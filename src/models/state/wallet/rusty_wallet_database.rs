@@ -1,10 +1,12 @@
 use crate::prelude::twenty_first;
 
-use twenty_first::shared_math::tip5::Digest;
-use twenty_first::{
-    storage::level_db::DB,
-    storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage},
+use crate::database::{
+    storage::storage_schema::{
+        traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
+    },
+    NeptuneLevelDb,
 };
+use twenty_first::shared_math::tip5::Digest;
 
 use super::monitored_utxo::MonitoredUtxo;
 
@@ -21,18 +23,19 @@ pub struct RustyWalletDatabase {
 }
 
 impl RustyWalletDatabase {
-    pub fn connect(db: DB) -> Self {
+    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyWalletDatabase-Schema",
             crate::LOG_LOCK_EVENT_CB,
         );
 
-        let monitored_utxos_storage = storage.schema.new_vec::<MonitoredUtxo>("monitored_utxos");
-        let sync_label_storage = storage.schema.new_singleton::<Digest>("sync_label");
-        let counter_storage = storage.schema.new_singleton::<u64>("counter");
-
-        storage.restore_or_new();
+        let monitored_utxos_storage = storage
+            .schema
+            .new_vec::<MonitoredUtxo>("monitored_utxos")
+            .await;
+        let sync_label_storage = storage.schema.new_singleton::<Digest>("sync_label").await;
+        let counter_storage = storage.schema.new_singleton::<u64>("counter").await;
 
         Self {
             storage,
@@ -53,29 +56,25 @@ impl RustyWalletDatabase {
     }
 
     /// Get the hash of the block to which this database is synced.
-    pub fn get_sync_label(&self) -> Digest {
-        self.sync_label.get()
+    pub async fn get_sync_label(&self) -> Digest {
+        self.sync_label.get().await
     }
 
-    pub fn set_sync_label(&mut self, sync_label: Digest) {
-        self.sync_label.set(sync_label);
+    pub async fn set_sync_label(&mut self, sync_label: Digest) {
+        self.sync_label.set(sync_label).await;
     }
 
-    pub fn get_counter(&self) -> u64 {
-        self.counter.get()
+    pub async fn get_counter(&self) -> u64 {
+        self.counter.get().await
     }
 
-    pub fn set_counter(&mut self, counter: u64) {
-        self.counter.set(counter);
+    pub async fn set_counter(&mut self, counter: u64) {
+        self.counter.set(counter).await;
     }
 }
 
 impl StorageWriter for RustyWalletDatabase {
-    fn persist(&mut self) {
-        self.storage.persist()
-    }
-
-    fn restore_or_new(&mut self) {
-        self.storage.restore_or_new()
+    async fn persist(&mut self) {
+        self.storage.persist().await
     }
 }

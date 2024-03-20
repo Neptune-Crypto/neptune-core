@@ -1,13 +1,15 @@
+use crate::database::storage::storage_schema::{
+    traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
+};
+use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
-use twenty_first::storage::level_db::DB;
-use twenty_first::storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage};
-use twenty_first::{shared_math::tip5::Digest, util_types::mmr::archival_mmr::ArchivalMmr};
+use twenty_first::shared_math::tip5::Digest;
 
 use super::{
-    active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
-    mutator_set_kernel::MutatorSetKernel,
+    active_window::ActiveWindow, archival_mmr::ArchivalMmr,
+    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;
@@ -20,23 +22,25 @@ pub struct RustyArchivalMutatorSet {
 }
 
 impl RustyArchivalMutatorSet {
-    pub fn connect(db: DB) -> Self {
+    pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyArchivalMutatorSet-Schema",
             crate::LOG_LOCK_EVENT_CB,
         );
 
-        let aocl = storage.schema.new_vec::<Digest>("aocl");
-        let swbfi = storage.schema.new_vec::<Digest>("swbfi");
-        let chunks = storage.schema.new_vec::<Chunk>("chunks");
-        let active_window = storage.schema.new_singleton::<Vec<u32>>("active_window");
-        let sync_label = storage.schema.new_singleton::<Digest>("sync_label");
-        storage.restore_or_new();
+        let aocl = storage.schema.new_vec::<Digest>("aocl").await;
+        let swbfi = storage.schema.new_vec::<Digest>("swbfi").await;
+        let chunks = storage.schema.new_vec::<Chunk>("chunks").await;
+        let active_window = storage
+            .schema
+            .new_singleton::<Vec<u32>>("active_window")
+            .await;
+        let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
 
         let kernel = MutatorSetKernel::<ArchivalMmr<Hash, AmsMmrStorage>> {
-            aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl),
-            swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi),
+            aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl).await,
+            swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi).await,
             swbf_active: ActiveWindow::new(),
         };
 
@@ -61,40 +65,39 @@ impl RustyArchivalMutatorSet {
     }
 
     #[inline]
-    pub fn get_sync_label(&self) -> Digest {
-        self.sync_label.get()
+    pub async fn get_sync_label(&self) -> Digest {
+        self.sync_label.get().await
     }
 
     #[inline]
-    pub fn set_sync_label(&mut self, sync_label: Digest) {
-        self.sync_label.set(sync_label);
+    pub async fn set_sync_label(&mut self, sync_label: Digest) {
+        self.sync_label.set(sync_label).await;
+    }
+
+    pub async fn restore_or_new(&mut self) {
+        // The field `digests` of ArchivalMMR should always have at
+        // least one element (a dummy digest), owing to 1-indexation.
+        self.ams_mut().kernel.aocl.fix_dummy_async().await;
+        self.ams_mut().kernel.swbf_inactive.fix_dummy_async().await;
+
+        // populate active window
+        self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get().await;
     }
 }
 
 impl StorageWriter for RustyArchivalMutatorSet {
-    fn persist(&mut self) {
+    async fn persist(&mut self) {
         self.active_window_storage
-            .set(self.ams().kernel.swbf_active.sbf.clone());
+            .set(self.ams().kernel.swbf_active.sbf.clone())
+            .await;
 
-        self.storage.persist();
-    }
-
-    fn restore_or_new(&mut self) {
-        self.storage.restore_or_new();
-
-        // The field `digests` of ArchivalMMR should always have at
-        // least one element (a dummy digest), owing to 1-indexation.
-        self.ams_mut().kernel.aocl.fix_dummy();
-        self.ams_mut().kernel.swbf_inactive.fix_dummy();
-
-        // populate active window
-        self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get();
+        self.storage.persist().await;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+    use crate::util_types::mutator_set::mutator_set_trait::*;
     use itertools::Itertools;
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
@@ -103,7 +106,6 @@ mod tests {
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
     use crate::util_types::test_shared::mutator_set::*;
-    use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;
 
@@ -115,19 +117,27 @@ mod tests {
         let num_removals = 50usize;
         let mut rng = thread_rng();
 
-        let db = DB::open_new_test_database(false, None, None, None).unwrap();
+        let db = NeptuneLevelDb::open_new_test_database(false, None, None, None)
+            .await
+            .unwrap();
         let db_path = db.path().clone();
-        let mut rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db);
+        let mut rusty_mutator_set: RustyArchivalMutatorSet =
+            RustyArchivalMutatorSet::connect(db).await;
         println!("Connected to database");
-        rusty_mutator_set.restore_or_new();
-        println!("Restored or new odne.");
+        rusty_mutator_set.restore_or_new().await;
+        println!("Restored or new done.");
 
         let mut items = vec![];
         let mut mps = vec![];
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set.ams().kernel.aocl.count_leaves()
+            rusty_mutator_set
+                .ams()
+                .kernel
+                .aocl
+                .count_leaves_async()
+                .await
         );
 
         for _ in 0..num_additions {
@@ -149,12 +159,17 @@ mod tests {
 
             mps.push(mp);
             items.push(item);
-            rusty_mutator_set.ams_mut().add(&addition_record);
+            rusty_mutator_set.ams_mut().add(&addition_record).await;
         }
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set.ams().kernel.aocl.count_leaves()
+            rusty_mutator_set
+                .ams()
+                .kernel
+                .aocl
+                .count_leaves_async()
+                .await
         );
 
         // Verify membership
@@ -179,7 +194,7 @@ mod tests {
             )
             .expect("Could not batch update membership proofs from remove");
 
-            rusty_mutator_set.ams_mut().remove(&removal_record);
+            rusty_mutator_set.ams_mut().remove(&removal_record).await;
 
             removed_items.push(items.remove(index));
             removed_mps.push(mps.remove(index));
@@ -189,31 +204,42 @@ mod tests {
         // a new archival object from the databases it contains and then check
         // that this archival MS contains the same values
         let sync_label: Digest = random();
-        rusty_mutator_set.set_sync_label(sync_label);
+        rusty_mutator_set.set_sync_label(sync_label).await;
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set.ams().kernel.aocl.count_leaves()
+            rusty_mutator_set
+                .ams()
+                .kernel
+                .aocl
+                .count_leaves_async()
+                .await
         );
 
         // persist and drop
-        rusty_mutator_set.persist();
+        rusty_mutator_set.persist().await;
 
         let active_window_before = rusty_mutator_set.ams().kernel.swbf_active.clone();
 
         drop(rusty_mutator_set); // Drop DB
 
         // new database
-        let new_db = DB::open_test_database(&db_path, true, None, None, None)
+        let new_db = NeptuneLevelDb::open_test_database(&db_path, true, None, None, None)
+            .await
             .expect("should open existing database");
         let mut new_rusty_mutator_set: RustyArchivalMutatorSet =
-            RustyArchivalMutatorSet::connect(new_db);
-        new_rusty_mutator_set.restore_or_new();
+            RustyArchivalMutatorSet::connect(new_db).await;
+        new_rusty_mutator_set.restore_or_new().await;
 
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set.ams().kernel.aocl.count_leaves()
+            new_rusty_mutator_set
+                .ams()
+                .kernel
+                .aocl
+                .count_leaves_async()
+                .await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
@@ -230,7 +256,7 @@ mod tests {
             );
         }
 
-        let retrieved_sync_label = new_rusty_mutator_set.get_sync_label();
+        let retrieved_sync_label = new_rusty_mutator_set.get_sync_label().await;
         assert_eq!(sync_label, retrieved_sync_label);
 
         let active_window_after = new_rusty_mutator_set.ams().kernel.swbf_active.clone();

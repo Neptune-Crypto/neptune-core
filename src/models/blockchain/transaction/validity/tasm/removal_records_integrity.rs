@@ -505,7 +505,7 @@ mod bench {
         let nondeterminism = NonDeterminism::default().with_ram(memory);
 
         bench_and_profile_program::<RemovalRecordsIntegrity>(
-            "tasm_neptune_transaction_removal_records_integrity".to_string(),
+            "tasm_neptune_transaction_removal_records_integrity",
             BenchmarkCase::CommonCase,
             &public_input,
             &nondeterminism,

@@ -7,15 +7,15 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::NeptuneLevelDb;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use twenty_first::util_types::storage_vec::StorageVec;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -39,9 +39,9 @@ pub fn random_chunk_dictionary() -> ChunkDictionary {
     pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>())
 }
 
-pub fn get_all_indices_with_duplicates<
-    MmrStorage: StorageVec<Digest>,
-    ChunkStorage: StorageVec<Chunk>,
+pub async fn get_all_indices_with_duplicates<
+    MmrStorage: StorageVec<Digest> + Send + Sync,
+    ChunkStorage: StorageVec<Chunk> + Send + Sync,
 >(
     archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
 ) -> Vec<u128> {
@@ -51,9 +51,9 @@ pub fn get_all_indices_with_duplicates<
         ret.push(*index as u128);
     }
 
-    let chunk_count = archival_mutator_set.chunks.len();
+    let chunk_count = archival_mutator_set.chunks.len().await;
     for chunk_index in 0..chunk_count {
-        let chunk = archival_mutator_set.chunks.get(chunk_index);
+        let chunk = archival_mutator_set.chunks.get(chunk_index).await;
         for index in chunk.relative_indices.iter() {
             ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
         }
@@ -71,9 +71,11 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
-    let db = DB::open_new_test_database(true, None, None, None).unwrap();
-    let rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db);
+pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
+    let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+        .await
+        .unwrap();
+    let rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db).await;
     rusty_mutator_set
 }
 
@@ -394,14 +396,14 @@ mod shared_tests_test {
 
     use super::*;
 
-    #[test]
-    fn can_call() {
+    #[tokio::test]
+    async fn can_call() {
         let rcd = random_chunk_dictionary();
         assert!(!rcd.dictionary.is_empty());
         let _ = random_removal_record();
-        let mut rms = empty_rusty_mutator_set();
+        let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
-        let _ = get_all_indices_with_duplicates(ams);
+        let _ = get_all_indices_with_duplicates(ams).await;
         let _ = make_item_and_randomnesses();
         let _ = insert_mock_item(&mut ams.kernel);
     }

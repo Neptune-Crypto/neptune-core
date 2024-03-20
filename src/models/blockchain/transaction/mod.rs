@@ -418,7 +418,7 @@ impl Transaction {
 
     /// Verify the transaction directly from the primitive witness, without proofs or
     /// decomposing into subclaims.
-    pub fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
+    pub async fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts

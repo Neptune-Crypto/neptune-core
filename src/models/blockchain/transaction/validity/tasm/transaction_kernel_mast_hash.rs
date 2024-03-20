@@ -75,16 +75,16 @@ impl BasicSnippet for TransactionKernelMastHash {
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(New {
-            data_type: DataType::Digest,
+            element_type: DataType::Digest,
         }));
         let get_element = library.import(Box::new(Get {
             element_type: DataType::Digest,
         }));
         let set_element = library.import(Box::new(Set {
-            data_type: DataType::Digest,
+            element_type: DataType::Digest,
         }));
         let set_length = library.import(Box::new(SetLength {
-            data_type: DataType::Digest,
+            element_type: DataType::Digest,
         }));
 
         let kernel_to_inputs_with_size = tasm_lib::field_with_size!(TransactionKernel::inputs);

@@ -157,7 +157,11 @@ async fn mine_block(
     );
 
     let new_block_info = NewBlockFound {
-        block: Box::new(Block::new(block_header, block_body, None)),
+        block: Box::new(Block::new(
+            block_header,
+            block_body,
+            Block::mk_std_block_type(None),
+        )),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
     };
 
@@ -487,7 +491,7 @@ mod mine_loop_tests {
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
-            None,
+            Block::mk_std_block_type(None),
         );
         assert!(
             block_template_empty_mempool.is_valid(&genesis_block, now),
@@ -543,7 +547,11 @@ mod mine_loop_tests {
             transaction_non_empty_mempool,
             now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000),
         );
-        let block_template_non_empty_mempool = Block::new(block_header_template, block_body, None);
+        let block_template_non_empty_mempool = Block::new(
+            block_header_template,
+            block_body,
+            Block::mk_std_block_type(None),
+        );
         assert!(
             block_template_non_empty_mempool.is_valid(
                 &genesis_block,
