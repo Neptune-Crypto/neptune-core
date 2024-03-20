@@ -10,13 +10,13 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
 
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::util_types::mutator_set::ms_membership_proof::{
     pseudorandom_mutator_set_membership_proof, MsMembershipProof,

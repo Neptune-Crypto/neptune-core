@@ -1,4 +1,4 @@
-use crate::prelude::{triton_vm, twenty_first};
+use crate::prelude::triton_vm;
 
 use crate::{
     models::blockchain::shared::Hash,
@@ -11,7 +11,7 @@ use tasm_lib::traits::basic_snippet::BasicSnippet;
 
 use triton_vm::triton_asm;
 
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 /// Given a membership proof and a canonical commitment, verify membership in the AOCL.
 /// Note that the AOCL MMR accumulator is given deep in the stack, accounting for a 3-wide
@@ -125,7 +125,7 @@ mod tests {
 
     use triton_vm::prelude::{BFieldElement, Digest};
 
-    use crate::util_types::mutator_set::archival_mmr::mmr_test::mock;
+    use crate::util_types::mmr::mock;
 
     impl Function for VerifyAoclMembership {
         fn rust_shadow(
@@ -209,8 +209,8 @@ mod tests {
                 let mmr = mock::get_ammr_from_digests::<Hash>(leafs).await;
 
                 let leaf_index = rng.next_u64() % num_leafs;
-                let leaf = mmr.get_leaf_async(leaf_index).await;
-                let (mmr_mp, peaks) = mmr.prove_membership_async(leaf_index).await;
+                let leaf = mmr.get_leaf(leaf_index).await;
+                let (mmr_mp, peaks) = mmr.prove_membership(leaf_index).await;
                 let mut msmp = pseudorandom_mutator_set_membership_proof(rng.gen());
                 msmp.auth_path_aocl = mmr_mp;
 

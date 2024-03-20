@@ -1,8 +1,8 @@
 [
   {
     "name": "tasm_neptune_transaction_removal_records_integrity",
-    "clock_cycle_count": 30848,
-    "hash_table_height": 5621,
+    "clock_cycle_count": 30856,
+    "hash_table_height": 5627,
     "u32_table_height": 13792,
     "case": "CommonCase"
   }

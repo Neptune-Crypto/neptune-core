@@ -14,7 +14,7 @@ pub mod tasm;
 pub mod typescripts_halt;
 use crate::models::blockchain::transaction;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
@@ -124,7 +124,7 @@ impl TransactionValidationLogic {
         )
     }
 
-    pub fn validation_tree_from_mutator_set_update(
+    pub async fn validation_tree_from_mutator_set_update(
         old_tree: &ValidityTree,
         old_kernel: &TransactionKernel,
         old_mutator_set_accumulator: &MutatorSetAccumulator,
@@ -132,7 +132,7 @@ impl TransactionValidationLogic {
         mutator_set_update: &MutatorSetUpdate,
     ) -> ValidityTree {
         if !old_tree.verify(old_kernel.mast_hash())
-            || old_kernel.mutator_set_hash != old_mutator_set_accumulator.hash()
+            || old_kernel.mutator_set_hash != old_mutator_set_accumulator.hash().await
         {
             return ValidityTree::none();
         }
@@ -140,12 +140,13 @@ impl TransactionValidationLogic {
         let mut mutator_set_accumulator = old_mutator_set_accumulator.clone();
         if mutator_set_update
             .apply_to_accumulator(&mut mutator_set_accumulator)
+            .await
             .is_err()
         {
             return ValidityTree::none();
         }
 
-        if new_kernel.mutator_set_hash != mutator_set_accumulator.hash() {
+        if new_kernel.mutator_set_hash != mutator_set_accumulator.hash().await {
             return ValidityTree::none();
         }
 

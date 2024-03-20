@@ -1,5 +1,6 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::traits::*;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -578,7 +579,8 @@ impl GlobalState {
             timestamp.as_millis() as u64,
             mutator_set_accumulator,
             privacy,
-        ))
+        )
+        .await)
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
@@ -641,7 +643,7 @@ impl GlobalState {
     /// Assembles a transaction kernel and supporting witness or proof(s) from
     /// the given transaction data.
     #[allow(clippy::too_many_arguments)]
-    fn create_transaction_from_data(
+    async fn create_transaction_from_data(
         spending_key: SpendingKey,
         inputs: Vec<RemovalRecord>,
         spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
@@ -661,7 +663,7 @@ impl GlobalState {
             fee,
             timestamp: BFieldElement::new(timestamp),
             coinbase: None,
-            mutator_set_hash: mutator_set_accumulator.hash(),
+            mutator_set_hash: mutator_set_accumulator.hash().await,
         };
 
         // populate witness
@@ -770,7 +772,7 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
-        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves_async().await;
+        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves().await;
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
             // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
@@ -791,7 +793,7 @@ impl GlobalState {
             let restored_msmp = match restored_msmp_res {
                 Ok(msmp) => {
                     // Verify that the restored MSMP is valid
-                    if !ams_ref.ams().verify(ms_item, &msmp) {
+                    if !ams_ref.ams().verify(ms_item, &msmp).await {
                         warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", incoming_utxo.aocl_index);
                         continue;
                     }
@@ -918,7 +920,9 @@ impl GlobalState {
                 }
 
                 // revert additions
-                membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
+                membership_proof
+                    .revert_update_from_batch_addition(&previous_mutator_set)
+                    .await;
 
                 // unset spent_in_block field if the UTXO was spent in this block
                 if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
@@ -929,7 +933,7 @@ impl GlobalState {
 
                 // assert valid (if unspent)
                 assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
-                    .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
+                    .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof).await, "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
             // walk forwards, applying
@@ -968,8 +972,9 @@ impl GlobalState {
                             &block_msa,
                             addition_record,
                         )
+                        .await
                         .expect("Could not update membership proof with addition record.");
-                    block_msa.add(addition_record);
+                    block_msa.add(addition_record).await;
                 }
 
                 // apply removals
@@ -977,7 +982,7 @@ impl GlobalState {
                     membership_proof
                         .update_from_remove(removal_record)
                         .expect("Could not update membership proof from removal record.");
-                    block_msa.remove(removal_record);
+                    block_msa.remove(removal_record).await;
                 }
 
                 assert_eq!(block_msa, apply_block.kernel.body.mutator_set_accumulator);
@@ -1236,6 +1241,7 @@ mod global_state_tests {
                         .body
                         .mutator_set_accumulator
                         .verify(Hash::hash(&monitored_utxo.utxo), &mp)
+                        .await
                     {
                         return false;
                     }
@@ -1298,7 +1304,8 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
-        ))
+        )
+        .await)
     }
 
     #[traced_test]
@@ -1308,7 +1315,7 @@ mod global_state_tests {
         let other_wallet = WalletSecret::new_random();
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_neptune.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -1439,9 +1446,9 @@ mod global_state_tests {
         let other_receiver_address = WalletSecret::new_random()
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let (mock_block_1, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
         crate::tests::shared::add_block_to_archival_state(
             global_state.chain.archival_state_mut(),
             mock_block_1.clone(),
@@ -1493,7 +1500,8 @@ mod global_state_tests {
                         .get_latest_membership_proof_entry()
                         .unwrap()
                         .1,
-                );
+                )
+                .await;
             assert_eq!(
                 mock_block_1.hash(),
                 own_premine_mutxo
@@ -1520,11 +1528,11 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1 and store it to the DB
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let launch = genesis_block.kernel.header.timestamp.value();
         let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
         let (mock_block_1a, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1595,7 +1603,7 @@ mod global_state_tests {
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
+            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1640,7 +1648,7 @@ mod global_state_tests {
         let mut parent_block = genesis_block;
         for _ in 0..5 {
             let (next_block, _, _) =
-                make_mock_block(&parent_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&parent_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1721,7 +1729,7 @@ mod global_state_tests {
         let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         assert!(genesis_block.kernel.header.height.is_genesis());
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
+            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1762,7 +1770,7 @@ mod global_state_tests {
         let mut fork_a_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_a_block, _, _) =
-                make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1794,7 +1802,7 @@ mod global_state_tests {
         let mut fork_b_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_b_block, _, _) =
-                make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1849,7 +1857,7 @@ mod global_state_tests {
         let mut fork_c_block = genesis_block.clone();
         for _ in 0..100 {
             let (next_c_block, _, _) =
-                make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1962,7 +1970,7 @@ mod global_state_tests {
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state_lock = get_mock_global_state(network, 3, wallet_secret_bob).await;
 
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let launch = genesis_block.kernel.header.timestamp.value();
         let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
 
@@ -1971,7 +1979,8 @@ mod global_state_tests {
             None,
             genesis_spending_key.to_address(),
             rng.gen(),
-        );
+        )
+        .await;
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -2039,7 +2048,11 @@ mod global_state_tests {
                 )
                 .await;
             let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
-            assert!(block_1.is_valid(&genesis_block, now + Duration::from_millis(seven_months)));
+            assert!(
+                block_1
+                    .is_valid(&genesis_block, now + Duration::from_millis(seven_months))
+                    .await
+            );
         }
 
         println!("Accumulated transaction into block_1.");
@@ -2234,7 +2247,8 @@ mod global_state_tests {
                 None,
                 genesis_spending_key.to_address(),
                 rng.gen(),
-            );
+            )
+            .await;
         block_2
             .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
             .await;
@@ -2254,19 +2268,23 @@ mod global_state_tests {
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         let wallet_secret = WalletSecret::new_random();
         let receiving_address = wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _cb_utxo, _cb_output_randomness) =
-            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen())
+                .await;
 
         add_block(&mut global_state, block_1).await.unwrap();
 
-        assert!(global_state
-            .chain
-            .light_state()
-            .is_valid(&genesis_block, now));
+        assert!(
+            global_state
+                .chain
+                .light_state()
+                .is_valid(&genesis_block, now)
+                .await
+        );
     }
 }

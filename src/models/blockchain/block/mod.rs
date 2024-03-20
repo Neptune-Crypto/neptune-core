@@ -2,6 +2,8 @@ use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -12,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use tracing::{debug, error, warn};
@@ -50,7 +51,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use crate::util_types::mutator_set::mutator_set_trait::*;
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
@@ -134,7 +135,7 @@ impl Block {
         1719792000000u64
     }
 
-    pub fn genesis_block() -> Self {
+    pub async fn genesis_block() -> Self {
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
@@ -152,7 +153,7 @@ impl Block {
                 timestamp: BFieldElement::new(Self::launch()),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
-                mutator_set_hash: MutatorSetAccumulator::new().hash(),
+                mutator_set_hash: MutatorSetAccumulator::new().hash().await,
             },
             witness: TransactionValidationLogic {
                 vast: ValidityTree {
@@ -175,7 +176,7 @@ impl Block {
             // Add pre-mine UTXO to MutatorSet
             let addition_record = commit(utxo_digest, bad_randomness, receiver_digest);
             ms_update.additions.push(addition_record);
-            genesis_mutator_set.add(&addition_record);
+            genesis_mutator_set.add(&addition_record).await;
 
             // Add pre-mine UTXO + commitment to coinbase transaction
             genesis_coinbase_tx.kernel.outputs.push(addition_record)
@@ -184,8 +185,8 @@ impl Block {
         let body: BlockBody = BlockBody {
             transaction: genesis_coinbase_tx,
             mutator_set_accumulator: genesis_mutator_set.clone(),
-            block_mmr_accumulator: MmrAccumulator::new(vec![]),
-            lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
+            block_mmr_accumulator: MmrAccumulator::default(),
+            lock_free_mmr_accumulator: MmrAccumulator::default(),
             uncle_blocks: vec![],
         };
 
@@ -290,6 +291,7 @@ impl Block {
         // Apply the mutator set update to get the `next_mutator_set_accumulator`
         mutator_set_update
             .apply_to_accumulator(&mut new_mutator_set_accumulator)
+            .await
             .expect("Mutator set mutation must work");
 
         let block_body: BlockBody = BlockBody {
@@ -319,7 +321,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    pub(crate) fn is_valid(&self, previous_block: &Block, now: Duration) -> bool {
+    pub(crate) async fn is_valid(&self, previous_block: &Block, now: Duration) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let block_copy = self.to_owned();
@@ -361,7 +363,7 @@ impl Block {
 
         // 0.c) Verify correct addition to block MMR
         let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-        mmra.append(previous_block.hash());
+        mmra.append(previous_block.hash()).await;
         if mmra != self.kernel.body.block_mmr_accumulator {
             warn!("Block MMRA was not updated correctly");
             return false;
@@ -407,6 +409,7 @@ impl Block {
                 .mutator_set_accumulator
                 .kernel
                 .can_remove(removal_record)
+                .await
             {
                 warn!("Removal record cannot be removed from mutator set");
                 return false;
@@ -439,7 +442,7 @@ impl Block {
             block_copy.kernel.body.transaction.kernel.outputs.clone(),
         );
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
-        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
+        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms).await;
         match ms_update_result {
             Ok(()) => (),
             Err(err) => {
@@ -450,7 +453,7 @@ impl Block {
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.hash() != block_copy.kernel.body.mutator_set_accumulator.hash() {
+        if ms.hash().await != block_copy.kernel.body.mutator_set_accumulator.hash().await {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
@@ -583,7 +586,7 @@ mod block_tests {
             state::UtxoReceiverData,
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
-        util_types::mutator_set::archival_mmr::ArchivalMmr,
+        util_types::mmr::ArchivalMmr,
     };
     use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -612,13 +615,13 @@ mod block_tests {
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
 
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen()).await;
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         assert!(
-            block_1.is_valid(&genesis_block, now),
+            block_1.is_valid(&genesis_block, now).await,
             "Block 1 must be valid with only coinbase output"
         );
 
@@ -646,17 +649,17 @@ mod block_tests {
             .accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator)
             .await;
         assert!(
-            block_1.is_valid(&genesis_block, now + seven_months),
+            block_1.is_valid(&genesis_block, now + seven_months).await,
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
             genesis_block.kernel
                 .body
                 .mutator_set_accumulator
-                .hash()
+                .hash().await
                 .emojihash(),
                 block_1.kernel
                     .body
                     .mutator_set_accumulator
-                    .hash()
+                    .hash().await
                     .emojihash()
         );
 
@@ -703,39 +706,41 @@ mod block_tests {
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
     }
 
-    #[test]
-    fn block_with_wrong_mmra_is_invalid() {
+    #[tokio::test]
+    async fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen())
+                .await;
 
-        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::default();
         let timestamp = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
-        assert!(!block_1.is_valid(&genesis_block, timestamp));
+        assert!(!block_1.is_valid(&genesis_block, timestamp).await);
     }
 
     #[traced_test]
-    #[test]
-    fn block_with_far_future_timestamp_is_invalid() {
+    #[tokio::test]
+    async fn block_with_far_future_timestamp_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen())
+                .await;
 
         // Set block timestamp 1 hour in the future.  (is valid)
         let future_time1 = now + Duration::from_secs(60 * 60);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time1.as_millis().try_into().unwrap());
-        assert!(block_1.is_valid(&genesis_block, now));
+        assert!(block_1.is_valid(&genesis_block, now).await);
 
         now = Duration::from_millis(block_1.kernel.header.timestamp.value());
 
@@ -743,25 +748,25 @@ mod block_tests {
         let future_time2 = now + Duration::from_secs(60 * 60 * 2 - 1);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time2.as_millis().try_into().unwrap());
-        assert!(block_1.is_valid(&genesis_block, now));
+        assert!(block_1.is_valid(&genesis_block, now).await);
 
         // Set block timestamp 2 hours + 10 secs in the future. (not valid)
         let future_time3 = now + Duration::from_secs(60 * 60 * 2 + 10);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time3.as_millis().try_into().unwrap());
-        assert!(!block_1.is_valid(&genesis_block, now));
+        assert!(!block_1.is_valid(&genesis_block, now).await);
 
         // Set block timestamp 2 days in the future. (not valid)
         let future_time4 = now + Duration::from_secs(86400 * 2);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time4.as_millis().try_into().unwrap());
-        assert!(!block_1.is_valid(&genesis_block, now));
+        assert!(!block_1.is_valid(&genesis_block, now).await);
     }
 
     #[tokio::test]
     async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
@@ -770,18 +775,21 @@ mod block_tests {
         let mut storage = SimpleRustyStorage::new(db);
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
         let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
-        ammr.append(genesis_block.hash());
-        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
+        ammr.append(genesis_block.hash()).await;
+        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]).await;
 
         for i in 0..55 {
             let wallet_secret = WalletSecret::new_random();
             let recipient_address = wallet_secret.nth_generation_spending_key(0).to_address();
             let (new_block, _, _) =
-                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
+                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen()).await;
             if i != 54 {
-                ammr.append(new_block.hash());
-                mmra.append(new_block.hash());
-                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+                ammr.append(new_block.hash()).await;
+                mmra.append(new_block.hash()).await;
+                assert_eq!(
+                    ammr.to_accumulator().await.bag_peaks().await,
+                    mmra.bag_peaks().await
+                );
             }
             blocks.push(new_block);
         }
@@ -791,22 +799,23 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let (membership_proof, _) = ammr.prove_membership_async(index as u64).await;
+        let (membership_proof, _) = ammr.prove_membership(index as u64).await;
         let (v, _) = membership_proof.verify(
-            &last_block_mmra.get_peaks(),
+            &last_block_mmra.get_peaks().await,
             block_digest,
-            last_block_mmra.count_leaves(),
+            last_block_mmra.count_leaves().await,
         );
         assert!(
             v,
             "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
             last_block_mmra
                 .get_peaks()
+                .await
                 .iter()
                 .map(|d| d.emojihash())
                 .join(","),
-            last_block_mmra.get_peaks().len(),
-            last_block_mmra.count_leaves(),
+            last_block_mmra.get_peaks().await.len(),
+            last_block_mmra.count_leaves().await,
             membership_proof.leaf_index,
             membership_proof
                 .authentication_path
@@ -816,7 +825,10 @@ mod block_tests {
             blocks.len(),
             membership_proof.leaf_index
         );
-        assert_eq!(last_block_mmra.count_leaves(), blocks.len() as u64 - 1);
+        assert_eq!(
+            last_block_mmra.count_leaves().await,
+            blocks.len() as u64 - 1
+        );
     }
 
     #[test]

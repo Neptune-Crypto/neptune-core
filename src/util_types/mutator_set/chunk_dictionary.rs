@@ -13,8 +13,8 @@ use triton_vm::prelude::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
@@ -119,11 +119,11 @@ mod chunk_dict_tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
-    use super::super::archival_mmr::mmr_test::mock;
+    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use crate::util_types::mmr::mock;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::{Digest, Tip5};
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
 
@@ -141,7 +141,7 @@ mod chunk_dict_tests {
         let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
 
         let key1: u64 = 898989;
-        let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await.0;
+        let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).await.0;
         let chunk1: Chunk = {
             Chunk {
                 relative_indices: (0..CHUNK_SIZE).collect(),
@@ -153,7 +153,7 @@ mod chunk_dict_tests {
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
         let key2: u64 = 8989;
-        let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership_async(2).await.0;
+        let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).await.0;
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
@@ -215,7 +215,7 @@ mod chunk_dict_tests {
         let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
         let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
-        let mp: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await.0;
+        let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).await.0;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };

@@ -58,14 +58,14 @@ pub trait MutatorSet {
 pub trait MutatorSetAsync {
     /// Generates a membership proof that will be valid when the item
     /// is added to the mutator set.
-    fn prove(
+    async fn prove(
         &mut self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof;
 
-    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool;
+    async fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool;
 
     /// Generates a removal record with which to update the set commitment.
     fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord;

@@ -6,12 +6,10 @@
 // To accomplish that, we keep the sub modules private, and
 // add `pub use sub_module::*`.
 
-#![allow(missing_docs)]
-// mod iterators;
 pub mod traits;
 
+/// represents a StorageVec Index.
 pub type Index = u64;
-// pub use iterators::*;
 
 // note: we keep ordinary_vec around because it is
 // used in DocTest examples, as it does not require DB.
@@ -23,8 +21,6 @@ pub use ordinary_vec::*;
 #[cfg(test)]
 mod tests {
 
-    // use futures::pin_mut;
-    // use futures::stream::StreamExt;
     use super::traits::*;
     use super::*;
 

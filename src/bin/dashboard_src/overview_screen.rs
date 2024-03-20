@@ -106,6 +106,7 @@ impl OverviewData {
             syncing: false,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block()
+                    .await
                     .kernel
                     .header,
             ),

@@ -1487,7 +1487,7 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 6
          tasm_list_get_element___digest: 13
          tasm_hashing_eq_digest: 15
- total: 30848
+ total: 30856
 
 # aggregated
  tasm_neptune_transaction_transaction_kernel_mast_hash: 4723 (1)
@@ -1606,4 +1606,4 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_div2: 1764 (0.37349144)
            tasm_hashing_swap_digest: 784 (0.1659962)
          tasm_hashing_eq_digest: 30 (0.006351895)
- total: 30848 (6.5314417)
+ total: 30856 (6.533136)

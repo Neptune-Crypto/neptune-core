@@ -5,7 +5,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -21,7 +21,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -37,7 +37,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// let atomic_u64 = AtomicRw::from(25u64);
     /// let age = atomic_u64.get();
     /// ```
@@ -53,7 +53,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// let mut atomic_bool = AtomicRw::from(false);
     /// atomic_bool.set(true);
     /// ```

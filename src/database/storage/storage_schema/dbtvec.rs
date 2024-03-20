@@ -37,7 +37,6 @@ where
 
 #[async_trait::async_trait]
 impl<V> StorageVecBase<V> for DbtVec<V>
-// impl<V> DbtVec<V>
 where
     V: Clone + Debug,
     V: Serialize + DeserializeOwned + Send + Sync,

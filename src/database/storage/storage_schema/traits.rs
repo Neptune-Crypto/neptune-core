@@ -10,8 +10,6 @@ pub use leveldb::database::key::IntoLevelDBKey;
 #[allow(async_fn_in_trait)]
 #[async_trait::async_trait]
 pub trait DbTable {
-    // Retrieve all unwritten operations and empty write-queue
-    // async fn pull_queue(&mut self) -> Vec<WriteOperation>;
     /// Restore existing table if present, else create a new one
     async fn restore_or_new(&mut self);
 }

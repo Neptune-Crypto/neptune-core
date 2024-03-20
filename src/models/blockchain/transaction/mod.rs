@@ -10,6 +10,7 @@ pub mod validity;
 
 use anyhow::{bail, Result};
 use arbitrary::Arbitrary;
+use futures::StreamExt;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -36,7 +37,7 @@ use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(
@@ -75,7 +76,7 @@ impl Transaction {
     /// Create a new `Transaction`` from a `PrimitiveWitness` (which defines an old
     /// `Transaction`) by updating the mutator set records according to a new
     /// `Block`.
-    fn new_with_updated_mutator_set_records_given_primitive_witness(
+    async fn new_with_updated_mutator_set_records_given_primitive_witness(
         old_primitive_witness: &PrimitiveWitness,
         block: &Block,
     ) -> Result<Transaction> {
@@ -99,13 +100,15 @@ impl Transaction {
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
                 &mut msa_state.kernel,
-            );
+            )
+            .await;
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
                 &mut transaction_removal_records,
                 &mut msa_state.kernel,
-            );
+            )
+            .await;
 
             // Batch update primitive witness membership proofs
             let membership_proofs = &mut primitive_witness
@@ -124,9 +127,10 @@ impl Transaction {
                 &msa_state.kernel,
                 &block_addition_record,
             )
+            .await
             .expect("MS MP update from add must succeed in wallet handler");
 
-            msa_state.add(&block_addition_record);
+            msa_state.add(&block_addition_record).await;
         }
 
         while let Some(removal_record) = block_removal_records.pop() {
@@ -151,13 +155,19 @@ impl Transaction {
                 bail!("`MsMembershipProof::batch_update_from_remove` must work when updating mutator set records on transaction. Got error: {}", e);
             }
 
-            msa_state.remove(removal_record);
+            msa_state.remove(removal_record).await;
         }
 
         // Sanity check of block validity
-        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
+        let block_msa_hash = block
+            .kernel
+            .body
+            .mutator_set_accumulator
+            .clone()
+            .hash()
+            .await;
         assert_eq!(
-            msa_state.hash(),
+            msa_state.hash().await,
             block_msa_hash,
             "Internal MSA state must match that from block"
         );
@@ -174,7 +184,7 @@ impl Transaction {
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
     ///  4. Use resulting proof as new witness.
-    fn new_with_updated_mutator_set_records_given_proof(
+    async fn new_with_updated_mutator_set_records_given_proof(
         old_transaction: &Transaction,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -192,12 +202,13 @@ impl Transaction {
                 &mut new_mutator_set_accumulator,
                 &mut new_inputs.iter_mut().collect_vec(),
             )
+            .await
             .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
 
         // Sanity check of block validity
-        let msa_hash = new_mutator_set_accumulator.hash();
+        let msa_hash = new_mutator_set_accumulator.hash().await;
         assert_eq!(
-            block.kernel.body.mutator_set_accumulator.hash(),
+            block.kernel.body.mutator_set_accumulator.hash().await,
             msa_hash,
             "Internal MSA state must match that from block"
         );
@@ -214,7 +225,8 @@ impl Transaction {
             previous_mutator_set_accumulator,
             &new_kernel,
             &mutator_set_update,
-        );
+        )
+        .await;
 
         Ok(Transaction {
             kernel: new_kernel,
@@ -225,7 +237,7 @@ impl Transaction {
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that for Proof witnesses, this will
     /// invalidate the proof, requiring an update.
-    pub fn new_with_updated_mutator_set_records(
+    pub async fn new_with_updated_mutator_set_records(
         &self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -235,12 +247,14 @@ impl Transaction {
                 primitive_witness,
                 block,
             )
+            .await
         } else {
             Self::new_with_updated_mutator_set_records_given_proof(
                 self,
                 previous_mutator_set_accumulator,
                 block,
             )
+            .await
         }
     }
 
@@ -406,14 +420,13 @@ impl Transaction {
     /// the given mutator set accumulator. Specifically, test whether the
     /// removal records determine indices absent in the mutator set sliding
     /// window Bloom filter, and whether the MMR membership proofs are valid.
-    pub fn is_confirmable_relative_to(
+    pub async fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {
-        self.kernel
-            .inputs
-            .iter()
+        futures::stream::iter(self.kernel.inputs.iter())
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+            .await
     }
 
     /// Verify the transaction directly from the primitive witness, without proofs or
@@ -455,13 +468,21 @@ impl Transaction {
         {
             let item = Hash::hash(input_utxo);
             // TODO: write these functions in tasm
-            if !primitive_witness.mutator_set_accumulator.verify(item, msmp) {
+            if !primitive_witness
+                .mutator_set_accumulator
+                .verify(item, msmp)
+                .await
+            {
                 warn!(
                     "Cannot generate removal record for an item with an invalid membership proof."
                 );
                 debug!(
                     "witness mutator set hash: {}",
-                    primitive_witness.mutator_set_accumulator.hash().emojihash()
+                    primitive_witness
+                        .mutator_set_accumulator
+                        .hash()
+                        .await
+                        .emojihash()
                 );
                 debug!(
                     "kernel mutator set hash: {}",
@@ -576,7 +597,7 @@ impl Transaction {
         // Verify that the mutator set accumulator listed in the
         // primitive witness corresponds to the hash listed in the
         // transaction's kernel.
-        if primitive_witness.mutator_set_accumulator.hash() != self.kernel.mutator_set_hash {
+        if primitive_witness.mutator_set_accumulator.hash().await != self.kernel.mutator_set_hash {
             warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
             debug!(
                 "Transaction mutator set hash: {}",
@@ -584,7 +605,11 @@ impl Transaction {
             );
             debug!(
                 "Witness mutator set hash: {}",
-                primitive_witness.mutator_set_accumulator.hash().emojihash()
+                primitive_witness
+                    .mutator_set_accumulator
+                    .hash()
+                    .await
+                    .emojihash()
             );
             return false;
         }
@@ -757,7 +782,7 @@ mod transaction_tests {
     //         .await
     //         .unwrap();
 
-    //     let genesis_block = Block::genesis_block();
+    //     let genesis_block = Block::genesis_block().await;
     //     let (block_1, _, _) = make_mock_block(
     //         &genesis_block,
     //         None,
@@ -772,7 +797,7 @@ mod transaction_tests {
     //     transaction.update_mutator_set_records(&block_1).unwrap();
 
     //     // Insert the updated transaction into block 2 and verify that this block is valid
-    //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key()).await;
     //     block_2.authority_merge_transaction(updated_tx.clone());
     //     assert!(block_2.is_valid_for_devnet(&block_1));
 
@@ -782,12 +807,12 @@ mod transaction_tests {
     //     let mut _previous_block = next_block.clone();
     //     for _ in 0..26 {
     //         _previous_block = next_block;
-    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key()).await;
     //         updated_tx.update_ms_data(&next_block).unwrap();
     //     }
 
     //     _previous_block = next_block.clone();
-    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key()).await;
     //     next_block.authority_merge_transaction(updated_tx.clone());
     //     assert!(next_block.is_valid_for_devnet(&_previous_block));
 
@@ -820,10 +845,10 @@ mod transaction_tests {
     //     let original_tx = tx.clone();
 
     //     // Create next block and verify that transaction is not valid with this block as tip
-    //     let genesis_block = Block::genesis_block();
+    //     let genesis_block = Block::genesis_block().await;
     //     let other_wallet = WalletSecret::new(generate_secret_key());
-    //     let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key());
-    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key()).await;
+    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key()).await;
     //     assert!(
     //         block_1.is_valid_for_devnet(&genesis_block),
     //         "Block 1 must be valid with only coinbase output"
@@ -909,7 +934,7 @@ mod transaction_tests {
     //             .create_transaction(vec![utxo_a, utxo_b, utxo_c], 1.into())
     //             .await
     //             .unwrap();
-    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key()).await;
 
     //         next_block.authority_merge_transaction(other_transaction);
     //         assert!(
@@ -942,7 +967,7 @@ mod transaction_tests {
     //     }
 
     //     _previous_block = next_block.clone();
-    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key()).await;
     //     next_block.authority_merge_transaction(updated_tx.clone());
     //     assert!(
     //         next_block.is_valid_for_devnet(&_previous_block),

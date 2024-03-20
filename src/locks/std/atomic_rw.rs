@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// # Example
 /// ```
-/// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+/// # use neptune_core::locks::std::{AtomicRw, traits::*};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -23,7 +23,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::locks::sync::{AtomicRw, LockEvent, LockCallbackFn};
+/// # use neptune_core::locks::std::{AtomicRw, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -194,7 +194,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -211,7 +211,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -228,7 +228,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -250,7 +250,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -272,7 +272,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// let atomic_u64 = AtomicRw::from(25u64);
     /// let age = atomic_u64.get();
     /// ```
@@ -288,7 +288,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicRw, traits::*};
+    /// # use neptune_core::locks::std::{AtomicRw, traits::*};
     /// let mut atomic_bool = AtomicRw::from(false);
     /// atomic_bool.set(true);
     /// ```

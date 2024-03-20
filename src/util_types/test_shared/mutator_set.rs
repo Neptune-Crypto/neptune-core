@@ -9,12 +9,12 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
@@ -79,7 +79,7 @@ pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
     rusty_mutator_set
 }
 
-pub fn insert_mock_item<M: Mmr<Hash>>(
+pub async fn insert_mock_item<M: Mmr<Hash>>(
     mutator_set: &mut MutatorSetKernel<M>,
 ) -> (MsMembershipProof, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
@@ -89,19 +89,21 @@ pub fn insert_mock_item<M: Mmr<Hash>>(
         sender_randomness,
         receiver_preimage.hash::<Hash>(),
     );
-    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
-    mutator_set.add_helper(&addition_record);
+    let membership_proof = mutator_set
+        .prove(new_item, sender_randomness, receiver_preimage)
+        .await;
+    mutator_set.add_helper(&addition_record).await;
 
     (membership_proof, new_item)
 }
 
-pub fn remove_mock_item<M: Mmr<Hash>>(
+pub async fn remove_mock_item<M: Mmr<Hash>>(
     mutator_set: &mut MutatorSetKernel<M>,
     item: Digest,
     mp: &MsMembershipProof,
 ) {
     let removal_record: RemovalRecord = mutator_set.drop(item, mp);
-    mutator_set.remove_helper(&removal_record);
+    mutator_set.remove_helper(&removal_record).await;
 }
 
 /// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.
@@ -173,7 +175,7 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
     (mmr_accumulator, membership_proof)
 }
 
-pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
+pub async fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
     seed: [u8; 32],
     leafs: &[Digest],
 ) -> (MmrAccumulator<H>, Vec<MmrMembershipProof<H>>) {
@@ -287,7 +289,10 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
 
     // sanity check
     for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+        assert!(
+            mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                .0
+        );
     }
 
     (mmra, mps)
@@ -405,15 +410,18 @@ mod shared_tests_test {
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;
         let _ = make_item_and_randomnesses();
-        let _ = insert_mock_item(&mut ams.kernel);
+        let _ = insert_mock_item(&mut ams.kernel).await;
     }
 
-    #[test]
-    fn test_pseudorandom_mmra_with_single_mp() {
+    #[tokio::test]
+    async fn test_pseudorandom_mmra_with_single_mp() {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
         let (mmra, mp) = pseudorandom_mmra_with_mp::<Hash>(rng.gen(), leaf);
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+        assert!(
+            mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                .0
+        );
     }
 
     #[test]
@@ -450,8 +458,8 @@ mod shared_tests_test {
         }
     }
 
-    #[test]
-    fn test_pseudorandom_mmra_with_mps() {
+    #[tokio::test]
+    async fn test_pseudorandom_mmra_with_mps() {
         let seed: [u8; 32] = thread_rng().gen();
         let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
         for num_leafs in 0..20 {
@@ -459,10 +467,11 @@ mod shared_tests_test {
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
-            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
+            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs).await;
             for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
-                    mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0,
+                    mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                        .0,
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }

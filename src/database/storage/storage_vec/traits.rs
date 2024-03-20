@@ -9,10 +9,11 @@ use super::Index;
 use async_stream::stream;
 use futures::stream::Stream;
 
-// re-export to make life easier for users of our API.
+// re-export to make life easier for users of our API
+// when using a wildcard import.
 pub use futures::{pin_mut, StreamExt};
 
-// #[allow(async_fn_in_trait)]
+/// Defines base StorageVec methods
 #[async_trait::async_trait]
 pub trait StorageVecBase<T: Send> {
     /// check if collection is empty
@@ -20,7 +21,6 @@ pub trait StorageVecBase<T: Send> {
 
     /// get collection length
     async fn len(&self) -> Index;
-    // fn len(&self) -> impl Future<Output = Index > + Send;
 
     /// get single element at index
     async fn get(&self, index: Index) -> T;
@@ -31,10 +31,6 @@ pub trait StorageVecBase<T: Send> {
     /// it may be more efficient to use a Stream or for-loop
     /// and avoid allocating a Vec
     async fn get_many(&self, indices: &[Index]) -> Vec<T>;
-    // #[inline]
-    // async fn get_many(&self, indices: &[Index]) -> Vec<T> {
-    //     self.many_iter(indices.to_vec()).map(|(_i, v)| v).collect()
-    // }
 
     /// get all elements
     ///
@@ -117,6 +113,7 @@ pub trait StorageVecBase<T: Send> {
     async fn clear(&mut self);
 }
 
+/// Defines StorageVec stream methods
 #[allow(async_fn_in_trait)]
 pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// get an async Stream for iterating over all elements by key/val
@@ -228,18 +225,16 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     }
 }
 
+/// The StorageVec trait defines a Vec-like interface for
+/// storing data (in LevelDB).
 pub trait StorageVec<T: Send>: StorageVecBase<T> + StorageVecStream<T> {}
-
-pub(in super::super) trait StorageVecIterMut<T: Send>: StorageVec<T> {}
 
 #[cfg(test)]
 pub(in super::super) mod tests {
     use super::*;
-    // use itertools::Itertools;
 
     pub mod streams {
         use super::*;
-        use futures::{pin_mut, StreamExt};
 
         pub async fn prepare_streams_test_vec(vec: &mut impl StorageVecBase<u64>) {
             vec.clear().await;

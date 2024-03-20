@@ -3,13 +3,14 @@ use crate::database::storage::storage_schema::{
 };
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::ArchivalMmr;
 use crate::Hash;
 
 use twenty_first::shared_math::tip5::Digest;
 
 use super::{
-    active_window::ActiveWindow, archival_mmr::ArchivalMmr,
-    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
+    active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
+    mutator_set_kernel::MutatorSetKernel,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;
@@ -77,8 +78,8 @@ impl RustyArchivalMutatorSet {
     pub async fn restore_or_new(&mut self) {
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.
-        self.ams_mut().kernel.aocl.fix_dummy_async().await;
-        self.ams_mut().kernel.swbf_inactive.fix_dummy_async().await;
+        self.ams_mut().kernel.aocl.fix_dummy().await;
+        self.ams_mut().kernel.swbf_inactive.fix_dummy().await;
 
         // populate active window
         self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get().await;
@@ -102,6 +103,7 @@ mod tests {
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
+    use crate::util_types::mmr::traits::*;
     use crate::util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
@@ -132,22 +134,17 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().kernel.aocl.count_leaves().await
         );
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
-            let mp =
-                rusty_mutator_set
-                    .ams()
-                    .kernel
-                    .prove(item, sender_randomness, receiver_preimage);
+            let mp = rusty_mutator_set
+                .ams()
+                .kernel
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
@@ -155,6 +152,7 @@ mod tests {
                 &rusty_mutator_set.ams().kernel,
                 &addition_record,
             )
+            .await
             .expect("Cannot batch update from addition");
 
             mps.push(mp);
@@ -164,17 +162,12 @@ mod tests {
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().kernel.aocl.count_leaves().await
         );
 
         // Verify membership
         for (mp, &item) in mps.iter().zip(items.iter()) {
-            assert!(rusty_mutator_set.ams().verify(item, mp));
+            assert!(rusty_mutator_set.ams().verify(item, mp).await);
         }
 
         // Remove items
@@ -208,12 +201,7 @@ mod tests {
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().kernel.aocl.count_leaves().await
         );
 
         // persist and drop
@@ -234,16 +222,11 @@ mod tests {
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            new_rusty_mutator_set.ams().kernel.aocl.count_leaves().await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
-                new_rusty_mutator_set.ams().verify(item, mp),
+                new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof {index} does not verify"
             );
         }
@@ -251,7 +234,7 @@ mod tests {
         // Verify non-membership
         for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
-                !new_rusty_mutator_set.ams().verify(item, mp),
+                !new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof of non-member {index} still valid"
             );
         }

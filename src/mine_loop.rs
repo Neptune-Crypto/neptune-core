@@ -18,8 +18,10 @@ use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNot
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
@@ -30,8 +32,6 @@ use rand::SeedableRng;
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -48,7 +48,7 @@ use self::primitive_witness::SaltedUtxos;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
 /// Prepare a Block for mining
-fn make_block_template(
+async fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     timestamp: Duration,
@@ -64,14 +64,15 @@ fn make_block_template(
     let mutator_set_update = MutatorSetUpdate::new(removals, additions);
     mutator_set_update
         .apply_to_accumulator(&mut next_mutator_set_accumulator)
+        .await
         .expect("Mutator set mutation must work");
 
     let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmra.append(previous_block.hash());
+    block_mmra.append(previous_block.hash()).await;
     let block_body: BlockBody = BlockBody {
         transaction,
         mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::default(),
         block_mmr_accumulator: block_mmra,
         uncle_blocks: vec![],
     };
@@ -177,7 +178,7 @@ async fn mine_block(
 
 /// Return the coinbase UTXO for the receiving address and the "sender" randomness
 /// used for the canonical AOCL commitment.
-fn make_coinbase_transaction(
+async fn make_coinbase_transaction(
     coinbase_utxo: &Utxo,
     receiver_digest: Digest,
     wallet_secret: &WalletSecret,
@@ -210,7 +211,7 @@ fn make_coinbase_transaction(
         fee: NeptuneCoins::zero(),
         timestamp: BFieldElement::new(timestamp.as_millis() as u64),
         coinbase: Some(coinbase_amount),
-        mutator_set_hash: mutator_set_accumulator.hash(),
+        mutator_set_hash: mutator_set_accumulator.hash().await,
     };
 
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
@@ -236,7 +237,7 @@ fn make_coinbase_transaction(
 /// Create the transaction that goes into the block template. The transaction is
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
-fn create_block_transaction(
+async fn create_block_transaction(
     latest_block: &Block,
     global_state: &GlobalState,
     timestamp: Duration,
@@ -271,7 +272,8 @@ fn create_block_transaction(
         next_block_height,
         latest_block.kernel.body.mutator_set_accumulator.clone(),
         timestamp,
-    );
+    )
+    .await;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -280,6 +282,7 @@ fn create_block_transaction(
             .body
             .mutator_set_accumulator
             .hash()
+            .await
             .emojihash()
     );
 
@@ -333,9 +336,10 @@ pub async fn mine(
                     &latest_block,
                     global_state_lock.lock_guard().await.deref(),
                     now,
-                );
+                )
+                .await;
                 let (block_header, block_body) =
-                    make_block_template(&latest_block, transaction, now);
+                    make_block_template(&latest_block, transaction, now).await;
                 let miner_task = mine_block(
                     block_header,
                     block_body,
@@ -419,7 +423,7 @@ pub async fn mine(
                 // The block, however, *must* be valid on other parameters. So here, we should panic
                 // if it is not.
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-                assert!(new_block_info.block.is_valid(&latest_block, now), "Own mined block must be valid. Failed validity check after successful PoW check.");
+                assert!(new_block_info.block.is_valid(&latest_block, now).await, "Own mined block must be valid. Failed validity check after successful PoW check.");
 
                 info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_info.block.kernel.header.height, new_block_info.block.hash().emojihash());
 
@@ -473,10 +477,10 @@ mod mine_loop_tests {
         );
 
         // Verify constructed coinbase transaction and block template when mempool is empty
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let (transaction_empty_mempool, _coinbase_sender_randomness) =
-            create_block_transaction(&genesis_block, &premine_receiver_global_state, now);
+            create_block_transaction(&genesis_block, &premine_receiver_global_state, now).await;
         assert_eq!(
             1,
             transaction_empty_mempool.kernel.outputs.len(),
@@ -487,14 +491,16 @@ mod mine_loop_tests {
             "Coinbase transaction with empty mempool must have zero inputs"
         );
         let (block_header_template_empty_mempool, block_body_empty_mempool) =
-            make_block_template(&genesis_block, transaction_empty_mempool, now);
+            make_block_template(&genesis_block, transaction_empty_mempool, now).await;
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
             Block::mk_std_block_type(None),
         );
         assert!(
-            block_template_empty_mempool.is_valid(&genesis_block, now),
+            block_template_empty_mempool
+                .is_valid(&genesis_block, now)
+                .await,
             "Block template created by miner with empty mempool must be valid"
         );
 
@@ -533,7 +539,8 @@ mod mine_loop_tests {
                 &genesis_block,
                 &premine_receiver_global_state,
                 now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 1000),
-            );
+            )
+            .await;
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -546,17 +553,20 @@ mod mine_loop_tests {
             &genesis_block,
             transaction_non_empty_mempool,
             now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000),
-        );
+        )
+        .await;
         let block_template_non_empty_mempool = Block::new(
             block_header_template,
             block_body,
             Block::mk_std_block_type(None),
         );
         assert!(
-            block_template_non_empty_mempool.is_valid(
-                &genesis_block,
-                now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000)
-            ),
+            block_template_non_empty_mempool
+                .is_valid(
+                    &genesis_block,
+                    now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000)
+                )
+                .await,
             "Block template created by miner with non-empty mempool must be valid"
         );
 
