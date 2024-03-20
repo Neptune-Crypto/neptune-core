@@ -9,7 +9,7 @@
 //!    that implements the StorageVec trait.  It is mainly useful for tests and doctests.
 //!  - [`SimpleRustyStorage`](storage_schema::SimpleRustyStorage) provides atomic NeptuneLevelDb writes across
 //!    any number of [`DbtVec`](storage_schema::DbtVec) or [`DbtSingleton`](storage_schema::DbtSingleton) "tables".
-//!  - [`NeptuneLevelDb`](level_db::NeptuneLevelDb) provides a convenient wrapper for the LevelDB API.
+//!  - [`NeptuneLevelDb`](crate::database::NeptuneLevelDb) provides a convenient wrapper for the LevelDB API.
 
 // For anyone reading this code and trying to understand the StorageVec trait and the DbSchema
 // in particular, especially with regards to locks, mutability, and concurrency, the following

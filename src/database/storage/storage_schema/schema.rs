@@ -25,23 +25,34 @@ use std::{fmt::Display, sync::Arc};
 ///
 /// # Example:
 ///
-/// ```
-/// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
-/// use std::sync::{Arc, RwLock};
+/// ```compile_fail
+/// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
+/// # tokio_test::block_on(async {
+/// # use database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// use std::sync::Arc;
+/// use tokio::sync::RwLock;
 /// let mut storage = SimpleRustyStorage::new(db);
 ///
 /// let tables = (
-///     storage.schema.new_vec::<u16>("ages"),
-///     storage.schema.new_vec::<String>("names"),
-///     storage.schema.new_singleton::<bool>("proceed")
+///     storage.schema.new_vec::<u16>("ages").await,
+///     storage.schema.new_vec::<String>("names").await,
+///     storage.schema.new_singleton::<bool>("proceed").await
 /// );
 ///
 /// let mut atomic_tables = Arc::new(RwLock::new(tables));
-/// let mut lock = atomic_tables.write().unwrap();
-/// lock.0.push(5);
-/// lock.1.push("Sally".into());
-/// lock.2.set(true);
+///
+/// // these mutations happen atomically in mem.
+/// {
+///     let mut lock = atomic_tables.write().await;
+///     lock.0.push(5).await;
+///     lock.1.push("Sally".into()).await;
+///     lock.2.set(true).await;
+/// }
+///
+/// // all pending writes are persisted to DB in one atomic batch operation.
+/// storage.persist();
+/// # });
 /// ```
 ///
 /// In the example, the `table` were placed in a `tuple` container.
@@ -58,25 +69,34 @@ use std::{fmt::Display, sync::Arc};
 ///
 /// # Example:
 ///
-/// ```rust
-/// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// ```compile_fail
+/// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
+/// # tokio_test::block_on(async {
+/// # use database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// use neptune_core::locks::tokio::AtomicRw;
+///
 /// let mut storage = SimpleRustyStorage::new(db);
 ///
-/// let mut atomic_tables = storage.schema.create_tables_rw(|s| {
-///     (
-///         s.new_vec::<u16>("ages"),
-///         s.new_vec::<String>("names"),
-///         s.new_singleton::<bool>("proceed")
-///     )
-/// });
+/// let tables = (
+///     storage.schema.new_vec::<u16>("ages").await,
+///     storage.schema.new_vec::<String>("names").await,
+///     storage.schema.new_singleton::<bool>("proceed").await
+/// );
 ///
-/// // these writes happen atomically.
-/// atomic_tables.lock_mut(|tables| {
-///     tables.0.push(5);
-///     tables.1.push("Sally".into());
-///     tables.2.set(true);
-/// });
+/// let mut atomic_tables = AtomicRw::from(tables);
+///
+/// // these mutations happen atomically in mem.
+/// {
+///     let mut lock = atomic_tables.lock_guard_mut().await;
+///     lock.0.push(5).await;
+///     lock.1.push("Sally".into()).await;
+///     lock.2.set(true).await;
+/// }
+///
+/// // all pending writes are persisted to DB in one atomic batch operation.
+/// storage.persist();
+/// # });
 /// ```
 pub struct DbtSchema {
     /// Pending writes for all tables in this Schema.

@@ -47,7 +47,7 @@ use std::fmt::Debug;
 ///
 /// ```
 /// use serde::{Serialize, Deserialize};
-/// use crate::database::storage::storage_schema::RustyValue;
+/// use neptune_core::database::storage::storage_schema::RustyValue;
 ///
 /// #[derive(Debug, Clone, Serialize, Deserialize)]
 /// pub struct Person {

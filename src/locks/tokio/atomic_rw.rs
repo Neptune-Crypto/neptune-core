@@ -8,7 +8,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::util_types::sync::tokio::AtomicRw;
+/// # use neptune_core::locks::tokio::AtomicRw;
 /// struct Car {
 ///     year: u16,
 /// };
@@ -24,7 +24,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::util_types::sync::tokio::{AtomicRw, LockEvent, LockCallbackFn};
+/// # use neptune_core::locks::tokio::{AtomicRw, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -197,7 +197,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -216,7 +216,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -235,7 +235,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -259,7 +259,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -286,7 +286,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
@@ -312,7 +312,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicRw;
+    /// # use neptune_core::locks::tokio::AtomicRw;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,

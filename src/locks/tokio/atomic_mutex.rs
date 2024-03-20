@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, MutexGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+/// # use neptune_core::locks::tokio::AtomicMutex;
 /// struct Car {
 ///     year: u16,
 /// };
@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, MutexGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::util_types::sync::tokio::{AtomicMutex, LockEvent, LockCallbackFn};
+/// # use neptune_core::locks::tokio::{AtomicMutex, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -198,7 +198,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -217,7 +217,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -236,7 +236,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -261,7 +261,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -292,7 +292,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
@@ -319,7 +319,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use neptune_core::locks::tokio::AtomicMutex;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
