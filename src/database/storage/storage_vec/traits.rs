@@ -115,140 +115,27 @@ pub trait StorageVecBase<T: Send> {
     ///
     /// note: The update is performed as a single atomic operation.
     async fn clear(&mut self);
-
-    /*
-    /// get a mutable iterator over all elements
-    ///
-    /// note: all updates are performed as a single atomic operation.
-    ///       readers will see either the before or after state,
-    ///       never an intermediate state.
-    ///
-    /// note: the returned (lending) iterator cannot be used in a for loop.  Use a
-    ///       while loop instead.  See example below.
-    ///
-    /// Note: The returned iterator holds a write lock over `StorageVecRwLock::LockedData`.
-    /// This write lock must be dropped before performing any read operation.
-    /// This is enforced by the borrow-checker, which also prevents deadlocks.
-    ///
-    /// # Example:
-    /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
-    /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
-    ///
-    /// {
-    ///     let mut iter = vec.iter_mut();
-    ///         while let Some(mut setter) = iter.next() {
-    ///         setter.set(50);
-    ///     }
-    /// } // <----- iter is dropped here.  write lock is released.
-    ///
-    /// // read can proceed
-    /// let val = vec.get(2);
-    /// ```
-    // #[allow(private_bounds)]
-    // #[inline]
-    // fn iter_mut(&mut self) -> ManyIterMut<Self, T>
-    // where
-    //     Self: Sized + StorageVecRwLock<T>,
-    // {
-    //     ManyIterMut::new(0..self.len(), self)
-    // }
-
-    /// get a mutable iterator over elements matching indices
-    ///
-    /// note: all updates are performed as a single atomic operation.
-    ///       readers will see either the before or after state,
-    ///       never an intermediate state.
-    ///
-    /// note: the returned (lending) iterator cannot be used in a for loop.  Use a
-    ///       while loop instead.  See example below.
-    ///
-    /// Note: The returned iterator holds a write lock over `StorageVecRwLock::LockedData`.
-    /// This write lock must be dropped before performing any read operation.
-    /// This is enforced by the borrow-checker, which also prevents deadlocks.
-    ///
-    /// # Example:
-    /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
-    /// # let mut vec = OrdinaryVec::<&str>::from(vec!["1","2","3","4","5","6","7","8","9"]);
-    ///
-    /// {
-    ///     let mut iter = vec.many_iter_mut([2, 4, 6]);
-    ///         while let Some(mut setter) = iter.next() {
-    ///         setter.set("50");
-    ///     }
-    /// } // <----- iter is dropped here.  write lock is released.
-    ///
-    /// // read can proceed
-    /// let val = vec.get(2);
-    /// ```
-    // #[allow(private_bounds)]
-    // #[inline]
-    // fn many_iter_mut<'a>(
-    //     &'a mut self,
-    //     indices: impl IntoIterator<Item = Index> + 'a,
-    // ) -> ManyIterMut<Self, T>
-    // where
-    //     Self: Sized + StorageVecRwLock<T>,
-    // {
-    //     ManyIterMut::new(indices, self)
-    // }
-    */
 }
-
-// We keep this trait private for now as impl detail.
-// #[allow(async_fn_in_trait)]
-// pub(in super::super) trait StorageVecLockedData<T> {
-//     /// get single element at index
-//     async fn get(&self, index: Index) -> T;
-
-//     /// set a single element.
-//     async fn set(&mut self, index: Index, value: T);
-// }
-
-// We keep this trait private so that the locks remain encapsulated inside our API.
-// #[allow(async_fn_in_trait)]
-// #[async_trait::async_trait]
-// pub(in super::super) trait StorageVecRwLock<T> {
-//     type LockedData;
-
-//     /// obtain write lock over mutable data.
-//     async fn try_write_lock(&mut self) -> Option<AtomicRwWriteGuard<'_, Self::LockedData>>;
-//     // where <Self as StorageVecRwLock<T>>::LockedData: 'a;
-
-//     /// obtain read lock over mutable data.
-//     async fn try_read_lock(&self) -> Option<AtomicRwReadGuard<'_, Self::LockedData>>;
-//     // where <Self as StorageVecRwLock<T>>::LockedData: 'a;
-// }
 
 #[allow(async_fn_in_trait)]
 pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
-    /// get an iterator over all elements
-    ///
-    /// The returned iterator holds a read-lock over the collection contents.
-    /// This enables consistent (snapshot) reads because any writer must
-    /// wait until the lock is released.
-    ///
-    /// The lock is not released until the iterator is dropped, so it is
-    /// important to drop the iterator immediately after use.  Typical
-    /// for-loop usage does this automatically.
+    /// get an async Stream for iterating over all elements by key/val
     ///
     /// # Example:
     /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # tokio_test::block_on(async {
+    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// for (key, val) in vec.iter() {
-    ///     println!("{key}: {val}")
-    /// } // <--- iterator is dropped here.
+    /// let stream = vec.stream().await;
+    /// pin_mut!(stream);  // needed for iteration
     ///
-    /// // write can proceed
-    /// vec.set(5, 2);
+    /// while let Some((key, val)) = stream.next().await {
+    ///     println!("{key}: {val}")
+    /// }
+    /// # })
     /// ```
-    // #[inline]
-    // async fn iter(&self) -> Box<dyn Iterator<Item = (Index, T)> + '_> {
-    //     self.many_iter(0..self.len())
-    // }
+    #[inline]
     async fn stream<'a>(&'a self) -> impl Stream<Item = (Index, T)> + 'a
     where
         T: 'a,
@@ -256,30 +143,23 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         self.stream_many(0..self.len().await).await
     }
 
-    /// The returned iterator holds a read-lock over the collection contents.
-    /// This enables consistent (snapshot) reads because any writer must
-    /// wait until the lock is released.
-    ///
-    /// The lock is not released until the iterator is dropped, so it is
-    /// important to drop the iterator immediately after use.  Typical
-    /// for-loop usage does this automatically.
+    /// get an async Stream for iterating over all elements by value
     ///
     /// # Example:
     /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # tokio_test::block_on(async {
+    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// for (val) in vec.iter_values() {
-    ///     println!("{val}")
-    /// } // <--- iterator is dropped here.
+    /// let stream = vec.stream_values().await;
+    /// pin_mut!(stream);  // needed for iteration
     ///
-    /// // write can proceed
-    /// let val = vec.push(2);
+    /// while let Some(val) = stream.next().await {
+    ///     println!("{val}")
+    /// }
+    /// # })
     /// ```
-    // #[inline]
-    // fn iter_values(&self) -> Box<dyn Iterator<Item = T> + '_> {
-    //     self.many_iter_values(0..self.len())
-    // }
+    #[inline]
     async fn stream_values<'a>(&'a self) -> impl Stream<Item = T> + 'a
     where
         T: 'a,
@@ -287,32 +167,22 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         self.stream_many_values(0..self.len().await).await
     }
 
-    /// get an iterator over elements matching indices
-    ///
-    /// The returned iterator holds a read-lock over the collection contents.
-    /// This enables consistent (snapshot) reads because any writer must
-    /// wait until the lock is released.
-    ///
-    /// The lock is not released until the iterator is dropped, so it is
-    /// important to drop the iterator immediately after use.  Typical
-    /// for-loop usage does this automatically.
+    /// get an async Stream for iterating over elements matching indices by key/value
     ///
     /// # Example:
     /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # tokio_test::block_on(async {
+    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// for (key, val) in vec.many_iter([3, 5, 7]) {
-    ///     println!("{key}: {val}")
-    /// } // <--- iterator is dropped here.
+    /// let stream = vec.stream_many([2,3,7]).await;
+    /// pin_mut!(stream);  // needed for iteration
     ///
-    /// // write can proceed
-    /// vec.set(5, 2);
+    /// while let Some((key, val)) = stream.next().await {
+    ///     println!("{key}: {val}")
+    /// }
+    /// # })
     /// ```
-    // fn many_iter<'a>(
-    //     &'a self,
-    //     indices: impl IntoIterator<Item = Index> + 'a,
-    // ) -> Box<dyn Iterator<Item = (Index, T)> + '_>;
     async fn stream_many<'a>(
         &'a self,
         indices: impl IntoIterator<Item = Index> + 'a,
@@ -327,32 +197,22 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
         }
     }
 
-    /// get an iterator over elements matching indices
-    ///
-    /// The returned iterator holds a read-lock over the collection contents.
-    /// This enables consistent (snapshot) reads because any writer must
-    /// wait until the lock is released.
-    ///
-    /// The lock is not released until the iterator is dropped, so it is
-    /// important to drop the iterator immediately after use.  Typical
-    /// for-loop usage does this automatically.
+    /// get an async Stream for iterating over elements matching indices by value
     ///
     /// # Example:
     /// ```
-    /// # use crate::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # tokio_test::block_on(async {
+    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
-    /// for (val) in vec.many_iter_values([2, 5, 8]) {
-    ///     println!("{val}")
-    /// } // <--- iterator is dropped here.
+    /// let stream = vec.stream_many_values([2,3,7]).await;
+    /// pin_mut!(stream);  // needed for iteration
     ///
-    /// // write can proceed
-    /// vec.set(5, 2);
+    /// while let Some(val) = stream.next().await {
+    ///     println!("{val}")
+    /// }
+    /// # })
     /// ```
-    // fn many_iter_values<'a>(
-    //     &'a self,
-    //     indices: impl IntoIterator<Item = Index> + 'a,
-    // ) -> Box<dyn Iterator<Item = T> + '_>;
     async fn stream_many_values<'a>(
         &'a self,
         indices: impl IntoIterator<Item = Index> + 'a,
