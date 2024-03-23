@@ -56,11 +56,17 @@ tracing-subscriber = { version = "0", features = [
 tracing-test = "0"
 unicode-width = "0"
 zeroize = "1.7.0"
+rs-leveldb = "0.1.5"
+leveldb-sys = "2.0.9"
+async-trait = "0.1.77"
+async-stream = "0.3.5"
 
 [dev-dependencies]
 test-strategy = "0.3"
 pin-project-lite = "0.2.13"
 tokio-test = "0"
+blake3 = "1.5.1"
+divan = "0.1.14"
 
 [dev-dependencies.cargo-husky]
 default-features = false
@@ -90,8 +96,13 @@ opt-level = 0
 # codegen-units = 256
 # rpath = false
 
+[[bench]]
+name = "sync_atomic"
+harness = false
+
 [patch.crates-io]
-# # rev = "f711ae27d1402d733989624bbadd59b7e82a1972" is tip of tasm-lib master as of 2024-01-25
-# tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "f711ae27d1402d733989624bbadd59b7e82a1972" }
-# rev = "928b1fa7522aacdb055c4c04d144b44af241f2e6" is tip of tasm-lib master as of 2024-02-27
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "928b1fa7522aacdb055c4c04d144b44af241f2e6" }
+# 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
+tasm-lib = { git = "https://github.com/dan-da/tasm-lib.git", rev = "15a708cf6fcbd9ed3e65e5e2067be6e622176328" }
+
+# 4f5f46b33f25f83940cbd934ae63c5848a041a7a = tip of branch: make_storage_async on 2024-03-21
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "4f5f46b33f25f83940cbd934ae63c5848a041a7a"}

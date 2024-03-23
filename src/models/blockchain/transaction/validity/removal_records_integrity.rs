@@ -2,13 +2,11 @@ use crate::models::blockchain::transaction;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
-use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use arbitrary::Arbitrary;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -21,12 +19,10 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
+    util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::models::consensus::{
@@ -131,7 +127,6 @@ impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
         }
     }
 }
-
 impl ValidationLogic for RemovalRecordsIntegrity {
     fn vast(&self) -> ValidityTree {
         ValidityTree {
@@ -203,7 +198,7 @@ impl RemovalRecordsIntegrityWitness {
         (root, paths)
     }
 
-    pub fn pseudorandom_mmra_with_mps(
+    pub async fn pseudorandom_mmra_with_mps(
         seed: [u8; 32],
         leafs: &[Digest],
     ) -> (MmrAccumulator<Hash>, Vec<MmrMembershipProof<Hash>>) {
@@ -323,95 +318,103 @@ impl RemovalRecordsIntegrityWitness {
 
         // sanity check
         for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+            assert!(
+                mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                    .0
+            );
         }
 
         (mmra, mps)
     }
 }
 
-impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let num_inputs = u.int_in_range(1..=3usize)?;
-        let _num_outputs = u.int_in_range(1..=3usize)?;
-        let _num_public_announcements = u.int_in_range(0..=2usize)?;
+// Commented out during async storage refactor due to
+// non-async tasm-lib trait conflicts.
+//
+// Seems like this belongs in a tests module anyway?
 
-        let input_utxos: Vec<Utxo> = (0..num_inputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let mut membership_proofs: Vec<MsMembershipProof> = (0..num_inputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let addition_records: Vec<AdditionRecord> = input_utxos
-            .iter()
-            .zip(membership_proofs.iter())
-            .map(|(utxo, msmp)| {
-                commit(
-                    Hash::hash(utxo),
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage.hash::<Hash>(),
-                )
-            })
-            .collect_vec();
-        let canonical_commitments = addition_records
-            .iter()
-            .map(|ar| ar.canonical_commitment)
-            .collect_vec();
-        let (aocl, mmr_mps) =
-            Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments);
-        assert_eq!(num_inputs, mmr_mps.len());
-        assert_eq!(num_inputs, canonical_commitments.len());
+// impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
+//     async fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+//         let num_inputs = u.int_in_range(1..=3usize)?;
+//         let _num_outputs = u.int_in_range(1..=3usize)?;
+//         let _num_public_announcements = u.int_in_range(0..=2usize)?;
 
-        for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
-            assert!(
-                mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
-                "Returned MPs must be valid for returned AOCL"
-            );
-        }
+//         let input_utxos: Vec<Utxo> = (0..num_inputs)
+//             .map(|_| u.arbitrary().unwrap())
+//             .collect_vec();
+//         let mut membership_proofs: Vec<MsMembershipProof> = (0..num_inputs)
+//             .map(|_| u.arbitrary().unwrap())
+//             .collect_vec();
+//         let addition_records: Vec<AdditionRecord> = input_utxos
+//             .iter()
+//             .zip(membership_proofs.iter())
+//             .map(|(utxo, msmp)| {
+//                 commit(
+//                     Hash::hash(utxo),
+//                     msmp.sender_randomness,
+//                     msmp.receiver_preimage.hash::<Hash>(),
+//                 )
+//             })
+//             .collect_vec();
+//         let canonical_commitments = addition_records
+//             .iter()
+//             .map(|ar| ar.canonical_commitment)
+//             .collect_vec();
+//         let (aocl, mmr_mps) =
+//             Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments).await;
+//         assert_eq!(num_inputs, mmr_mps.len());
+//         assert_eq!(num_inputs, canonical_commitments.len());
 
-        for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
-            ms_mp.auth_path_aocl = mmr_mp.clone();
-        }
-        let swbfi: MmrAccumulator<Hash> = u.arbitrary()?;
-        let swbfa_hash: Digest = u.arbitrary()?;
-        let mut kernel: TransactionKernel = u.arbitrary()?;
-        kernel.mutator_set_hash = Hash::hash_pair(
-            Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-            Hash::hash_pair(swbfa_hash, Digest::default()),
-        );
-        kernel.inputs = input_utxos
-            .iter()
-            .zip(membership_proofs.iter())
-            .map(|(utxo, msmp)| {
-                (
-                    Hash::hash(utxo),
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage,
-                    msmp.auth_path_aocl.leaf_index,
-                )
-            })
-            .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
-            .map(|ais| RemovalRecord {
-                absolute_indices: AbsoluteIndexSet::new(&ais),
-                target_chunks: u.arbitrary().unwrap(),
-            })
-            .rev()
-            .collect_vec();
+//         for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+//             assert!(
+//                 mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await).0,
+//                 "Returned MPs must be valid for returned AOCL"
+//             );
+//         }
 
-        let mut kernel_index_set_hashes = kernel
-            .inputs
-            .iter()
-            .map(|rr| Hash::hash(&rr.absolute_indices))
-            .collect_vec();
-        kernel_index_set_hashes.sort();
+//         for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
+//             ms_mp.auth_path_aocl = mmr_mp.clone();
+//         }
+//         let swbfi: MmrAccumulator<Hash> = u.arbitrary()?;
+//         let swbfa_hash: Digest = u.arbitrary()?;
+//         let mut kernel: TransactionKernel = u.arbitrary()?;
+//         kernel.mutator_set_hash = Hash::hash_pair(
+//             Hash::hash_pair(aocl.bag_peaks().await, swbfi.bag_peaks().await),
+//             Hash::hash_pair(swbfa_hash, Digest::default()),
+//         );
+//         kernel.inputs = input_utxos
+//             .iter()
+//             .zip(membership_proofs.iter())
+//             .map(|(utxo, msmp)| {
+//                 (
+//                     Hash::hash(utxo),
+//                     msmp.sender_randomness,
+//                     msmp.receiver_preimage,
+//                     msmp.auth_path_aocl.leaf_index,
+//                 )
+//             })
+//             .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
+//             .map(|ais| RemovalRecord {
+//                 absolute_indices: AbsoluteIndexSet::new(&ais),
+//                 target_chunks: u.arbitrary().unwrap(),
+//             })
+//             .rev()
+//             .collect_vec();
 
-        Ok(RemovalRecordsIntegrityWitness {
-            input_utxos,
-            membership_proofs,
-            aocl,
-            swbfi,
-            swbfa_hash,
-            kernel,
-        })
-    }
-}
+//         let mut kernel_index_set_hashes = kernel
+//             .inputs
+//             .iter()
+//             .map(|rr| Hash::hash(&rr.absolute_indices))
+//             .collect_vec();
+//         kernel_index_set_hashes.sort();
+
+//         Ok(RemovalRecordsIntegrityWitness {
+//             input_utxos,
+//             membership_proofs,
+//             aocl,
+//             swbfi,
+//             swbfa_hash,
+//             kernel,
+//         })
+//     }
+// }

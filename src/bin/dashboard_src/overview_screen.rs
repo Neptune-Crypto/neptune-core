@@ -93,7 +93,7 @@ impl OverviewData {
             ram_used: Default::default(),
         }
     }
-    pub fn test() -> Self {
+    pub async fn test() -> Self {
         OverviewData {
             available_balance: Some(NeptuneCoins::zero()),
             timelocked_balance: Some(NeptuneCoins::zero()),
@@ -106,6 +106,7 @@ impl OverviewData {
             syncing: false,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block()
+                    .await
                     .kernel
                     .header,
             ),

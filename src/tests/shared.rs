@@ -5,6 +5,8 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
 
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use bytesize::ByteSize;
@@ -33,15 +35,13 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
@@ -87,7 +87,7 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
@@ -141,11 +141,11 @@ pub fn get_dummy_version() -> String {
     "0.1.0".to_string()
 }
 
-pub fn get_dummy_latest_block(
+pub async fn get_dummy_latest_block(
     input_block: Option<Block>,
 ) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
     let block = match input_block {
-        None => Block::genesis_block(),
+        None => Block::genesis_block().await,
         Some(block) => block,
     };
 
@@ -159,10 +159,15 @@ pub fn get_dummy_latest_block(
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
+pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
+        tip_header: get_dummy_latest_block(None)
+            .await
+            .2
+            .lock()
+            .unwrap()
+            .to_owned(),
         listen_port: Some(8080),
         network,
         version: get_dummy_version(),
@@ -178,11 +183,11 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-pub fn get_dummy_peer_connection_data_genesis(
+pub async fn get_dummy_peer_connection_data_genesis(
     network: Network,
     id: u8,
 ) -> (HandshakeData, SocketAddr) {
-    let handshake = get_dummy_handshake_data_for_genesis(network);
+    let handshake = get_dummy_handshake_data_for_genesis(network).await;
     let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
@@ -206,7 +211,7 @@ pub async fn get_mock_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
-    let (block, _, _) = get_dummy_latest_block(None);
+    let (block, _, _) = get_dummy_latest_block(None).await;
     let light_state: LightState = LightState::from(block.clone());
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
@@ -259,7 +264,7 @@ pub async fn get_test_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data_for_genesis(network),
+        get_dummy_handshake_data_for_genesis(network).await,
     ))
 }
 
@@ -438,7 +443,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     }
 }
 
-pub fn pseudorandom_removal_record_integrity_witness(
+pub async fn pseudorandom_removal_record_integrity_witness(
     seed: [u8; 32],
 ) -> RemovalRecordsIntegrityWitness {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -467,13 +472,15 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .iter()
         .map(|ar| ar.canonical_commitment)
         .collect_vec();
-    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
+    let (aocl, mmr_mps) =
+        pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments).await;
     assert_eq!(num_inputs, mmr_mps.len());
     assert_eq!(num_inputs, canonical_commitments.len());
 
     for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
         assert!(
-            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+            mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await)
+                .0,
             "Returned MPs must be valid for returned AOCL"
         );
     }
@@ -490,7 +497,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
         num_public_announcements,
     );
     kernel.mutator_set_hash = Hash::hash_pair(
-        Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+        Hash::hash_pair(aocl.bag_peaks().await, swbfi.bag_peaks().await),
         Hash::hash_pair(swbfa_hash, Digest::default()),
     );
     kernel.inputs = input_utxos
@@ -739,7 +746,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
-pub fn make_mock_transaction_with_generation_key(
+pub async fn make_mock_transaction_with_generation_key(
     input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
     receiver_data: Vec<UtxoReceiverData>,
     fee: NeptuneCoins,
@@ -780,7 +787,7 @@ pub fn make_mock_transaction_with_generation_key(
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
-        mutator_set_hash: tip_msa.hash(),
+        mutator_set_hash: tip_msa.hash().await,
     };
 
     let input_utxos = input_utxos_mps_keys
@@ -895,7 +902,7 @@ pub fn make_mock_transaction_with_wallet(
 /// of a coinbase output.
 ///
 /// Returns (block, coinbase UTXO, Coinbase output randomness)
-pub fn make_mock_block(
+pub async fn make_mock_block(
     previous_block: &Block,
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<u64>,
@@ -915,12 +922,12 @@ pub fn make_mock_block(
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
     let previous_mutator_set = next_mutator_set.clone();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmr.append(previous_block.hash());
+    block_mmr.append(previous_block.hash()).await;
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
         commit(coinbase_digest, coinbase_output_randomness, receiver_digest);
-    next_mutator_set.add(&coinbase_addition_record);
+    next_mutator_set.add(&coinbase_addition_record).await;
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
@@ -934,7 +941,7 @@ pub fn make_mock_block(
         fee: NeptuneCoins::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
-        mutator_set_hash: previous_mutator_set.hash(),
+        mutator_set_hash: previous_mutator_set.hash().await,
     };
 
     let primitive_witness = PrimitiveWitness {
@@ -958,7 +965,7 @@ pub fn make_mock_block(
     let block_body: BlockBody = BlockBody {
         transaction,
         mutator_set_accumulator: next_mutator_set.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::default(),
         block_mmr_accumulator: block_mmr,
         uncle_blocks: vec![],
     };
@@ -981,13 +988,13 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body, Some(Proof(vec![]))),
+        Block::new(block_header, block_body, Block::mk_std_block_type(None)),
         coinbase_utxo,
         coinbase_output_randomness,
     )
 }
 
-pub fn make_mock_block_with_valid_pow(
+pub async fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
@@ -999,14 +1006,16 @@ pub fn make_mock_block_with_valid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    );
+    )
+    .await;
     while !block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        );
+        )
+        .await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;
@@ -1014,7 +1023,7 @@ pub fn make_mock_block_with_valid_pow(
     (block, utxo, digest)
 }
 
-pub fn make_mock_block_with_invalid_pow(
+pub async fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
@@ -1026,14 +1035,16 @@ pub fn make_mock_block_with_invalid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    );
+    )
+    .await;
     while block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        );
+        )
+        .await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;

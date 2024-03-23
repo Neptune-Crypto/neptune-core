@@ -25,8 +25,10 @@ use super::shared::{
     NUM_TRIALS,
 };
 use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 
 #[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
@@ -139,11 +141,11 @@ impl RemovalRecord {
     /// Update a batch of removal records that are synced to a given mutator set, given
     /// that that mutator set will be updated with an addition. (The addition record
     /// does not matter; all necessary information is in the mutator set.)
-    pub fn batch_update_from_addition<MMR: Mmr<Hash>>(
+    pub async fn batch_update_from_addition<MMR: Mmr<Hash>>(
         removal_records: &mut [&mut Self],
         mutator_set: &mut MutatorSetKernel<MMR>,
     ) {
-        let new_item_index = mutator_set.aocl.count_leaves();
+        let new_item_index = mutator_set.aocl.count_leaves().await;
 
         // if window does not slide, do nothing
         if !MutatorSetKernel::<MMR>::window_slides(new_item_index) {
@@ -160,9 +162,8 @@ impl RemovalRecord {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
-            mmra.append(new_chunk_digest);
+        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator().await;
+        let new_swbf_auth_path: MmrMembershipProof<Hash> = mmra.append(new_chunk_digest).await;
 
         // Collect all indices for all removal records that are being updated
         let mut chunk_index_to_rr_index: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -238,11 +239,11 @@ impl RemovalRecord {
         }
 
         // Perform the update of all the MMR membership proofs contained in the removal records
-        mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
+        MmrMembershipProof::<Hash>::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
-            mutator_set.swbf_inactive.count_leaves(),
+            mutator_set.swbf_inactive.count_leaves().await,
             new_chunk_digest,
-            &mutator_set.swbf_inactive.get_peaks(),
+            &mutator_set.swbf_inactive.get_peaks().await,
         );
     }
 
@@ -263,7 +264,7 @@ impl RemovalRecord {
             );
 
         // Collect all the MMR membership proofs from the chunk dictionaries.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut own_mmr_mps: Vec<&mut MmrMembershipProof<Hash>> = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
             for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
                 own_mmr_mps.push(mp);
@@ -271,26 +272,26 @@ impl RemovalRecord {
         }
 
         // Perform the batch mutation of the MMR membership proofs
-        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+        MmrMembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_mmr_mps,
             mutation_argument,
         );
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<M>) -> bool
+    pub async fn validate<M>(&self, mutator_set: &MutatorSetKernel<M>) -> bool
     where
         M: Mmr<Hash>,
     {
-        let peaks = mutator_set.swbf_inactive.get_peaks();
+        let peaks = mutator_set.swbf_inactive.get_peaks().await;
+        let leaf_count = mutator_set.swbf_inactive.count_leaves().await;
+
         self.target_chunks
             .dictionary
             .iter()
             .all(|(_i, (proof, chunk))| {
                 let leaf_digest = Hash::hash(chunk);
-                let leaf_count = mutator_set.swbf_inactive.count_leaves();
                 let (verified, _final_state) = proof.verify(&peaks, leaf_digest, leaf_count);
-
                 verified
             })
     }
@@ -328,23 +329,25 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+    use crate::util_types::mutator_set::mutator_set_trait::*;
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;
 
-    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
+    async fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+        let mp: MsMembershipProof = accumulator
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
         (item, mp, removal_record)
     }
 
-    #[test]
-    fn get_size_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn get_size_test() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let serialization_result = bincode::serialize(&removal_record).unwrap();
         let reported_size = removal_record.get_size();
@@ -355,9 +358,9 @@ mod removal_record_tests {
         assert!(reported_size * 2 > serialization_result.len());
     }
 
-    #[test]
-    fn verify_that_removal_records_and_mp_indices_agree() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn verify_that_removal_records_and_mp_indices_agree() {
+        let (item, mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
@@ -370,9 +373,9 @@ mod removal_record_tests {
         );
     }
 
-    #[test]
-    fn hash_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn hash_test() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
@@ -390,9 +393,9 @@ mod removal_record_tests {
         );
     }
 
-    #[test]
-    fn get_chunkidx_to_indices_test() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn get_chunkidx_to_indices_test() {
+        let (item, mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
@@ -412,13 +415,13 @@ mod removal_record_tests {
         }
     }
 
-    #[test]
-    fn removal_record_serialization_test() {
+    #[tokio::test]
+    async fn removal_record_serialization_test() {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
 
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord>(&json).unwrap();
@@ -426,34 +429,36 @@ mod removal_record_tests {
         assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
 
-    #[test]
-    fn simple_remove_test() {
+    #[tokio::test]
+    async fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
             commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+        let mp = accumulator
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         assert!(
-            !accumulator.verify(item, &mp),
+            !accumulator.verify(item, &mp).await,
             "Item must fail to verify before it is added"
         );
-        accumulator.add(&addition_record);
+        accumulator.add(&addition_record).await;
         let rr = accumulator.drop(item, &mp);
         assert!(
-            accumulator.verify(item, &mp),
+            accumulator.verify(item, &mp).await,
             "Item must succeed in verification after it is added"
         );
-        accumulator.remove(&rr);
+        accumulator.remove(&rr).await;
         assert!(
-            !accumulator.verify(item, &mp),
+            !accumulator.verify(item, &mp).await,
             "Item must fail to verify after it is removed"
         );
     }
 
-    #[test]
-    fn batch_update_from_addition_pbt() {
+    #[tokio::test]
+    async fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
 
         let test_iterations = 10;
@@ -467,7 +472,9 @@ mod removal_record_tests {
 
                 let addition_record: AdditionRecord =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+                let mp = accumulator
+                    .prove(item, sender_randomness, receiver_preimage)
+                    .await;
 
                 // Update all removal records from addition, then add the element
                 RemovalRecord::batch_update_from_addition(
@@ -476,30 +483,32 @@ mod removal_record_tests {
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
                     &mut accumulator.kernel,
-                );
+                )
+                .await;
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
                     &accumulator.kernel,
                     &addition_record,
-                );
+                )
+                .await;
                 assert!(
                     update_res_mp.is_ok(),
                     "batch update must return OK, i = {}",
                     i
                 );
-                accumulator.add(&addition_record);
+                accumulator.add(&addition_record).await;
                 mps.push(mp.clone());
                 items.push(item);
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&accumulator.kernel),
+                        removal_record.validate(&accumulator.kernel).await,
                         "removal records must validate, i = {}",
                         i
                     );
                     assert!(
-                        accumulator.kernel.can_remove(removal_record),
+                        accumulator.kernel.can_remove(removal_record).await,
                         "removal records must return true on `can_remove`, i = {}",
                         i
                     );
@@ -517,27 +526,35 @@ mod removal_record_tests {
             // this function, so we only test one of the removal records here.
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
-            assert!(accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
             assert!(
-                accumulator.kernel.can_remove(random_removal_record),
+                accumulator
+                    .verify(items[*chosen_index], &mps[*chosen_index])
+                    .await
+            );
+            assert!(
+                accumulator.kernel.can_remove(random_removal_record).await,
                 "removal records must return true on `can_remove`",
             );
             assert!(
-                random_removal_record.validate(&accumulator.kernel),
+                random_removal_record.validate(&accumulator.kernel).await,
                 "removal record must have valid MMR MPs"
             );
-            accumulator.remove(random_removal_record);
-            assert!(!accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
+            accumulator.remove(random_removal_record).await;
+            assert!(
+                !accumulator
+                    .verify(items[*chosen_index], &mps[*chosen_index])
+                    .await
+            );
 
             assert!(
-                !accumulator.kernel.can_remove(random_removal_record),
+                !accumulator.kernel.can_remove(random_removal_record).await,
                 "removal records must return false on `can_remove` after removal",
             );
         }
     }
 
-    #[test]
-    fn batch_update_from_addition_and_remove_pbt() {
+    #[tokio::test]
+    async fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
 
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
@@ -551,7 +568,9 @@ mod removal_record_tests {
 
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+            let mp = accumulator
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             // Update all removal records from addition, then add the element
             RemovalRecord::batch_update_from_addition(
@@ -560,30 +579,32 @@ mod removal_record_tests {
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
                 &mut accumulator.kernel,
-            );
+            )
+            .await;
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
                 &accumulator.kernel,
                 &addition_record,
-            );
+            )
+            .await;
             assert!(
                 update_res_mp.is_ok(),
                 "batch update must return OK, i = {}",
                 i
             );
-            accumulator.add(&addition_record);
+            accumulator.add(&addition_record).await;
             mps.push(mp.clone());
             items.push(item);
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel).await,
                     "removal records must validate, i = {}",
                     i
                 );
                 assert!(
-                    accumulator.kernel.can_remove(removal_record),
+                    accumulator.kernel.can_remove(removal_record).await,
                     "removal records must return true on `can_remove`, i = {}",
                     i
                 );
@@ -609,27 +630,33 @@ mod removal_record_tests {
                 &random_removal_record,
             );
 
-            accumulator.remove(&random_removal_record);
+            accumulator.remove(&random_removal_record).await;
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel).await,
                     "removal records must validate, i = {}",
                     i
                 );
-                assert!(accumulator.kernel.can_remove(removal_record));
+                assert!(accumulator.kernel.can_remove(removal_record).await);
             }
         }
 
         // Verify that the original removal record is no longer valid since its
         // MMR MPs are deprecated
-        assert!(original_first_removal_record
-            .as_ref()
-            .unwrap()
-            .validate(&accumulator.kernel));
-        assert!(!accumulator
-            .kernel
-            .can_remove(&original_first_removal_record.unwrap()));
+        assert!(
+            original_first_removal_record
+                .as_ref()
+                .unwrap()
+                .validate(&accumulator.kernel)
+                .await
+        );
+        assert!(
+            !accumulator
+                .kernel
+                .can_remove(&original_first_removal_record.unwrap())
+                .await
+        );
     }
 
     #[test]

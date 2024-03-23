@@ -9,13 +9,13 @@ use proptest_arbitrary_interop::arb;
 use tasm_lib::{
     twenty_first::util_types::{
         algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr},
+        // mmr::{mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr},
     },
     Digest,
 };
 
 use crate::{
-    models::blockchain::shared::Hash, util_types::mutator_set::mutator_set_trait::MutatorSet,
+    models::blockchain::shared::Hash, util_types::mutator_set::mutator_set_trait::*,
 };
 
 use super::{
@@ -39,12 +39,20 @@ pub struct MsaAndRecords {
     pub membership_proofs: Vec<MsMembershipProof>,
 }
 
+// Commented out during async storage refactor
+// because it is only used by impl Arbitrary,
+// which is also commented out.
+//
+// Maybe this verify() method will be used later?
+
+/*
 impl MsaAndRecords {
-    pub fn verify(&self, items: &[Digest]) -> bool {
-        let all_removal_records_can_remove = self
+    pub async fn verify(&self, items: &[Digest]) -> bool {
+        let all_removal_records_can_remove =
+        futures::stream::iter(self
             .removal_records
-            .iter()
-            .all(|rr| self.mutator_set_accumulator.kernel.can_remove(rr));
+            .iter())
+            .all(|rr| self.mutator_set_accumulator.kernel.can_remove(rr)).await;
         assert!(
             all_removal_records_can_remove,
             "Some removal records cannot be removed!"
@@ -61,7 +69,14 @@ impl MsaAndRecords {
         all_removal_records_can_remove && all_membership_proofs_are_valid
     }
 }
+*/
 
+// Commented out during async storage refactor due to
+// non-async tasm-lib trait conflicts.
+//
+// Seems like this belongs in a tests module anyway?
+
+/*
 impl Arbitrary for MsaAndRecords {
     /// Parameters:
     ///  - removables : Vec<(Digest, Digest, Digest)> where each triple contains:
@@ -132,7 +147,7 @@ impl Arbitrary for MsaAndRecords {
                 all_chunk_indices.dedup();
 
                 // filter by swbf mmr size
-                let swbf_mmr_size = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                let swbf_mmr_size = aocl_mmra.count_leaves().await / (BATCH_SIZE as u64);
                 let mmr_chunk_indices = all_chunk_indices
                     .iter()
                     .cloned()
@@ -161,7 +176,7 @@ impl Arbitrary for MsaAndRecords {
                         let all_index_sets = all_index_sets.clone();
                         let aocl_membership_proofs = aocl_membership_proofs.clone();
                         let removables = removables.clone();
-                        let swbf_mmr_leaf_count = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                        let swbf_mmr_leaf_count = aocl_mmra.count_leaves().await / (BATCH_SIZE as u64);
 
                         // unwrap random swbf mmra and membership proofs
                         MmraAndMembershipProofs::arbitrary_with((
@@ -218,7 +233,7 @@ impl Arbitrary for MsaAndRecords {
                                     .zip(personalized_chunk_dictionaries.iter())
                                     .map(|(((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)| {
                                         let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
-                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()).0);
+                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks().await, leaf, aocl_mmra.count_leaves().await).0);
                                         (((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)
                                     })
                                     .map(
@@ -279,6 +294,7 @@ impl Arbitrary for MsaAndRecords {
         .boxed()
     }
 }
+*/
 
 #[cfg(test)]
 mod test {
@@ -292,7 +308,7 @@ mod test {
     use super::MsaAndRecords;
 
     #[proptest(cases = 1)]
-    fn msa_and_records_is_valid(
+    async fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
@@ -305,6 +321,6 @@ mod test {
                 .iter()
                 .map(|(item, _sr, _rp)| *item)
                 .collect_vec()
-        ));
+        )).await;
     }
 }

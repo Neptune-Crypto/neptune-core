@@ -288,7 +288,7 @@ impl Mempool {
     /// Remove from the mempool all transactions that become invalid because
     /// of this newly mined block. Also update all mutator set data for monitored
     /// transactions that were not removed in the previous step.
-    pub fn update_with_block(
+    pub async fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
@@ -335,6 +335,7 @@ impl Mempool {
         for tx in self.tx_dictionary.values_mut() {
             *tx = tx
                 .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+                .await
                 .expect("Updating mempool transaction must succeed");
         }
 
@@ -409,7 +410,7 @@ mod tests {
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
             make_mock_transaction_with_wallet,
         },
-        util_types::mutator_set::mutator_set_trait::MutatorSet,
+        util_types::mutator_set::mutator_set_trait::*,
     };
     use anyhow::Result;
     use itertools::Itertools;
@@ -543,18 +544,21 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn remove_transactions_with_block_test() -> Result<()> {
-        let mut rng: StdRng =
-            SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
-        let seed: [u8; 32] = rng.gen();
-        // let seed = [
-        //     0x19, 0xba, 0xc1, 0x55, 0xa7, 0xa0, 0x33, 0xcc, 0x85, 0x73, 0x47, 0xad, 0xd2, 0x1b,
-        //     0x4e, 0x30, 0x54, 0x4b, 0xd3, 0x2e, 0xe0, 0xc2, 0x21, 0xe6, 0x96, 0x82, 0x2a, 0x6, 0xe,
-        //     0xe2, 0xa, 0xda,
-        // ];
-        println!(
-            "seed: [{}]",
-            seed.iter().map(|h| format!("{:#x}", h)).join(", ")
-        );
+        let seed = {
+            let mut rng: StdRng =
+                SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
+            let seed: [u8; 32] = rng.gen();
+            // let seed = [
+            //     0x19, 0xba, 0xc1, 0x55, 0xa7, 0xa0, 0x33, 0xcc, 0x85, 0x73, 0x47, 0xad, 0xd2, 0x1b,
+            //     0x4e, 0x30, 0x54, 0x4b, 0xd3, 0x2e, 0xe0, 0xc2, 0x21, 0xe6, 0x96, 0x82, 0x2a, 0x6, 0xe,
+            //     0xe2, 0xa, 0xda,
+            // ];
+            println!(
+                "seed: [{}]",
+                seed.iter().map(|h| format!("{:#x}", h)).join(", ")
+            );
+            seed
+        };
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         // We need the global state to construct a transaction. This global state
@@ -577,9 +581,9 @@ mod tests {
         let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
 
         // Update both states with block 1
         premine_receiver_global_state
@@ -671,13 +675,16 @@ mod tests {
 
         // Create next block which includes preminer's transaction
         let (mut block_2, _, _) =
-            make_mock_block(&block_1, None, premine_receiver_address, rng.gen());
+            make_mock_block(&block_1, None, premine_receiver_address, rng.gen()).await;
         block_2
-            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator);
+            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator)
+            .await;
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2);
+        mempool
+            .update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2)
+            .await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -691,7 +698,7 @@ mod tests {
         );
 
         let (block_3_with_no_input, _, _) =
-            make_mock_block(&block_2, None, premine_receiver_address, rng.gen());
+            make_mock_block(&block_2, None, premine_receiver_address, rng.gen()).await;
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
         debug!(
@@ -701,6 +708,7 @@ mod tests {
                 .body
                 .mutator_set_accumulator
                 .hash()
+                .await
                 .emojihash()
         );
         debug!(
@@ -710,6 +718,7 @@ mod tests {
                 .body
                 .mutator_set_accumulator
                 .hash()
+                .await
                 .emojihash()
         );
 
@@ -717,13 +726,17 @@ mod tests {
             "tx_by_other_updated has mutator set hash: {}",
             tx_by_other_updated.kernel.mutator_set_hash.emojihash()
         );
-        block_3_with_updated_tx.accumulate_transaction(
-            tx_by_other_updated.clone(),
-            &block_2.kernel.body.mutator_set_accumulator,
-        );
+        block_3_with_updated_tx
+            .accumulate_transaction(
+                tx_by_other_updated.clone(),
+                &block_2.kernel.body.mutator_set_accumulator,
+            )
+            .await;
         now = Duration::from_millis(block_2.kernel.header.timestamp.value());
         assert!(
-            block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
+            block_3_with_updated_tx
+                .is_valid(&block_2, now + seven_months)
+                .await,
             "Block with tx with updated mutator set data must be valid"
         );
 
@@ -733,32 +746,38 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) =
-                make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
-            mempool.update_with_block(
-                previous_block.kernel.body.mutator_set_accumulator,
-                &next_block,
-            );
+                make_mock_block(&previous_block, None, other_receiver_address, rng.gen()).await;
+            mempool
+                .update_with_block(
+                    previous_block.kernel.body.mutator_set_accumulator,
+                    &next_block,
+                )
+                .await;
             previous_block = next_block;
         }
 
         let (mut block_14, _, _) =
-            make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&previous_block, None, other_receiver_address, rng.gen()).await;
         assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
-        block_14.accumulate_transaction(
-            tx_by_other_updated,
-            &previous_block.kernel.body.mutator_set_accumulator,
-        );
+        block_14
+            .accumulate_transaction(
+                tx_by_other_updated,
+                &previous_block.kernel.body.mutator_set_accumulator,
+            )
+            .await;
         now = Duration::from_millis(previous_block.kernel.header.timestamp.value());
         assert!(
-            block_14.is_valid(&previous_block, now+seven_months),
+            block_14.is_valid(&previous_block, now+seven_months).await,
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(
-            previous_block.kernel.body.mutator_set_accumulator,
-            &block_14,
-        );
+        mempool
+            .update_with_block(
+                previous_block.kernel.body.mutator_set_accumulator,
+                &block_14,
+            )
+            .await;
 
         assert!(
             mempool.is_empty(),
@@ -774,7 +793,8 @@ mod tests {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state_lock =
             get_mock_global_state(Network::Alpha, 2, WalletSecret::devnet_wallet()).await;
-        let now = Duration::from_millis(Block::genesis_block().kernel.header.timestamp.value());
+        let now =
+            Duration::from_millis(Block::genesis_block().await.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
