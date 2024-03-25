@@ -31,7 +31,7 @@ use crate::{
         blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
         consensus::tasm::program::ConsensusProgram,
     },
-    util_types::mutator_set::mutator_set_scheme::commit,
+    util_types::mutator_set::commit,
 };
 use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
 

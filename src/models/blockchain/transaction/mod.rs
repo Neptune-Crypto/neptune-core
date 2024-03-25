@@ -406,7 +406,7 @@ impl Transaction {
         self.kernel
             .inputs
             .iter()
-            .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+            .all(|rr| rr.validate(mutator_set_accumulator))
     }
 
     /// Verify the transaction directly from the primitive witness, without proofs or
@@ -615,7 +615,7 @@ mod witness_tests {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::empty(),
-            mutator_set_accumulator: MutatorSetAccumulator::new(),
+            mutator_set_accumulator: MutatorSetAccumulator::default(),
             kernel: empty_kernel,
         };
 
@@ -635,7 +635,7 @@ mod transaction_tests {
     use super::*;
     use crate::{
         models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
-        tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_scheme::commit,
+        tests::shared::make_mock_transaction, util_types::mutator_set::commit,
     };
 
     #[traced_test]

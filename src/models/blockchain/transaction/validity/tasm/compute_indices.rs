@@ -254,7 +254,7 @@ mod tests {
     use triton_vm::prelude::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-    use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
+    use crate::util_types::mutator_set::get_swbf_indices;
 
     use super::*;
 

@@ -1,5 +1,5 @@
 use crate::prelude::{triton_vm, twenty_first};
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
+use crate::util_types::mutator_set::commit;
 
 use aead::Aead;
 use aead::KeyInit;

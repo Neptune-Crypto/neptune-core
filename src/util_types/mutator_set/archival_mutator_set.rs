@@ -1,6 +1,7 @@
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::{get_swbf_indices, MutatorSetError};
 
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
@@ -19,7 +20,6 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::removal_record::RemovalRecord;
 use super::shared::{BATCH_SIZE, CHUNK_SIZE};
 
@@ -45,7 +45,7 @@ where
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
-        MutatorSetKernel::new(
+        MutatorSetAccumulator::new(
             &self.aocl.get_peaks(),
             self.aocl.count_leaves(),
             &self.swbf_inactive.get_peaks(),
@@ -97,7 +97,7 @@ where
         preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) {
         // update the active window and inactive MMR
-        let mut kernel = MutatorSetKernel {
+        let mut kernel = MutatorSetAccumulator {
             aocl: self.aocl.to_accumulator_async().await,
             swbf_inactive: self.swbf_inactive.to_accumulator_async().await,
             swbf_active: self.swbf_active.clone(),
@@ -171,12 +171,9 @@ where
         index: u64,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
         if self.aocl.count_leaves_async().await <= index {
-            return Err(Box::new(
-                MutatorSetKernelError::RequestedAoclAuthPathOutOfBounds((
-                    index,
-                    self.aocl.count_leaves_async().await,
-                )),
-            ));
+            return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
+                (index, self.aocl.count_leaves_async().await),
+            )));
         }
 
         Ok(self.aocl.prove_membership_async(index).await.0)
@@ -188,12 +185,9 @@ where
         chunk_index: u64,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk), Box<dyn Error>> {
         if self.swbf_inactive.count_leaves_async().await <= chunk_index {
-            return Err(Box::new(
-                MutatorSetKernelError::RequestedSwbfAuthPathOutOfBounds((
-                    chunk_index,
-                    self.swbf_inactive.count_leaves_async().await,
-                )),
-            ));
+            return Err(Box::new(MutatorSetError::RequestedSwbfAuthPathOutOfBounds(
+                (chunk_index, self.swbf_inactive.count_leaves_async().await),
+            )));
         }
 
         let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
@@ -225,7 +219,7 @@ where
         aocl_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
         if self.aocl.is_empty_async().await {
-            return Err(Box::new(MutatorSetKernelError::MutatorSetIsEmpty));
+            return Err(Box::new(MutatorSetError::MutatorSetIsEmpty));
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_index).await?;
@@ -333,7 +327,7 @@ where
         // 2. Possibly shrink bloom filter by moving a chunk back into active window
         //
         // This happens when the batch index changes (i.e. every `BATCH_SIZE` addition).
-        if !MutatorSetKernel::window_slides_back(removed_add_index) {
+        if !MutatorSetAccumulator::window_slides_back(removed_add_index) {
             return;
         }
 
@@ -363,7 +357,7 @@ where
     }
 
     pub async fn accumulator(&self) -> MutatorSetAccumulator {
-        let set_commitment = MutatorSetKernel {
+        MutatorSetAccumulator {
             aocl: MmrAccumulator::init(
                 self.aocl.get_peaks_async().await,
                 self.aocl.count_leaves_async().await,
@@ -373,9 +367,6 @@ where
                 self.swbf_inactive.count_leaves_async().await,
             ),
             swbf_active: self.swbf_active.clone(),
-        };
-        MutatorSetAccumulator {
-            kernel: set_commitment,
         }
     }
 
@@ -504,7 +495,7 @@ mod archival_mutator_set_tests {
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 
-    use crate::util_types::mutator_set::mutator_set_scheme::commit;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
     use crate::util_types::test_shared::mutator_set::{

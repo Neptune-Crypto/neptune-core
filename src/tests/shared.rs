@@ -4,7 +4,8 @@ use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -85,7 +86,6 @@ use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_diction
 use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
@@ -751,7 +751,7 @@ pub async fn make_mock_transaction_with_generation_key(
     // Generate removal records
     let mut inputs = vec![];
     for (input_utxo, input_mp, _) in input_utxos_mps_keys.iter() {
-        let removal_record = tip_msa.kernel.drop(Hash::hash(input_utxo), input_mp);
+        let removal_record = tip_msa.drop(Hash::hash(input_utxo), input_mp);
         inputs.push(removal_record);
     }
 

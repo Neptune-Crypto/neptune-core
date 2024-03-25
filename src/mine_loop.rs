@@ -18,8 +18,8 @@ use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNot
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
