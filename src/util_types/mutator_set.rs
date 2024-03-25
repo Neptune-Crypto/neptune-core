@@ -10,7 +10,7 @@ pub mod ms_membership_proof;
 pub mod msa_and_records;
 pub mod mutator_set_accumulator;
 pub mod mutator_set_kernel;
-pub mod mutator_set_trait;
+pub mod mutator_set_scheme;
 pub mod removal_record;
 pub mod root_and_paths;
 pub mod rusty_archival_mutator_set;

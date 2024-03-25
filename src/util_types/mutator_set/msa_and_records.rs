@@ -1,6 +1,20 @@
 use std::collections::HashMap;
 
+use super::{
+    active_window::ActiveWindow,
+    chunk::Chunk,
+    chunk_dictionary::ChunkDictionary,
+    mmra_and_membership_proofs::MmraAndMembershipProofs,
+    ms_membership_proof::MsMembershipProof,
+    mutator_set_accumulator::MutatorSetAccumulator,
+    mutator_set_kernel::{get_swbf_indices, MutatorSetKernel},
+    mutator_set_scheme::commit,
+    removal_record::{AbsoluteIndexSet, RemovalRecord},
+    shared::{BATCH_SIZE, CHUNK_SIZE},
+};
+use crate::Hash;
 use itertools::Itertools;
+use proptest::collection::vec;
 use proptest::{
     arbitrary::Arbitrary,
     strategy::{BoxedStrategy, Strategy},
@@ -13,24 +27,6 @@ use tasm_lib::{
     },
     Digest,
 };
-
-use crate::{
-    models::blockchain::shared::Hash, util_types::mutator_set::mutator_set_trait::MutatorSet,
-};
-
-use super::{
-    active_window::ActiveWindow,
-    chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
-    mmra_and_membership_proofs::MmraAndMembershipProofs,
-    ms_membership_proof::MsMembershipProof,
-    mutator_set_accumulator::MutatorSetAccumulator,
-    mutator_set_kernel::{get_swbf_indices, MutatorSetKernel},
-    mutator_set_trait::commit,
-    removal_record::{AbsoluteIndexSet, RemovalRecord},
-    shared::{BATCH_SIZE, CHUNK_SIZE},
-};
-use proptest::collection::vec;
 
 #[derive(Debug, Clone)]
 pub struct MsaAndRecords {

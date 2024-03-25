@@ -37,7 +37,6 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use crate::Hash;
 
@@ -412,7 +411,7 @@ impl WalletState {
                             .map(|(mp, _index)| mp)
                             .collect_vec(),
                         &utxo_digests,
-                        &msa_state.kernel,
+                        &msa_state,
                         addition_record,
                     );
                 match updated_mp_indices {
@@ -424,7 +423,7 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel);
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &msa_state);
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.

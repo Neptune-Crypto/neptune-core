@@ -4,6 +4,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_scheme::commit;
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -85,8 +86,6 @@ use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_se
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;

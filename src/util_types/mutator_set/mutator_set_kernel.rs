@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{error::Error, fmt};
 use tasm_lib::twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Sponge};
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
@@ -40,9 +41,9 @@ pub enum MutatorSetKernelError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
-pub struct MutatorSetKernel<MMR: Mmr<Hash>> {
-    pub aocl: MMR,
-    pub swbf_inactive: MMR,
+pub struct MutatorSetKernel {
+    pub aocl: MmrAccumulator<Hash>,
+    pub swbf_inactive: MmrAccumulator<Hash>,
     pub swbf_active: ActiveWindow,
 }
 
@@ -74,7 +75,7 @@ pub fn get_swbf_indices(
         .unwrap()
 }
 
-impl<M: Mmr<Hash>> MutatorSetKernel<M> {
+impl MutatorSetKernel {
     /// Generates a removal record with which to update the set commitment.
     pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
         let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices(
@@ -475,9 +476,23 @@ impl<M: Mmr<Hash>> MutatorSetKernel<M> {
 
         have_absent_index
     }
+
+    pub(crate) fn new(
+        aocl: &[Digest],
+        aocl_leaf_count: u64,
+        swbf_inactive: &[Digest],
+        swbf_active: &ActiveWindow,
+    ) -> Self {
+        let swbf_inactive_leaf_count = aocl_leaf_count / (BATCH_SIZE as u64);
+        Self {
+            aocl: MmrAccumulator::init(aocl.to_vec(), aocl_leaf_count),
+            swbf_inactive: MmrAccumulator::init(swbf_inactive.to_vec(), swbf_inactive_leaf_count),
+            swbf_active: swbf_active.clone(),
+        }
+    }
 }
 
-impl<MMR: Mmr<Hash> + BFieldCodec> BFieldCodec for MutatorSetKernel<MMR> {
+impl BFieldCodec for MutatorSetKernel {
     type Error = anyhow::Error;
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         let mut index = 0;
@@ -486,7 +501,7 @@ impl<MMR: Mmr<Hash> + BFieldCodec> BFieldCodec for MutatorSetKernel<MMR> {
             None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
         };
         index += 1;
-        let aocl = match MMR::decode(&sequence[index..(index + aocl_len)]) {
+        let aocl = match MmrAccumulator::<Hash>::decode(&sequence[index..(index + aocl_len)]) {
             Ok(decoded) => *decoded,
             Err(err) => anyhow::bail!("Failed to decode AOCL-MMR. Error was: {err}"),
         };
@@ -497,10 +512,11 @@ impl<MMR: Mmr<Hash> + BFieldCodec> BFieldCodec for MutatorSetKernel<MMR> {
             None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
         };
         index += 1;
-        let swbf_inactive = match MMR::decode(&sequence[index..(index + swbf_inactive_len)]) {
-            Ok(decoded) => *decoded,
-            Err(err) => anyhow::bail!("Failed to decode SWBF-MMR. Error was: {err}"),
-        };
+        let swbf_inactive =
+            match MmrAccumulator::<Hash>::decode(&sequence[index..(index + swbf_inactive_len)]) {
+                Ok(decoded) => *decoded,
+                Err(err) => anyhow::bail!("Failed to decode SWBF-MMR. Error was: {err}"),
+            };
         index += swbf_inactive_len;
 
         let swbf_active_len: usize = match sequence.get(index) {
@@ -552,11 +568,8 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
-    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::commit;
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::mutator_set_scheme::commit;
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;
@@ -702,7 +715,7 @@ mod accumulation_scheme_tests {
         );
         assert_eq!(
             0,
-            archival.kernel.get_batch_index(),
+            archival.get_batch_index_async().await,
             "Batch index must be zero for empty archival MS"
         );
     }
@@ -909,7 +922,7 @@ mod accumulation_scheme_tests {
                 let batch_update_res = MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mutator_set.kernel,
+                    &mutator_set,
                     &addition_record,
                 );
                 assert!(batch_update_res.is_ok());
@@ -1060,9 +1073,8 @@ mod accumulation_scheme_tests {
         // in the runtime. This test is to verify that that does not happen.
         // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
         // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-        type Mmr = MmrAccumulator<Hash>;
-        type Ms = MutatorSetKernel<Mmr>;
-        let mut mutator_set: Ms = MutatorSetAccumulator::default().kernel;
+        type Ms = MutatorSetKernel;
+        let mut mutator_set = MutatorSetAccumulator::default();
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
         println!("json = \n{}", json_empty);

@@ -25,13 +25,13 @@ pub struct ArchivalMmr<H: AlgebraicHasher, Storage: StorageVec<Digest>> {
     _hasher: PhantomData<H>,
 }
 
-impl<H, Storage> Mmr<H> for ArchivalMmr<H, Storage>
+impl<H, Storage> ArchivalMmr<H, Storage>
 where
     H: AlgebraicHasher + Send + Sync,
     Storage: StorageVec<Digest> + Send + Sync,
 {
     /// Calculate the root for the entire MMR
-    fn bag_peaks(&self) -> Digest {
+    pub fn bag_peaks(&self) -> Digest {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -43,7 +43,7 @@ where
     }
 
     /// Return the digests of the peaks of the MMR
-    fn get_peaks(&self) -> Vec<Digest> {
+    pub fn get_peaks(&self) -> Vec<Digest> {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -57,7 +57,7 @@ where
     /// Whether the MMR is empty. Note that since indexing starts at
     /// 1, the `digests` contain must always contain at least one
     /// element: a dummy digest.
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -69,7 +69,7 @@ where
     }
 
     /// Return the number of leaves in the tree
-    fn count_leaves(&self) -> u64 {
+    pub fn count_leaves(&self) -> u64 {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -84,7 +84,7 @@ where
     /// The membership proof is returned here since the accumulater MMR has no other way of
     /// retrieving a membership proof for a leaf. And the archival and accumulator MMR share
     /// this interface.
-    fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
+    pub fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -98,7 +98,7 @@ where
     /// Mutate an existing leaf. It is the caller's responsibility that the
     /// membership proof is valid. If the membership proof is wrong, the MMR
     /// will end up in a broken state.
-    fn mutate_leaf(&mut self, old_membership_proof: &MmrMembershipProof<H>, new_leaf: Digest) {
+    pub fn mutate_leaf(&mut self, old_membership_proof: &MmrMembershipProof<H>, new_leaf: Digest) {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -109,7 +109,8 @@ where
         })
     }
 
-    fn batch_mutate_leaf_and_update_mps(
+    /// Modify a bunch of leafs and keep a set of membership proofs in sync.
+    pub fn batch_mutate_leaf_and_update_mps(
         &mut self,
         membership_proofs: &mut [&mut MmrMembershipProof<H>],
         mutation_data: Vec<(MmrMembershipProof<H>, Digest)>,
@@ -126,7 +127,7 @@ where
         })
     }
 
-    fn verify_batch_update(
+    pub fn verify_batch_update(
         &self,
         new_peaks: &[Digest],
         appended_leafs: &[Digest],
@@ -146,7 +147,7 @@ where
         })
     }
 
-    fn to_accumulator(&self) -> MmrAccumulator<H> {
+    pub fn to_accumulator(&self) -> MmrAccumulator<H> {
         std::thread::scope(|s| {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -226,6 +227,7 @@ where
             .await
     }
 
+    /// Modify a bunch of leafs and keep a set of membership proofs in sync.
     pub async fn batch_mutate_leaf_and_update_mps_async(
         &mut self,
         membership_proofs: &mut [&mut MmrMembershipProof<H>],

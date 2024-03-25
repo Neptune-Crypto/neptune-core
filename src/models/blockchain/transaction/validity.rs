@@ -14,7 +14,6 @@ pub mod tasm;
 pub mod typescripts_halt;
 use crate::models::blockchain::transaction;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};

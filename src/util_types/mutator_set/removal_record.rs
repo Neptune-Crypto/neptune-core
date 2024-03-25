@@ -19,6 +19,7 @@ use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::MutatorSetKernel;
 use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
@@ -139,19 +140,19 @@ impl RemovalRecord {
     /// Update a batch of removal records that are synced to a given mutator set, given
     /// that that mutator set will be updated with an addition. (The addition record
     /// does not matter; all necessary information is in the mutator set.)
-    pub fn batch_update_from_addition<MMR: Mmr<Hash>>(
+    pub fn batch_update_from_addition(
         removal_records: &mut [&mut Self],
-        mutator_set: &mut MutatorSetKernel<MMR>,
+        mutator_set: &MutatorSetAccumulator,
     ) {
-        let new_item_index = mutator_set.aocl.count_leaves();
+        let new_item_index = mutator_set.kernel.aocl.count_leaves();
 
         // if window does not slide, do nothing
-        if !MutatorSetKernel::<MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::window_slides(new_item_index) {
             return;
         }
 
         // window does slide
-        let new_chunk = mutator_set.swbf_active.slid_chunk();
+        let new_chunk = mutator_set.kernel.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
@@ -160,7 +161,7 @@ impl RemovalRecord {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
+        let mut mmra: MmrAccumulator<Hash> = mutator_set.kernel.swbf_inactive.to_accumulator();
         let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
             mmra.append(new_chunk_digest);
 
@@ -240,9 +241,9 @@ impl RemovalRecord {
         // Perform the update of all the MMR membership proofs contained in the removal records
         mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
-            mutator_set.swbf_inactive.count_leaves(),
+            mutator_set.kernel.swbf_inactive.count_leaves(),
             new_chunk_digest,
-            &mutator_set.swbf_inactive.get_peaks(),
+            &mutator_set.kernel.swbf_inactive.get_peaks(),
         );
     }
 
@@ -278,10 +279,7 @@ impl RemovalRecord {
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<M>) -> bool
-    where
-        M: Mmr<Hash>,
-    {
+    pub fn validate(&self, mutator_set: &MutatorSetKernel) -> bool {
         let peaks = mutator_set.swbf_inactive.get_peaks();
         self.target_chunks
             .dictionary
@@ -328,7 +326,7 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+    use crate::util_types::mutator_set::mutator_set_scheme::commit;
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
     use crate::util_types::test_shared::mutator_set::*;
 
@@ -475,12 +473,12 @@ mod removal_record_tests {
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
-                    &mut accumulator.kernel,
+                    &accumulator,
                 );
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &accumulator.kernel,
+                    &accumulator,
                     &addition_record,
                 );
                 assert!(
@@ -559,12 +557,12 @@ mod removal_record_tests {
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
-                &mut accumulator.kernel,
+                &accumulator,
             );
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &accumulator.kernel,
+                &accumulator,
                 &addition_record,
             );
             assert!(

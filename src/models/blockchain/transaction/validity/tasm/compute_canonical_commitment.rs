@@ -18,7 +18,7 @@ use triton_vm::prelude::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::util_types::mutator_set::{
-    ms_membership_proof::MsMembershipProof, mutator_set_trait::commit,
+    ms_membership_proof::MsMembershipProof, mutator_set_scheme::commit,
 };
 
 /// Compute a canonical commitment from an item and its membership proof.
