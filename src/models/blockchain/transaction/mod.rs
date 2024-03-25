@@ -411,7 +411,10 @@ impl Transaction {
 
     /// Verify the transaction directly from the primitive witness, without proofs or
     /// decomposing into subclaims.
-    pub async fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
+    pub async fn validate_primitive_witness(
+        &self,
+        primitive_witness: &'static PrimitiveWitness,
+    ) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -422,10 +425,17 @@ impl Transaction {
             // without crashing). We do not care about the output.
             let public_input = Hash::hash(&self.kernel).reversed().encode();
 
-            match lock_script.program.run(
-                public_input.into(),
-                NonDeterminism::new(secret_input.to_vec()),
-            ) {
+            // we wrap triton-vm script execution in spawn_blocking as it
+            // could be a lengthy CPU intensive call.
+            let result = tokio::task::spawn_blocking(|| {
+                lock_script.program.run(
+                    public_input.into(),
+                    NonDeterminism::new(secret_input.to_vec()),
+                )
+            })
+            .await;
+
+            match result {
                 Ok(_) => (),
                 Err(err) => {
                     warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
@@ -477,9 +487,9 @@ impl Transaction {
             .collect_vec();
 
         // verify that all type script hashes are represented by the witness's type script list
-        let mut type_script_dictionary = HashMap::<Digest, TypeScript>::new();
+        let mut type_script_dictionary = HashMap::<Digest, &TypeScript>::new();
         for ts in primitive_witness.type_scripts.iter() {
-            type_script_dictionary.insert(ts.hash(), ts.clone());
+            type_script_dictionary.insert(ts.hash(), ts);
         }
         if !type_script_hashes
             .clone()
@@ -505,12 +515,19 @@ impl Transaction {
                 .flatten()
                 .collect_vec();
 
+            // we wrap triton-vm script execution in spawn_blocking as it
+            // could be a lengthy CPU intensive call.
+            let type_script_clone = (*type_script).clone();
+            let result = tokio::task::spawn_blocking(move || {
+                type_script_clone
+                    .program
+                    .run(public_input.into(), NonDeterminism::new(secret_input))
+            })
+            .await;
+
             // The type script is satisfied if it halts gracefully, i.e.,
             // without panicking. So we don't care about the output
-            if let Err(e) = type_script
-                .program
-                .run(public_input.into(), NonDeterminism::new(secret_input))
-            {
+            if let Err(e) = result {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",
                     type_script_hash.emojihash(),
