@@ -131,7 +131,7 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves_async().await
+            rusty_mutator_set.ams().aocl.count_leaves().await
         );
 
         for _ in 0..num_additions {
@@ -157,7 +157,7 @@ mod tests {
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves_async().await
+            rusty_mutator_set.ams().aocl.count_leaves().await
         );
 
         // Verify membership
@@ -196,7 +196,7 @@ mod tests {
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves_async().await
+            rusty_mutator_set.ams().aocl.count_leaves().await
         );
 
         // persist and drop
@@ -217,7 +217,7 @@ mod tests {
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set.ams().aocl.count_leaves_async().await
+            new_rusty_mutator_set.ams().aocl.count_leaves().await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
