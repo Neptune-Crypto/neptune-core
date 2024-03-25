@@ -139,7 +139,8 @@ mod tests {
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
             let mp = rusty_mutator_set
                 .ams()
-                .prove(item, sender_randomness, receiver_preimage);
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),

@@ -673,8 +673,9 @@ mod ms_proof_tests {
                 .expect("Could not update membership proof from addition.");
             }
 
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
             if i == own_index {
                 own_membership_proof = Some(membership_proof);
                 own_item = Some(item);
@@ -801,7 +802,7 @@ mod ms_proof_tests {
                 &addition_record,
             )
             .unwrap();
-            mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+            mps.push(ams.prove(item, sender_randomness, receiver_preimage).await);
             items.push(item);
             ams.add(&addition_record).await;
             addition_records.push(addition_record);
@@ -883,7 +884,7 @@ mod ms_proof_tests {
                     &addition_record,
                 )
                 .unwrap();
-                mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+                mps.push(ams.prove(item, sender_randomness, receiver_preimage).await);
                 items.push(item);
                 ams.add(&addition_record).await;
                 addition_records.push(addition_record);
@@ -1012,8 +1013,9 @@ mod ms_proof_tests {
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             addition_records.push(addition_record);
 
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -1137,8 +1139,9 @@ mod ms_proof_tests {
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
 
                 // record membership proof
-                let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                let membership_proof = archival_mutator_set
+                    .prove(item, sender_randomness, receiver_preimage)
+                    .await;
 
                 // update existing membership proof
                 for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {

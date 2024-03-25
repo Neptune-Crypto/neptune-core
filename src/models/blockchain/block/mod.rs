@@ -769,7 +769,7 @@ mod block_tests {
         let mut storage = SimpleRustyStorage::new(db);
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
         let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
-        ammr.append(genesis_block.hash());
+        ammr.append_async(genesis_block.hash()).await;
         let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
 
         for i in 0..55 {
@@ -778,9 +778,12 @@ mod block_tests {
             let (new_block, _, _) =
                 make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
             if i != 54 {
-                ammr.append(new_block.hash());
+                ammr.append_async(new_block.hash()).await;
                 mmra.append(new_block.hash());
-                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+                assert_eq!(
+                    ammr.to_accumulator_async().await.bag_peaks(),
+                    mmra.bag_peaks()
+                );
             }
             blocks.push(new_block);
         }
