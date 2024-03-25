@@ -1,6 +1,6 @@
 use crate::{
     prelude::twenty_first,
-    util_types::mutator_set::{addition_record::AdditionRecord, mutator_set_scheme::commit},
+    util_types::mutator_set::{addition_record::AdditionRecord, commit},
 };
 
 use anyhow::{bail, Result};

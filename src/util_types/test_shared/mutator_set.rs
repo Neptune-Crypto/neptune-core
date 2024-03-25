@@ -1,5 +1,5 @@
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
+use crate::util_types::mutator_set::commit;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -28,7 +28,6 @@ use crate::util_types::mutator_set::ms_membership_proof::{
     pseudorandom_mmr_membership_proof, pseudorandom_mutator_set_membership_proof, MsMembershipProof,
 };
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
@@ -104,16 +103,10 @@ pub fn remove_mock_item(
 
 /// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.
 pub fn random_mutator_set_accumulator() -> MutatorSetAccumulator {
-    let kernel = random_mutator_set_kernel();
-    MutatorSetAccumulator { kernel }
-}
-
-/// Generate a random MSK. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_kernel() -> MutatorSetKernel {
     let aocl = random_mmra();
     let swbf_inactive = random_mmra();
     let swbf_active = random_swbf_active();
-    MutatorSetKernel {
+    MutatorSetAccumulator {
         aocl,
         swbf_inactive,
         swbf_active,

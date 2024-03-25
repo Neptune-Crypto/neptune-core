@@ -5,7 +5,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
+use crate::util_types::mutator_set::commit;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -419,9 +419,7 @@ impl GlobalState {
     ) -> Vec<RemovalRecord> {
         let mut inputs: Vec<RemovalRecord> = vec![];
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
-            let removal_record = mutator_set_accumulator
-                .kernel
-                .drop(Hash::hash(spendable_utxo), mp);
+            let removal_record = mutator_set_accumulator.drop(Hash::hash(spendable_utxo), mp);
             inputs.push(removal_record);
         }
         inputs

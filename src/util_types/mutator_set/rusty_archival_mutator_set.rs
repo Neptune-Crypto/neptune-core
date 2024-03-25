@@ -100,7 +100,7 @@ mod tests {
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::util_types::mutator_set::mutator_set_scheme::commit;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };

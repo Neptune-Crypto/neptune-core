@@ -49,8 +49,8 @@ use super::type_scripts::time_lock::TimeLock;
 use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_scheme::commit;
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
@@ -152,7 +152,7 @@ impl Block {
                 timestamp: BFieldElement::new(Self::launch()),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
-                mutator_set_hash: MutatorSetAccumulator::new().hash(),
+                mutator_set_hash: MutatorSetAccumulator::default().hash(),
             },
             witness: TransactionValidationLogic {
                 vast: ValidityTree {
@@ -405,7 +405,6 @@ impl Block {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .kernel
                 .can_remove(removal_record)
             {
                 warn!("Removal record cannot be removed from mutator set");
