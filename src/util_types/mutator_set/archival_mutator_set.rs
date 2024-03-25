@@ -46,9 +46,9 @@ where
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         MutatorSetAccumulator::new(
-            &self.aocl.get_peaks_async().await,
-            self.aocl.count_leaves_async().await,
-            &self.swbf_inactive.get_peaks_async().await,
+            &self.aocl.get_peaks().await,
+            self.aocl.count_leaves().await,
+            &self.swbf_inactive.get_peaks().await,
             &self.swbf_active.clone(),
         )
         .prove(item, sender_randomness, receiver_preimage)
@@ -134,7 +134,7 @@ where
         // Apply the batch-update to the inactive part of the sliding window Bloom filter.
         // This updates both the inactive part of the SWBF and the MMR membership proofs
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps_async(
+            .batch_mutate_leaf_and_update_mps(
                 &mut preserved_mmr_membership_proofs,
                 membership_proofs_and_new_leafs,
             )
@@ -172,9 +172,9 @@ where
         &self,
         index: u64,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
-        if self.aocl.count_leaves_async().await <= index {
+        if self.aocl.count_leaves().await <= index {
             return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
-                (index, self.aocl.count_leaves_async().await),
+                (index, self.aocl.count_leaves().await),
             )));
         }
 
@@ -186,9 +186,9 @@ where
         &self,
         chunk_index: u64,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk), Box<dyn Error>> {
-        if self.swbf_inactive.count_leaves_async().await <= chunk_index {
+        if self.swbf_inactive.count_leaves().await <= chunk_index {
             return Err(Box::new(MutatorSetError::RequestedSwbfAuthPathOutOfBounds(
-                (chunk_index, self.swbf_inactive.count_leaves_async().await),
+                (chunk_index, self.swbf_inactive.count_leaves().await),
             )));
         }
 
@@ -220,7 +220,7 @@ where
         receiver_preimage: Digest,
         aocl_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
-        if self.aocl.is_empty_async().await {
+        if self.aocl.is_empty().await {
             return Err(Box::new(MutatorSetError::MutatorSetIsEmpty));
         }
 
@@ -308,7 +308,7 @@ where
     /// Determine whether the given `AdditionRecord` can be reversed.
     /// Equivalently, determine if it was added last.
     pub async fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
-        let leaf_index = self.aocl.count_leaves_async().await - 1;
+        let leaf_index = self.aocl.count_leaves().await - 1;
         let digest = self.aocl.get_leaf_async(leaf_index).await;
         addition_record.canonical_commitment == digest
     }
@@ -320,7 +320,7 @@ where
     ///   from the inactive window, and slide window back by putting the
     ///   last inactive chunk in the active window.
     pub async fn revert_add(&mut self, addition_record: &AdditionRecord) {
-        let removed_add_index = self.aocl.count_leaves_async().await - 1;
+        let removed_add_index = self.aocl.count_leaves().await - 1;
 
         // 1. Remove last leaf from AOCL
         let digest = self.aocl.remove_last_leaf_async().await.unwrap();
@@ -360,20 +360,17 @@ where
 
     pub async fn accumulator(&self) -> MutatorSetAccumulator {
         MutatorSetAccumulator {
-            aocl: MmrAccumulator::init(
-                self.aocl.get_peaks_async().await,
-                self.aocl.count_leaves_async().await,
-            ),
+            aocl: MmrAccumulator::init(self.aocl.get_peaks().await, self.aocl.count_leaves().await),
             swbf_inactive: MmrAccumulator::init(
-                self.swbf_inactive.get_peaks_async().await,
-                self.swbf_inactive.count_leaves_async().await,
+                self.swbf_inactive.get_peaks().await,
+                self.swbf_inactive.count_leaves().await,
             ),
             swbf_active: self.swbf_active.clone(),
         }
     }
 
     pub async fn get_batch_index_async(&self) -> u128 {
-        (self.aocl.count_leaves_async().await as u128) / (BATCH_SIZE as u128)
+        (self.aocl.count_leaves().await as u128) / (BATCH_SIZE as u128)
     }
 
     /// Helper function. Like `add` but also returns the chunk that
@@ -387,9 +384,9 @@ where
         // track of the mutator set.
 
         // add to list
-        let item_index = self.aocl.count_leaves_async().await;
+        let item_index = self.aocl.count_leaves().await;
         self.aocl
-            .append_async(addition_record.canonical_commitment.to_owned())
+            .append(addition_record.canonical_commitment.to_owned())
             .await; // ignore auth path
 
         if !Self::window_slides(item_index) {
@@ -400,8 +397,8 @@ where
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
         let chunk_digest: Digest = Hash::hash(&new_chunk);
-        let new_chunk_index = self.swbf_inactive.count_leaves_async().await;
-        self.swbf_inactive.append_async(chunk_digest).await; // ignore auth path
+        let new_chunk_index = self.swbf_inactive.count_leaves().await;
+        self.swbf_inactive.append(chunk_digest).await; // ignore auth path
 
         // Then move window to the right, equivalent to moving values
         // inside window to the left.
@@ -448,7 +445,7 @@ where
 
             // If chunk index is not in the active part, insert the index into the relevant chunk
             let new_target_chunks_clone = new_target_chunks.clone();
-            let count_leaves = self.aocl.count_leaves_async().await;
+            let count_leaves = self.aocl.count_leaves().await;
             let relevant_chunk = new_target_chunks
                 .dictionary
                 .get_mut(&chunk_index)
@@ -483,7 +480,7 @@ where
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps_async(&mut [], mutation_data)
+            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data)
             .await;
 
         new_target_chunks
