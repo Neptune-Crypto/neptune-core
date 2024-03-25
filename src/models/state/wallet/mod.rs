@@ -370,7 +370,6 @@ mod wallet_tests {
         add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
         make_mock_transaction_with_generation_key,
     };
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

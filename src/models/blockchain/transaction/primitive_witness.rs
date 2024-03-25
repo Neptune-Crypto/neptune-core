@@ -20,10 +20,6 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::{
-    blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-    consensus::tasm::program::ConsensusProgram,
-};
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
     util_types::mutator_set::{
@@ -31,12 +27,13 @@ use crate::{
     },
 };
 use crate::{
-    util_types::mutator_set::{
-        msa_and_records::MsaAndRecords,
-        mutator_set_trait::{commit, MutatorSet},
+    models::{
+        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
+        consensus::tasm::program::ConsensusProgram,
     },
-    Hash,
+    util_types::mutator_set::mutator_set_scheme::commit,
 };
+use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
 
 use super::{
     transaction_kernel::TransactionKernel,

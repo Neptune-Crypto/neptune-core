@@ -23,7 +23,6 @@ use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -196,13 +195,7 @@ impl ArchivalState {
         // We could have populated the archival mutator set with the genesis block UTXOs earlier in
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
-        if archival_mutator_set
-            .ams()
-            .kernel
-            .aocl
-            .is_empty_async()
-            .await
-        {
+        if archival_mutator_set.ams().aocl.is_empty_async().await {
             for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
                 archival_mutator_set.ams_mut().add(addition_record).await;
             }
@@ -760,7 +753,7 @@ impl ArchivalState {
                 // Batch-update all removal records to keep them valid after next addition
                 RemovalRecord::batch_update_from_addition(
                     &mut removal_records,
-                    &mut self.archival_mutator_set.ams_mut().kernel,
+                    &self.archival_mutator_set.ams().accumulator().await,
                 );
 
                 // Add the element to the mutator set
@@ -889,7 +882,6 @@ mod archival_state_tests {
             archival_state
                 .archival_mutator_set
                 .ams()
-                .kernel
                 .aocl
                 .count_leaves_async()
                 .await,
@@ -994,7 +986,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().kernel.aocl.count_leaves_async().await);
+            assert_ne!(0, ams_ref.ams().aocl.count_leaves_async().await);
         }
 
         let now = Duration::from_millis(mock_block_1.kernel.header.timestamp.value());
@@ -1045,7 +1037,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().kernel.swbf_active.sbf.len());
+            assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
         }
 
         Ok(())
@@ -1216,7 +1208,6 @@ mod archival_state_tests {
             archival_state
                 .archival_mutator_set
                 .ams()
-                .kernel
                 .swbf_active
                 .sbf
                 .is_empty(),
@@ -1228,7 +1219,6 @@ mod archival_state_tests {
             archival_state
                 .archival_mutator_set
                 .ams()
-                .kernel
                 .aocl
                 .count_leaves_async()
                 .await as usize,
@@ -1390,7 +1380,6 @@ mod archival_state_tests {
                 .archival_state()
                 .archival_mutator_set
                 .ams()
-                .kernel
                 .swbf_active
                 .sbf
                 .is_empty(),
@@ -1404,7 +1393,6 @@ mod archival_state_tests {
                 .archival_state()
                 .archival_mutator_set
                 .ams()
-                .kernel
                 .aocl
                 .count_leaves_async().await as usize,
             "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"

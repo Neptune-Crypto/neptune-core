@@ -33,8 +33,9 @@ pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
 
 #[cfg(test)]
 mod addition_record_tests {
-    use crate::models::blockchain::shared::Hash;
-    use crate::util_types::mutator_set::mutator_set_trait::commit;
+    use crate::{
+        models::blockchain::shared::Hash, util_types::mutator_set::mutator_set_scheme::commit,
+    };
 
     use rand::random;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;

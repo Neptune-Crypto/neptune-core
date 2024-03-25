@@ -36,7 +36,6 @@ use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(
@@ -96,16 +95,10 @@ impl Transaction {
         // Apply all addition records in the block
         for block_addition_record in block_addition_records {
             // Batch update block's removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(
-                &mut block_removal_records,
-                &mut msa_state.kernel,
-            );
+            RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
 
             // Batch update transaction's removal records
-            RemovalRecord::batch_update_from_addition(
-                &mut transaction_removal_records,
-                &mut msa_state.kernel,
-            );
+            RemovalRecord::batch_update_from_addition(&mut transaction_removal_records, &msa_state);
 
             // Batch update primitive witness membership proofs
             let membership_proofs = &mut primitive_witness
@@ -121,7 +114,7 @@ impl Transaction {
             MsMembershipProof::batch_update_from_addition(
                 membership_proofs,
                 &own_items,
-                &msa_state.kernel,
+                &msa_state,
                 &block_addition_record,
             )
             .expect("MS MP update from add must succeed in wallet handler");
@@ -642,7 +635,7 @@ mod transaction_tests {
     use super::*;
     use crate::{
         models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
-        tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_trait::commit,
+        tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_scheme::commit,
     };
 
     #[traced_test]

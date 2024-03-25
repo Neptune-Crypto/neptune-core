@@ -1,4 +1,5 @@
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_scheme::commit;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -28,7 +29,6 @@ use crate::util_types::mutator_set::ms_membership_proof::{
 };
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
@@ -47,7 +47,7 @@ pub async fn get_all_indices_with_duplicates<
 ) -> Vec<u128> {
     let mut ret: Vec<u128> = vec![];
 
-    for index in archival_mutator_set.kernel.swbf_active.sbf.iter() {
+    for index in archival_mutator_set.swbf_active.sbf.iter() {
         ret.push(*index as u128);
     }
 
@@ -79,9 +79,7 @@ pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
     rusty_mutator_set
 }
 
-pub fn insert_mock_item<M: Mmr<Hash>>(
-    mutator_set: &mut MutatorSetKernel<M>,
-) -> (MsMembershipProof, Digest) {
+pub fn insert_mock_item(mutator_set: &mut MutatorSetAccumulator) -> (MsMembershipProof, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
     let addition_record = commit(
@@ -95,8 +93,8 @@ pub fn insert_mock_item<M: Mmr<Hash>>(
     (membership_proof, new_item)
 }
 
-pub fn remove_mock_item<M: Mmr<Hash>>(
-    mutator_set: &mut MutatorSetKernel<M>,
+pub fn remove_mock_item(
+    mutator_set: &mut MutatorSetAccumulator,
     item: Digest,
     mp: &MsMembershipProof,
 ) {
@@ -111,7 +109,7 @@ pub fn random_mutator_set_accumulator() -> MutatorSetAccumulator {
 }
 
 /// Generate a random MSK. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_kernel() -> MutatorSetKernel<MmrAccumulator<Hash>> {
+pub fn random_mutator_set_kernel() -> MutatorSetKernel {
     let aocl = random_mmra();
     let swbf_inactive = random_mmra();
     let swbf_active = random_swbf_active();
@@ -405,7 +403,7 @@ mod shared_tests_test {
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;
         let _ = make_item_and_randomnesses();
-        let _ = insert_mock_item(&mut ams.kernel);
+        let _ = insert_mock_item(&mut ams.accumulator().await);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use twenty_first::shared_math::tip5::Digest;
 
 use super::{
     active_window::ActiveWindow, archival_mmr::ArchivalMmr,
-    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
+    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;
@@ -38,13 +38,12 @@ impl RustyArchivalMutatorSet {
             .await;
         let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
 
-        let kernel = MutatorSetKernel::<ArchivalMmr<Hash, AmsMmrStorage>> {
+        let ams = ArchivalMutatorSet::<AmsMmrStorage, AmsChunkStorage> {
+            chunks,
             aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl).await,
             swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi).await,
             swbf_active: ActiveWindow::new(),
         };
-
-        let ams = ArchivalMutatorSet::<AmsMmrStorage, AmsChunkStorage> { chunks, kernel };
 
         Self {
             ams,
@@ -77,18 +76,18 @@ impl RustyArchivalMutatorSet {
     pub async fn restore_or_new(&mut self) {
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.
-        self.ams_mut().kernel.aocl.fix_dummy_async().await;
-        self.ams_mut().kernel.swbf_inactive.fix_dummy_async().await;
+        self.ams_mut().aocl.fix_dummy_async().await;
+        self.ams_mut().swbf_inactive.fix_dummy_async().await;
 
         // populate active window
-        self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get().await;
+        self.ams_mut().swbf_active.sbf = self.active_window_storage.get().await;
     }
 }
 
 impl StorageWriter for RustyArchivalMutatorSet {
     async fn persist(&mut self) {
         self.active_window_storage
-            .set(self.ams().kernel.swbf_active.sbf.clone())
+            .set(self.ams().swbf_active.sbf.clone())
             .await;
 
         self.storage.persist().await;
@@ -97,11 +96,11 @@ impl StorageWriter for RustyArchivalMutatorSet {
 
 #[cfg(test)]
 mod tests {
-    use crate::util_types::mutator_set::mutator_set_trait::*;
     use itertools::Itertools;
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
+    use crate::util_types::mutator_set::mutator_set_scheme::commit;
     use crate::util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
@@ -132,27 +131,20 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().aocl.count_leaves_async().await
         );
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
-            let mp =
-                rusty_mutator_set
-                    .ams()
-                    .kernel
-                    .prove(item, sender_randomness, receiver_preimage);
+            let mp = rusty_mutator_set
+                .ams()
+                .prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
-                &rusty_mutator_set.ams().kernel,
+                &rusty_mutator_set.ams().accumulator().await,
                 &addition_record,
             )
             .expect("Cannot batch update from addition");
@@ -164,17 +156,12 @@ mod tests {
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().aocl.count_leaves_async().await
         );
 
         // Verify membership
         for (mp, &item) in mps.iter().zip(items.iter()) {
-            assert!(rusty_mutator_set.ams().verify(item, mp));
+            assert!(rusty_mutator_set.ams().verify(item, mp).await);
         }
 
         // Remove items
@@ -186,8 +173,8 @@ mod tests {
             let membership_proof = mps[index].clone();
             let removal_record = rusty_mutator_set
                 .ams_mut()
-                .kernel
-                .drop(item, &membership_proof);
+                .drop(item, &membership_proof)
+                .await;
             MsMembershipProof::batch_update_from_remove(
                 &mut mps.iter_mut().collect_vec(),
                 &removal_record,
@@ -208,18 +195,13 @@ mod tests {
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            rusty_mutator_set.ams().aocl.count_leaves_async().await
         );
 
         // persist and drop
         rusty_mutator_set.persist().await;
 
-        let active_window_before = rusty_mutator_set.ams().kernel.swbf_active.clone();
+        let active_window_before = rusty_mutator_set.ams().swbf_active.clone();
 
         drop(rusty_mutator_set); // Drop DB
 
@@ -234,16 +216,11 @@ mod tests {
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set
-                .ams()
-                .kernel
-                .aocl
-                .count_leaves_async()
-                .await
+            new_rusty_mutator_set.ams().aocl.count_leaves_async().await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
-                new_rusty_mutator_set.ams().verify(item, mp),
+                new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof {index} does not verify"
             );
         }
@@ -251,7 +228,7 @@ mod tests {
         // Verify non-membership
         for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
-                !new_rusty_mutator_set.ams().verify(item, mp),
+                !new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof of non-member {index} still valid"
             );
         }
@@ -259,7 +236,7 @@ mod tests {
         let retrieved_sync_label = new_rusty_mutator_set.get_sync_label().await;
         assert_eq!(sync_label, retrieved_sync_label);
 
-        let active_window_after = new_rusty_mutator_set.ams().kernel.swbf_active.clone();
+        let active_window_after = new_rusty_mutator_set.ams().swbf_active.clone();
 
         assert_eq!(active_window_before, active_window_after);
     }

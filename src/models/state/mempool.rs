@@ -409,7 +409,6 @@ mod tests {
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
             make_mock_transaction_with_wallet,
         },
-        util_types::mutator_set::mutator_set_trait::MutatorSet,
     };
     use anyhow::Result;
     use itertools::Itertools;

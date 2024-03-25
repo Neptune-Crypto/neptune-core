@@ -5,6 +5,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
+use crate::util_types::mutator_set::mutator_set_scheme::commit;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -45,7 +46,6 @@ use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 use crate::{Hash, VERSION};
@@ -770,7 +770,7 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
-        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves_async().await;
+        let current_aocl_leaf_count = ams_ref.ams().aocl.count_leaves_async().await;
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
             // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
@@ -791,7 +791,7 @@ impl GlobalState {
             let restored_msmp = match restored_msmp_res {
                 Ok(msmp) => {
                     // Verify that the restored MSMP is valid
-                    if !ams_ref.ams().verify(ms_item, &msmp) {
+                    if !ams_ref.ams().verify(ms_item, &msmp).await {
                         warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", incoming_utxo.aocl_index);
                         continue;
                     }

@@ -4,7 +4,7 @@ use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
+use crate::util_types::mutator_set::mutator_set_scheme::commit;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 
 use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;

@@ -40,7 +40,7 @@ use crate::{
         },
     },
     util_types::mutator_set::{
-        mutator_set_kernel::get_swbf_indices, mutator_set_trait::commit,
+        mutator_set_kernel::get_swbf_indices, mutator_set_scheme::commit,
         removal_record::AbsoluteIndexSet,
     },
 };

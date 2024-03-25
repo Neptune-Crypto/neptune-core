@@ -50,7 +50,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use crate::util_types::mutator_set::mutator_set_scheme::commit;
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
