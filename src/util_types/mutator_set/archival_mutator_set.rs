@@ -39,16 +39,16 @@ where
     MmrStorage: StorageVec<Digest> + Send + Sync,
     ChunkStorage: StorageVec<Chunk> + StorageVecStream<Chunk> + Send + Sync,
 {
-    pub fn prove(
+    pub async fn prove(
         &self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         MutatorSetAccumulator::new(
-            &self.aocl.get_peaks(),
-            self.aocl.count_leaves(),
-            &self.swbf_inactive.get_peaks(),
+            &self.aocl.get_peaks_async().await,
+            self.aocl.count_leaves_async().await,
+            &self.swbf_inactive.get_peaks_async().await,
             &self.swbf_active.clone(),
         )
         .prove(item, sender_randomness, receiver_preimage)
@@ -65,7 +65,7 @@ where
     }
 
     pub async fn add(&mut self, addition_record: &AdditionRecord) {
-        let new_chunk: Option<(u64, Chunk)> = self.add_helper(addition_record);
+        let new_chunk: Option<(u64, Chunk)> = self.add_helper(addition_record).await;
         match new_chunk {
             None => (),
             Some((chunk_index, chunk)) => {
@@ -133,10 +133,12 @@ where
 
         // Apply the batch-update to the inactive part of the sliding window Bloom filter.
         // This updates both the inactive part of the SWBF and the MMR membership proofs
-        self.swbf_inactive.batch_mutate_leaf_and_update_mps(
-            &mut preserved_mmr_membership_proofs,
-            membership_proofs_and_new_leafs,
-        );
+        self.swbf_inactive
+            .batch_mutate_leaf_and_update_mps_async(
+                &mut preserved_mmr_membership_proofs,
+                membership_proofs_and_new_leafs,
+            )
+            .await;
 
         self.chunks.set_many(chunk_index_to_chunk_new_state).await
     }
@@ -378,16 +380,17 @@ where
     /// was added to the inactive SWBF if the window slid (and None
     /// otherwise) since this is needed by the archival version of
     /// the mutator set.
-    pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
+    pub async fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
         // track of the mutator set.
 
         // add to list
-        let item_index = self.aocl.count_leaves();
+        let item_index = self.aocl.count_leaves_async().await;
         self.aocl
-            .append(addition_record.canonical_commitment.to_owned()); // ignore auth path
+            .append_async(addition_record.canonical_commitment.to_owned())
+            .await; // ignore auth path
 
         if !Self::window_slides(item_index) {
             return None;
@@ -397,8 +400,8 @@ where
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
         let chunk_digest: Digest = Hash::hash(&new_chunk);
-        let new_chunk_index = self.swbf_inactive.count_leaves();
-        self.swbf_inactive.append(chunk_digest); // ignore auth path
+        let new_chunk_index = self.swbf_inactive.count_leaves_async().await;
+        self.swbf_inactive.append_async(chunk_digest).await; // ignore auth path
 
         // Then move window to the right, equivalent to moving values
         // inside window to the left.
@@ -445,6 +448,7 @@ where
 
             // If chunk index is not in the active part, insert the index into the relevant chunk
             let new_target_chunks_clone = new_target_chunks.clone();
+            let count_leaves = self.aocl.count_leaves_async().await;
             let relevant_chunk = new_target_chunks
                 .dictionary
                 .get_mut(&chunk_index)
@@ -452,7 +456,7 @@ where
                     panic!(
                         "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
                         new_target_chunks_clone.dictionary,
-                        self.aocl.count_leaves(),
+                        count_leaves,
                         batch_index,
                         removal_record
                     )
@@ -479,7 +483,8 @@ where
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
+            .batch_mutate_leaf_and_update_mps_async(&mut [], mutation_data)
+            .await;
 
         new_target_chunks
             .dictionary
@@ -517,8 +522,9 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -957,8 +963,9 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -1005,8 +1012,9 @@ mod archival_mutator_set_tests {
 
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                let membership_proof = archival_mutator_set
+                    .prove(item, sender_randomness, receiver_preimage)
+                    .await;
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -1075,8 +1083,9 @@ mod archival_mutator_set_tests {
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+        let membership_proof = archival_mutator_set
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         (item, addition_record, membership_proof)
     }
@@ -1089,8 +1098,9 @@ mod archival_mutator_set_tests {
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+        let membership_proof = archival_mutator_set
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         (item, addition_record, membership_proof)
     }
