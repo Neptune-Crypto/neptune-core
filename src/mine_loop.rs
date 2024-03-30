@@ -388,6 +388,8 @@ pub async fn mine(
                 }
 
                 let main_message: MainToMiner = from_main.borrow_and_update().clone();
+                debug!("Miner received message {:?}", main_message);
+
                 match main_message {
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
@@ -406,12 +408,8 @@ pub async fn mine(
                         info!("Miner thread received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
                     }
                     MainToMiner::Empty => (),
-                    MainToMiner::ReadyToMineNextBlock => {
-                        debug!("Got {:?} from `main_loop`", MainToMiner::ReadyToMineNextBlock);
-                    }
+                    MainToMiner::ReadyToMineNextBlock => {}
                     MainToMiner::StopMining => {
-                        debug!("Miner shutting down.");
-
                         pause_mine = true;
 
                         if let Some(mt) = miner_thread {
@@ -419,9 +417,22 @@ pub async fn mine(
                         }
                     }
                     MainToMiner::StartMining => {
-                        debug!("Starting miner");
-
                         pause_mine = false;
+                    }
+                    MainToMiner::StopSyncing => {
+                        // no need to do anything here.  Mining will
+                        // resume or not at top of loop depending on
+                        // pause_mine and syncing variables.
+                    }
+                    MainToMiner::StartSyncing => {
+                        // when syncing begins, we must halt the mining
+                        // thread.  But we don't change the pause_mine
+                        // variable, because it reflects the logical on/off
+                        // of mining, which syncing can temporarily override
+                        // but not alter the setting.
+                        if let Some(mt) = miner_thread {
+                            mt.abort();
+                        }
                     }
                 }
             }

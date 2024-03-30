@@ -407,6 +407,7 @@ impl MainLoopHandler {
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
                             global_state_mut.net.syncing = false;
+                            self.main_to_miner_tx.send(MainToMiner::StopSyncing)?;
                         }
                     }
 
@@ -463,6 +464,7 @@ impl MainLoopHandler {
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
                     global_state_mut.net.syncing = true;
+                    self.main_to_miner_tx.send(MainToMiner::StartSyncing)?;
                 }
             }
             PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
