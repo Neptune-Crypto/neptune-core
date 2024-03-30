@@ -104,12 +104,46 @@ fn make_block_template(
 
 /// Attempt to mine a valid block for the network
 async fn mine_block(
+    block_header: BlockHeader,
+    block_body: BlockBody,
+    sender: oneshot::Sender<NewBlockFound>,
+    coinbase_utxo_info: ExpectedUtxo,
+    difficulty: U32s<5>,
+    unrestricted_mining: bool,
+) {
+    // We wrap mining loop with spawn_blocking() because it is a
+    // very lengthy and CPU intensive task, which should execute
+    // on its own thread.
+    //
+    // Instead of spawn_blocking(), we could start a native OS
+    // thread which avoids using one from tokio's threadpool
+    // but that doesn't seem a concern for neptune-core.
+    // Also we would need to use a oneshot channel to avoid
+    // blocking while joining the thread.
+    // see: https://ryhl.io/blog/async-what-is-blocking/
+    //
+    // note: there is no async code inside the mining loop.
+    tokio::task::spawn_blocking(move || {
+        mine_block_worker(
+            block_header,
+            block_body,
+            sender,
+            coinbase_utxo_info,
+            difficulty,
+            unrestricted_mining,
+        )
+    })
+    .await
+    .unwrap()
+}
+
+fn mine_block_worker(
     mut block_header: BlockHeader,
     block_body: BlockBody,
     sender: oneshot::Sender<NewBlockFound>,
-    global_state_lock: GlobalStateLock,
     coinbase_utxo_info: ExpectedUtxo,
     difficulty: U32s<5>,
+    unrestricted_mining: bool,
 ) {
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {}",
@@ -122,12 +156,11 @@ async fn mine_block(
     // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
     // seeded with that seed. The `thread_rng()` object is dropped immediately.
     let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
-    let mut counter = 0;
 
     // Mining takes place here
     while Hash::hash(&block_header) >= threshold {
-        if !global_state_lock.cli().unrestricted_mining {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        if !unrestricted_mining {
+            std::thread::sleep(Duration::from_millis(100));
         }
 
         // If the sender is cancelled, the parent to this thread most
@@ -142,15 +175,9 @@ async fn mine_block(
             return;
         }
 
-        // Don't mine if we are syncing (but don't check too often)
-        if counter % 100 == 0 && global_state_lock.lock(|s| s.net.syncing).await {
-            return;
-        } else {
-            counter += 1;
-        }
-
         block_header.nonce = rng.gen();
     }
+
     info!(
         "Found valid block with nonce: ({}, {}, {}).",
         block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
@@ -340,9 +367,9 @@ pub async fn mine(
                     block_header,
                     block_body,
                     worker_thread_tx,
-                    global_state_lock.clone(),
                     coinbase_utxo_info,
                     latest_block.kernel.header.difficulty,
+                    global_state_lock.cli().unrestricted_mining,
                 );
                 global_state_lock.set_mining(true).await;
                 Some(
