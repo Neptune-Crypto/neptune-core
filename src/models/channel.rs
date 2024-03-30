@@ -24,6 +24,9 @@ pub enum MainToMiner {
 
     StopMining,
     StartMining,
+
+    StartSyncing,
+    StopSyncing,
     // SetCoinbasePubkey,
 }
 
