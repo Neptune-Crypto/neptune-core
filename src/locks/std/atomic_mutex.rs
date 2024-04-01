@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 ///
 /// # Example
 /// ```
-/// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+/// # use neptune_core::locks::std::{AtomicMutex, traits::*};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::locks::sync::{AtomicMutex, LockEvent, LockCallbackFn};
+/// # use neptune_core::locks::std::{AtomicMutex, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -210,7 +210,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -227,7 +227,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -244,7 +244,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -267,7 +267,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -290,7 +290,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// let atomic_u64 = AtomicMutex::from(25u64);
     /// let age = atomic_u64.get();
     /// ```
@@ -306,7 +306,7 @@ impl<T> AtomicMutex<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::sync::{AtomicMutex, traits::*};
+    /// # use neptune_core::locks::std::{AtomicMutex, traits::*};
     /// let mut atomic_bool = AtomicMutex::from(false);
     /// atomic_bool.set(true);
     /// ```
