@@ -229,7 +229,7 @@ where
         let swbf_indices = get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_index);
 
         let batch_index = self.get_batch_index_async().await;
-        let window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let window_start = batch_index * CHUNK_SIZE as u128;
 
         let chunk_indices: BTreeSet<u64> = swbf_indices
             .iter()
@@ -270,7 +270,7 @@ where
     pub async fn revert_remove(&mut self, removal_record: &RemovalRecord) {
         let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
         let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
 
         // Populate the dictionary by iterating over all the removal
@@ -346,7 +346,7 @@ where
     /// filter, whether in the active window, or in some chunk.
     pub async fn bloom_filter_contains(&mut self, index: u128) -> bool {
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         if index >= active_window_start {
             let relative_index = (index - active_window_start) as u32;
@@ -429,7 +429,7 @@ where
     /// after applying the update. Does not mutate the removal record.
     pub async fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // insert all indices
         let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
