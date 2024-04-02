@@ -104,6 +104,7 @@ where
         };
         let chunk_index_to_chunk_new_state =
             kernel.batch_remove(removal_records, preserved_membership_proofs);
+        self.swbf_active = kernel.swbf_active;
 
         // extract modified leafs with indices
         let mut indices_and_new_leafs = chunk_index_to_chunk_new_state
