@@ -120,9 +120,7 @@ impl NeptuneCoins {
 
         // flip and recurse if we are dealing with negative numbers
         if sign == num_bigint::Sign::Minus {
-            let Some(positive_nau) = Self::from_nau(-nau) else {
-                return None;
-            };
+            let positive_nau = Self::from_nau(-nau)?;
             return Some(Self(u128::MAX - positive_nau.0 + 1u128));
         }
 

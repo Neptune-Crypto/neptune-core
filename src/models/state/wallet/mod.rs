@@ -283,6 +283,7 @@ impl WalletSecret {
         use std::os::unix::prelude::OpenOptionsExt;
         fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .mode(0o600)
             .open(path)
@@ -295,6 +296,7 @@ impl WalletSecret {
     fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) -> Result<()> {
         fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .open(path)
             .unwrap();
