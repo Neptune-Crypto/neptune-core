@@ -1,4 +1,4 @@
-mod leveldb;
+pub mod leveldb;
 mod neptune_leveldb;
 pub mod storage;
 

@@ -288,7 +288,6 @@ where
     }
 }
 
-#[cfg(any(test, doctest))]
 impl<Key, Value> NeptuneLevelDb<Key, Value>
 where
     Key: Serialize + DeserializeOwned + Send + Sync + 'static,

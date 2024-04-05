@@ -96,9 +96,20 @@ opt-level = 0
 # codegen-units = 256
 # rpath = false
 
+## We use harness = false on these so that the divan reports are output on stdout.
+
 [[bench]]
 name = "sync_atomic"
 harness = false
+
+[[bench]]
+name = "db_leveldb"
+harness = false
+
+[[bench]]
+name = "db_dbtvec"
+harness = false
+
 
 [patch.crates-io]
 # 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
