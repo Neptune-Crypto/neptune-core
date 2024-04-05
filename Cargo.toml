@@ -11,11 +11,11 @@ aead = "0"
 aes-gcm = "0"
 anyhow = "1"
 arbitrary = { version = "1", features = ["derive"] }
-bech32 = "0"
+bech32 = "0.9"
 bincode = "1"
 bytes = "1"
 bytesize = "1"
-chrono = "^0.4.31"
+chrono = "=0.4.34"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4.4.6"
 console-subscriber = "0.2.0"
