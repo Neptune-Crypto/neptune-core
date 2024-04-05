@@ -136,8 +136,8 @@ pub struct RemovalRecord {
 }
 
 impl RemovalRecord {
-    /// Update a batch of removal records that are synced to a given mutator set, given
-    /// that that mutator set will be updated with an addition. (The addition record
+    /// Update a batch of removal records that are synced to a given mutator set, in anticipation
+    /// of one addition to that mutator set. (The addition record
     /// does not matter; all necessary information is in the mutator set.)
     pub fn batch_update_from_addition(
         removal_records: &mut [&mut Self],
