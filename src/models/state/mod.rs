@@ -1113,59 +1113,84 @@ impl GlobalState {
         new_block: Block,
         coinbase_utxo_info: Option<ExpectedUtxo>,
     ) -> Result<()> {
-        // get proof_of_work_family for tip
-        let tip_proof_of_work_family = self.chain.light_state().kernel.header.proof_of_work_family;
-        let previous_mutator_set_accumulator = self
-            .chain
-            .light_state()
-            .kernel
-            .body
-            .mutator_set_accumulator
-            .clone();
+        // note: we make this fn internal so we can log its duration and ensure it will
+        // never be called directly by another fn, without the timings.
 
-        // Apply the updates
-        self.chain
-            .archival_state_mut()
-            .write_block(&new_block, Some(tip_proof_of_work_family))
-            .await?;
+        async fn store_block_internal_worker(
+            myself: &mut GlobalState,
+            new_block: Block,
+            coinbase_utxo_info: Option<ExpectedUtxo>,
+        ) -> Result<()> {
+            // get proof_of_work_family for tip
+            let tip_proof_of_work_family = myself
+                .chain
+                .light_state()
+                .kernel
+                .header
+                .proof_of_work_family;
+            let previous_mutator_set_accumulator = myself
+                .chain
+                .light_state()
+                .kernel
+                .body
+                .mutator_set_accumulator
+                .clone();
 
-        // update the mutator set with the UTXOs from this block
-        self.chain
-            .archival_state_mut()
-            .update_mutator_set(&new_block)
-            .await
-            .expect("Updating mutator set must succeed");
+            // Apply the updates
+            myself
+                .chain
+                .archival_state_mut()
+                .write_block(&new_block, Some(tip_proof_of_work_family))
+                .await?;
 
-        if let Some(coinbase_info) = coinbase_utxo_info {
-            // Notify wallet to expect the coinbase UTXO, as we mined this block
-            self.wallet_state
-                .expected_utxos
-                .add_expected_utxo(
-                    coinbase_info.utxo,
-                    coinbase_info.sender_randomness,
-                    coinbase_info.receiver_preimage,
-                    UtxoNotifier::OwnMiner,
-                )
-                .expect("UTXO notification from miner must be accepted");
+            // update the mutator set with the UTXOs from this block
+            myself
+                .chain
+                .archival_state_mut()
+                .update_mutator_set(&new_block)
+                .await
+                .expect("Updating mutator set must succeed");
+
+            if let Some(coinbase_info) = coinbase_utxo_info {
+                // Notify wallet to expect the coinbase UTXO, as we mined this block
+                myself
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        coinbase_info.utxo,
+                        coinbase_info.sender_randomness,
+                        coinbase_info.receiver_preimage,
+                        UtxoNotifier::OwnMiner,
+                    )
+                    .expect("UTXO notification from miner must be accepted");
+            }
+
+            // update wallet state with relevant UTXOs from this block
+            myself
+                .wallet_state
+                .update_wallet_state_with_new_block(&previous_mutator_set_accumulator, &new_block)
+                .await?;
+
+            // Update mempool with UTXOs from this block. This is done by removing all transaction
+            // that became invalid/was mined by this block.
+            myself
+                .mempool
+                .update_with_block(previous_mutator_set_accumulator, &new_block)
+                .await;
+
+            myself.chain.light_state_mut().set_block(new_block);
+
+            // Flush databases
+            myself.flush_databases().await?;
+
+            Ok(())
         }
 
-        // update wallet state with relevant UTXOs from this block
-        self.wallet_state
-            .update_wallet_state_with_new_block(&previous_mutator_set_accumulator, &new_block)
-            .await?;
-
-        // Update mempool with UTXOs from this block. This is done by removing all transaction
-        // that became invalid/was mined by this block.
-        self.mempool
-            .update_with_block(previous_mutator_set_accumulator, &new_block)
-            .await;
-
-        self.chain.light_state_mut().set_block(new_block);
-
-        // Flush databases
-        self.flush_databases().await?;
-
-        Ok(())
+        crate::log_duration_async!(store_block_internal_worker(
+            self,
+            new_block,
+            coinbase_utxo_info
+        ))
     }
 
     /// resync membership proofs

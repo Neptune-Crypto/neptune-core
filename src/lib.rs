@@ -289,6 +289,36 @@ where
     (output, total_time)
 }
 
+#[macro_export]
+macro_rules! log_duration {
+    ($args: expr) => {{
+        let (output, duration) = $crate::time_fn_call(|| $args);
+        tracing::debug!(
+            "at {}:{}\n-- executed expression --\n{}\n -- duration: {} secs --",
+            file!(),
+            line!(),
+            stringify!($args),
+            duration
+        );
+        output
+    }};
+}
+
+#[macro_export]
+macro_rules! log_duration_async {
+    ($args: expr) => {{
+        let (output, duration) = $crate::time_fn_call_async({ $args }).await;
+        tracing::debug!(
+            "at {}:{}\n-- executed async expression --\n{}\n -- duration: {} secs --",
+            file!(),
+            line!(),
+            stringify!($args),
+            duration
+        );
+        output
+    }};
+}
+
 /// Converts a UTC millisecond timestamp (millis since 1970 UTC) into
 /// a `DateTime<Local>`, ie local-time.
 pub fn utc_timestamp_to_localtime<T>(timestamp: T) -> DateTime<Local>
