@@ -564,8 +564,8 @@ impl GlobalState {
             .wallet_secret
             .nth_generation_spending_key(0);
 
-        // assemble transaction object
-        Ok(Self::create_transaction_from_data(
+        // assemble transaction object (lengthy operation)
+        Self::create_transaction_from_data(
             spending_key,
             inputs,
             spendable_utxos_and_mps,
@@ -576,7 +576,8 @@ impl GlobalState {
             timestamp.as_millis() as u64,
             mutator_set_accumulator,
             privacy,
-        ))
+        )
+        .await
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
@@ -639,7 +640,47 @@ impl GlobalState {
     /// Assembles a transaction kernel and supporting witness or proof(s) from
     /// the given transaction data.
     #[allow(clippy::too_many_arguments)]
-    fn create_transaction_from_data(
+    async fn create_transaction_from_data(
+        spending_key: SpendingKey,
+        inputs: Vec<RemovalRecord>,
+        spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
+        outputs: Vec<AdditionRecord>,
+        output_utxos: Vec<Utxo>,
+        fee: NeptuneCoins,
+        public_announcements: Vec<PublicAnnouncement>,
+        timestamp: u64,
+        mutator_set_accumulator: MutatorSetAccumulator,
+        privacy: bool,
+    ) -> Result<Transaction> {
+        // note: this executes the prover which can take a very
+        //       long time, perhaps minutes.  As such, we use
+        //       spawn_blocking() to execute on tokio's blocking
+        //       threadpool and avoid blocking the tokio executor
+        //       and other async tasks.
+        let transaction = tokio::task::spawn_blocking(move || {
+            Self::create_transaction_from_data_worker(
+                spending_key,
+                inputs,
+                spendable_utxos_and_mps,
+                outputs,
+                output_utxos,
+                fee,
+                public_announcements,
+                timestamp,
+                mutator_set_accumulator,
+                privacy,
+            )
+        })
+        .await?;
+        Ok(transaction)
+    }
+
+    // note: this executes the prover which can take a very
+    //       long time, perhaps minutes. It should never be
+    //       called directly.
+    //       Use create_transaction_from_data() instead.
+    #[allow(clippy::too_many_arguments)]
+    fn create_transaction_from_data_worker(
         spending_key: SpendingKey,
         inputs: Vec<RemovalRecord>,
         spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
@@ -1285,7 +1326,7 @@ mod global_state_tests {
             .nth_generation_spending_key(0);
 
         // assemble transaction object
-        Ok(GlobalState::create_transaction_from_data(
+        GlobalState::create_transaction_from_data(
             spending_key,
             inputs,
             spendable_utxos_and_mps,
@@ -1296,7 +1337,8 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
-        ))
+        )
+        .await
     }
 
     #[traced_test]
