@@ -216,7 +216,7 @@ mod batch_mutate_leaf_and_update_mps {
 
             let mut mps = leaf_indices_for_mps_to_preserve
                 .iter()
-                .map(|i| rt.block_on(async { ammr.prove_membership_async(*i).await.0 }))
+                .map(|i| rt.block_on(async { ammr.prove_membership_async(*i).await }))
                 .collect_vec();
 
             bencher.bench_local(|| {
