@@ -1,13 +1,13 @@
 use crate::database::storage::storage_vec::traits::*;
 use crate::prelude::twenty_first;
 
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::shared::bag_peaks;
 
-use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 use itertools::Itertools;
 
@@ -61,14 +61,30 @@ where
     }
 
     /// Append an element to the archival MMR, return the membership proof of the newly added leaf.
-    /// The membership proof is returned here since the accumulater MMR has no other way of
-    /// retrieving a membership proof for a leaf. And the archival and accumulator MMR share
-    /// this interface.
     pub async fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
-        let node_index = self.digests.len().await;
-        let leaf_index = shared_advanced::node_index_to_leaf_index(node_index).unwrap();
-        self.append_raw_async(new_leaf).await;
-        self.prove_membership_async(leaf_index).await.0
+        let mut node_index = self.digests.len().await;
+        let leaf_index = node_index_to_leaf_index(node_index).unwrap();
+        let right_lineage_length = right_lineage_length_from_leaf_index(leaf_index);
+        self.digests.push(new_leaf).await;
+
+        let mut returned_auth_path = vec![];
+        let mut acc_hash = new_leaf;
+        for height in 0..right_lineage_length {
+            let left_sibling_hash = self
+                .digests
+                .get(shared_advanced::left_sibling(node_index, height))
+                .await;
+            returned_auth_path.push(left_sibling_hash);
+            acc_hash = H::hash_pair(left_sibling_hash, acc_hash);
+            self.digests.push(acc_hash).await;
+            node_index += 1;
+        }
+
+        MmrMembershipProof {
+            leaf_index,
+            authentication_path: returned_auth_path,
+            _hasher: PhantomData,
+        }
     }
 
     /// Mutate an existing leaf. It is the caller's responsibility that the
@@ -297,26 +313,6 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         peaks_and_heights
     }
 
-    /// Append an element to the archival MMR
-    pub fn append_raw_async(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        Box::pin(async move {
-            let node_index = self.digests.len().await;
-            self.digests.push(new_leaf).await;
-            let (right_parent_count, own_height) =
-                shared_advanced::right_lineage_length_and_own_height(node_index);
-
-            // This function could be rewritten with a while-loop instead of being recursive.
-            if right_parent_count != 0 {
-                let left_sibling_hash = self
-                    .digests
-                    .get(shared_advanced::left_sibling(node_index, own_height))
-                    .await;
-                let parent_hash: Digest = H::hash_pair(left_sibling_hash, new_leaf);
-                self.append_raw_async(parent_hash).await;
-            }
-        })
-    }
-
     /// Remove the last leaf from the archival MMR
     pub async fn remove_last_leaf_async(&mut self) -> Option<Digest> {
         if self.is_empty().await {
@@ -376,7 +372,7 @@ pub(crate) mod mmr_test {
         {
             let mut ammr = get_empty_ammr().await;
             for digest in digests {
-                ammr.append_raw_async(digest).await;
+                ammr.append(digest).await;
             }
             ammr
         }
