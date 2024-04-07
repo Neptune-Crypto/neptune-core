@@ -3052,6 +3052,7 @@ mod archival_state_tests {
     async fn can_initialize_mutator_set_database() {
         let args: cli_args::Args = cli_args::Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
+        println!("data_dir for MS initialization test: {data_dir}");
         let _rams = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .unwrap();
