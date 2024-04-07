@@ -1,7 +1,10 @@
 use crate::database::storage::storage_vec::traits::*;
 use crate::prelude::twenty_first;
 
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -51,13 +54,7 @@ where
 
     /// Return the number of leaves in the tree
     pub async fn count_leaves(&self) -> u64 {
-        let peaks_and_heights: Vec<(_, u32)> = self.get_peaks_with_heights_async().await;
-        let mut acc = 0;
-        for (_, height) in peaks_and_heights {
-            acc += 1 << height
-        }
-
-        acc
+        node_index_to_leaf_index(self.digests.len().await).unwrap()
     }
 
     /// Append an element to the archival MMR, return the membership proof of the newly added leaf.
@@ -196,49 +193,29 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         self.digests.get(node_index).await
     }
 
-    /// Return (membership_proof, peaks)
+    /// Return membership proof
     pub async fn prove_membership_async(&self, leaf_index: u64) -> MmrMembershipProof<H> {
         // A proof consists of an authentication path
         // and a list of peaks
+        let num_leafs = self.count_leaves().await;
         assert!(
-            leaf_index < self.count_leaves().await,
+            leaf_index < num_leafs,
             "Cannot prove membership of leaf outside of range. Got leaf_index {leaf_index}. Leaf count is {}", self.count_leaves().await
         );
 
-        // Find out how long the authentication path is
         let node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
-        let mut top_height: i32 = -1;
-        let mut parent_index = node_index;
-        while parent_index < self.digests.len().await {
-            parent_index = shared_advanced::parent(parent_index);
-            top_height += 1;
-        }
+        let (_, own_index_into_peaks_list) =
+            leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
+        let (_, peak_indices) = get_peak_heights_and_peak_node_indices(num_leafs);
+        let num_nodes = self.digests.len().await;
+        let sibling_indices = get_authentication_path_node_indices(
+            node_index,
+            peak_indices[own_index_into_peaks_list as usize],
+            num_nodes,
+        )
+        .unwrap();
 
-        // Build the authentication path
-        let mut authentication_path: Vec<Digest> = vec![];
-        let mut index = node_index;
-        let (mut right_ancestor_count, mut index_height): (u32, u32) =
-            shared_advanced::right_lineage_length_and_own_height(index);
-        while index_height < top_height as u32 {
-            if right_ancestor_count != 0 {
-                // index is right child
-                let left_sibling_index = shared_advanced::left_sibling(index, index_height);
-                authentication_path.push(self.digests.get(left_sibling_index).await);
-
-                // parent of right child is index + 1
-                index += 1;
-            } else {
-                // index is left child
-                let right_sibling_index = shared_advanced::right_sibling(index, index_height);
-                authentication_path.push(self.digests.get(right_sibling_index).await);
-
-                // parent of left child:
-                index += 1 << (index_height + 1);
-            }
-            let next_index_info = shared_advanced::right_lineage_length_and_own_height(index);
-            right_ancestor_count = next_index_info.0;
-            index_height = next_index_info.1;
-        }
+        let authentication_path = self.digests.get_many(&sibling_indices).await;
 
         MmrMembershipProof::new(leaf_index, authentication_path)
     }
