@@ -123,19 +123,21 @@ where
         }
     }
 
-    /// Modify a bunch of leafs and keep a set of membership proofs in sync.
+    /// Modify a bunch of leafs and keep a set of membership proofs in sync. Notice that this
+    /// function is not just the application of `mutate_leaf` multiple times, as it also preserves
+    /// a list of membership proofs.
     pub async fn batch_mutate_leaf_and_update_mps(
         &mut self,
         membership_proofs: &mut [&mut MmrMembershipProof<H>],
-        mutation_data: Vec<(MmrMembershipProof<H>, Digest)>,
+        mutation_data: Vec<(u64, Digest)>,
     ) -> Vec<usize> {
         assert!(
-            mutation_data.iter().map(|md| md.0.leaf_index).all_unique(),
+            mutation_data.iter().map(|md| md.0).all_unique(),
             "Duplicated leaves are not allowed in membership proof updater"
         );
 
-        for (mp, digest) in mutation_data.iter() {
-            self.mutate_leaf(mp.leaf_index, *digest).await;
+        for (leaf_index, digest) in mutation_data.iter() {
+            self.mutate_leaf(*leaf_index, *digest).await;
         }
 
         let mut modified_mps: Vec<usize> = vec![];

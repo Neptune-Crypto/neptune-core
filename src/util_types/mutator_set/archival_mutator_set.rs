@@ -7,7 +7,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 
 use itertools::Itertools;
-use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
@@ -113,14 +112,6 @@ where
             .collect_vec();
         indices_and_new_leafs.sort_by_key(|(i, _d)| *i);
 
-        // get membership proofs
-        let mut membership_proofs_and_new_leafs = vec![];
-        for (index, leaf) in indices_and_new_leafs {
-            let (membership_proof, _old_peaks) =
-                self.swbf_inactive.prove_membership_async(index).await;
-            membership_proofs_and_new_leafs.push((membership_proof, leaf));
-        }
-
         // compile list of MMR membership proofs to be preserved
         let mut preserved_mmr_membership_proofs = preserved_membership_proofs
             .iter_mut()
@@ -137,7 +128,7 @@ where
         self.swbf_inactive
             .batch_mutate_leaf_and_update_mps(
                 &mut preserved_mmr_membership_proofs,
-                membership_proofs_and_new_leafs,
+                indices_and_new_leafs,
             )
             .await;
 
@@ -470,16 +461,12 @@ where
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
-        let all_mmr_membership_proofs = new_target_chunks
-            .dictionary
-            .values()
-            .map(|(p, _c)| p.to_owned());
+        let target_chunk_indices = new_target_chunks.dictionary.keys().cloned().collect_vec();
         let all_leafs = new_target_chunks
             .dictionary
             .values()
             .map(|(_p, chunk)| Hash::hash(chunk));
-        let mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
-            all_mmr_membership_proofs.zip(all_leafs).collect();
+        let mutation_data = target_chunk_indices.into_iter().zip(all_leafs).collect();
 
         // If we want to update the membership proof with this removal, we
         // could use the below function.
