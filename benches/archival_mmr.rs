@@ -6,9 +6,12 @@ use leveldb_sys::Compression;
 use neptune_core::database::storage::storage_schema::traits::*;
 use neptune_core::database::storage::storage_schema::DbtVec;
 use neptune_core::database::storage::storage_schema::SimpleRustyStorage;
+use neptune_core::database::storage::storage_vec::traits::StorageVecBase;
 use neptune_core::database::NeptuneLevelDb;
 use neptune_core::util_types::mutator_set::archival_mmr::ArchivalMmr;
+use rand::random;
 use tasm_lib::twenty_first::shared_math::tip5::Tip5;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_count_to_node_count;
 use tasm_lib::Digest;
 
 fn main() {
@@ -62,7 +65,7 @@ fn db_options() -> Option<Options> {
     })
 }
 
-async fn empty_ammr() -> (SimpleRustyStorage, ArchivalMmr<Tip5, DbtVec<Digest>>) {
+async fn new_ammr(leaf_count: u64) -> (SimpleRustyStorage, ArchivalMmr<Tip5, DbtVec<Digest>>) {
     let db = NeptuneLevelDb::open_new_test_database(
         false,
         db_options(),
@@ -75,10 +78,18 @@ async fn empty_ammr() -> (SimpleRustyStorage, ArchivalMmr<Tip5, DbtVec<Digest>>)
     .await
     .unwrap();
     let mut rusty_storage = SimpleRustyStorage::new(db);
-    let nv = rusty_storage
+    let mut nv = rusty_storage
         .schema
         .new_vec::<Digest>("test-archival-mmr")
         .await;
+
+    // Add the dummy node since nodes are 1-indexed in AMMRs.
+    nv.push(Digest::default()).await;
+
+    let num_nodes = leaf_count_to_node_count(leaf_count);
+    for _ in 0..num_nodes {
+        nv.push(random()).await;
+    }
 
     (rusty_storage, ArchivalMmr::new(nv).await)
 }
@@ -88,13 +99,14 @@ mod append {
 
     mod append_5000 {
         const NUM_WRITE_ITEMS: usize = 5000;
+        const INIT_AMMR_LEAF_COUNT: u64 = 0;
         use tasm_lib::twenty_first::shared_math::other::random_elements;
 
         use super::*;
 
         fn append_impl(bencher: Bencher, persist: bool) {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let (mut storage, mut ammr) = rt.block_on(empty_ammr());
+            let (mut storage, mut ammr) = rt.block_on(new_ammr(INIT_AMMR_LEAF_COUNT));
             let digests = random_elements(NUM_WRITE_ITEMS);
 
             bencher.bench_local(|| {
@@ -117,6 +129,54 @@ mod append {
         #[divan::bench]
         fn append_and_persist(bencher: Bencher) {
             append_impl(bencher, true);
+        }
+    }
+}
+
+mod mutate {
+    use super::*;
+
+    mod mutate_100_of_10000 {
+        const NUM_MUTATIONS: usize = 100;
+        const AMMR_LEAF_COUNT: u64 = 10000;
+        use itertools::Itertools;
+        use rand::{thread_rng, Rng};
+        use tasm_lib::twenty_first::shared_math::other::random_elements;
+
+        use super::*;
+
+        fn leaf_mutation_impl(bencher: Bencher, persist: bool) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (mut storage, mut ammr) = rt.block_on(new_ammr(AMMR_LEAF_COUNT));
+            let mut rng = thread_rng();
+            let digests = random_elements(NUM_MUTATIONS);
+            let leaf_index_of_mutated_leafs = (0..NUM_MUTATIONS as u64)
+                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .collect_vec();
+
+            bencher.bench_local(|| {
+                rt.block_on(async {
+                    for (new_leaf, leaf_index) in
+                        digests.iter().zip(leaf_index_of_mutated_leafs.iter())
+                    {
+                        let mp = ammr.prove_membership_async(*leaf_index).await.0;
+                        ammr.mutate_leaf(&mp, *new_leaf).await;
+                    }
+                    if persist {
+                        storage.persist().await;
+                    }
+                });
+            });
+        }
+
+        #[divan::bench]
+        fn leaf_mutation(bencher: Bencher) {
+            leaf_mutation_impl(bencher, false);
+        }
+
+        #[divan::bench]
+        fn leaf_mutation_and_persist(bencher: Bencher) {
+            leaf_mutation_impl(bencher, true);
         }
     }
 }
