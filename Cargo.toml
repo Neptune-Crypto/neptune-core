@@ -40,7 +40,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0"
 strum = { version = "0.25", features = ["derive"] }
-tarpc = { version = "^0.34", features = ["tokio1", "serde-transport", "serde-transport-json", "tcp"] }
+tarpc = { version = "^0.34", features = [
+    "tokio1",
+    "serde-transport",
+    "serde-transport-json",
+    "tcp",
+] }
 tasm-lib = "0.2"
 tiny-bip39 = "1.0"
 tokio = { version = "1.37", features = ["full", "tracing"] }
@@ -110,11 +115,14 @@ harness = false
 name = "db_dbtvec"
 harness = false
 
+[[bench]]
+name = "archival_mmr"
+harness = false
+
 
 [patch.crates-io]
 # 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
 tasm-lib = { git = "https://github.com/dan-da/tasm-lib.git", rev = "15a708cf6fcbd9ed3e65e5e2067be6e622176328" }
 
 # 81573735e9df4836ca16655fd31884271984bac7 = tip of branch: make_storage_async on 2024-03-18
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7"}
-
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7" }
