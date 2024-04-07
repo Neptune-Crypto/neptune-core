@@ -299,7 +299,7 @@ where
 
             // update archival mmr
             self.swbf_inactive
-                .mutate_leaf_raw_async(chunk_index, Hash::hash(&new_chunk))
+                .mutate_leaf(chunk_index, Hash::hash(&new_chunk))
                 .await;
 
             self.chunks.set(chunk_index, new_chunk).await;

@@ -159,8 +159,8 @@ mod mutate {
                     for (new_leaf, leaf_index) in
                         digests.iter().zip(leaf_index_of_mutated_leafs.iter())
                     {
-                        let mp = ammr.prove_membership_async(*leaf_index).await.0;
-                        ammr.mutate_leaf(&mp, *new_leaf).await;
+                        let _mp = ammr.prove_membership_async(*leaf_index).await.0;
+                        ammr.mutate_leaf(*leaf_index, *new_leaf).await;
                     }
                     if persist {
                         storage.persist().await;
