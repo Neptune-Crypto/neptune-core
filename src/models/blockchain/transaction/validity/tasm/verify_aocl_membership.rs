@@ -210,7 +210,8 @@ mod tests {
 
                 let leaf_index = rng.next_u64() % num_leafs;
                 let leaf = mmr.get_leaf_async(leaf_index).await;
-                let (mmr_mp, peaks) = mmr.prove_membership_async(leaf_index).await;
+                let peaks = mmr.get_peaks().await;
+                let mmr_mp = mmr.prove_membership_async(leaf_index).await;
                 let mut msmp = pseudorandom_mutator_set_membership_proof(rng.gen());
                 msmp.auth_path_aocl = mmr_mp;
 

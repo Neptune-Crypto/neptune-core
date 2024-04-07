@@ -793,7 +793,7 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let (membership_proof, _) = ammr.prove_membership_async(index as u64).await;
+        let membership_proof = ammr.prove_membership_async(index as u64).await;
         let (v, _) = membership_proof.verify(
             &last_block_mmra.get_peaks(),
             block_digest,

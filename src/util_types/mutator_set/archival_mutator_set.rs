@@ -170,7 +170,7 @@ where
             )));
         }
 
-        Ok(self.aocl.prove_membership_async(index).await.0)
+        Ok(self.aocl.prove_membership_async(index).await)
     }
 
     /// Returns an authentication path for a chunk in the sliding window Bloom filter
@@ -184,11 +184,8 @@ where
             )));
         }
 
-        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
-            .swbf_inactive
-            .prove_membership_async(chunk_index)
-            .await
-            .0;
+        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+            self.swbf_inactive.prove_membership_async(chunk_index).await;
 
         // This check should never fail. It would mean that chunks are missing but that the
         // archival MMR has the membership proof for the chunk. That would be a programming
@@ -237,11 +234,8 @@ where
                 self.chunks.len().await > chunk_index,
                 "Chunks must be known if its authentication path is known."
             );
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
-                .swbf_inactive
-                .prove_membership_async(chunk_index)
-                .await
-                .0;
+            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+                self.swbf_inactive.prove_membership_async(chunk_index).await;
             target_chunks
                 .dictionary
                 .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));

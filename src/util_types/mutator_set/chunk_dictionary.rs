@@ -141,7 +141,7 @@ mod chunk_dict_tests {
         let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
 
         let key1: u64 = 898989;
-        let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await.0;
+        let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await;
         let chunk1: Chunk = {
             Chunk {
                 relative_indices: (0..CHUNK_SIZE).collect(),
@@ -153,7 +153,7 @@ mod chunk_dict_tests {
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
         let key2: u64 = 8989;
-        let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership_async(2).await.0;
+        let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership_async(2).await;
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
@@ -215,7 +215,7 @@ mod chunk_dict_tests {
         let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
         let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
-        let mp: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await.0;
+        let mp: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };
