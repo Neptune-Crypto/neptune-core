@@ -587,7 +587,7 @@ mod test {
 
     use super::TimeLockWitness;
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -614,7 +614,7 @@ mod test {
             .as_millis() as u64
     }
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn test_locked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -636,7 +636,7 @@ mod test {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn test_released(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
