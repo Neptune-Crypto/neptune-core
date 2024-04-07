@@ -179,3 +179,68 @@ mod mutate {
         }
     }
 }
+
+mod batch_mutate_leaf_and_update_mps {
+    use super::*;
+
+    mod mutate_100_of_10000 {
+        const NUM_MUTATIONS_IN_BATCH: usize = 100;
+        const AMMR_LEAF_COUNT: u64 = 10000;
+        use itertools::Itertools;
+        use rand::{thread_rng, Rng};
+        use tasm_lib::twenty_first::shared_math::other::random_elements;
+
+        use super::*;
+
+        fn batch_leaf_mutation_impl(bencher: Bencher, persist: bool) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (mut storage, mut ammr) = rt.block_on(new_ammr(AMMR_LEAF_COUNT));
+            let mut rng = thread_rng();
+            let new_digests = random_elements(NUM_MUTATIONS_IN_BATCH);
+            let mut leaf_index_of_mutated_leafs = (0..NUM_MUTATIONS_IN_BATCH as u64)
+                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .collect_vec();
+            leaf_index_of_mutated_leafs.sort();
+            leaf_index_of_mutated_leafs.dedup();
+
+            let mutation_data = leaf_index_of_mutated_leafs
+                .into_iter()
+                .zip(new_digests)
+                .collect_vec();
+
+            let mut leaf_indices_for_mps_to_preserve = (0..NUM_MUTATIONS_IN_BATCH as u64)
+                .map(|_| rng.gen_range(0..AMMR_LEAF_COUNT))
+                .collect_vec();
+            leaf_indices_for_mps_to_preserve.sort();
+            leaf_indices_for_mps_to_preserve.dedup();
+
+            let mut mps = leaf_indices_for_mps_to_preserve
+                .iter()
+                .map(|i| rt.block_on(async { ammr.prove_membership_async(*i).await.0 }))
+                .collect_vec();
+
+            bencher.bench_local(|| {
+                rt.block_on(async {
+                    ammr.batch_mutate_leaf_and_update_mps(
+                        &mut mps.iter_mut().collect_vec(),
+                        mutation_data.clone(),
+                    )
+                    .await;
+                    if persist {
+                        storage.persist().await;
+                    }
+                });
+            });
+        }
+
+        #[divan::bench]
+        fn leaf_mutation(bencher: Bencher) {
+            batch_leaf_mutation_impl(bencher, false);
+        }
+
+        #[divan::bench]
+        fn leaf_mutation_and_persist(bencher: Bencher) {
+            batch_leaf_mutation_impl(bencher, true);
+        }
+    }
+}
