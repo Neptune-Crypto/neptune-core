@@ -282,6 +282,7 @@ pub(crate) mod mmr_test {
 
     use itertools::*;
     use rand::random;
+    use rand::thread_rng;
     use test_strategy::proptest;
 
     use crate::database::storage::storage_schema::traits::*;
@@ -604,6 +605,47 @@ pub(crate) mod mmr_test {
     async fn bag_peaks_blake3_test() {
         bag_peaks_gen::<blake3::Hasher>().await;
         bag_peaks_gen::<Tip5>().await;
+    }
+
+    #[tokio::test]
+    async fn compare_batch_and_individual_leaf_mutation() {
+        type H = Tip5;
+        use rand::seq::SliceRandom;
+
+        let mut rng = thread_rng();
+        for size in 0..25 {
+            let init_digests = random_elements(size);
+            let mut archival_batch_mut: ArchivalMmr<H, Storage> =
+                mock::get_ammr_from_digests::<H>(init_digests.clone()).await;
+            let mut archival_individual_mut = mock::get_ammr_from_digests::<H>(init_digests).await;
+
+            for max_mutation_count in 0..size {
+                let all_indices = (0..size as u64).collect_vec();
+                let mutated_indices = (0..max_mutation_count)
+                    .map(|_| *all_indices.choose(&mut rng).unwrap())
+                    .collect_vec();
+                let mutated_indices = mutated_indices.into_iter().unique().collect_vec();
+                let new_leafs = random_elements(max_mutation_count);
+                let mutation_data = mutated_indices
+                    .clone()
+                    .into_iter()
+                    .zip(new_leafs.into_iter())
+                    .collect_vec();
+
+                archival_batch_mut
+                    .batch_mutate_leaf_and_update_mps(&mut [], mutation_data.clone())
+                    .await;
+
+                for (index, new_leaf) in mutation_data {
+                    archival_individual_mut.mutate_leaf(index, new_leaf).await;
+                }
+
+                assert_eq!(
+                    archival_batch_mut.get_peaks().await,
+                    archival_individual_mut.get_peaks().await
+                );
+            }
+        }
     }
 
     #[tokio::test]
