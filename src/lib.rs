@@ -8,6 +8,7 @@ pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
 pub mod locks;
+pub mod macros;
 pub mod main_loop;
 pub mod mine_loop;
 pub mod models;
@@ -287,36 +288,6 @@ where
     let elapsed = start.elapsed();
     let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
     (output, total_time)
-}
-
-#[macro_export]
-macro_rules! log_duration {
-    ($args: expr) => {{
-        let (output, duration) = $crate::time_fn_call(|| $args);
-        tracing::debug!(
-            "at {}:{}\n-- executed expression --\n{}\n -- duration: {} secs --",
-            file!(),
-            line!(),
-            stringify!($args),
-            duration
-        );
-        output
-    }};
-}
-
-#[macro_export]
-macro_rules! log_duration_async {
-    ($args: expr) => {{
-        let (output, duration) = $crate::time_fn_call_async({ $args }).await;
-        tracing::debug!(
-            "at {}:{}\n-- executed async expression --\n{}\n -- duration: {} secs --",
-            file!(),
-            line!(),
-            stringify!($args),
-            duration
-        );
-        output
-    }};
 }
 
 /// Converts a UTC millisecond timestamp (millis since 1970 UTC) into

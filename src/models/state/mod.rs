@@ -1186,7 +1186,7 @@ impl GlobalState {
             Ok(())
         }
 
-        crate::log_duration_async!(store_block_internal_worker(
+        crate::macros::duration_async_info!(store_block_internal_worker(
             self,
             new_block,
             coinbase_utxo_info
