@@ -392,7 +392,7 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "latest block timestamp: {}",
             dashifnotset!(data.block_header.as_ref().map(|bh| {
-                neptune_core::utc_timestamp_to_localtime(bh.timestamp.value()).to_string()
+                neptune_core::utc_timestamp_to_localtime(bh.timestamp.0.value()).to_string()
             })),
         ));
 
