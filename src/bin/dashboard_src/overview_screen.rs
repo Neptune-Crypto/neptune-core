@@ -1,4 +1,5 @@
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::prelude::twenty_first;
 
 use std::net::SocketAddr;
 use std::time::SystemTime;
@@ -14,6 +15,7 @@ use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
+use neptune_core::models::blockchain::shared::Hash;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::{
@@ -23,6 +25,7 @@ use ratatui::{
 };
 use tarpc::context;
 use tokio::{select, task::JoinHandle, time};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
@@ -388,6 +391,12 @@ impl Widget for OverviewScreen {
         lines.push(format!("synchronizing: {}", data.syncing));
 
         lines.push(format!("mining: {}", dashifnotset!(data.is_mining)));
+
+        let tip_digest = data.block_header.as_ref().map(Hash::hash);
+        lines.push(format!(
+            "tip digest:\n{}\n\n",
+            dashifnotset!(tip_digest),
+        ));
 
         lines.push(format!(
             "latest block timestamp: {}",
