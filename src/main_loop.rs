@@ -24,7 +24,6 @@ use tokio::task::JoinHandle;
 use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
-use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
@@ -413,7 +412,7 @@ impl MainLoopHandler {
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
-                            new_block.hash().emojihash(),
+                            new_block.hash(),
                             new_block.kernel.header.height,
                             new_block.kernel.header.timestamp.standard_format()
                         );
@@ -773,7 +772,7 @@ impl MainLoopHandler {
         info!(
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
             chosen_peer,
-            current_block_hash.emojihash(),
+            current_block_hash,
             current_block_height
         );
         self.main_to_peer_broadcast_tx

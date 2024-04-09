@@ -21,7 +21,6 @@ use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
@@ -433,7 +432,7 @@ impl WalletState {
                 let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",
-                    new_block.hash().emojihash(),
+                    new_block.hash(),
                     new_block.kernel.header.height,
                     utxo.coins
                         .iter()
@@ -704,7 +703,7 @@ impl WalletState {
                 wallet_status.synced_unspent_timelocked_amount(timestamp),
                 wallet_status.unsynced_unspent.len(),
                 wallet_status.unsynced_unspent_amount(),
-                tip_digest.emojihash());
+                tip_digest);
         }
 
         let mut ret: Vec<(Utxo, LockScript, MsMembershipProof)> = vec![];
