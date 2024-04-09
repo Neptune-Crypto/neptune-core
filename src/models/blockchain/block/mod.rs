@@ -578,7 +578,6 @@ mod block_tests {
         util_types::mutator_set::archival_mmr::ArchivalMmr,
     };
     use strum::IntoEnumIterator;
-    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
 
@@ -644,13 +643,11 @@ mod block_tests {
             genesis_block.kernel
                 .body
                 .mutator_set_accumulator
-                .hash()
-                .emojihash(),
+                .hash(),
                 block_1.kernel
                     .body
                     .mutator_set_accumulator
                     .hash()
-                    .emojihash()
         );
 
         // Sanity checks
@@ -798,7 +795,7 @@ mod block_tests {
             last_block_mmra
                 .get_peaks()
                 .iter()
-                .map(|d| d.emojihash())
+                .map(|d| d)
                 .join(","),
             last_block_mmra.get_peaks().len(),
             last_block_mmra.count_leaves(),
@@ -806,7 +803,7 @@ mod block_tests {
             membership_proof
                 .authentication_path
                 .iter()
-                .map(|d| d.emojihash())
+                .map(|d| d)
                 .join(","),
             blocks.len(),
             membership_proof.leaf_index

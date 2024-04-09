@@ -24,7 +24,6 @@ use triton_vm::prelude::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -446,11 +445,11 @@ impl Transaction {
                 );
                 debug!(
                     "witness mutator set hash: {}",
-                    primitive_witness.mutator_set_accumulator.hash().emojihash()
+                    primitive_witness.mutator_set_accumulator.hash()
                 );
                 debug!(
                     "kernel mutator set hash: {}",
-                    self.kernel.mutator_set_hash.emojihash()
+                    self.kernel.mutator_set_hash
                 );
                 return false;
             }
@@ -505,7 +504,7 @@ impl Transaction {
             {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",
-                    type_script_hash.emojihash(),
+                    type_script_hash,
                     e
                 );
                 return false;
@@ -545,14 +544,14 @@ impl Transaction {
                 "observed: {}",
                 witnessed_removal_record_hashes
                     .iter()
-                    .map(|d| d.emojihash())
+                    .map(|d| d)
                     .join(",")
             );
             warn!(
                 "listed: {}",
                 listed_removal_record_hashes
                     .iter()
-                    .map(|d| d.emojihash())
+                    .map(|d| d)
                     .join(",")
             );
             return false;
@@ -565,11 +564,11 @@ impl Transaction {
             warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
             debug!(
                 "Transaction mutator set hash: {}",
-                self.kernel.mutator_set_hash.emojihash()
+                self.kernel.mutator_set_hash
             );
             debug!(
                 "Witness mutator set hash: {}",
-                primitive_witness.mutator_set_accumulator.hash().emojihash()
+                primitive_witness.mutator_set_accumulator.hash()
             );
             return false;
         }

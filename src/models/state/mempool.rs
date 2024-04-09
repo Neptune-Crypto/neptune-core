@@ -412,7 +412,6 @@ mod tests {
     use num_bigint::BigInt;
     use num_traits::Zero;
     use rand::{random, rngs::StdRng, thread_rng, Rng, SeedableRng};
-    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
     use tracing::debug;
     use tracing_test::traced_test;
 
@@ -688,7 +687,7 @@ mod tests {
 
         debug!(
             "mempool now has transaction relative to mutator set hash {}",
-            tx_by_other_updated.kernel.mutator_set_hash.emojihash()
+            tx_by_other_updated.kernel.mutator_set_hash
         );
 
         let (block_3_with_no_input, _, _) =
@@ -702,7 +701,6 @@ mod tests {
                 .body
                 .mutator_set_accumulator
                 .hash()
-                .emojihash()
         );
         debug!(
             "Just made block with next mutator set hash {}",
@@ -711,12 +709,11 @@ mod tests {
                 .body
                 .mutator_set_accumulator
                 .hash()
-                .emojihash()
         );
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
-            tx_by_other_updated.kernel.mutator_set_hash.emojihash()
+            tx_by_other_updated.kernel.mutator_set_hash
         );
         block_3_with_updated_tx
             .accumulate_transaction(

@@ -146,8 +146,7 @@ mod tests {
     };
     use triton_vm::prelude::{Digest, NonDeterminism};
     use twenty_first::{
-        shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH},
-        util_types::emojihash_trait::Emojihash,
+        shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH}
     };
 
     use super::*;
@@ -242,8 +241,8 @@ mod tests {
             tasm_digests,
             rust_digests,
             "\ntasm: ({})\nrust: ({})",
-            tasm_digests.iter().map(|d| d.emojihash()).join(", "),
-            rust_digests.iter().map(|d| d.emojihash()).join(", ")
+            tasm_digests.iter().map(|d| d).join(", "),
+            rust_digests.iter().map(|d| d).join(", ")
         );
     }
 }

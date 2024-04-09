@@ -41,7 +41,6 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use self::primitive_witness::SaltedUtxos;
 
@@ -279,7 +278,6 @@ fn create_block_transaction(
             .body
             .mutator_set_accumulator
             .hash()
-            .emojihash()
     );
 
     // Merge incoming transactions with the coinbase transaction
@@ -420,7 +418,7 @@ pub async fn mine(
                 let now = Timestamp::now();
                 assert!(new_block_info.block.is_valid(&latest_block, now), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
-                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_info.block.kernel.header.height, new_block_info.block.hash().emojihash());
+                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_info.block.kernel.header.height, new_block_info.block.hash());
 
                 latest_block = *new_block_info.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;

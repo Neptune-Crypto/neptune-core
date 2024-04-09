@@ -7,7 +7,6 @@ use memmap2::MmapOptions;
 use num_traits::Zero;
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
@@ -544,9 +543,8 @@ impl ArchivalState {
                 .await
                 .unwrap_or_else(
                     || panic!(
-                        "Cannot get block header from digest, even though digest was fetched from height. Digest: {}/{}",
-                        child_digest,
-                        child_digest.emojihash()
+                        "Cannot get block header from digest, even though digest was fetched from height. Digest: {}",
+                        child_digest
                     )
                 );
             if child_header.prev_block_digest == parent_block_digest {
@@ -568,16 +566,14 @@ impl ArchivalState {
             .await
             .unwrap_or_else(|| {
                 panic!(
-                    "Could not get block header by digest: {}/{}",
-                    block_digest,
-                    block_digest.emojihash()
+                    "Could not get block header by digest: {}",
+                    block_digest
                 )
             });
         let tip_header = self.get_block_header(tip_digest).await.unwrap_or_else(|| {
             panic!(
-                "Could not get block header by digest: {}/{}",
-                tip_digest,
-                tip_digest.emojihash()
+                "Could not get block header by digest: {}",
+                tip_digest
             )
         });
 
