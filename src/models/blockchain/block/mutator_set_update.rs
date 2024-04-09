@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util_types::mutator_set::{
     addition_record::AdditionRecord, mutator_set_accumulator::MutatorSetAccumulator,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+    removal_record::RemovalRecord,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -42,12 +42,9 @@ impl MutatorSetUpdate {
         let mut cloned_removals = self.removals.clone();
         let mut applied_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
         for addition_record in self.additions.iter() {
-            RemovalRecord::batch_update_from_addition(
-                &mut applied_removal_records,
-                &mut ms_accumulator.kernel,
-            );
+            RemovalRecord::batch_update_from_addition(&mut applied_removal_records, ms_accumulator);
 
-            RemovalRecord::batch_update_from_addition(removal_records, &mut ms_accumulator.kernel);
+            RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);
 
             ms_accumulator.add(addition_record);
         }

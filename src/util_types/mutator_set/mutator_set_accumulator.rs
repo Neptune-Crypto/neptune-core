@@ -1,8 +1,15 @@
+use std::collections::HashMap;
+
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
+use itertools::Itertools;
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
+use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::DIGEST_LENGTH;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -10,76 +17,341 @@ use twenty_first::util_types::{
     algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
 };
 
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
+use super::get_swbf_indices;
+use super::removal_record::AbsoluteIndexSet;
+use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE};
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
-    ms_membership_proof::MsMembershipProof, mutator_set_kernel::MutatorSetKernel,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+    ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct MutatorSetAccumulator {
-    pub kernel: MutatorSetKernel<MmrAccumulator<Hash>>,
-}
-
-impl MutatorSetAccumulator {
-    pub fn new() -> Self {
-        let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
-            swbf_active: ActiveWindow::new(),
-        };
-
-        Self {
-            kernel: set_commitment,
-        }
-    }
+    pub aocl: MmrAccumulator<Hash>,
+    pub swbf_inactive: MmrAccumulator<Hash>,
+    pub swbf_active: ActiveWindow,
 }
 
 impl Default for MutatorSetAccumulator {
     fn default() -> Self {
-        let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
+        Self {
             aocl: MmrAccumulator::new(vec![]),
             swbf_inactive: MmrAccumulator::new(vec![]),
-            swbf_active: ActiveWindow::new(),
-        };
-
-        Self {
-            kernel: set_commitment,
+            swbf_active: Default::default(),
         }
     }
 }
 
-impl MutatorSet for MutatorSetAccumulator {
-    fn prove(
-        &mut self,
+impl MutatorSetAccumulator {
+    pub fn new(
+        aocl: &[Digest],
+        aocl_leaf_count: u64,
+        swbf_inactive: &[Digest],
+        swbf_active: &ActiveWindow,
+    ) -> Self {
+        let swbf_inactive_leaf_count = aocl_leaf_count / (BATCH_SIZE as u64);
+        Self {
+            aocl: MmrAccumulator::init(aocl.to_vec(), aocl_leaf_count),
+            swbf_inactive: MmrAccumulator::init(swbf_inactive.to_vec(), swbf_inactive_leaf_count),
+            swbf_active: swbf_active.clone(),
+        }
+    }
+
+    /// Helper function. Like `add` but also returns the chunk that
+    /// was added to the inactive SWBF if the window slid (and None
+    /// otherwise) since this is needed by the archival version of
+    /// the mutator set.
+    pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
+        // Notice that `add` cannot return a membership proof since `add` cannot know the
+        // randomness that was used to create the commitment. This randomness can only be know
+        // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
+        // track of the mutator set.
+
+        // add to list
+        let item_index = self.aocl.count_leaves();
+        self.aocl
+            .append(addition_record.canonical_commitment.to_owned()); // ignore auth path
+
+        if !Self::window_slides(item_index) {
+            return None;
+        }
+
+        // if window slides, update filter
+        // First update the inactive part of the SWBF, the SWBF MMR
+        let new_chunk: Chunk = self.swbf_active.slid_chunk();
+        let chunk_digest: Digest = Hash::hash(&new_chunk);
+        let new_chunk_index = self.swbf_inactive.count_leaves();
+        self.swbf_inactive.append(chunk_digest); // ignore auth path
+
+        // Then move window to the right, equivalent to moving values
+        // inside window to the left.
+        self.swbf_active.slide_window();
+
+        // Return the chunk that was added to the inactive part of the SWBF.
+        // This chunk is needed by the Archival mutator set. The Regular
+        // mutator set can ignore it.
+        Some((new_chunk_index, new_chunk))
+    }
+
+    /// Return the batch index for the latest addition to the mutator set
+    pub fn get_batch_index(&self) -> u64 {
+        match self.aocl.count_leaves() {
+            0 => 0,
+            n => (n - 1) / BATCH_SIZE as u64,
+        }
+    }
+
+    /// Remove a record and return the chunks that have been updated in this process,
+    /// after applying the update. Does not mutate the removal record.
+    pub fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
+        let batch_index = self.get_batch_index();
+        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+
+        // insert all indices
+        let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
+        let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
+            removal_record.get_chunkidx_to_indices_dict();
+
+        for (chunk_index, indices) in chunkindices_to_indices_dict {
+            if chunk_index >= batch_index {
+                // index is in the active part, so insert it in the active part of the Bloom filter
+                for index in indices {
+                    let relative_index = (index - active_window_start) as u32;
+                    self.swbf_active.insert(relative_index);
+                }
+
+                continue;
+            }
+
+            // If chunk index is not in the active part, insert the index into the relevant chunk
+            let new_target_chunks_clone = new_target_chunks.clone();
+            let relevant_chunk = new_target_chunks
+                .dictionary
+                .get_mut(&chunk_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
+                        new_target_chunks_clone.dictionary,
+                        self.aocl.count_leaves(),
+                        batch_index,
+                        removal_record
+                    )
+                });
+            for index in indices {
+                let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                relevant_chunk.1.insert(relative_index);
+            }
+        }
+
+        // update mmr
+        // to do this, we need to keep track of all membership proofs
+        let all_mmr_membership_proofs = new_target_chunks
+            .dictionary
+            .values()
+            .map(|(p, _c)| p.to_owned());
+        let all_leafs = new_target_chunks
+            .dictionary
+            .values()
+            .map(|(_p, chunk)| Hash::hash(chunk));
+        let mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
+            all_mmr_membership_proofs.zip(all_leafs).collect();
+
+        // If we want to update the membership proof with this removal, we
+        // could use the below function.
+        self.swbf_inactive
+            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
+
+        new_target_chunks
+            .dictionary
+            .into_iter()
+            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
+            .collect()
+    }
+
+    /// Check if a removal record can be applied to a mutator set. Returns false if either
+    /// the MMR membership proofs are unsynced, or if all its indices are already set.
+    pub fn can_remove(&self, removal_record: &RemovalRecord) -> bool {
+        let mut have_absent_index = false;
+        if !removal_record.validate(self) {
+            return false;
+        }
+
+        for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+            // determine if inserted index lives in active window
+            let active_window_start =
+                (self.aocl.count_leaves() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
+            if inserted_index < active_window_start {
+                let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
+                if let Some((_mmr_mp, chunk)) = removal_record
+                    .target_chunks
+                    .dictionary
+                    .get(&inserted_index_chunkidx)
+                {
+                    let relative_index = (inserted_index % CHUNK_SIZE as u128) as u32;
+                    if !chunk.contains(relative_index) {
+                        have_absent_index = true;
+                        break;
+                    }
+                }
+            } else {
+                let relative_index = (inserted_index - active_window_start) as u32;
+                if !self.swbf_active.contains(relative_index) {
+                    have_absent_index = true;
+                    break;
+                }
+            }
+        }
+
+        have_absent_index
+    }
+}
+
+impl MutatorSetAccumulator {
+    /// Generates a membership proof that will the valid when the item
+    /// is added to the mutator set.
+    pub fn prove(
+        &self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
-        self.kernel
-            .prove(item, sender_randomness, receiver_preimage)
+        // compute commitment
+        let item_commitment = Hash::hash_pair(item, sender_randomness);
+
+        // simulate adding to commitment list
+        let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
+        let target_chunks: ChunkDictionary = ChunkDictionary::default();
+
+        // return membership proof
+        MsMembershipProof {
+            sender_randomness: sender_randomness.to_owned(),
+            receiver_preimage: receiver_preimage.to_owned(),
+            auth_path_aocl,
+            target_chunks,
+        }
     }
 
-    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
-        self.kernel.verify(item, membership_proof)
+    pub fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
+        // If data index does not exist in AOCL, return false
+        // This also ensures that no "future" indices will be
+        // returned from `get_indices`, so we don't have to check for
+        // future indices in a separate check.
+        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
+            return false;
+        }
+
+        // verify that a commitment to the item lives in the aocl mmr
+        let leaf = Hash::hash_pair(
+            Hash::hash_pair(item, membership_proof.sender_randomness),
+            Hash::hash_pair(
+                membership_proof.receiver_preimage,
+                Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+            ),
+        );
+        let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
+            &self.aocl.get_peaks(),
+            leaf,
+            self.aocl.count_leaves(),
+        );
+        if !is_aocl_member {
+            return false;
+        }
+
+        // verify that some indices are not present in the swbf
+        let mut has_absent_index = false;
+        let mut entries_in_dictionary = true;
+        let mut all_auth_paths_are_valid = true;
+
+        // prepare parameters of inactive part
+        let current_batch_index: u64 = self.get_batch_index();
+        let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
+
+        // Get all bloom filter indices
+        let all_indices = AbsoluteIndexSet::new(&get_swbf_indices(
+            item,
+            membership_proof.sender_randomness,
+            membership_proof.receiver_preimage,
+            membership_proof.auth_path_aocl.leaf_index,
+        ));
+
+        let chunkidx_to_indices_dict = indices_to_hash_map(&all_indices.to_array());
+        'outer: for (chunk_index, indices) in chunkidx_to_indices_dict.into_iter() {
+            if chunk_index < current_batch_index {
+                // verify mmr auth path
+                if !membership_proof
+                    .target_chunks
+                    .dictionary
+                    .contains_key(&chunk_index)
+                {
+                    entries_in_dictionary = false;
+                    break 'outer;
+                }
+
+                let mp_and_chunk: &(MmrMembershipProof<Hash>, Chunk) = membership_proof
+                    .target_chunks
+                    .dictionary
+                    .get(&chunk_index)
+                    .unwrap();
+                let (valid_auth_path, _) = mp_and_chunk.0.verify(
+                    &self.swbf_inactive.get_peaks(),
+                    Hash::hash(&mp_and_chunk.1),
+                    self.swbf_inactive.count_leaves(),
+                );
+
+                all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
+
+                'inner_inactive: for index in indices {
+                    let index_within_chunk = index % CHUNK_SIZE as u128;
+                    if !mp_and_chunk.1.contains(index_within_chunk as u32) {
+                        has_absent_index = true;
+                        break 'inner_inactive;
+                    }
+                }
+            } else {
+                // indices are in active window
+                'inner_active: for index in indices {
+                    let relative_index = index - window_start;
+                    if !self.swbf_active.contains(relative_index as u32) {
+                        has_absent_index = true;
+                        break 'inner_active;
+                    }
+                }
+            }
+        }
+
+        // return verdict
+        is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_absent_index
     }
 
-    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
-        self.kernel.drop(item, membership_proof)
+    /// Generates a removal record with which to update the set commitment.
+    pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
+        let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices(
+            item,
+            membership_proof.sender_randomness,
+            membership_proof.receiver_preimage,
+            membership_proof.auth_path_aocl.leaf_index,
+        ));
+
+        RemovalRecord {
+            absolute_indices: indices,
+            target_chunks: membership_proof.target_chunks.clone(),
+        }
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord) {
-        self.kernel.add_helper(addition_record);
+    pub fn add(&mut self, addition_record: &AdditionRecord) {
+        self.add_helper(addition_record);
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord) {
-        self.kernel.remove_helper(removal_record);
+    pub fn remove(&mut self, removal_record: &RemovalRecord) {
+        self.remove_helper(removal_record);
     }
 
-    fn hash(&self) -> Digest {
-        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = Hash::hash(&self.kernel.swbf_active);
+    pub fn hash(&self) -> Digest {
+        let aocl_mmr_bagged = self.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
+        let active_swbf_bagged = Hash::hash(&self.swbf_active);
         let default = Digest::default();
 
         Hash::hash_pair(
@@ -88,31 +360,147 @@ impl MutatorSet for MutatorSetAccumulator {
         )
     }
 
-    fn batch_remove(
+    /// Apply a bunch of removal records. Return a hashmap of
+    /// { chunk index => updated_chunk }.
+    pub fn batch_remove(
         &mut self,
-        removal_records: Vec<RemovalRecord>,
+        mut removal_records: Vec<RemovalRecord>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof],
-    ) {
-        self.kernel
-            .batch_remove(removal_records, preserved_membership_proofs);
+    ) -> HashMap<u64, Chunk> {
+        {
+            let batch_index = self.get_batch_index();
+            let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+
+            // Collect all indices that that are set by the removal records
+            let all_removal_records_indices: Vec<u128> = removal_records
+                .iter()
+                .map(|x| x.absolute_indices.to_vec())
+                .concat();
+
+            // Loop over all indices from removal records in order to create a mapping
+            // {chunk index => chunk mutation } where "chunk mutation" has the type of
+            // `Chunk` but only represents the values which are set by the removal records
+            // being handled.
+            let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
+            all_removal_records_indices.iter().for_each(|index| {
+                if *index >= active_window_start {
+                    let relative_index = (index - active_window_start) as u32;
+                    self.swbf_active.insert(relative_index);
+                } else {
+                    chunkidx_to_chunk_difference_dict
+                        .entry((index / CHUNK_SIZE as u128) as u64)
+                        .or_insert_with(Chunk::empty_chunk)
+                        .insert((*index % CHUNK_SIZE as u128) as u32);
+                }
+            });
+
+            // Collect all affected chunks as they look before these removal records are applied
+            // These chunks are part of the removal records, so we fetch them there.
+            let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<Hash>)> =
+                HashMap::new();
+            for removal_record in removal_records.iter_mut() {
+                for (chunk_index, (mmr_mp, chunk)) in
+                    removal_record.target_chunks.dictionary.iter_mut()
+                {
+                    let chunk_hash = Hash::hash(chunk);
+                    let prev_val =
+                        mutation_data_preimage.insert(*chunk_index, (chunk, mmr_mp.to_owned()));
+
+                    // Sanity check that all removal records agree on both chunks and MMR membership
+                    // proofs.
+                    if let Some((chnk, mm)) = prev_val {
+                        assert!(mm == *mmr_mp && chunk_hash == Hash::hash(chnk))
+                    }
+                }
+            }
+
+            // Apply the removal records: the new chunk is obtained by adding the chunk difference
+            for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
+                **chunk = chunk
+                    .clone()
+                    .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone())
+                    .clone();
+            }
+
+            // Set the chunk values in the membership proofs that we want to preserve to the
+            // newly calculated chunk values.
+            // This is done by looping over all membership proofs and checking if they contain
+            // any of the chunks that are affected by the removal records.
+            for mp in preserved_membership_proofs.iter_mut() {
+                for (chunk_index, (_, chunk)) in mp.target_chunks.dictionary.iter_mut() {
+                    if mutation_data_preimage.contains_key(chunk_index) {
+                        *chunk = mutation_data_preimage[chunk_index].0.to_owned();
+                    }
+                }
+            }
+
+            // Calculate the digests of the affected leafs in the inactive part of the sliding-window
+            // Bloom filter such that we can apply a batch-update operation to the MMR through which
+            // this part of the Bloom filter is represented.
+            let swbf_inactive_mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
+                mutation_data_preimage
+                    .into_values()
+                    .map(|x| (x.1, Hash::hash(x.0)))
+                    .collect();
+
+            // Create a vector of pointers to the MMR-membership part of the mutator set membership
+            // proofs that we want to preserve. This is used as input to a batch-call to the
+            // underlying MMR.
+            let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<Hash>> =
+                preserved_membership_proofs
+                    .iter_mut()
+                    .flat_map(|x| {
+                        x.target_chunks
+                            .dictionary
+                            .iter_mut()
+                            .map(|y| &mut y.1 .0)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+
+            // Apply the batch-update to the inactive part of the sliding window Bloom filter.
+            // This updates both the inactive part of the SWBF and the MMR membership proofs
+            self.swbf_inactive.batch_mutate_leaf_and_update_mps(
+                &mut preseved_mmr_membership_proofs,
+                swbf_inactive_mutation_data,
+            );
+
+            chunkidx_to_chunk_difference_dict
+        }
+    }
+
+    /// Determine if the window slides before absorbing an item,
+    /// given the index of the to-be-added item.
+    pub fn window_slides(added_index: u64) -> bool {
+        added_index != 0 && added_index % BATCH_SIZE as u64 == 0
+
+        // example cases:
+        //  - index == 0 we don't care about
+        //  - index == 1 does not generate a slide
+        //  - index == n * BATCH_SIZE generates a slide for any n
+    }
+
+    pub fn window_slides_back(removed_index: u64) -> bool {
+        Self::window_slides(removed_index)
     }
 }
 
 #[cfg(test)]
 mod ms_accumulator_tests {
     use crate::util_types::{
-        mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
+        mutator_set::{
+            commit,
+            shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
+        },
         test_shared::mutator_set::*,
     };
     use itertools::{izip, Itertools};
     use rand::{thread_rng, Rng};
 
-    use crate::util_types::mutator_set::mutator_set_trait::commit;
-
     use super::*;
 
-    #[test]
-    fn mutator_set_batch_remove_accumulator_test() {
+    #[tokio::test]
+    async fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let mut membership_proofs: Vec<MsMembershipProof> = vec![];
@@ -129,7 +517,7 @@ mod ms_accumulator_tests {
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &accumulator.kernel,
+                &accumulator,
                 &addition_record,
             )
             .expect("MS membership update must work");
@@ -173,8 +561,8 @@ mod ms_accumulator_tests {
         }
     }
 
-    #[test]
-    fn mutator_set_accumulator_pbt() {
+    #[tokio::test]
+    async fn mutator_set_accumulator_pbt() {
         // This tests verifies that items can be added and removed from the mutator set
         // without assuming anything about the order of the adding and removal. It also
         // verifies that the membership proofs handled through an mutator set accumulator
@@ -185,9 +573,9 @@ mod ms_accumulator_tests {
         // lot of code duplication that is avoided by doing that.
 
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let mut rms_after = empty_rusty_mutator_set();
+        let mut rms_after = empty_rusty_mutator_set().await;
         let archival_after_remove = rms_after.ams_mut();
-        let mut rms_before = empty_rusty_mutator_set();
+        let mut rms_before = empty_rusty_mutator_set().await;
         let archival_before_remove = rms_before.ams_mut();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
@@ -207,7 +595,7 @@ mod ms_accumulator_tests {
                 let new_commitment = accumulator.hash();
                 assert_eq!(
                     new_commitment,
-                    archival_after_remove.hash(),
+                    archival_after_remove.hash().await,
                     "Commitment to archival/accumulator MS must agree"
                 );
                 match last_ms_commitment {
@@ -234,7 +622,7 @@ mod ms_accumulator_tests {
                     let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &accumulator.kernel,
+                        &accumulator,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
@@ -248,8 +636,8 @@ mod ms_accumulator_tests {
                     }
 
                     accumulator.add(&addition_record);
-                    archival_after_remove.add(&addition_record);
-                    archival_before_remove.add(&addition_record);
+                    archival_after_remove.add(&addition_record).await;
+                    archival_before_remove.add(&addition_record).await;
 
                     let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);
@@ -297,7 +685,7 @@ mod ms_accumulator_tests {
 
                     // generate removal record
                     let removal_record: RemovalRecord = accumulator.drop(removal_item, &removal_mp);
-                    assert!(removal_record.validate(&accumulator.kernel));
+                    assert!(removal_record.validate(&accumulator));
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
@@ -322,14 +710,18 @@ mod ms_accumulator_tests {
                     assert!(accumulator.verify(removal_item, &removal_mp));
                     let removal_record_copy = removal_record.clone();
                     accumulator.remove(&removal_record);
-                    archival_after_remove.remove(&removal_record);
+                    archival_after_remove.remove(&removal_record).await;
 
                     // Verify that removal record's indices are all set
                     for removed_index in removal_record.absolute_indices.to_vec() {
-                        assert!(archival_after_remove.bloom_filter_contains(removed_index));
+                        assert!(
+                            archival_after_remove
+                                .bloom_filter_contains(removed_index)
+                                .await
+                        );
                     }
 
-                    archival_before_remove.remove(&removal_record_copy);
+                    archival_before_remove.remove(&removal_record_copy).await;
                     assert!(!accumulator.verify(removal_item, &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
@@ -395,6 +787,7 @@ mod ms_accumulator_tests {
                             receiver_preimage,
                             mp_batch.auth_path_aocl.leaf_index,
                         )
+                        .await
                         .unwrap();
                     assert_eq!(arch_mp, mp_batch.to_owned());
 
@@ -425,7 +818,7 @@ mod ms_accumulator_tests {
             "profiling Mutator Set (w, b, s, k) = ({}, {}, {}, {}) ...",
             WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
         );
-        let mut msa = MutatorSetAccumulator::new();
+        let mut msa = MutatorSetAccumulator::default();
         let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
         let target_set_size = 100;
         let num_iterations = 10000;

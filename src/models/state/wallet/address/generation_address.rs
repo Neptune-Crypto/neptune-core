@@ -1,4 +1,5 @@
 use crate::prelude::{triton_vm, twenty_first};
+use crate::util_types::mutator_set::commit;
 
 use aead::Aead;
 use aead::KeyInit;
@@ -29,7 +30,6 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 

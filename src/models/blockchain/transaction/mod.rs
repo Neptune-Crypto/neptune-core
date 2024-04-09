@@ -35,7 +35,6 @@ use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(
@@ -95,16 +94,10 @@ impl Transaction {
         // Apply all addition records in the block
         for block_addition_record in block_addition_records {
             // Batch update block's removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(
-                &mut block_removal_records,
-                &mut msa_state.kernel,
-            );
+            RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
 
             // Batch update transaction's removal records
-            RemovalRecord::batch_update_from_addition(
-                &mut transaction_removal_records,
-                &mut msa_state.kernel,
-            );
+            RemovalRecord::batch_update_from_addition(&mut transaction_removal_records, &msa_state);
 
             // Batch update primitive witness membership proofs
             let membership_proofs = &mut primitive_witness
@@ -120,7 +113,7 @@ impl Transaction {
             MsMembershipProof::batch_update_from_addition(
                 membership_proofs,
                 &own_items,
-                &msa_state.kernel,
+                &msa_state,
                 &block_addition_record,
             )
             .expect("MS MP update from add must succeed in wallet handler");
@@ -405,12 +398,12 @@ impl Transaction {
         self.kernel
             .inputs
             .iter()
-            .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+            .all(|rr| rr.validate(mutator_set_accumulator))
     }
 
     /// Verify the transaction directly from the primitive witness, without proofs or
     /// decomposing into subclaims.
-    pub fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
+    pub async fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -614,7 +607,7 @@ mod witness_tests {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::empty(),
-            mutator_set_accumulator: MutatorSetAccumulator::new(),
+            mutator_set_accumulator: MutatorSetAccumulator::default(),
             kernel: empty_kernel,
         };
 
@@ -636,7 +629,7 @@ mod transaction_tests {
             blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
         },
         tests::shared::make_mock_transaction,
-        util_types::mutator_set::mutator_set_trait::commit,
+        util_types::mutator_set::commit,
     };
 
     #[traced_test]

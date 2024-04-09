@@ -19,7 +19,7 @@ use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
-use super::mutator_set_kernel::MutatorSetKernel;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
     NUM_TRIALS,
@@ -136,17 +136,17 @@ pub struct RemovalRecord {
 }
 
 impl RemovalRecord {
-    /// Update a batch of removal records that are synced to a given mutator set, given
-    /// that that mutator set will be updated with an addition. (The addition record
+    /// Update a batch of removal records that are synced to a given mutator set, in anticipation
+    /// of one addition to that mutator set. (The addition record
     /// does not matter; all necessary information is in the mutator set.)
-    pub fn batch_update_from_addition<MMR: Mmr<Hash>>(
+    pub fn batch_update_from_addition(
         removal_records: &mut [&mut Self],
-        mutator_set: &mut MutatorSetKernel<MMR>,
+        mutator_set: &MutatorSetAccumulator,
     ) {
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // if window does not slide, do nothing
-        if !MutatorSetKernel::<MMR>::window_slides(new_item_index) {
+        if !MutatorSetAccumulator::window_slides(new_item_index) {
             return;
         }
 
@@ -278,10 +278,7 @@ impl RemovalRecord {
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<M>) -> bool
-    where
-        M: Mmr<Hash>,
-    {
+    pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
         let peaks = mutator_set.swbf_inactive.get_peaks();
         self.target_chunks
             .dictionary
@@ -326,16 +323,16 @@ mod removal_record_tests {
     use rand::{thread_rng, Rng, RngCore};
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;
 
     fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
-        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
@@ -475,12 +472,12 @@ mod removal_record_tests {
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
-                    &mut accumulator.kernel,
+                    &accumulator,
                 );
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &accumulator.kernel,
+                    &accumulator,
                     &addition_record,
                 );
                 assert!(
@@ -494,12 +491,12 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&accumulator.kernel),
+                        removal_record.validate(&accumulator),
                         "removal records must validate, i = {}",
                         i
                     );
                     assert!(
-                        accumulator.kernel.can_remove(removal_record),
+                        accumulator.can_remove(removal_record),
                         "removal records must return true on `can_remove`, i = {}",
                         i
                     );
@@ -519,18 +516,18 @@ mod removal_record_tests {
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
             assert!(accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
             assert!(
-                accumulator.kernel.can_remove(random_removal_record),
+                accumulator.can_remove(random_removal_record),
                 "removal records must return true on `can_remove`",
             );
             assert!(
-                random_removal_record.validate(&accumulator.kernel),
+                random_removal_record.validate(&accumulator),
                 "removal record must have valid MMR MPs"
             );
             accumulator.remove(random_removal_record);
             assert!(!accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
 
             assert!(
-                !accumulator.kernel.can_remove(random_removal_record),
+                !accumulator.can_remove(random_removal_record),
                 "removal records must return false on `can_remove` after removal",
             );
         }
@@ -559,12 +556,12 @@ mod removal_record_tests {
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
-                &mut accumulator.kernel,
+                &accumulator,
             );
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &accumulator.kernel,
+                &accumulator,
                 &addition_record,
             );
             assert!(
@@ -578,12 +575,12 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator),
                     "removal records must validate, i = {}",
                     i
                 );
                 assert!(
-                    accumulator.kernel.can_remove(removal_record),
+                    accumulator.can_remove(removal_record),
                     "removal records must return true on `can_remove`, i = {}",
                     i
                 );
@@ -613,11 +610,11 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator),
                     "removal records must validate, i = {}",
                     i
                 );
-                assert!(accumulator.kernel.can_remove(removal_record));
+                assert!(accumulator.can_remove(removal_record));
             }
         }
 
@@ -626,10 +623,8 @@ mod removal_record_tests {
         assert!(original_first_removal_record
             .as_ref()
             .unwrap()
-            .validate(&accumulator.kernel));
-        assert!(!accumulator
-            .kernel
-            .can_remove(&original_first_removal_record.unwrap()));
+            .validate(&accumulator));
+        assert!(!accumulator.can_remove(&original_first_removal_record.unwrap()));
     }
 
     #[test]

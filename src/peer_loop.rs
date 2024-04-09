@@ -1226,7 +1226,7 @@ mod peer_loop_tests {
         let (peer_address1, instance_id1) =
             (peer_infos[1].connected_address, peer_infos[1].instance_id);
 
-        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2);
+        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2).await;
         let expected_response = vec![
             (peer_address0, instance_id0),
             (peer_address1, instance_id1),
@@ -1876,7 +1876,7 @@ mod peer_loop_tests {
 
         let mut global_state_mut = state_lock.lock_guard_mut().await;
 
-        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
+        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let genesis_block: Block = global_state_mut
             .chain
             .archival_state()
@@ -2277,7 +2277,7 @@ mod peer_loop_tests {
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
-        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
+        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
         let expected_peer_list_resp = vec![
             (
                 peer_infos[0].listen_address().unwrap(),
@@ -2366,7 +2366,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
@@ -2411,7 +2411,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),

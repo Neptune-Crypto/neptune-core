@@ -13,11 +13,11 @@ use tasm_lib::{
 };
 
 thread_local! {
-    pub(super) static PUB_INPUT: RefCell<Vec<BFieldElement>> = RefCell::new(vec![]);
-    pub(super) static PUB_OUTPUT: RefCell<Vec<BFieldElement>> = RefCell::new(vec![]);
+    pub(super) static PUB_INPUT: RefCell<Vec<BFieldElement>> = const {RefCell::new(vec![])};
+    pub(super) static PUB_OUTPUT: RefCell<Vec<BFieldElement>> = const { RefCell::new(vec![])};
 
-    pub(super) static ND_INDIVIDUAL_TOKEN: RefCell<Vec<BFieldElement>> = RefCell::new(vec![]);
-    pub(super) static ND_DIGESTS: RefCell<Vec<Digest>> = RefCell::new(vec![]);
+    pub(super) static ND_INDIVIDUAL_TOKEN: RefCell<Vec<BFieldElement>> = const{RefCell::new(vec![])};
+    pub(super) static ND_DIGESTS: RefCell<Vec<Digest>> = const{RefCell::new(vec![])};
     pub(super) static ND_MEMORY: RefCell<HashMap<BFieldElement, BFieldElement>> =
         RefCell::new(HashMap::default());
 

@@ -7,6 +7,8 @@
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
+pub mod locks;
+pub mod macros;
 pub mod main_loop;
 pub mod mine_loop;
 pub mod models;
@@ -39,12 +41,13 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 
-use crate::twenty_first::sync::{LockCallbackFn, LockEvent};
-use crate::util_types::sync::tokio as sync_tokio;
+use crate::locks::tokio as sync_tokio;
+use crate::locks::tokio::{LockCallbackFn, LockEvent};
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::PeerInfo;
@@ -242,6 +245,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                     state: rpc_state_lock.clone(),
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
+
                 channel.execute(server.serve()).for_each(spawn)
             })
             // Max 10 channels.

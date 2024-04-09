@@ -1,6 +1,19 @@
 use std::collections::HashMap;
 
+use super::{
+    active_window::ActiveWindow,
+    chunk::Chunk,
+    chunk_dictionary::ChunkDictionary,
+    get_swbf_indices,
+    mmra_and_membership_proofs::MmraAndMembershipProofs,
+    ms_membership_proof::MsMembershipProof,
+    mutator_set_accumulator::MutatorSetAccumulator,
+    removal_record::{AbsoluteIndexSet, RemovalRecord},
+    shared::{BATCH_SIZE, CHUNK_SIZE},
+};
+use crate::{util_types::mutator_set::commit, Hash};
 use itertools::Itertools;
+use proptest::collection::vec;
 use proptest::{
     arbitrary::Arbitrary,
     strategy::{BoxedStrategy, Strategy},
@@ -14,24 +27,6 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::{
-    models::blockchain::shared::Hash, util_types::mutator_set::mutator_set_trait::MutatorSet,
-};
-
-use super::{
-    active_window::ActiveWindow,
-    chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
-    mmra_and_membership_proofs::MmraAndMembershipProofs,
-    ms_membership_proof::MsMembershipProof,
-    mutator_set_accumulator::MutatorSetAccumulator,
-    mutator_set_kernel::{get_swbf_indices, MutatorSetKernel},
-    mutator_set_trait::commit,
-    removal_record::{AbsoluteIndexSet, RemovalRecord},
-    shared::{BATCH_SIZE, CHUNK_SIZE},
-};
-use proptest::collection::vec;
-
 #[derive(Debug, Clone)]
 pub struct MsaAndRecords {
     pub mutator_set_accumulator: MutatorSetAccumulator,
@@ -44,7 +39,7 @@ impl MsaAndRecords {
         let all_removal_records_can_remove = self
             .removal_records
             .iter()
-            .all(|rr| self.mutator_set_accumulator.kernel.can_remove(rr));
+            .all(|rr| self.mutator_set_accumulator.can_remove(rr));
         assert!(
             all_removal_records_can_remove,
             "Some removal records cannot be removed!"
@@ -255,11 +250,9 @@ impl Arbitrary for MsaAndRecords {
                                 arb::<ActiveWindow>()
                                     .prop_map(move |active_window| {
                                         let mutator_set_accumulator = MutatorSetAccumulator {
-                                            kernel: MutatorSetKernel {
                                                 aocl: aocl_mmra.clone(),
                                                 swbf_inactive: swbf_mmra.clone(),
                                                 swbf_active: active_window,
-                                            },
                                         };
 
                                         MsaAndRecords {

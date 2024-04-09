@@ -1,4 +1,7 @@
-use crate::prelude::twenty_first;
+use crate::{
+    prelude::twenty_first,
+    util_types::mutator_set::{addition_record::AdditionRecord, commit},
+};
 
 use anyhow::{bail, Result};
 use bytesize::ByteSize;
@@ -13,15 +16,12 @@ use std::{
 use tracing::{error, info, warn};
 use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
-use crate::{
-    models::{
-        blockchain::{
-            shared::Hash,
-            transaction::{utxo::Utxo, Transaction},
-        },
-        peer::InstanceId,
+use crate::models::{
+    blockchain::{
+        shared::Hash,
+        transaction::{utxo::Utxo, Transaction},
     },
-    util_types::mutator_set::{addition_record::AdditionRecord, mutator_set_trait::commit},
+    peer::InstanceId,
 };
 
 pub type Credibility = i32;

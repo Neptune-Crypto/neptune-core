@@ -18,23 +18,23 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::{
-    blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-    consensus::{tasm::program::ConsensusProgram, timestamp::Timestamp},
-};
 use crate::{
-    models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
+    models::{
+        blockchain::type_scripts::TypeScript, consensus::timestamp::Timestamp,
+        state::wallet::address::generation_address,
+    },
     util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
     },
 };
 use crate::{
-    util_types::mutator_set::{
-        msa_and_records::MsaAndRecords,
-        mutator_set_trait::{commit, MutatorSet},
+    models::{
+        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
+        consensus::tasm::program::ConsensusProgram,
     },
-    Hash,
+    util_types::mutator_set::commit,
 };
+use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
 
 use super::{
     transaction_kernel::TransactionKernel,

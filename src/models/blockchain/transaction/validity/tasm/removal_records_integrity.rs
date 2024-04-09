@@ -1,5 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
 
 use std::collections::HashSet;
 
@@ -39,10 +41,7 @@ use crate::{
             validity::tasm::transaction_kernel_mast_hash::TransactionKernelMastHash,
         },
     },
-    util_types::mutator_set::{
-        mutator_set_kernel::get_swbf_indices, mutator_set_trait::commit,
-        removal_record::AbsoluteIndexSet,
-    },
+    util_types::mutator_set::removal_record::AbsoluteIndexSet,
 };
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 
@@ -505,7 +504,7 @@ mod bench {
         let nondeterminism = NonDeterminism::default().with_ram(memory);
 
         bench_and_profile_program::<RemovalRecordsIntegrity>(
-            "tasm_neptune_transaction_removal_records_integrity".to_string(),
+            "tasm_neptune_transaction_removal_records_integrity",
             BenchmarkCase::CommonCase,
             &public_input,
             &nondeterminism,

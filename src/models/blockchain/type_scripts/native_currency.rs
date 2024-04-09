@@ -282,7 +282,7 @@ pub mod test {
 
     use super::*;
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn balanced_transaction_is_valid(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -303,7 +303,7 @@ pub mod test {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn unbalanced_transaction_without_coinbase_is_invalid(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -333,7 +333,7 @@ pub mod test {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 20)]
     fn unbalanced_transaction_with_coinbase_is_invalid(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,

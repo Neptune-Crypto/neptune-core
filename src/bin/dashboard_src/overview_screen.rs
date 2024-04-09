@@ -93,7 +93,7 @@ impl OverviewData {
             ram_used: Default::default(),
         }
     }
-    pub fn test() -> Self {
+    pub async fn test() -> Self {
         OverviewData {
             available_balance: Some(NeptuneCoins::zero()),
             timelocked_balance: Some(NeptuneCoins::zero()),

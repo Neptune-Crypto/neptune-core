@@ -3,8 +3,8 @@ use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-use crate::util_types::mutator_set::mutator_set_trait::commit;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 
 use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
@@ -67,17 +67,12 @@ impl RemovalRecordsIntegrityWitness {
             input_utxos: primitive_witness.input_utxos.utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
             kernel: primitive_witness.kernel.clone(),
-            aocl: primitive_witness
-                .mutator_set_accumulator
-                .kernel
-                .aocl
-                .clone(),
+            aocl: primitive_witness.mutator_set_accumulator.aocl.clone(),
             swbfi: primitive_witness
                 .mutator_set_accumulator
-                .kernel
                 .swbf_inactive
                 .clone(),
-            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.kernel.swbf_active),
+            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.swbf_active),
         }
     }
 }

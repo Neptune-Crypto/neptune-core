@@ -39,7 +39,7 @@ use self::block_header::{
 use self::block_height::BlockHeight;
 use self::block_kernel::BlockKernel;
 use self::mutator_set_update::MutatorSetUpdate;
-use self::transfer_block::TransferBlock;
+use self::transfer_block::{ProofType, TransferBlock};
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::validity::TransactionValidationLogic;
@@ -49,18 +49,23 @@ use super::type_scripts::time_lock::TimeLock;
 use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+
+/// All blocks have proofs except the genesis block
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+pub enum BlockType {
+    Genesis,
+    Standard(ProofType),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,
 
-    /// All blocks have proofs except:
-    ///  - the genesis block
-    ///  - blocks being generated
-    pub proof: Option<Proof>,
+    /// type of block: Genesis, or Standard
+    pub block_type: BlockType,
 }
 
 impl From<TransferBlock> for Block {
@@ -70,24 +75,24 @@ impl From<TransferBlock> for Block {
                 header: t_block.header,
                 body: t_block.body,
             },
-            proof: Some(t_block.proof),
+            block_type: BlockType::Standard(t_block.proof_type),
         }
     }
 }
 
 impl From<Block> for TransferBlock {
     fn from(block: Block) -> Self {
-        let proof = match block.proof {
-            Some(p) => p,
-            None => {
-                error!("In order to be transferred, a Block must have a non-None proof field.");
+        let proof_type = match block.block_type {
+            BlockType::Standard(pt) => pt,
+            BlockType::Genesis => {
+                error!("The Genesis block cannot be transferred");
                 panic!()
             }
         };
         Self {
             header: block.kernel.header,
             body: block.kernel.body,
-            proof,
+            proof_type,
         }
     }
 }
@@ -142,7 +147,7 @@ impl Block {
                 timestamp: network.launch_date(),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
-                mutator_set_hash: MutatorSetAccumulator::new().hash(),
+                mutator_set_hash: MutatorSetAccumulator::default().hash(),
             },
             witness: TransactionValidationLogic {
                 vast: ValidityTree {
@@ -197,7 +202,7 @@ impl Block {
             difficulty: MINIMUM_DIFFICULTY.into(),
         };
 
-        Self::new(header, body, None)
+        Self::new(header, body, BlockType::Genesis)
     }
 
     fn premine_distribution(
@@ -230,16 +235,30 @@ impl Block {
         utxos
     }
 
-    pub fn new(header: BlockHeader, body: BlockBody, proof: Option<Proof>) -> Self {
+    pub fn new(header: BlockHeader, body: BlockBody, block_type: BlockType) -> Self {
         Self {
             kernel: BlockKernel { body, header },
-            proof,
+            block_type,
         }
+    }
+
+    /// helper fn to generate a BlockType::Standard enum variant representing a standard Block (non-genesis).
+    ///
+    /// note: This consolidates creation of ProofType::Unimplemented
+    /// into one place, so that once all Proofs are implemented we
+    /// can easily remove ProofType::Unimplemented.  We will
+    /// still need to make this proof param non optional though.
+    pub fn mk_std_block_type(proof: Option<Proof>) -> BlockType {
+        let proof_type = match proof {
+            Some(p) => ProofType::Proof(p),
+            None => ProofType::Unimplemented,
+        };
+        BlockType::Standard(proof_type)
     }
 
     /// Merge a transaction into this block's transaction.
     /// The mutator set data must be valid in all inputs.
-    pub fn accumulate_transaction(
+    pub async fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
@@ -380,7 +399,6 @@ impl Block {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .kernel
                 .can_remove(removal_record)
             {
                 warn!("Removal record cannot be removed from mutator set");
@@ -550,21 +568,17 @@ mod block_tests {
 
     use crate::{
         config_models::network::Network,
+        database::storage::storage_schema::SimpleRustyStorage,
+        database::NeptuneLevelDb,
         models::{
             blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
+        util_types::mutator_set::archival_mmr::ArchivalMmr,
     };
     use strum::IntoEnumIterator;
-    use tasm_lib::twenty_first::{
-        storage::level_db::DB,
-        util_types::{
-            emojihash_trait::Emojihash,
-            mmr::archival_mmr::ArchivalMmr,
-            storage_schema::{SimpleRustyStorage, StorageWriter},
-        },
-    };
+    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
 
@@ -621,7 +635,9 @@ mod block_tests {
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
 
-        block_1.accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator);
+        block_1
+            .accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator)
+            .await;
         assert!(
             block_1.is_valid(&genesis_block, now + seven_months),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
@@ -733,19 +749,20 @@ mod block_tests {
         assert!(!block_1.is_valid(&genesis_block, now));
     }
 
-    #[test]
-    fn can_prove_block_ancestry() {
+    #[tokio::test]
+    async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let genesis_block = Block::genesis_block(network);
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
-        let db = DB::open_new_test_database(true, None, None, None).unwrap();
+        let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+            .await
+            .unwrap();
         let mut storage = SimpleRustyStorage::new(db);
-        storage.restore_or_new();
-        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0");
-        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage);
-        ammr.append(genesis_block.hash());
+        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
+        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
+        ammr.append(genesis_block.hash()).await;
         let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
 
         for i in 0..55 {
@@ -754,9 +771,12 @@ mod block_tests {
             let (new_block, _, _) =
                 make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
             if i != 54 {
-                ammr.append(new_block.hash());
+                ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());
-                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+                assert_eq!(
+                    ammr.to_accumulator_async().await.bag_peaks(),
+                    mmra.bag_peaks()
+                );
             }
             blocks.push(new_block);
         }
@@ -766,7 +786,7 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let (membership_proof, _) = ammr.prove_membership(index as u64);
+        let membership_proof = ammr.prove_membership_async(index as u64).await;
         let (v, _) = membership_proof.verify(
             &last_block_mmra.get_peaks(),
             block_digest,

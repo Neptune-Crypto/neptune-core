@@ -1,17 +1,16 @@
-use crate::prelude::twenty_first;
+use super::leveldb::DB;
 use anyhow::Result;
+use leveldb::{
+    batch::WriteBatch,
+    iterator::Iterable,
+    options::{Options, ReadOptions, WriteOptions},
+};
+use leveldb_sys::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
 use tokio::task;
-use twenty_first::leveldb::{
-    batch::WriteBatch,
-    iterator::Iterable,
-    options::{Options, ReadOptions, WriteOptions},
-};
-use twenty_first::leveldb_sys::Compression;
-use twenty_first::storage::level_db::DB;
 
 struct NeptuneLevelDbInternal<Key, Value>
 where
@@ -21,6 +20,20 @@ where
     database: DB,
     _key: PhantomData<Key>,
     _value: PhantomData<Value>,
+}
+
+impl<Key, Value> From<DB> for NeptuneLevelDbInternal<Key, Value>
+where
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
+{
+    fn from(database: DB) -> Self {
+        Self {
+            database,
+            _key: Default::default(),
+            _value: Default::default(),
+        }
+    }
 }
 
 impl<Key, Value> Clone for NeptuneLevelDbInternal<Key, Value>
@@ -88,18 +101,34 @@ where
         value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap())
     }
 
+    fn get_u8(&mut self, key: &[u8]) -> Option<Vec<u8>> {
+        self.database.get_u8(key).unwrap()
+    }
+
     fn put(&mut self, key: Key, value: Value) {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
         let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
         self.database.put(&key_bytes, &value_bytes).unwrap();
     }
 
-    fn batch_write(&mut self, entries: impl IntoIterator<Item = (Key, Value)>) {
+    fn put_u8(&mut self, key: &[u8], value: &[u8]) {
+        self.database.put_u8(key, value).unwrap()
+    }
+
+    fn batch_write(&mut self, entries: WriteBatchAsync<Key, Value>) {
         let batch = WriteBatch::new();
-        for (key, value) in entries.into_iter() {
-            let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
-            let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
-            batch.put(&key_bytes, &value_bytes);
+        for op in entries.0.into_iter() {
+            match op {
+                WriteBatchOpAsync::Write(key, value) => {
+                    let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
+                    let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
+                    batch.put(&key_bytes, &value_bytes);
+                }
+                WriteBatchOpAsync::Delete(key) => {
+                    let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
+                    batch.delete(&key_bytes);
+                }
+            }
         }
 
         self.database.write(&batch, true).unwrap();
@@ -208,6 +237,13 @@ where
         task::spawn_blocking(move || inner.get(key)).await.unwrap()
     }
 
+    pub async fn get_u8(&self, key: Vec<u8>) -> Option<Vec<u8>> {
+        let mut inner = self.0.clone();
+        task::spawn_blocking(move || inner.get_u8(&key))
+            .await
+            .unwrap()
+    }
+
     /// Set database value asynchronously
     pub async fn put(&mut self, key: Key, value: Value) {
         let mut inner = self.0.clone();
@@ -216,11 +252,15 @@ where
             .unwrap()
     }
 
+    pub async fn put_u8(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        let mut inner = self.0.clone();
+        task::spawn_blocking(move || inner.put_u8(&key, &value))
+            .await
+            .unwrap()
+    }
+
     /// Write database values as a batch asynchronously
-    pub async fn batch_write(
-        &mut self,
-        entries: impl IntoIterator<Item = (Key, Value)> + Send + Sync + 'static,
-    ) {
+    pub async fn batch_write(&mut self, entries: WriteBatchAsync<Key, Value>) {
         let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.batch_write(entries))
             .await
@@ -240,6 +280,76 @@ where
         let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.flush()).await.unwrap()
     }
+
+    /// returns the directory path of the database files on disk.
+    #[inline]
+    pub fn path(&self) -> &std::path::PathBuf {
+        self.0.database.path()
+    }
+}
+
+impl<Key, Value> NeptuneLevelDb<Key, Value>
+where
+    Key: Serialize + DeserializeOwned + Send + Sync + 'static,
+    Value: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    /// Creates and opens a test database
+    ///
+    /// The database will be created in the system
+    /// temp directory with prefix "test-db-" followed
+    /// by a random string.
+    ///
+    /// if destroy_db_on_drop is true, the database on-disk
+    /// files will be wiped when the DB struct is dropped.
+    pub async fn open_new_test_database(
+        destroy_db_on_drop: bool,
+        options: Option<Options>,
+        read_options: Option<ReadOptions>,
+        write_options: Option<WriteOptions>,
+    ) -> Result<Self> {
+        let options_async = options.map(OptionsAsync::from);
+
+        let db = task::spawn_blocking(move || {
+            DB::open_new_test_database(
+                destroy_db_on_drop,
+                options_async.map(|o| o.into()),
+                read_options,
+                write_options,
+            )
+        })
+        .await??;
+
+        Ok(Self(NeptuneLevelDbInternal::from(db)))
+    }
+
+    /// Opens an existing (test?) database, with auto-destroy option.
+    ///
+    /// if destroy_db_on_drop is true, the database on-disk
+    /// files will be wiped when the DB struct is dropped.
+    /// This is usually useful only for unit-test purposes.
+    pub async fn open_test_database(
+        db_path: &std::path::Path,
+        destroy_db_on_drop: bool,
+        options: Option<Options>,
+        read_options: Option<ReadOptions>,
+        write_options: Option<WriteOptions>,
+    ) -> Result<Self> {
+        let path = db_path.to_path_buf();
+        let options_async = options.map(OptionsAsync::from);
+
+        let db = task::spawn_blocking(move || {
+            DB::open_test_database(
+                &path,
+                destroy_db_on_drop,
+                options_async.map(|o| o.into()),
+                read_options,
+                write_options,
+            )
+        })
+        .await??;
+
+        Ok(Self(NeptuneLevelDbInternal::from(db)))
+    }
 }
 
 // We made this OptionsAsync struct because leveldb::options::Options cannot be
@@ -248,7 +358,7 @@ where
 // send this OptionsAsync between threads, which does not have a Cache field.
 //
 // todo:  add a cache_size option specified in bytes.
-struct OptionsAsync {
+pub(super) struct OptionsAsync {
     pub create_if_missing: bool,
     pub error_if_exists: bool,
     pub paranoid_checks: bool,
@@ -300,5 +410,37 @@ impl From<&OptionsAsync> for Options {
 impl From<OptionsAsync> for Options {
     fn from(o: OptionsAsync) -> Self {
         Self::from(&o)
+    }
+}
+
+#[derive(Debug, Clone)]
+enum WriteBatchOpAsync<K, V> {
+    // args: key, val
+    Write(K, V),
+
+    // args: key
+    Delete(K),
+}
+
+#[derive(Debug, Clone)]
+pub struct WriteBatchAsync<K, V>(Vec<WriteBatchOpAsync<K, V>>);
+
+impl<K, V> WriteBatchAsync<K, V> {
+    pub fn new() -> Self {
+        Self(vec![])
+    }
+
+    pub fn op_write(&mut self, key: K, value: V) {
+        self.0.push(WriteBatchOpAsync::Write(key, value));
+    }
+
+    pub fn op_delete(&mut self, key: K) {
+        self.0.push(WriteBatchOpAsync::Delete(key));
+    }
+}
+
+impl<K, V> Default for WriteBatchAsync<K, V> {
+    fn default() -> Self {
+        Self::new()
     }
 }
