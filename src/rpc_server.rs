@@ -505,6 +505,11 @@ impl RPC for NeptuneRPCServer {
         let utxo = Utxo::new(address.lock_script(), coins);
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
+        // note: for future changes:
+        // No consensus data should be read within this read-lock.
+        // Else a write lock must be used instead and held until
+        // create_transaction() completes, so entire op is atomic.
+        // See: https://github.com/Neptune-Crypto/neptune-core/issues/134
         let state = self.state.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
         let receiver_privacy_digest = address.privacy_digest;
@@ -545,6 +550,8 @@ impl RPC for NeptuneRPCServer {
                 .await;
         }
 
+        // All cryptographic data must be in relation to a single block
+        // and a write-lock must therefore be held over GlobalState to ensure this.
         let transaction_result = self
             .state
             .lock_guard_mut()
