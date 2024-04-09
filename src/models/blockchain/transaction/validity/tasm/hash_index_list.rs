@@ -241,8 +241,8 @@ mod tests {
             tasm_digests,
             rust_digests,
             "\ntasm: ({})\nrust: ({})",
-            tasm_digests.iter().map(|d| d).join(", "),
-            rust_digests.iter().map(|d| d).join(", ")
+            tasm_digests.iter().join(", "),
+            rust_digests.iter().join(", ")
         );
     }
 }

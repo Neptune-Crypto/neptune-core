@@ -544,14 +544,12 @@ impl Transaction {
                 "observed: {}",
                 witnessed_removal_record_hashes
                     .iter()
-                    .map(|d| d)
                     .join(",")
             );
             warn!(
                 "listed: {}",
                 listed_removal_record_hashes
                     .iter()
-                    .map(|d| d)
                     .join(",")
             );
             return false;
