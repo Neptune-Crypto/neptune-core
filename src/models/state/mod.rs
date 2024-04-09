@@ -11,9 +11,7 @@ use itertools::Itertools;
 use num_traits::CheckedSub;
 use std::cmp::max;
 use std::ops::{Deref, DerefMut};
-use std::time::Duration;
 use tracing::{debug, info, warn};
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -38,6 +36,7 @@ use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::time_lock::TimeLock;
 use super::blockchain::type_scripts::TypeScript;
 use super::consensus::tasm::program::ConsensusProgram;
+use super::consensus::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::locks::tokio as sync_tokio;
 use crate::models::peer::HandshakeData;
@@ -353,7 +352,7 @@ impl GlobalState {
     }
 
     /// Retrieve wallet balance history
-    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, NeptuneCoins)> {
+    pub async fn get_balance_history(&self) -> Vec<(Digest, Timestamp, BlockHeight, NeptuneCoins)> {
         let current_tip_digest = self.chain.light_state().hash();
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
@@ -397,7 +396,7 @@ impl GlobalState {
     pub async fn assemble_inputs_for_transaction(
         &mut self,
         total_spend: NeptuneCoins,
-        timestamp: u64,
+        timestamp: Timestamp,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
         // Get the block tip as the transaction is made relative to it
         let block_tip = self.chain.light_state();
@@ -537,11 +536,11 @@ impl GlobalState {
         &mut self,
         receiver_data: Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
-        timestamp: Duration,
+        timestamp: Timestamp,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
         let (inputs, spendable_utxos_and_mps, outputs, output_utxos) = self
-            .generate_utxo_data_for_transaction(&receiver_data, fee, timestamp.as_millis() as u64)
+            .generate_utxo_data_for_transaction(&receiver_data, fee, timestamp)
             .await?;
 
         // other data
@@ -573,7 +572,7 @@ impl GlobalState {
             output_utxos,
             fee,
             public_announcements,
-            timestamp.as_millis() as u64,
+            timestamp,
             mutator_set_accumulator,
             privacy,
         ))
@@ -587,7 +586,7 @@ impl GlobalState {
         &mut self,
         receiver_data: &[UtxoReceiverData],
         fee: NeptuneCoins,
-        timestamp: u64,
+        timestamp: Timestamp,
     ) -> Result<(
         Vec<RemovalRecord>,
         Vec<(Utxo, LockScript, MsMembershipProof)>,
@@ -647,7 +646,7 @@ impl GlobalState {
         output_utxos: Vec<Utxo>,
         fee: NeptuneCoins,
         public_announcements: Vec<PublicAnnouncement>,
-        timestamp: u64,
+        timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         _privacy: bool,
     ) -> Transaction {
@@ -657,7 +656,7 @@ impl GlobalState {
             outputs,
             public_announcements: public_announcements.clone(),
             fee,
-            timestamp: BFieldElement::new(timestamp),
+            timestamp,
             coinbase: None,
             mutator_set_hash: mutator_set_accumulator.hash(),
         };
@@ -1018,9 +1017,9 @@ impl GlobalState {
         let current_tip_header = self.chain.light_state().header();
         let current_tip_digest = self.chain.light_state().kernel.mast_hash();
 
-        let current_tip_info: (Digest, Duration, BlockHeight) = (
+        let current_tip_info: (Digest, Timestamp, BlockHeight) = (
             current_tip_digest,
-            Duration::from_millis(current_tip_header.timestamp.value()),
+            current_tip_header.timestamp,
             current_tip_header.height,
         );
 
@@ -1276,7 +1275,7 @@ mod global_state_tests {
         global_state_lock: &GlobalStateLock,
         receiver_data: &[UtxoReceiverData],
         fee: NeptuneCoins,
-        timestamp: u64,
+        timestamp: Timestamp,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
         let (inputs, spendable_utxos_and_mps, outputs, output_utxos) = global_state_lock
@@ -1327,11 +1326,11 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let other_wallet = WalletSecret::new_random();
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_neptune.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -1363,9 +1362,9 @@ mod global_state_tests {
         assert_ne!(monitored_utxos.len(), 0);
 
         // one month before release date, we should not be able to create the transaction
-        let launch = genesis_block.kernel.header.timestamp.value();
-        let six_months: u64 = 6 * 30 * 24 * 60 * 60 * 1000;
-        let one_month: u64 = 30 * 24 * 60 * 60 * 1000;
+        let launch = genesis_block.kernel.header.timestamp;
+        let six_months = Timestamp::months(6);
+        let one_month = Timestamp::months(1);
         assert!(create_transaction_with_timestamp(
             &global_state_lock,
             &receiver_data,
@@ -1387,11 +1386,11 @@ mod global_state_tests {
         assert!(tx.is_valid());
 
         // but if we backdate the timestamp two months, not anymore!
-        tx.kernel.timestamp -= BFieldElement::new(2 * one_month);
+        tx.kernel.timestamp = tx.kernel.timestamp - Timestamp::months(2);
         // we can't test this yet; we don't have tasm code for time locks yet!
         // todo: uncomment the next line when we do.
         // assert!(!tx.is_valid());
-        tx.kernel.timestamp += BFieldElement::new(2 * one_month);
+        tx.kernel.timestamp = tx.kernel.timestamp + Timestamp::months(2);
 
         assert_eq!(
             2,
@@ -1455,14 +1454,14 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let mut rng = thread_rng();
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let global_state_lock = get_mock_global_state(network, 2, devnet_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let other_receiver_address = WalletSecret::new_random()
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let (mock_block_1, _, _) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
         crate::tests::shared::add_block_to_archival_state(
@@ -1543,9 +1542,9 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1 and store it to the DB
-        let genesis_block = Block::genesis_block();
-        let launch = genesis_block.kernel.header.timestamp.value();
-        let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
+        let genesis_block = Block::genesis_block(network);
+        let launch = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         let (mock_block_1a, _, _) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
         {
@@ -1968,7 +1967,7 @@ mod global_state_tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // Test various parts of the state update when a block contains multiple inputs and outputs
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let genesis_wallet_state =
             get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
@@ -1985,9 +1984,9 @@ mod global_state_tests {
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state_lock = get_mock_global_state(network, 3, wallet_secret_bob).await;
 
-        let genesis_block = Block::genesis_block();
-        let launch = genesis_block.kernel.header.timestamp.value();
-        let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
+        let genesis_block = Block::genesis_block(network);
+        let launch = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
 
         let (mut block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
             &genesis_block,
@@ -2061,8 +2060,8 @@ mod global_state_tests {
                     &genesis_block.kernel.body.mutator_set_accumulator,
                 )
                 .await;
-            let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
-            assert!(block_1.is_valid(&genesis_block, now + Duration::from_millis(seven_months)));
+            let now = genesis_block.kernel.header.timestamp;
+            assert!(block_1.is_valid(&genesis_block, now + seven_months));
         }
 
         println!("Accumulated transaction into block_1.");
@@ -2205,7 +2204,7 @@ mod global_state_tests {
                 public_announcement: PublicAnnouncement::default(),
             },
         ];
-        let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let now = genesis_block.kernel.header.timestamp;
         let tx_from_alice = alice_state_lock
             .lock_guard_mut()
             .await
@@ -2277,8 +2276,8 @@ mod global_state_tests {
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block();
-        let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
 
         let wallet_secret = WalletSecret::new_random();
         let receiving_address = wallet_secret.nth_generation_spending_key(0).to_address();

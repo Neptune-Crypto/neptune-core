@@ -1,37 +1,32 @@
-use std::{fmt::Display, time::Duration};
+use std::fmt::Display;
 
-use chrono::DateTime;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::{
+    blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+};
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinWithPossibleTimeLock {
     pub amount: NeptuneCoins,
-    pub confirmed: Duration,
-    pub release_date: Option<Duration>,
+    pub confirmed: Timestamp,
+    pub release_date: Option<Timestamp>,
 }
 
 impl Display for CoinWithPossibleTimeLock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let confirmed_total_length = 25;
-        let confirmed = DateTime::from_timestamp_millis(self.confirmed.as_millis() as i64)
-            .unwrap()
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string();
+        let confirmed = self.confirmed.format("%Y-%m-%d %H:%M:%S");
         let confirmed_padding = " ".repeat(confirmed_total_length - confirmed.len());
 
         let release_total_length = 25;
         let (release, release_padding) = match self.release_date {
             Some(date) => {
-                let string = DateTime::from_timestamp_millis(date.as_millis() as i64)
-                    .unwrap()
-                    .format("%Y-%m-%d %H:%M:%S")
-                    .to_string();
+                let string = date.format("%Y-%m-%d %H:%M:%S");
                 let string_padding = " ".repeat(release_total_length - string.len());
                 (string, string_padding)
             }
@@ -112,12 +107,13 @@ impl CoinWithPossibleTimeLock {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
 
     use arbitrary::{Arbitrary, Unstructured};
     use rand::{thread_rng, Rng, RngCore};
 
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::{
+        blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+    };
 
     use super::CoinWithPossibleTimeLock;
 
@@ -134,11 +130,11 @@ mod test {
                     NeptuneCoins::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>())).unwrap()
                 },
                 release_date: if rng.gen::<bool>() {
-                    Some(Duration::from_millis(rng.next_u64() % (1 << 35)))
+                    Some(rng.gen::<Timestamp>())
                 } else {
                     None
                 },
-                confirmed: Duration::from_millis(rng.next_u64() % (1 << 35)),
+                confirmed: rng.gen::<Timestamp>(),
             };
             coins.push(coin);
         }

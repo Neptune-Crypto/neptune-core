@@ -9,6 +9,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::SecretWitness;
 use crate::models::consensus::ValidationLogic;
 use crate::models::consensus::ValidityAstType;
@@ -50,10 +51,10 @@ impl TimeLock {
     /// Create a `TimeLock` type-script-and-state-pair that releases the coins at the
     /// given release date, which corresponds to the number of milliseconds that passed
     /// since the unix epoch started (00:00 am UTC on Jan 1 1970).
-    pub fn until(date: u64) -> Coin {
+    pub fn until(date: Timestamp) -> Coin {
         Coin {
             type_script_hash: TimeLock.hash(),
-            state: vec![BFieldElement::new(date)],
+            state: vec![date.0],
         }
     }
 }
@@ -410,7 +411,7 @@ impl SecretWitness for TimeLockWitness {
             SaltedUtxos::empty(),
         );
         let individual_tokens = vec![
-            self.transaction_kernel.timestamp,
+            self.transaction_kernel.timestamp.0,
             input_salted_utxos_address,
             output_salted_utxos_address,
         ];
@@ -496,7 +497,7 @@ impl Arbitrary for TimeLockWitness {
     ///    coin is absent.
     ///  - num_outputs : usize Number of outputs.
     ///  - num_public_announcements : usize Number of public announcements.
-    type Parameters = (Vec<u64>, usize, usize);
+    type Parameters = (Vec<Timestamp>, usize, usize);
 
     type Strategy = BoxedStrategy<Self>;
 
@@ -532,7 +533,7 @@ impl Arbitrary for TimeLockWitness {
 
                     // add time locks to input UTXOs
                     for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter()) {
-                        if *release_date != 0 {
+                        if !release_date.is_zero() {
                             let time_lock_coin = TimeLock::until(*release_date);
                             utxo.coins.push(time_lock_coin);
                         }
@@ -575,14 +576,13 @@ impl Arbitrary for TimeLockWitness {
 
 #[cfg(test)]
 mod test {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
+    use num_traits::Zero;
     use proptest::{collection::vec, strategy::Just};
     use test_strategy::proptest;
 
     use crate::models::{
         blockchain::type_scripts::time_lock::TimeLock,
-        consensus::{tasm::program::ConsensusProgram, SecretWitness},
+        consensus::{tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness},
     };
 
     use super::TimeLockWitness;
@@ -592,7 +592,7 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Just(0u64), #_num_inputs))] _release_dates: Vec<u64>,
+        #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
         #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
@@ -607,24 +607,17 @@ mod test {
         );
     }
 
-    fn now() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
-    }
-
     #[proptest(cases = 20)]
     fn test_locked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(now()+1000*60*60*24..now()+1000*60*60*24*7, #_num_inputs))]
-        _release_dates: Vec<u64>,
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()+Timestamp::days(1),Timestamp::now()+Timestamp::days(7)), #_num_inputs))]
+        _release_dates: Vec<Timestamp>,
         #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
-        println!("now: {}", now());
+        println!("now: {}", Timestamp::now());
         assert!(
             TimeLock {}
                 .run(
@@ -641,12 +634,12 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(now()-1000*60*60*24*7..now()-1000*60*60*24, #_num_inputs))]
-        _release_dates: Vec<u64>,
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
+        _release_dates: Vec<Timestamp>,
         #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
-        println!("now: {}", now());
+        println!("now: {}", Timestamp::now());
         assert!(
             TimeLock
                 .run(

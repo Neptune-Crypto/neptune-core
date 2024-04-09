@@ -346,7 +346,6 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-    use std::time::Duration;
 
     use crate::database::storage::storage_vec::traits::*;
     use itertools::Itertools;
@@ -366,6 +365,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
@@ -383,7 +383,7 @@ mod wallet_tests {
         let mut rng = thread_rng();
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let mut wallet_state_premine_recipient =
             get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let monitored_utxos_premine_wallet =
@@ -394,7 +394,7 @@ mod wallet_tests {
             "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
         );
 
-        let expected_premine_utxo = Block::premine_utxos()[0].clone();
+        let expected_premine_utxo = Block::premine_utxos(network)[0].clone();
         assert_eq!(
             expected_premine_utxo, monitored_utxos_premine_wallet[0].utxo,
             "Auth wallet's monitored UTXO must match that from genesis block at initialization"
@@ -409,7 +409,7 @@ mod wallet_tests {
         );
 
         // Add 12 blocks and verify that membership proofs are still valid
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let mut next_block = genesis_block.clone();
         let other_wallet_secret = WalletSecret::new_random();
         let other_receiver_address = other_wallet_secret
@@ -453,7 +453,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret.clone(), network).await;
         let other_wallet_secret = WalletSecret::new_random();
@@ -467,7 +467,7 @@ mod wallet_tests {
             "Monitored UTXO list must be empty at init"
         );
 
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_recipient_address = own_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
@@ -588,12 +588,12 @@ mod wallet_tests {
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let mut rng = thread_rng();
         let own_wallet_secret = WalletSecret::new_random();
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             None,
@@ -807,27 +807,27 @@ mod wallet_tests {
         // An archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let premine_wallet = get_mock_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
         let premine_receiver_global_state_lock =
-            get_mock_global_state(Network::Alpha, 2, premine_wallet).await;
+            get_mock_global_state(network, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
-        let launch = genesis_block.kernel.header.timestamp.value();
-        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
+        let launch = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months.as_millis() as u64);
+            .synced_unspent_available_amount(launch + seven_months);
         assert!(
             !preminers_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -867,7 +867,7 @@ mod wallet_tests {
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
-        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let mut now = genesis_block.kernel.header.timestamp;
         let valid_tx = premine_receiver_global_state
             .create_transaction(
                 receiver_data_to_other.clone(),
@@ -921,7 +921,7 @@ mod wallet_tests {
             premine_receiver_global_state
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months.as_millis() as u64),
+                .synced_unspent_available_amount(launch + seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -1123,7 +1123,7 @@ mod wallet_tests {
         // one coinbase UTXO and one other UTXO
         let (mut block_3_b, cb_utxo, cb_sender_randomness) =
             make_mock_block(&block_2_b, None, own_address, rng.gen());
-        now = Duration::from_millis(block_3_b.kernel.header.timestamp.value());
+        now = block_3_b.kernel.header.timestamp;
         assert!(
             block_3_b.is_valid(&block_2_b, now),
             "Block must be valid before merging txs"

@@ -1,5 +1,6 @@
 use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
 use crate::prelude::twenty_first;
 
@@ -10,7 +11,6 @@ use num_traits::{abs, Zero};
 
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
-use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -129,16 +129,11 @@ impl Block {
         reward
     }
 
-    // 1 July 2024 (might be revised before then)
-    pub fn launch() -> u64 {
-        1719792000000u64
-    }
-
-    pub fn genesis_block() -> Self {
+    pub fn genesis_block(network: Network) -> Self {
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
-        let premine_distribution = Self::premine_distribution();
+        let premine_distribution = Self::premine_distribution(network);
         let total_premine_amount = premine_distribution
             .iter()
             .map(|(_receiving_address, amount)| *amount)
@@ -149,7 +144,7 @@ impl Block {
                 inputs: vec![],
                 outputs: vec![],
                 fee: NeptuneCoins::new(0),
-                timestamp: BFieldElement::new(Self::launch()),
+                timestamp: network.launch_date(),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::default().hash(),
@@ -163,8 +158,9 @@ impl Block {
             },
         };
 
-        for ((receiving_address, _amount), utxo) in
-            premine_distribution.iter().zip(Self::premine_utxos())
+        for ((receiving_address, _amount), utxo) in premine_distribution
+            .iter()
+            .zip(Self::premine_utxos(network))
         {
             let utxo_digest = Hash::hash(&utxo);
             // generate randomness for mutator set commitment
@@ -193,7 +189,8 @@ impl Block {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
             prev_block_digest: Digest::default(),
-            timestamp: BFieldElement::new(Self::launch()),
+            timestamp: network.launch_date(),
+            // to be set to something difficult to predict ahead of time
             nonce: [
                 BFieldElement::zero(),
                 BFieldElement::zero(),
@@ -208,7 +205,9 @@ impl Block {
         Self::new(header, body, BlockType::Genesis)
     }
 
-    fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
+    fn premine_distribution(
+        _network: Network,
+    ) -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
@@ -223,14 +222,14 @@ impl Block {
         ]
     }
 
-    pub fn premine_utxos() -> Vec<Utxo> {
+    pub fn premine_utxos(network: Network) -> Vec<Utxo> {
         let mut utxos = vec![];
-        for (receiving_address, amount) in Self::premine_distribution() {
+        for (receiving_address, amount) in Self::premine_distribution(network) {
             // generate utxo
             let mut utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
-            let six_months = 365 * 24 * 60 * 60 * 1000 / 2;
+            let six_months = Timestamp::months(6);
             utxo.coins
-                .push(TimeLock::until(Self::launch() + six_months));
+                .push(TimeLock::until(network.launch_date() + six_months));
             utxos.push(utxo);
         }
         utxos
@@ -265,13 +264,13 @@ impl Block {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
     ) {
         // merge transactions
-        let merged_timestamp = BFieldElement::new(max(
-            self.kernel.header.timestamp.value(),
-            max(
-                self.kernel.body.transaction.kernel.timestamp.value(),
-                transaction.kernel.timestamp.value(),
+        let merged_timestamp = max::<Timestamp>(
+            self.kernel.header.timestamp,
+            max::<Timestamp>(
+                self.kernel.body.transaction.kernel.timestamp,
+                transaction.kernel.timestamp,
             ),
-        ));
+        );
         let new_transaction = self
             .kernel
             .body
@@ -319,7 +318,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    pub(crate) fn is_valid(&self, previous_block: &Block, now: Duration) -> bool {
+    pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let block_copy = self.to_owned();
@@ -368,32 +367,27 @@ impl Block {
         }
 
         // 0.d) Block timestamp is greater than (or equal to) that of previous block
-        if previous_block.kernel.header.timestamp.value()
-            > block_copy.kernel.header.timestamp.value()
-        {
+        if previous_block.kernel.header.timestamp > block_copy.kernel.header.timestamp {
             warn!(
                 "Block's timestamp ({}) should be greater than or equal to that of previous block ({})\nprevious <= current ?? {}",
-                block_copy.kernel.header.timestamp.value(),
-                previous_block.kernel.header.timestamp.value(),
-                previous_block.kernel.header.timestamp.value() <= block_copy.kernel.header.timestamp.value()
+                block_copy.kernel.header.timestamp,
+                previous_block.kernel.header.timestamp,
+                previous_block.kernel.header.timestamp <= block_copy.kernel.header.timestamp
             );
             return false;
         }
 
         // 0.e) Target difficulty, and other control parameters, were updated correctly
         if block_copy.kernel.header.difficulty
-            != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp.value())
+            != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp)
         {
             warn!("Value for new difficulty is incorrect.");
             return false;
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
-        // (but only check this if "now" is after launch)
-        let future_limit = now + Duration::from_secs(60 * 60 * 2);
-        if now.as_millis() as u64 > Block::launch()
-            && (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis()
-        {
+        let future_limit = now + Timestamp::hours(2);
+        if block_copy.kernel.header.timestamp >= future_limit {
             warn!("block time is too far in the future");
             return false;
         }
@@ -459,13 +453,12 @@ impl Block {
         }
 
         // 1.e) verify that the transaction timestamp is less than or equal to the block's timestamp.
-        if block_copy.kernel.body.transaction.kernel.timestamp.value()
-            > block_copy.kernel.header.timestamp.value()
+        if block_copy.kernel.body.transaction.kernel.timestamp > block_copy.kernel.header.timestamp
         {
             warn!(
                 "Transaction timestamp ({}) is is larger than that of block ({})",
-                block_copy.kernel.body.transaction.kernel.timestamp.value(),
-                block_copy.kernel.header.timestamp.value()
+                block_copy.kernel.body.transaction.kernel.timestamp,
+                block_copy.kernel.header.timestamp
             );
             return false;
         }
@@ -541,7 +534,7 @@ impl Block {
     /// We assume that the block timestamp is valid.
     pub fn difficulty_control(
         old_block: &Block,
-        new_timestamp: u64,
+        new_timestamp: Timestamp,
     ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
         // no adjustment if the previous block is the genesis block
         if old_block.kernel.header.height.is_genesis() {
@@ -549,9 +542,9 @@ impl Block {
         }
 
         // otherwise, compute PID control signal
-        let t = new_timestamp - old_block.kernel.header.timestamp.value();
+        let t = new_timestamp - old_block.kernel.header.timestamp;
 
-        let new_error = t as i64 - TARGET_BLOCK_INTERVAL as i64;
+        let new_error = t.0.value() as i64 - TARGET_BLOCK_INTERVAL as i64;
 
         let adjustment = -new_error / 100;
         let absolute_adjustment = abs(adjustment) as u64;
@@ -584,6 +577,7 @@ mod block_tests {
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
         util_types::mutator_set::archival_mmr::ArchivalMmr,
     };
+    use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
@@ -597,7 +591,7 @@ mod block_tests {
         let mut rng = thread_rng();
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
@@ -611,11 +605,11 @@ mod block_tests {
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
 
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
-        let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
-        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
+        let now = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block 1 must be valid with only coinbase output"
@@ -705,7 +699,8 @@ mod block_tests {
     #[test]
     fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -713,7 +708,7 @@ mod block_tests {
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
-        let timestamp = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let timestamp = genesis_block.kernel.header.timestamp;
 
         assert!(!block_1.is_valid(&genesis_block, timestamp));
     }
@@ -722,8 +717,9 @@ mod block_tests {
     #[test]
     fn block_with_far_future_timestamp_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
-        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
+        let mut now = genesis_block.kernel.header.timestamp;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -731,36 +727,33 @@ mod block_tests {
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
         // Set block timestamp 1 hour in the future.  (is valid)
-        let future_time1 = now + Duration::from_secs(60 * 60);
-        block_1.kernel.header.timestamp =
-            BFieldElement::new(future_time1.as_millis().try_into().unwrap());
+        let future_time1 = now + Timestamp::hours(1);
+        block_1.kernel.header.timestamp = future_time1;
         assert!(block_1.is_valid(&genesis_block, now));
 
-        now = Duration::from_millis(block_1.kernel.header.timestamp.value());
+        now = block_1.kernel.header.timestamp;
 
         // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
-        let future_time2 = now + Duration::from_secs(60 * 60 * 2 - 1);
-        block_1.kernel.header.timestamp =
-            BFieldElement::new(future_time2.as_millis().try_into().unwrap());
+        let future_time2 = now + Timestamp::hours(2) - Timestamp::seconds(1);
+        block_1.kernel.header.timestamp = future_time2;
         assert!(block_1.is_valid(&genesis_block, now));
 
         // Set block timestamp 2 hours + 10 secs in the future. (not valid)
-        let future_time3 = now + Duration::from_secs(60 * 60 * 2 + 10);
-        block_1.kernel.header.timestamp =
-            BFieldElement::new(future_time3.as_millis().try_into().unwrap());
+        let future_time3 = now + Timestamp::hours(2) + Timestamp::seconds(10);
+        block_1.kernel.header.timestamp = future_time3;
         assert!(!block_1.is_valid(&genesis_block, now));
 
         // Set block timestamp 2 days in the future. (not valid)
-        let future_time4 = now + Duration::from_secs(86400 * 2);
-        block_1.kernel.header.timestamp =
-            BFieldElement::new(future_time4.as_millis().try_into().unwrap());
+        let future_time4 = now + Timestamp::seconds(86400 * 2);
+        block_1.kernel.header.timestamp = future_time4;
         assert!(!block_1.is_valid(&genesis_block, now));
     }
 
     #[tokio::test]
     async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
@@ -826,13 +819,14 @@ mod block_tests {
         // 831600 = 42000000 * 0.0198
         // where 42000000 is the asymptotical limit of the token supply
         // and 1.98% is the relative size of the premine
-        let premine_max_size = NeptuneCoins::new(831600);
+        for network in Network::iter() {
+            let premine_max_size = NeptuneCoins::new(831600);
+            let total_premine = Block::premine_distribution(network)
+                .iter()
+                .map(|(_receiving_address, amount)| *amount)
+                .sum::<NeptuneCoins>();
 
-        let total_premine = Block::premine_distribution()
-            .iter()
-            .map(|(_receiving_address, amount)| *amount)
-            .sum::<NeptuneCoins>();
-
-        assert!(total_premine <= premine_max_size);
+            assert!(total_premine <= premine_max_size);
+        }
     }
 }

@@ -100,7 +100,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir).await?;
     info!("Got archival mutator set");
 
-    let archival_state = ArchivalState::new(data_dir, block_index_db, archival_mutator_set).await;
+    let archival_state = ArchivalState::new(
+        data_dir,
+        block_index_db,
+        archival_mutator_set,
+        cli_args.network,
+    )
+    .await;
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
     let latest_block: Block = archival_state.get_latest_block().await;

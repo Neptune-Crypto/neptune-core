@@ -1,4 +1,5 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::prelude::twenty_first;
 
@@ -9,9 +10,6 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::time::Duration;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
@@ -97,7 +95,7 @@ pub trait RPC {
     async fn synced_balance() -> NeptuneCoins;
 
     /// Get the client's wallet transaction history
-    async fn history() -> Vec<(Digest, BlockHeight, Duration, NeptuneCoins)>;
+    async fn history() -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>;
 
     /// Return information about funds in the wallet
     async fn wallet_status() -> WalletStatus;
@@ -310,10 +308,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Timestamp::now();
         // test inequality
         let wallet_status = self
             .state
@@ -325,10 +320,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Timestamp::now();
         let wallet_status = self
             .state
             .lock_guard()
@@ -395,11 +387,11 @@ impl RPC for NeptuneRPCServer {
     async fn history(
         self,
         _context: tarpc::context::Context,
-    ) -> Vec<(Digest, BlockHeight, Duration, NeptuneCoins)> {
+    ) -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> {
         let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
-        let mut display_history: Vec<(Digest, BlockHeight, Duration, NeptuneCoins)> = history
+        let mut display_history: Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> = history
             .iter()
             .map(|(h, t, bh, a)| (*h, *bh, *t, *a))
             .collect::<Vec<_>>();
@@ -413,10 +405,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Timestamp::now();
         let state = self.state.lock_guard().await;
         let tip_header = state.chain.light_state().header().clone();
         let wallet_status = state.get_wallet_status_for_tip().await;
@@ -503,7 +492,7 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let now = Timestamp::now();
 
         // note: for future changes:
         // No consensus data should be read within this read-lock.
@@ -712,7 +701,8 @@ mod rpc_server_tests {
         // We don't care about the actual response data in this test, just that the
         // requests do not crash the server.
 
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let network = Network::RegTest;
+        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;

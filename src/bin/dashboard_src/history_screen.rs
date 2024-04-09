@@ -8,8 +8,9 @@ use super::{dashboard_app::DashboardEvent, screen::Screen};
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use itertools::Itertools;
 use neptune_core::{
-    models::blockchain::{
-        block::block_height::BlockHeight, type_scripts::neptune_coins::NeptuneCoins,
+    models::{
+        blockchain::{block::block_height::BlockHeight, type_scripts::neptune_coins::NeptuneCoins},
+        consensus::timestamp::Timestamp,
     },
     rpc_server::RPCClient,
 };
@@ -24,7 +25,7 @@ use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
 
-type BalanceUpdate = (BlockHeight, Duration, NeptuneCoins, NeptuneCoins);
+type BalanceUpdate = (BlockHeight, Timestamp, NeptuneCoins, NeptuneCoins);
 type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -269,7 +270,7 @@ impl Widget for HistoryScreen {
                 let (height, timestamp, amount, balance) = *bu;
                 vec![
                     height.to_string(),
-                    neptune_core::utc_timestamp_to_localtime(timestamp.as_millis()).to_string(),
+                    timestamp.standard_format(),
                     if !amount.is_negative() {
                         "⭸".to_string()
                     } else {

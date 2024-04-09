@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use std::time::SystemTime;
 use tasm_lib::Digest;
 use tracing::{debug, error, warn};
 use triton_vm::prelude::NonDeterminism;
@@ -237,10 +236,6 @@ impl Transaction {
         }
     }
 
-    pub fn get_timestamp(&self) -> Result<SystemTime> {
-        Ok(std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.kernel.timestamp.value()))
-    }
-
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
@@ -296,10 +291,7 @@ impl Transaction {
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
         );
-        let timestamp = BFieldElement::new(max(
-            self.kernel.timestamp.value(),
-            other.kernel.timestamp.value(),
-        ));
+        let timestamp = max(self.kernel.timestamp, other.kernel.timestamp);
 
         let merged_coinbase = match self.kernel.coinbase {
             Some(_) => match other.kernel.coinbase {
@@ -605,7 +597,7 @@ mod witness_tests {
             public_announcements: vec![],
             fee: NeptuneCoins::new(0),
             coinbase: None,
-            timestamp: BFieldElement::new(0),
+            timestamp: Default::default(),
             mutator_set_hash: Digest::default(),
         };
         let primitive_witness = PrimitiveWitness {
@@ -628,14 +620,16 @@ mod witness_tests {
 #[cfg(test)]
 mod transaction_tests {
     use rand::random;
-    use std::time::Duration;
     use tracing_test::traced_test;
     use transaction_tests::utxo::{LockScript, Utxo};
 
     use super::*;
     use crate::{
-        models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
-        tests::shared::make_mock_transaction, util_types::mutator_set::commit,
+        models::{
+            blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+        },
+        tests::shared::make_mock_transaction,
+        util_types::mutator_set::commit,
     };
 
     #[traced_test]
@@ -650,12 +644,7 @@ mod transaction_tests {
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
         // the correct time convention for this test to work.
         let coinbase_transaction = make_mock_transaction(vec![], vec![ar]);
-        assert!(
-            SystemTime::now()
-                .duration_since(coinbase_transaction.get_timestamp().unwrap())
-                .unwrap()
-                < Duration::from_secs(10)
-        );
+        assert!(Timestamp::now() - coinbase_transaction.kernel.timestamp < Timestamp::seconds(10));
     }
 
     #[test]

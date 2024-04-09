@@ -1,6 +1,7 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;
@@ -12,7 +13,6 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use std::time::Duration;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
@@ -89,12 +89,13 @@ impl Utxo {
     }
 
     /// If the UTXO has a timelock, find out what the release date is.
-    pub fn release_date(&self) -> Option<Duration> {
+    pub fn release_date(&self) -> Option<Timestamp> {
         self.coins
             .iter()
             .find(|coin| coin.type_script_hash == TimeLock.hash())
             .map(|coin| coin.state[0].value())
-            .map(Duration::from_millis)
+            .map(BFieldElement::new)
+            .map(Timestamp)
     }
 
     /// Determine whether the UTXO has coins that contain only known type
@@ -116,7 +117,7 @@ impl Utxo {
     /// assuming it can be unlocked. Currently, this boils down to checking
     /// whether it has a time lock and if it does, verifying that the release
     /// date is in the past.
-    pub fn can_spend_at(&self, timestamp: u64) -> bool {
+    pub fn can_spend_at(&self, timestamp: Timestamp) -> bool {
         // unknown type script
         if !self.has_known_type_scripts() {
             return false;
@@ -129,9 +130,9 @@ impl Utxo {
             .filter(|c| c.type_script_hash == TimeLock.hash())
             .map(|c| c.state.clone())
         {
-            match BFieldElement::decode(&state) {
+            match Timestamp::decode(&state) {
                 Ok(release_date) => {
-                    if timestamp <= release_date.value() {
+                    if timestamp <= *release_date {
                         return false;
                     }
                 }
@@ -146,7 +147,7 @@ impl Utxo {
 
     /// Determine whether the only thing preventing the UTXO from being spendable
     /// is the timelock whose according release date is in the future.
-    pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: u64) -> bool {
+    pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: Timestamp) -> bool {
         if !self.has_known_type_scripts() {
             return false;
         }
@@ -159,9 +160,9 @@ impl Utxo {
             .filter(|c| c.type_script_hash == TimeLock.hash())
             .map(|c| c.state.clone())
         {
-            match BFieldElement::decode(&state) {
+            match Timestamp::decode(&state) {
                 Ok(release_date) => {
-                    if timestamp <= release_date.value() {
+                    if timestamp <= *release_date {
                         have_future_release_date = true;
                     }
                 }
@@ -306,10 +307,10 @@ mod utxo_tests {
     #[test]
     fn utxo_timelock_test() {
         let mut rng = thread_rng();
-        let release_date = rng.next_u64() >> 1;
-        let mut delta = release_date + 1;
+        let release_date = rng.gen::<Timestamp>();
+        let mut delta = release_date + Timestamp::seconds(1);
         while delta > release_date {
-            delta = rng.next_u64() >> 1;
+            delta = Timestamp(BFieldElement::new(rng.next_u64() >> 1));
         }
         let mut utxo = Utxo::new(
             LockScript {

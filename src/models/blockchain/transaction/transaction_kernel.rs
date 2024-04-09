@@ -1,9 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::{
     models::{
         blockchain::type_scripts::neptune_coins::{pseudorandom_amount, NeptuneCoins},
-        consensus::mast_hash::{HasDiscriminant, MastHash},
+        consensus::{
+            mast_hash::{HasDiscriminant, MastHash},
+            timestamp::Timestamp,
+        },
     },
     prelude::twenty_first,
 };
@@ -44,7 +45,7 @@ pub struct TransactionKernel {
     pub coinbase: Option<NeptuneCoins>,
 
     // number of milliseconds since unix epoch
-    pub timestamp: BFieldElement,
+    pub timestamp: Timestamp,
 
     pub mutator_set_hash: Digest,
 }
@@ -130,7 +131,7 @@ pub fn pseudorandom_transaction_kernel(
         .collect_vec();
     let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
     let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
-    let timestamp: BFieldElement = rng.gen();
+    let timestamp: Timestamp = rng.gen();
     let mutator_set_hash: Digest = rng.gen();
 
     TransactionKernel {
@@ -160,12 +161,7 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
             .collect_vec();
         let fee: NeptuneCoins = u.arbitrary()?;
         let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
-        let timestamp: BFieldElement = BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
-        );
+        let timestamp = Timestamp::now();
         let mutator_set_hash: Digest = u.arbitrary()?;
 
         let transaction_kernel = TransactionKernel {
