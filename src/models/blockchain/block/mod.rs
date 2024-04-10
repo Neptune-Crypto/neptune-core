@@ -792,19 +792,11 @@ mod block_tests {
         assert!(
             v,
             "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
-            last_block_mmra
-                .get_peaks()
-                .iter()
-                .map(|d| d)
-                .join(","),
+            last_block_mmra.get_peaks().iter().join(","),
             last_block_mmra.get_peaks().len(),
             last_block_mmra.count_leaves(),
             membership_proof.leaf_index,
-            membership_proof
-                .authentication_path
-                .iter()
-                .map(|d| d)
-                .join(","),
+            membership_proof.authentication_path.iter().join(","),
             blocks.len(),
             membership_proof.leaf_index
         );

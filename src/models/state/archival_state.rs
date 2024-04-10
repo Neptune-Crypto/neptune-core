@@ -564,18 +564,11 @@ impl ArchivalState {
         let block_header = self
             .get_block_header(block_digest)
             .await
-            .unwrap_or_else(|| {
-                panic!(
-                    "Could not get block header by digest: {}",
-                    block_digest
-                )
-            });
-        let tip_header = self.get_block_header(tip_digest).await.unwrap_or_else(|| {
-            panic!(
-                "Could not get block header by digest: {}",
-                tip_digest
-            )
-        });
+            .unwrap_or_else(|| panic!("Could not get block header by digest: {}", block_digest));
+        let tip_header = self
+            .get_block_header(tip_digest)
+            .await
+            .unwrap_or_else(|| panic!("Could not get block header by digest: {}", tip_digest));
 
         // If block is tip or parent to tip, then block belongs to canonical chain
         if tip_digest == block_digest || tip_header.prev_block_digest == block_digest {

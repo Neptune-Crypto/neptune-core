@@ -145,9 +145,7 @@ mod tests {
         traits::function::ShadowedFunction,
     };
     use triton_vm::prelude::{Digest, NonDeterminism};
-    use twenty_first::{
-        shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH}
-    };
+    use twenty_first::shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH};
 
     use super::*;
 

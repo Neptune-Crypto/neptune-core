@@ -393,10 +393,7 @@ impl Widget for OverviewScreen {
         lines.push(format!("mining: {}", dashifnotset!(data.is_mining)));
 
         let tip_digest = data.block_header.as_ref().map(Hash::hash);
-        lines.push(format!(
-            "tip digest:\n{}\n\n",
-            dashifnotset!(tip_digest),
-        ));
+        lines.push(format!("tip digest:\n{}\n\n", dashifnotset!(tip_digest),));
 
         lines.push(format!(
             "latest block timestamp: {}",

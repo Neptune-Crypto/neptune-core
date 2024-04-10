@@ -273,11 +273,7 @@ fn create_block_transaction(
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        latest_block
-            .kernel
-            .body
-            .mutator_set_accumulator
-            .hash()
+        latest_block.kernel.body.mutator_set_accumulator.hash()
     );
 
     // Merge incoming transactions with the coinbase transaction
