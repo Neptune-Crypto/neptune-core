@@ -696,11 +696,7 @@ mod tests {
 
         debug!(
             "Just made block with previous mutator set hash {}",
-            block_2
-                .kernel
-                .body
-                .mutator_set_accumulator
-                .hash()
+            block_2.kernel.body.mutator_set_accumulator.hash()
         );
         debug!(
             "Just made block with next mutator set hash {}",

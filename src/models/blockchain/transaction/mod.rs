@@ -447,10 +447,7 @@ impl Transaction {
                     "witness mutator set hash: {}",
                     primitive_witness.mutator_set_accumulator.hash()
                 );
-                debug!(
-                    "kernel mutator set hash: {}",
-                    self.kernel.mutator_set_hash
-                );
+                debug!("kernel mutator set hash: {}", self.kernel.mutator_set_hash);
                 return false;
             }
             let removal_record = primitive_witness.mutator_set_accumulator.drop(item, msmp);
@@ -504,8 +501,7 @@ impl Transaction {
             {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",
-                    type_script_hash,
-                    e
+                    type_script_hash, e
                 );
                 return false;
             }
@@ -542,16 +538,9 @@ impl Transaction {
                 .collect_vec();
             warn!(
                 "observed: {}",
-                witnessed_removal_record_hashes
-                    .iter()
-                    .join(",")
+                witnessed_removal_record_hashes.iter().join(",")
             );
-            warn!(
-                "listed: {}",
-                listed_removal_record_hashes
-                    .iter()
-                    .join(",")
-            );
+            warn!("listed: {}", listed_removal_record_hashes.iter().join(","));
             return false;
         }
 
