@@ -678,7 +678,7 @@ mod tests {
 
         let mut now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let tx_by_preminer = premine_receiver_global_state
+        let (tx_by_preminer, _) = premine_receiver_global_state
             .create_transaction(
                 output_utxos_generated_by_me,
                 NeptuneCoins::new(1),
@@ -704,7 +704,7 @@ mod tests {
             receiver_privacy_digest: other_receiver_address.privacy_digest,
             public_announcement: PublicAnnouncement::default(),
         }];
-        let tx_by_other_original = other_global_state
+        let (tx_by_other_original, _) = other_global_state
             .create_transaction(
                 output_utxo_data_by_miner,
                 NeptuneCoins::new(1),
@@ -966,7 +966,7 @@ mod tests {
             sender_randomness: random(),
             public_announcement: PublicAnnouncement::default(),
         };
-        let tx_by_preminer_low_fee = preminer_state
+        let (tx_by_preminer_low_fee, _) = preminer_state
             .create_transaction(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(1),
@@ -988,7 +988,7 @@ mod tests {
 
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
-        let tx_by_preminer_high_fee = preminer_state
+        let (tx_by_preminer_high_fee, _) = preminer_state
             .create_transaction(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(10),
@@ -1007,7 +1007,7 @@ mod tests {
 
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
-        let tx_by_preminer_medium_fee = preminer_state
+        let (tx_by_preminer_medium_fee, _) = preminer_state
             .create_transaction(
                 vec![receiver_data],
                 NeptuneCoins::new(4),
