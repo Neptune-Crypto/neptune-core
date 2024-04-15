@@ -1023,7 +1023,7 @@ mod archival_state_tests {
                 own_receiving_address,
                 rng.gen(),
             );
-            let sender_tx = genesis_receiver_global_state
+            let (sender_tx, _) = genesis_receiver_global_state
                 .create_transaction(
                     vec![UtxoReceiverData {
                         public_announcement: PublicAnnouncement::default(),
@@ -1157,7 +1157,7 @@ mod archival_state_tests {
                 public_announcement: PublicAnnouncement::default(),
             },
         ];
-        let sender_tx = global_state_lock
+        let (sender_tx, _) = global_state_lock
             .lock_guard_mut()
             .await
             .create_transaction(receiver_data, NeptuneCoins::new(4), now + seven_months)
@@ -1285,7 +1285,7 @@ mod archival_state_tests {
                     public_announcement: PublicAnnouncement::default(),
                 },
             ];
-            let sender_tx = global_state
+            let (sender_tx, _) = global_state
                 .create_transaction(receiver_data, NeptuneCoins::new(4), now + seven_months)
                 .await
                 .unwrap();
@@ -1431,7 +1431,7 @@ mod archival_state_tests {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
-        let sender_tx = global_state_lock
+        let (sender_tx, _) = global_state_lock
             .lock_guard_mut()
             .await
             .create_transaction(vec![receiver_data], one_money, now + seven_months)
@@ -1667,7 +1667,7 @@ mod archival_state_tests {
                 public_announcement: PublicAnnouncement::default(),
             },
         ];
-        let tx_from_alice = alice_state_lock
+        let (tx_from_alice, _) = alice_state_lock
             .lock_guard_mut()
             .await
             .create_transaction(
