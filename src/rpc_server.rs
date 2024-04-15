@@ -1,6 +1,7 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::prelude::twenty_first;
 
 use anyhow::Result;
@@ -496,7 +497,7 @@ impl RPC for NeptuneRPCServer {
 
         // note: for future changes:
         // No consensus data should be read within this read-lock.
-        // Else a write lock must be used instead and held until
+        // Else the lock must be held until
         // create_transaction() completes, so entire op is atomic.
         // See: https://github.com/Neptune-Crypto/neptune-core/issues/134
         let state = self.state.lock_guard().await;
@@ -540,23 +541,57 @@ impl RPC for NeptuneRPCServer {
         }
 
         // All cryptographic data must be in relation to a single block
-        // and a write-lock must therefore be held over GlobalState to ensure this.
+        // and a read-lock must therefore be held over GlobalState to ensure this.
+        // Note that create_transaction() does not modify any state.
         let transaction_result = self
             .state
-            .lock_guard_mut()
+            .lock_guard()
             .await
             .create_transaction(receiver_data, fee, now)
             .await;
 
-        let transaction = match transaction_result {
-            Ok(tx) => tx,
+        let (transaction, maybe_change_utxo_data) = match transaction_result {
+            Ok((tx, data)) => (tx, data),
             Err(err) => {
                 tracing::error!("Could not create transaction: {}", err);
                 return None;
             }
         };
 
-        // 2. Send transaction message to main
+        // 2. Inform wallet.
+        //
+        //    If we have a change Utxo, we add it to pool
+        //    of expected incoming UTXOs so that we can
+        //    synchronize it after it is confirmed.
+        //
+        //    Here we modify state, so we briefly acquire write-lock.
+        //    TBD:
+        //      a) is this really necessary?  why can't wallet be
+        //         informed of change UTXO when block is received like
+        //         any other incoming utxo?  If not necessary, we can
+        //         avoid any mutation/write during send().
+        //      b) if it's necessary to notify wallet of incoming change
+        //         which adds to balance, should we not also notify
+        //         of all utxos that could affect wallet's balance?
+        //         In particular, it seems like the wallet balance
+        //         should decrease by the amount spent.
+        if let Some(change_utxo_data) = maybe_change_utxo_data {
+            let _change_addition_record = self
+                .state
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    change_utxo_data.change_utxo,
+                    change_utxo_data.change_sender_randomness,
+                    change_utxo_data.receiver_preimage,
+                    UtxoNotifier::Myself,
+                )
+                .expect("Adding change UTXO to UTXO notification pool must succeed");
+        }
+
+        // 3. Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::Send(Box::new(transaction.clone())))

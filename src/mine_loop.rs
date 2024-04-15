@@ -508,7 +508,7 @@ mod mine_loop_tests {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let tx_by_preminer = premine_receiver_global_state
+        let (tx_by_preminer, _) = premine_receiver_global_state
             .create_transaction(
                 vec![
                     (UtxoReceiverData {

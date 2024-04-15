@@ -868,7 +868,7 @@ mod wallet_tests {
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
         let mut now = genesis_block.kernel.header.timestamp;
-        let valid_tx = premine_receiver_global_state
+        let (valid_tx, _) = premine_receiver_global_state
             .create_transaction(
                 receiver_data_to_other.clone(),
                 NeptuneCoins::new(2),
@@ -1138,7 +1138,7 @@ mod wallet_tests {
             },
             sender_randomness: random(),
         };
-        let tx_from_preminer = premine_receiver_global_state
+        let (tx_from_preminer, _) = premine_receiver_global_state
             .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4), now)
             .await
             .unwrap();
