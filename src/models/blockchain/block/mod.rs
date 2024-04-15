@@ -763,7 +763,7 @@ mod block_tests {
             sender_randomness: random(),
             utxo: new_utxo,
         };
-        let new_tx = global_state_lock
+        let (new_tx, _) = global_state_lock
             .lock_guard_mut()
             .await
             .create_transaction(
