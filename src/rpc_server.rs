@@ -13,11 +13,12 @@ use std::str::FromStr;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
+use twenty_first::prelude::U32s;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -47,6 +48,17 @@ pub struct DashBoardOverviewDataFromClient {
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockInfo {
+    height: BlockHeight,
+    digest: Digest,
+    timestamp: Timestamp,
+    difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+    num_inputs: usize,
+    num_outputs: usize,
+    fee: NeptuneCoins,
 }
 
 #[tarpc::service]
@@ -81,6 +93,9 @@ pub trait RPC {
 
     /// Returns the digest of the latest block
     async fn tip_digest() -> Digest;
+
+    /// Returns information about the latest block
+    async fn tip_info() -> BlockInfo;
 
     /// Returns the digest of the latest n blocks
     async fn latest_tip_digests(n: usize) -> Vec<Digest>;
@@ -218,6 +233,24 @@ impl RPC for NeptuneRPCServer {
 
     async fn tip_digest(self, _: context::Context) -> Digest {
         self.state.lock_guard().await.chain.light_state().hash()
+    }
+
+    async fn tip_info(self, _: context::Context) -> BlockInfo {
+        let state = self.state.lock_guard().await;
+        let light_state = state.chain.light_state();
+
+        let header = light_state.header();
+        let body = light_state.body();
+
+        BlockInfo {
+            digest: state.chain.light_state().hash(),
+            height: header.height,
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            num_inputs: body.transaction.kernel.inputs.len(),
+            num_outputs: body.transaction.kernel.outputs.len(),
+            fee: body.transaction.kernel.fee,
+        }
     }
 
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
