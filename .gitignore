@@ -45,6 +45,7 @@ cmake-build-*/
 .vscode/dryrun.log
 .vscode/targets.log
 .vscode/configurationCache.log
+.vscode/settings.json
 
 # Mongo Explorer plugin
 .idea/**/mongoSettings.xml
