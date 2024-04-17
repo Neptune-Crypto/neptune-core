@@ -116,14 +116,8 @@ pub trait RPC {
     /// Return info about all peers that have been sanctioned
     async fn all_sanctioned_peers() -> HashMap<IpAddr, PeerStanding>;
 
-    /// Returns the digest of the latest block
-    async fn tip_digest() -> Digest;
-
     /// Returns the digest of the latest n blocks
     async fn latest_tip_digests(n: usize) -> Vec<Digest>;
-
-    /// Return the block header of the tip digest
-    async fn tip_header() -> BlockHeader;
 
     /// Returns information about the specified block
     async fn block_info(block_selector: BlockSelector) -> Option<BlockInfo>;
@@ -132,7 +126,7 @@ pub trait RPC {
     async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
 
     /// Return the block header for the specified block
-    async fn header(hash: Digest) -> Option<BlockHeader>;
+    async fn header(block_selector: BlockSelector) -> Option<BlockHeader>;
 
     /// Get sum of unspent UTXOs.
     async fn synced_balance() -> NeptuneCoins;
@@ -257,10 +251,6 @@ impl RPC for NeptuneRPCServer {
 
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
         self.confirmations_internal().await
-    }
-
-    async fn tip_digest(self, _: context::Context) -> Digest {
-        self.state.lock_guard().await.chain.light_state().hash()
     }
 
     async fn block_digest(
@@ -413,25 +403,14 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    async fn tip_header(self, _: context::Context) -> BlockHeader {
-        self.state
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .kernel
-            .header
-            .clone()
-    }
-
     async fn header(
         self,
         _context: tarpc::context::Context,
-        block_digest: Digest,
+        block_selector: BlockSelector,
     ) -> Option<BlockHeader> {
-        self.state
-            .lock_guard()
-            .await
+        let state = self.state.lock_guard().await;
+        let block_digest = block_selector.as_digest(&state).await?;
+        state
             .chain
             .archival_state()
             .get_block_header(block_digest)
@@ -785,9 +764,19 @@ mod rpc_server_tests {
         let _ = rpc_server.clone().block_height(ctx).await;
         let _ = rpc_server.clone().peer_info(ctx).await;
         let _ = rpc_server.clone().all_sanctioned_peers(ctx).await;
-        let _ = rpc_server.clone().tip_digest(ctx).await;
         let _ = rpc_server.clone().latest_tip_digests(ctx, 2).await;
-        let _ = rpc_server.clone().header(ctx, Digest::default()).await;
+        let _ = rpc_server
+            .clone()
+            .header(ctx, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_info(ctx, BlockSelector::Digest(Digest::default()))
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_digest(ctx, BlockSelector::Digest(Digest::default()))
+            .await;
         let _ = rpc_server.clone().synced_balance(ctx).await;
         let _ = rpc_server.clone().history(ctx).await;
         let _ = rpc_server.clone().wallet_status(ctx).await;

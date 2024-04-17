@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
-use neptune_core::rpc_server::RPCClient;
+use neptune_core::rpc_server::{BlockSelector, RPCClient};
 use std::io::stdout;
 use twenty_first::shared_math::digest::Digest;
 
@@ -314,7 +314,10 @@ async fn main() -> Result<()> {
             }
         }
         Command::TipDigest => {
-            let head_hash = client.tip_digest(ctx).await?;
+            let head_hash = client
+                .block_digest(ctx, BlockSelector::Tip)
+                .await?
+                .unwrap_or_default();
             println!("{}", head_hash);
         }
         Command::LatestTipDigests { n } => {
@@ -324,11 +327,14 @@ async fn main() -> Result<()> {
             }
         }
         Command::TipHeader => {
-            let val = client.tip_header(ctx).await?;
+            let val = client
+                .header(ctx, BlockSelector::Tip)
+                .await?
+                .expect("Tip header should be found");
             println!("{val}")
         }
         Command::Header { hash } => {
-            let res = client.header(ctx, hash).await?;
+            let res = client.header(ctx, BlockSelector::Digest(hash)).await?;
             if res.is_none() {
                 println!("Block did not exist in database.");
             } else {
