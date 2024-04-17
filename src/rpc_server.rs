@@ -28,7 +28,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalStateLock, UtxoReceiverData};
+use crate::models::state::{GlobalState, GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DashBoardOverviewDataFromClient {
@@ -59,6 +59,31 @@ pub struct BlockInfo {
     num_inputs: usize,
     num_outputs: usize,
     fee: NeptuneCoins,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlockSelector {
+    Digest(Digest),      // Identifies block by Digest (hash)
+    Height(BlockHeight), // Identifies block by Height (count from genesis)
+    Genesis,             // Indicates the genesis block
+    Tip,                 // Indicates the latest canonical block
+}
+
+impl BlockSelector {
+    async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
+        match self {
+            BlockSelector::Digest(d) => Some(*d),
+            BlockSelector::Height(h) => {
+                state
+                    .chain
+                    .archival_state()
+                    .block_height_to_canonical_block_digest(*h, state.chain.light_state().hash())
+                    .await
+            }
+            BlockSelector::Tip => Some(state.chain.light_state().hash()),
+            BlockSelector::Genesis => Some(state.chain.archival_state().genesis_block().hash()),
+        }
+    }
 }
 
 #[tarpc::service]
@@ -94,14 +119,17 @@ pub trait RPC {
     /// Returns the digest of the latest block
     async fn tip_digest() -> Digest;
 
-    /// Returns information about the latest block
-    async fn tip_info() -> BlockInfo;
-
     /// Returns the digest of the latest n blocks
     async fn latest_tip_digests(n: usize) -> Vec<Digest>;
 
     /// Return the block header of the tip digest
     async fn tip_header() -> BlockHeader;
+
+    /// Returns information about the specified block
+    async fn block_info(block_selector: BlockSelector) -> Option<BlockInfo>;
+
+    /// Return the digest for the specified block selector (genesis, tip, or height)
+    async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
 
     /// Return the block header for the specified block
     async fn header(hash: Digest) -> Option<BlockHeader>;
@@ -235,22 +263,36 @@ impl RPC for NeptuneRPCServer {
         self.state.lock_guard().await.chain.light_state().hash()
     }
 
-    async fn tip_info(self, _: context::Context) -> BlockInfo {
+    async fn block_digest(
+        self,
+        _: context::Context,
+        block_selector: BlockSelector,
+    ) -> Option<Digest> {
         let state = self.state.lock_guard().await;
-        let light_state = state.chain.light_state();
+        block_selector.as_digest(&state).await
+    }
 
-        let header = light_state.header();
-        let body = light_state.body();
+    async fn block_info(
+        self,
+        _: context::Context,
+        block_selector: BlockSelector,
+    ) -> Option<BlockInfo> {
+        let state = self.state.lock_guard().await;
+        let digest = block_selector.as_digest(&state).await?;
+        let archival_state = state.chain.archival_state();
 
-        BlockInfo {
-            digest: state.chain.light_state().hash(),
+        let block = archival_state.get_block(digest).await.unwrap()?;
+        let header = block.header();
+        let body = block.body();
+        Some(BlockInfo {
+            digest: block.hash(),
             height: header.height,
             timestamp: header.timestamp,
             difficulty: header.difficulty,
             num_inputs: body.transaction.kernel.inputs.len(),
             num_outputs: body.transaction.kernel.outputs.len(),
             fee: body.transaction.kernel.fee,
-        }
+        })
     }
 
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {

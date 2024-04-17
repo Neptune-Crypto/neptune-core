@@ -213,6 +213,10 @@ impl ArchivalState {
         }
     }
 
+    pub fn genesis_block(&self) -> &Block {
+        &self.genesis_block
+    }
+
     /// Write a newly found block to database and to disk.
     pub async fn write_block(
         &mut self,
@@ -492,6 +496,31 @@ impl ArchivalState {
             .await
             .map(|x| x.as_height_record())
             .unwrap_or_else(Vec::new)
+    }
+
+    /// Return the digest of canonical block at a specific height, or None
+    pub async fn block_height_to_canonical_block_digest(
+        &self,
+        block_height: BlockHeight,
+        tip_digest: Digest,
+    ) -> Option<Digest> {
+        let digests = self.block_height_to_block_digests(block_height).await;
+
+        // note: there should only ever be 1 block at a given height that
+        //       is in the canonical chain.
+        //
+        // note: we could do this with an async stream using equivalent of
+        //       Iterator::find() but the for loop is easier to understand.
+        //       see: https://stackoverflow.com/questions/74901029/rust-async-find-use-await-within-predicate
+        for digest in digests.into_iter() {
+            if self
+                .block_belongs_to_canonical_chain(digest, tip_digest)
+                .await
+            {
+                return Some(digest);
+            }
+        }
+        None
     }
 
     pub async fn get_children_block_headers(
