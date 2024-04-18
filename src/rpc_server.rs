@@ -50,17 +50,19 @@ pub struct DashBoardOverviewDataFromClient {
     pub confirmations: Option<BlockHeight>,
 }
 
+/// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockInfo {
-    height: BlockHeight,
-    digest: Digest,
-    timestamp: Timestamp,
-    difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-    num_inputs: usize,
-    num_outputs: usize,
-    fee: NeptuneCoins,
+    pub height: BlockHeight,
+    pub digest: Digest,
+    pub timestamp: Timestamp,
+    pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+    pub num_inputs: usize,
+    pub num_outputs: usize,
+    pub fee: NeptuneCoins,
 }
 
+/// Provides alternatives for looking up a block.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlockSelector {
     Digest(Digest),      // Identifies block by Digest (hash)
@@ -124,6 +126,9 @@ pub trait RPC {
 
     /// Return the digest for the specified block selector (genesis, tip, or height)
     async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
+
+    /// Return the digest for the specified UTXO index
+    async fn utxo_digest(index: u64) -> Option<Digest>;
 
     /// Return the block header for the specified block
     async fn header(block_selector: BlockSelector) -> Option<BlockHeader>;
@@ -251,6 +256,16 @@ impl RPC for NeptuneRPCServer {
 
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
         self.confirmations_internal().await
+    }
+
+    async fn utxo_digest(self, _: context::Context, index: u64) -> Option<Digest> {
+        let state = self.state.lock_guard().await;
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+
+        match index > 0 && index < aocl.len().await {
+            true => Some(aocl.get_leaf_async(index).await),
+            false => None,
+        }
     }
 
     async fn block_digest(

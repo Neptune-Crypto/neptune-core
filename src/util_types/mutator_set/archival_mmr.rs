@@ -52,6 +52,12 @@ where
         self.digests.len().await == 1
     }
 
+    /// Returns len of Digests.  Note that elem 0
+    /// is always a dummy digest.
+    pub async fn len(&self) -> u64 {
+        self.digests.len().await
+    }
+
     /// Return the number of leaves in the tree
     pub async fn count_leaves(&self) -> u64 {
         node_index_to_leaf_index(self.digests.len().await).unwrap()
