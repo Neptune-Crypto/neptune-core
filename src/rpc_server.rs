@@ -13,8 +13,8 @@ use std::str::FromStr;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
+use twenty_first::math::digest::Digest;
 use twenty_first::prelude::U32s;
-use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;

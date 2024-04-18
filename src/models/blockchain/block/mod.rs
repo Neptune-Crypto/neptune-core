@@ -14,14 +14,14 @@ use std::cmp::max;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use tracing::{debug, error, warn};
 
 use twenty_first::amount::u32s::U32s;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::digest::Digest;
-use twenty_first::shared_math::tip5::DIGEST_LENGTH;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::digest::Digest;
+use twenty_first::math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 pub mod block_body;

@@ -19,7 +19,7 @@ use tarpc::{client, context, tokio_serde::formats::Json};
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::{BlockSelector, RPCClient};
 use std::io::stdout;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 #[derive(Debug, Parser)]
 enum Command {

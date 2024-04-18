@@ -8,7 +8,7 @@ use std::{
     fmt::Display,
     ops::{Add, Sub},
 };
-use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,

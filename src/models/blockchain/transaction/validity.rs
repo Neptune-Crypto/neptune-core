@@ -20,7 +20,7 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::Digest;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use self::lockscripts_halt::LockScriptsHalt;
 use self::removal_records_integrity::RemovalRecordsIntegrity;

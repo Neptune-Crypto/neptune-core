@@ -57,7 +57,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use crate::database::NeptuneLevelDb;
-    use crate::twenty_first::shared_math::other::random_elements;
+    use crate::twenty_first::math::other::random_elements;
 
     use itertools::Itertools;
 

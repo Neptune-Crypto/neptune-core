@@ -23,7 +23,7 @@ use tasm_lib::{
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::{triton_asm, BFieldElement, NonDeterminism, PublicInput};
 use twenty_first::{
-    shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
+    math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
@@ -54,7 +54,7 @@ use super::{
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
         public_input: &PublicInput,
-        nondeterminism: &NonDeterminism<BFieldElement>,
+        nondeterminism: &NonDeterminism,
     ) -> anyhow::Result<Vec<BFieldElement>> {
         let hash_of_kernel = *Digest::decode(
             &public_input

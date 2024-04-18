@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;

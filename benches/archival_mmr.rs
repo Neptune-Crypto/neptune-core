@@ -10,7 +10,7 @@ use neptune_core::database::storage::storage_vec::traits::StorageVecBase;
 use neptune_core::database::NeptuneLevelDb;
 use neptune_core::util_types::mutator_set::archival_mmr::ArchivalMmr;
 use rand::random;
-use tasm_lib::twenty_first::shared_math::tip5::Tip5;
+use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_count_to_node_count;
 use tasm_lib::Digest;
 
@@ -100,7 +100,7 @@ mod append {
     mod append_5000 {
         const NUM_WRITE_ITEMS: usize = 5000;
         const INIT_AMMR_LEAF_COUNT: u64 = 0;
-        use tasm_lib::twenty_first::shared_math::other::random_elements;
+        use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
 
@@ -141,7 +141,7 @@ mod mutate {
         const AMMR_LEAF_COUNT: u64 = 10000;
         use itertools::Itertools;
         use rand::{thread_rng, Rng};
-        use tasm_lib::twenty_first::shared_math::other::random_elements;
+        use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
 
@@ -188,7 +188,7 @@ mod batch_mutate_leaf_and_update_mps {
         const AMMR_LEAF_COUNT: u64 = 10000;
         use itertools::Itertools;
         use rand::{thread_rng, Rng};
-        use tasm_lib::twenty_first::shared_math::other::random_elements;
+        use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
 

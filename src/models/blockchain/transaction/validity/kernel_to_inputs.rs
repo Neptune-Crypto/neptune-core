@@ -1,7 +1,7 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::{
-    shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
+    math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::models::blockchain::shared::Hash;

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::{
     structure::tasm_object::TasmObject,
     twenty_first::{
-        shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
+        math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
         util_types::algebraic_hasher::AlgebraicHasher,
     },
     Digest,

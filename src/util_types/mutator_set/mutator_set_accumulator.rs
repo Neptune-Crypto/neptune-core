@@ -7,11 +7,11 @@ use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
-use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::DIGEST_LENGTH;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
     algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,

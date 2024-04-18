@@ -18,13 +18,13 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self};
 use std::path::{Path, PathBuf};
 use tracing::info;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::digest::Digest;
-use twenty_first::shared_math::x_field_element::XFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::digest::Digest;
+use twenty_first::math::x_field_element::XFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::math::b_field_element::BFieldElement;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
 
@@ -352,8 +352,8 @@ mod wallet_tests {
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::tip5::DIGEST_LENGTH;
-    use twenty_first::shared_math::x_field_element::EXTENSION_DEGREE;
+    use twenty_first::math::tip5::DIGEST_LENGTH;
+    use twenty_first::math::x_field_element::EXTENSION_DEGREE;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;

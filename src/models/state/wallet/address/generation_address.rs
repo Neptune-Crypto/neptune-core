@@ -14,12 +14,15 @@ use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use sha3::digest::ExtendableOutput;
+use sha3::digest::Update;
+use sha3::Shake256;
 use triton_vm::triton_asm;
 use triton_vm::triton_instr;
-use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
-use twenty_first::shared_math::tip5::DIGEST_LENGTH;
+use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
+use twenty_first::math::tip5::DIGEST_LENGTH;
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, fips202::shake256, lattice, tip5::Digest},
+    math::{b_field_element::BFieldElement, lattice, tip5::Digest},
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
@@ -143,9 +146,7 @@ pub fn std_lockscript_reference_verify_unlock(
 
 impl SpendingKey {
     pub fn to_address(&self) -> ReceivingAddress {
-        let randomness: [u8; 32] = shake256(&bincode::serialize(&self.seed).unwrap(), 32)
-            .try_into()
-            .unwrap();
+        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = self.privacy_preimage.hash::<Hash>();
         ReceivingAddress {
@@ -215,9 +216,7 @@ impl SpendingKey {
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
-        let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
-            .try_into()
-            .unwrap();
+        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (sk, _pk) = lattice::kem::keygen(randomness);
         let receiver_identifier = derive_receiver_id(seed);
 
@@ -290,9 +289,7 @@ impl ReceivingAddress {
     pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
         let seed = spending_key.seed;
         let receiver_identifier = derive_receiver_id(seed);
-        let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
-            .try_into()
-            .unwrap();
+        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = spending_key.privacy_preimage.hash::<Hash>();
         Self {
@@ -440,6 +437,17 @@ impl ReceivingAddress {
     }
 }
 
+// note: copied from twenty_first::math::lattice::kem::shake256()
+//       which is not public
+fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NUM_OUT_BYTES] {
+    let mut hasher = Shake256::default();
+    hasher.update(randomness.as_ref());
+
+    let mut result = [0u8; NUM_OUT_BYTES];
+    hasher.finalize_xof_into(&mut result);
+    result
+}
+
 ///
 /// Claim
 ///  - (input: Hash(kernel), output: [], program: lock_script)
@@ -447,7 +455,7 @@ impl ReceivingAddress {
 #[cfg(test)]
 mod test_generation_addresses {
     use rand::{random, thread_rng, Rng, RngCore};
-    use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+    use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
     use crate::{
         config_models::network::Network,

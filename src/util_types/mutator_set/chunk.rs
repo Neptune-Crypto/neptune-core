@@ -4,7 +4,7 @@ use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::shared::CHUNK_SIZE;
 
@@ -132,7 +132,7 @@ mod chunk_tests {
     use rand::{thread_rng, RngCore};
     use std::collections::HashSet;
 
-    use twenty_first::shared_math::b_field_element::BFieldElement;
+    use twenty_first::math::b_field_element::BFieldElement;
 
     use super::*;
 

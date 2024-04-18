@@ -5,7 +5,7 @@ use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};

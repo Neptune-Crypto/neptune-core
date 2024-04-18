@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;

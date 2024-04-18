@@ -18,9 +18,7 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
     str::FromStr,
 };
-use tasm_lib::{
-    structure::tasm_object::TasmObject, twenty_first::shared_math::bfield_codec::BFieldCodec,
-};
+use tasm_lib::{structure::tasm_object::TasmObject, twenty_first::math::bfield_codec::BFieldCodec};
 
 /// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented
 /// by an atomic unit called Neptune atomic units (nau), which itself is represented as a 128

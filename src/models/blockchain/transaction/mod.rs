@@ -21,8 +21,8 @@ use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use tasm_lib::Digest;
 use tracing::{debug, error, warn};
 use triton_vm::prelude::NonDeterminism;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::primitive_witness::PrimitiveWitness;

@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use itertools::Itertools;
 use tasm_lib::{
     twenty_first::{
-        shared_math::bfield_codec::BFieldCodec,
+        math::bfield_codec::BFieldCodec,
         util_types::algebraic_hasher::{AlgebraicHasher, Sponge},
     },
     Digest,

@@ -6,7 +6,7 @@ use crate::database::{
     },
     NeptuneLevelDb,
 };
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::tip5::Digest;
 
 use super::monitored_utxo::MonitoredUtxo;
 

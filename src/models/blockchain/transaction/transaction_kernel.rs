@@ -16,9 +16,7 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use strum::EnumCount;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::shared_math::{
-    b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
-};
+use twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest};
 
 use super::{primitive_witness::PrimitiveWitness, PublicAnnouncement};
 use crate::util_types::mutator_set::{

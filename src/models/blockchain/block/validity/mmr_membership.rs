@@ -8,7 +8,6 @@ use crate::models::consensus::SecretWitness;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::NonDeterminism;
 use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,7 +16,7 @@ pub struct MmrMembershipWitness {
 }
 
 impl SecretWitness for MmrMembershipWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

@@ -14,7 +14,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tracing::{error, info, warn};
-use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
 use crate::models::{
     blockchain::{

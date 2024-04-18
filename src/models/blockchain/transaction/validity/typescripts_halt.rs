@@ -44,7 +44,7 @@ use itertools::Itertools;
 //         self.type_script_standard_input()
 //     }
 
-//     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+//     fn nondeterminism(&self) -> NonDeterminism {
 //         todo!()
 //     }
 // }

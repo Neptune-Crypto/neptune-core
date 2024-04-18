@@ -2,7 +2,7 @@ use crate::prelude::twenty_first;
 
 use serde::{Deserialize, Serialize};
 use std::{fmt, net::IpAddr};
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;

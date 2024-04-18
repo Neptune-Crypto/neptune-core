@@ -25,7 +25,7 @@ use std::{
     collections::{hash_map::RandomState, HashMap, HashSet},
     iter::Rev,
 };
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::Block;

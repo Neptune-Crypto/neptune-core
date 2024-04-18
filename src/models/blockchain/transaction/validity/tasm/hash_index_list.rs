@@ -110,8 +110,7 @@ impl Function for HashIndexList {
 
         let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
             std::collections::HashMap::new();
-        let index_list_encoded =
-            twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&index_list);
+        let index_list_encoded = twenty_first::math::bfield_codec::BFieldCodec::encode(&index_list);
 
         for (i, v) in index_list_encoded.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *v);
@@ -145,7 +144,7 @@ mod tests {
         traits::function::ShadowedFunction,
     };
     use triton_vm::prelude::{Digest, NonDeterminism};
-    use twenty_first::shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH};
+    use twenty_first::math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH};
 
     use super::*;
 
@@ -199,7 +198,7 @@ mod tests {
             memory,
         );
 
-        let memory_after_1st_run = vm_output.final_ram;
+        let memory_after_1st_run = vm_output.ram;
         assert_eq!(
             *memory_after_1st_run.get(stack.last().unwrap()).unwrap(),
             BFieldElement::new(num_lists as u64)
@@ -218,7 +217,7 @@ mod tests {
         );
 
         // inspect memory
-        let final_memory = vm_output_state.final_ram;
+        let final_memory = vm_output_state.ram;
         let output_list = stack.pop().unwrap();
         let num_hashes =
             rust_shadowing_helper_functions::list::list_get_length(output_list, &final_memory);

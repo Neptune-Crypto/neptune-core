@@ -1,9 +1,7 @@
+use crate::models::blockchain::block::BFieldCodec;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    triton_vm::program::{NonDeterminism, PublicInput},
-    twenty_first::{bfieldcodec_derive::BFieldCodec, shared_math::b_field_element::BFieldElement},
-};
+use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
 
 use crate::{
     models::consensus::{tasm::program::ConsensusProgram, SecretWitness},
@@ -16,7 +14,7 @@ pub struct CorrectMutatorSetUpdateWitness {
 }
 
 impl SecretWitness for CorrectMutatorSetUpdateWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

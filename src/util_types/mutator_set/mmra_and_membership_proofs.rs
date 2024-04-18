@@ -146,7 +146,7 @@ impl Arbitrary for MmraAndMembershipProofs {
 mod test {
 
     use super::*;
-    use crate::twenty_first::shared_math::tip5::Digest;
+    use crate::twenty_first::math::tip5::Digest;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;

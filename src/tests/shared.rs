@@ -33,12 +33,12 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::math::b_field_element::BFieldElement;
 
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;

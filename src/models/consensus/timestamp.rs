@@ -11,9 +11,7 @@ use num_traits::Zero;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
-use tasm_lib::twenty_first::shared_math::{
-    b_field_element::BFieldElement, bfield_codec::BFieldCodec,
-};
+use tasm_lib::twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 /// Dedicated struct for timestamps (and durations). Counts the number of
 /// milliseconds elapsed since the Unix epoch (00:00 UTC on 1 Jan 1970) using
@@ -123,16 +121,6 @@ impl Display for Timestamp {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use crate::models::consensus::timestamp::Timestamp;
-
-    #[test]
-    fn print_now() {
-        println!("{}", Timestamp::now());
-    }
-}
-
 impl Distribution<Timestamp> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Timestamp {
         Timestamp(rng.gen::<BFieldElement>())
@@ -144,5 +132,15 @@ impl<'a> Arbitrary<'a> for Timestamp {
         Result::Ok(Timestamp(BFieldElement::new(
             (u.arbitrary::<u128>()? % (BFieldElement::P as u128)) as u64,
         )))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::models::consensus::timestamp::Timestamp;
+
+    #[test]
+    fn print_now() {
+        println!("{}", Timestamp::now());
     }
 }

@@ -24,7 +24,7 @@ use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{twenty_first::shared_math::b_field_element::BFieldElement, Digest};
+use tasm_lib::{twenty_first::math::b_field_element::BFieldElement, Digest};
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -220,7 +220,7 @@ impl SecretWitness for NativeCurrencyWitness {
         self.type_script_standard_input()
     }
 
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         // memory
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let input_salted_utxos_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;

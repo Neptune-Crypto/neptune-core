@@ -30,11 +30,11 @@ use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::triton_vm::program::Program;
 use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::twenty_first::shared_math::tip5::Tip5;
 use tasm_lib::{
     triton_vm::{instruction::LabelledInstruction, program::NonDeterminism, triton_asm},
-    twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
+    twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
     Digest,
 };
 
@@ -397,7 +397,7 @@ pub struct TimeLockWitness {
 impl TimeLockWitness {}
 
 impl SecretWitness for TimeLockWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let input_salted_utxos_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let output_salted_utxos_address = encode_to_memory(

@@ -12,8 +12,8 @@ use num_traits::CheckedSub;
 use std::cmp::max;
 use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;

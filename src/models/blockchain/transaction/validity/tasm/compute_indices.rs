@@ -13,9 +13,9 @@ use tasm_lib::traits::function::{Function, FunctionInitialState};
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use triton_vm::triton_asm;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::util_types::mutator_set::ms_membership_proof::{
@@ -203,7 +203,7 @@ impl Function for ComputeIndices {
         let mut msmp = pseudorandom_mutator_set_membership_proof(rand::Rng::gen(&mut rng));
         msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
 
-        let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
+        let msmp_encoded = twenty_first::math::bfield_codec::BFieldCodec::encode(&msmp);
 
         let item: Digest = rand::Rng::gen(&mut rng);
         let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
@@ -252,7 +252,7 @@ mod tests {
         },
     };
     use triton_vm::prelude::NonDeterminism;
-    use twenty_first::shared_math::bfield_codec::BFieldCodec;
+    use twenty_first::math::bfield_codec::BFieldCodec;
 
     use crate::util_types::mutator_set::get_swbf_indices;
 
@@ -357,7 +357,7 @@ mod tests {
         maybe_write_debuggable_program_to_disk(&program, &vm_state);
 
         // inspect memory
-        let final_ram = vm_output_state.final_ram;
+        let final_ram = vm_output_state.ram;
         let output_list_address = stack.pop().unwrap();
         let output_list_length = final_ram.get(&output_list_address).unwrap().value() as usize;
         assert_eq!(output_list_length, num_items);

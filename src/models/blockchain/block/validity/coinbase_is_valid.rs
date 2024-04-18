@@ -5,9 +5,9 @@ use tasm_lib::{
         instruction::LabelledInstruction,
         program::{NonDeterminism, PublicInput},
     },
-    twenty_first::{self, shared_math::b_field_element::BFieldElement},
+    twenty_first,
 };
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::{
     blockchain::block::Block,
@@ -20,7 +20,7 @@ pub struct CoinbaseIsValidWitness {
 }
 
 impl SecretWitness for CoinbaseIsValidWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

@@ -6,7 +6,7 @@ use tasm_lib::{
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program},
     },
-    twenty_first::shared_math::b_field_element::BFieldElement,
+    twenty_first::math::b_field_element::BFieldElement,
     Digest,
 };
 
@@ -49,7 +49,7 @@ where
     fn run(
         &self,
         input: &[BFieldElement],
-        nondeterminism: NonDeterminism<BFieldElement>,
+        nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
         println!(
             "Running consensus program with input: {}",

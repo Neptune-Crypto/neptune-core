@@ -5,7 +5,7 @@ use tasm_lib::{
         instruction::LabelledInstruction,
         program::{NonDeterminism, PublicInput},
     },
-    twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
+    twenty_first::math::bfield_codec::BFieldCodec,
 };
 
 use crate::models::{
@@ -19,7 +19,7 @@ pub struct PredecessorIsValidWitness {
 }
 
 impl SecretWitness for PredecessorIsValidWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

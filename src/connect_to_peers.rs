@@ -466,7 +466,7 @@ mod connect_tests {
     use anyhow::{bail, Result};
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::digest::Digest;
+    use twenty_first::math::digest::Digest;
 
     use crate::config_models::network::Network;
     use crate::models::peer::{

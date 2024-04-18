@@ -16,10 +16,10 @@ use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
@@ -266,7 +266,7 @@ mod utxo_tests {
     use super::*;
     use rand::{thread_rng, Rng};
     use tracing_test::traced_test;
-    use twenty_first::shared_math::other::random_elements;
+    use twenty_first::math::other::random_elements;
 
     fn make_random_utxo() -> Utxo {
         let mut rng = thread_rng();

@@ -5,9 +5,9 @@ use tasm_lib::{
         instruction::LabelledInstruction,
         program::{NonDeterminism, PublicInput},
     },
-    twenty_first::{self, shared_math::b_field_element::BFieldElement},
+    twenty_first,
 };
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::consensus::{tasm::program::ConsensusProgram, SecretWitness};
 
@@ -67,7 +67,7 @@ pub struct PrincipalBlockValidationWitness {
 }
 
 impl SecretWitness for PrincipalBlockValidationWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

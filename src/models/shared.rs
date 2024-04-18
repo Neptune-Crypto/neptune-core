@@ -2,7 +2,7 @@ use crate::prelude::twenty_first;
 
 use serde::{Deserialize, Serialize};
 
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;

@@ -21,7 +21,7 @@ use tasm_lib::{
     Digest,
 };
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::{blockchain::transaction::utxo::LockScript, consensus::SecretWitness};
 
@@ -68,7 +68,7 @@ pub struct LockScriptHaltsWitness {
 }
 
 impl SecretWitness for LockScriptHaltsWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(
             self.nondeterministic_tokens
                 .clone()

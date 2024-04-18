@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use tasm_lib::twenty_first::{
-    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         merkle_tree::{CpuParallel, MerkleTree},

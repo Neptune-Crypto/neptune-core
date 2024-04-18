@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 
 use itertools::Itertools;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;

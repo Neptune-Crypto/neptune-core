@@ -1,16 +1,24 @@
 [
   {
     "name": "tasm_neptune_transaction_hash_index_list",
-    "clock_cycle_count": 390,
-    "hash_table_height": 217,
-    "u32_table_height": 14,
+    "benchmark_result": {
+      "clock_cycle_count": 390,
+      "hash_table_height": 217,
+      "u32_table_height": 14,
+      "op_stack_table_height": 634,
+      "ram_table_height": 181
+    },
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_hash_index_list",
-    "clock_cycle_count": 1134,
-    "hash_table_height": 589,
-    "u32_table_height": 16,
+    "benchmark_result": {
+      "clock_cycle_count": 1134,
+      "hash_table_height": 589,
+      "u32_table_height": 16,
+      "op_stack_table_height": 2370,
+      "ram_table_height": 801
+    },
     "case": "WorstCase"
   }
 ]

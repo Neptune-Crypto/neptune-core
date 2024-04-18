@@ -15,7 +15,7 @@ use tasm_lib::{
 };
 use triton_vm::prelude::{triton_asm, BFieldElement};
 use twenty_first::{
-    shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
+    math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::{
@@ -140,7 +140,7 @@ mod tests {
         traits::rust_shadow::RustShadow,
     };
     use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism};
-    use twenty_first::shared_math::tip5::DIGEST_LENGTH;
+    use twenty_first::math::tip5::DIGEST_LENGTH;
 
     use super::*;
 
@@ -206,7 +206,7 @@ mod tests {
         // read list of pointers from memory
         let pointers_list_address = *stack.last().unwrap();
 
-        let memory_after_1st_run = _vm_output.final_ram;
+        let memory_after_1st_run = _vm_output.ram;
         let num_pointers = memory_after_1st_run
             .get(&pointers_list_address)
             .unwrap()
@@ -268,7 +268,7 @@ mod tests {
         // STACK: 0^16 *[digest]
 
         // inspect memory
-        let final_memory = vm_output_state.final_ram;
+        let final_memory = vm_output_state.ram;
         let output_address = stack.pop().unwrap();
         let length: usize = final_memory.get(&output_address).unwrap().value() as usize;
         assert_eq!(length, num_removal_records);

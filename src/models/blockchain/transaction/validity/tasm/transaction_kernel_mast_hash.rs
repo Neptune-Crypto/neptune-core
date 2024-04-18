@@ -21,9 +21,9 @@ use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
 use tasm_lib::{rust_shadowing_helper_functions, ExecutionState};
 use triton_vm::{prelude::BFieldElement, triton_asm};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::{
-    shared_math::{tip5::Digest, tip5::DIGEST_LENGTH},
+    math::{tip5::Digest, tip5::DIGEST_LENGTH},
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
@@ -417,7 +417,7 @@ impl Function for TransactionKernelMastHash {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let input_state = Self::input_state_with_kernel_in_memory(
             BFieldElement::new(rng.gen_range(0..(1 << 20))),
-            &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
+            &twenty_first::math::bfield_codec::BFieldCodec::encode(
                 &pseudorandom_transaction_kernel(rand::Rng::gen::<[u8; 32]>(&mut rng), 4, 4, 2),
             ),
         );
@@ -434,8 +434,8 @@ mod tests {
     use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::twenty_first::shared_math::tip5::Tip5;
-    use twenty_first::shared_math::bfield_codec::BFieldCodec;
+    use tasm_lib::twenty_first::math::tip5::Tip5;
+    use twenty_first::math::bfield_codec::BFieldCodec;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
     use crate::models::consensus::mast_hash::MastHash;
@@ -464,11 +464,11 @@ mod tests {
         );
 
         // read the digest from the very short TX kernel
-        let d0 = output_with_known_digest.final_stack.pop().unwrap();
-        let d1 = output_with_known_digest.final_stack.pop().unwrap();
-        let d2 = output_with_known_digest.final_stack.pop().unwrap();
-        let d3 = output_with_known_digest.final_stack.pop().unwrap();
-        let d4 = output_with_known_digest.final_stack.pop().unwrap();
+        let d0 = output_with_known_digest.op_stack.stack.pop().unwrap();
+        let d1 = output_with_known_digest.op_stack.stack.pop().unwrap();
+        let d2 = output_with_known_digest.op_stack.stack.pop().unwrap();
+        let d3 = output_with_known_digest.op_stack.stack.pop().unwrap();
+        let d4 = output_with_known_digest.op_stack.stack.pop().unwrap();
         let mast_hash_from_vm = Digest::new([d0, d1, d2, d3, d4]);
 
         // Verify agreement with mast_hash method on tx kernel

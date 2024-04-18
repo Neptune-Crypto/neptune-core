@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::{
     triton_vm::program::{NonDeterminism, PublicInput},
     twenty_first::{
-        shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-        util_types::mmr::mmr_accumulator::MmrAccumulator,
+        math::bfield_codec::BFieldCodec, util_types::mmr::mmr_accumulator::MmrAccumulator,
     },
 };
 
@@ -17,7 +16,7 @@ pub struct CorrectMmrUpdateWitness {
 }
 
 impl SecretWitness for CorrectMmrUpdateWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 

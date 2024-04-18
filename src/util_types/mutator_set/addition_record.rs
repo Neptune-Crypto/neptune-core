@@ -5,8 +5,8 @@ use get_size::GetSize;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec, Arbitrary,

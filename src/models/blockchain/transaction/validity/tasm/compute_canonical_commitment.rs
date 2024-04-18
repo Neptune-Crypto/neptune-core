@@ -15,7 +15,7 @@ use tasm_lib::neptune::mutator_set::commit::Commit;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
 use triton_vm::prelude::{triton_asm, BFieldElement, Digest};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::util_types::mutator_set::{commit, ms_membership_proof::MsMembershipProof};
 

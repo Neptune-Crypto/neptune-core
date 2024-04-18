@@ -13,9 +13,8 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::other::log_2_floor;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -357,7 +356,7 @@ impl MsMembershipProof {
             "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
         let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
-        let aocl_mt_height = log_2_floor(aocl_discrepancies as u128);
+        let aocl_mt_height = (aocl_discrepancies as u128).ilog2();
 
         // trim to length
         while self.auth_path_aocl.authentication_path.len() > aocl_mt_height as usize {
@@ -374,7 +373,7 @@ impl MsMembershipProof {
         for (k, (mp, _chnk)) in self.target_chunks.dictionary.iter_mut() {
             // calculate length
             let chunk_discrepancies = swbfi_leaf_count ^ k;
-            let chunk_mt_height = log_2_floor(chunk_discrepancies as u128);
+            let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
 
             // trim to length
             while mp.authentication_path.len() > chunk_mt_height as usize {
@@ -555,7 +554,7 @@ mod ms_proof_tests {
     use itertools::{Either, Itertools};
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
-    use twenty_first::shared_math::other::random_elements;
+    use twenty_first::math::other::random_elements;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     #[test]

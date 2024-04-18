@@ -11,8 +11,8 @@ use strum::Display;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::program::Program;
 use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
-use tasm_lib::twenty_first::shared_math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::Digest;
 use triton_vm::prelude::Claim;
 use triton_vm::prelude::NonDeterminism;
@@ -72,8 +72,8 @@ pub struct RawWitness {
     digests: Vec<Digest>,
 }
 
-impl From<NonDeterminism<BFieldElement>> for RawWitness {
-    fn from(nondeterminism: NonDeterminism<BFieldElement>) -> Self {
+impl From<NonDeterminism> for RawWitness {
+    fn from(nondeterminism: NonDeterminism) -> Self {
         Self {
             tokens: nondeterminism.individual_tokens,
             ram: nondeterminism.ram.into_iter().collect_vec(),
@@ -82,7 +82,7 @@ impl From<NonDeterminism<BFieldElement>> for RawWitness {
     }
 }
 
-impl From<RawWitness> for NonDeterminism<BFieldElement> {
+impl From<RawWitness> for NonDeterminism {
     fn from(value: RawWitness) -> Self {
         Self {
             individual_tokens: value.tokens.clone(),
@@ -239,8 +239,7 @@ impl ValidityTree {
                     && !program.as_ref().unwrap().labelled_instructions().is_empty()
                 {
                     if let WitnessType::RawWitness(raw_witness) = &self.witness_type {
-                        let nondeterminism: NonDeterminism<BFieldElement> =
-                            raw_witness.clone().into();
+                        let nondeterminism: NonDeterminism = raw_witness.clone().into();
                         let proof = triton_vm::prove(
                             Stark::default(),
                             claim,
@@ -279,7 +278,7 @@ pub trait SecretWitness {
     }
 
     /// The non-determinism for the VM that this witness corresponds to
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
+    fn nondeterminism(&self) -> NonDeterminism;
 
     // fn verify(&self) -> bool {
     //     if self.consensus_program().code().is_empty() {
@@ -322,7 +321,7 @@ impl WhichProgram {
     pub fn run(
         &self,
         public_input: PublicInput,
-        non_determinism: NonDeterminism<BFieldElement>,
+        non_determinism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
         match self {
             WhichProgram::TimeLock => {

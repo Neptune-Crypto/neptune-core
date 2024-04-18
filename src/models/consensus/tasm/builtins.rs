@@ -1,7 +1,7 @@
 use tasm_lib::{
     structure::tasm_object::TasmObject,
     twenty_first::{
-        shared_math::{
+        math::{
             b_field_element::BFieldElement, bfield_codec::BFieldCodec,
             x_field_element::XFieldElement,
         },

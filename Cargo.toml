@@ -65,6 +65,7 @@ rs-leveldb = "0.1.5"
 leveldb-sys = "2.0.9"
 async-trait = "0.1.77"
 async-stream = "0.3.5"
+sha3 = "0.10.8"
 
 [dev-dependencies]
 test-strategy = "0.3"
@@ -122,7 +123,7 @@ harness = false
 
 [patch.crates-io]
 # 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
-tasm-lib = { git = "https://github.com/dan-da/tasm-lib.git", rev = "15a708cf6fcbd9ed3e65e5e2067be6e622176328" }
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "0591f8eab9b5d86380afdcd422d77dfeaacc5870" }
 
 # 81573735e9df4836ca16655fd31884271984bac7 = tip of branch: make_storage_async on 2024-03-18
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7" }
+# twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7" }

@@ -25,7 +25,7 @@ use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;

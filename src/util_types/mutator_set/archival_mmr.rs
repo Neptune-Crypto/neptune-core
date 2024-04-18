@@ -6,7 +6,7 @@ use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_a
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
-use twenty_first::shared_math::digest::Digest;
+use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::shared::bag_peaks;
 
@@ -295,12 +295,13 @@ pub(crate) mod mmr_test {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::storage::storage_vec::OrdinaryVec;
     use crate::database::NeptuneLevelDb;
-    use twenty_first::shared_math::b_field_element::BFieldElement;
-    use twenty_first::shared_math::other::*;
-    use twenty_first::shared_math::tip5::Tip5;
+    use twenty_first::math::b_field_element::BFieldElement;
+    use twenty_first::math::other::*;
+    use twenty_first::math::tip5::Tip5;
     use twenty_first::util_types::merkle_tree::*;
     use twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+    use twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
     use twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 
     type Storage = OrdinaryVec<Digest>;
@@ -352,7 +353,7 @@ pub(crate) mod mmr_test {
     pub fn root_from_arbitrary_number_of_digests<H: AlgebraicHasher>(digests: &[Digest]) -> Digest {
         let mut trees = vec![];
         let mut num_processed_digests = 0;
-        for tree_height in indices_of_set_bits(digests.len() as u64) {
+        for tree_height in get_peak_heights(digests.len() as u64) {
             let num_leaves_in_tree = 1 << tree_height;
             let leaf_digests =
                 &digests[num_processed_digests..num_processed_digests + num_leaves_in_tree];
@@ -380,7 +381,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn empty_mmr_behavior_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let mut archival_mmr: ArchivalMmr<H, Storage> = mock::get_empty_ammr().await;
         let mut accumulator_mmr: MmrAccumulator<H> = MmrAccumulator::<H>::new(vec![]);
@@ -459,7 +460,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn verify_against_correct_peak_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         // This test addresses a bug that was discovered late in the development process
         // where it was possible to fake a verification proof by providing a valid leaf
@@ -589,10 +590,10 @@ pub(crate) mod mmr_test {
 
     async fn bag_peaks_gen<H: AlgebraicHasher>() {
         // Verify that archival and accumulator MMR produce the same root
-        let leaf_hashes_blake3: Vec<Digest> = random_elements(3);
+        let leaf_hashes_tip5: Vec<Digest> = random_elements(3);
         let archival_mmr_small: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(leaf_hashes_blake3.clone()).await;
-        let accumulator_mmr_small = MmrAccumulator::<H>::new(leaf_hashes_blake3);
+            mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
+        let accumulator_mmr_small = MmrAccumulator::<H>::new(leaf_hashes_tip5);
         assert_eq!(
             archival_mmr_small.bag_peaks().await,
             accumulator_mmr_small.bag_peaks()
@@ -608,8 +609,7 @@ pub(crate) mod mmr_test {
     }
 
     #[tokio::test]
-    async fn bag_peaks_blake3_test() {
-        bag_peaks_gen::<blake3::Hasher>().await;
+    async fn bag_peaks_tip5_test() {
         bag_peaks_gen::<Tip5>().await;
     }
 
@@ -656,17 +656,17 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn accumulator_mmr_mutate_leaf_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         // Verify that upating leafs in archival and in accumulator MMR results in the same peaks
         // and verify that updating all leafs in an MMR results in the expected MMR
         for size in 1..150 {
             let new_leaf: Digest = random();
-            let leaf_hashes_blake3: Vec<Digest> = random_elements(size);
+            let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
 
-            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_blake3.clone());
+            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
             let mut archival: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_blake3.clone()).await;
+                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
             let archival_end_state: ArchivalMmr<H, Storage> =
                 mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
             for i in 0..size {
@@ -685,15 +685,15 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn mmr_prove_verify_leaf_mutation_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         for size in 1..150 {
             let new_leaf: Digest = random();
             let bad_leaf: Digest = random();
-            let leaf_hashes_blake3: Vec<Digest> = random_elements(size);
-            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_blake3.clone());
+            let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
+            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
             let mut archival: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_blake3.clone()).await;
+                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
             let archival_end_state: ArchivalMmr<H, Storage> =
                 mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
             for i in 0..size {
@@ -733,18 +733,18 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn mmr_append_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         // Verify that building an MMR iteratively or in *one* function call results in the same MMR
         for size in 1..260 {
-            let leaf_hashes_blake3: Vec<Digest> = random_elements(size);
+            let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
             let mut archival_iterative: ArchivalMmr<H, Storage> =
                 mock::get_ammr_from_digests::<H>(vec![]).await;
             let archival_batch: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_blake3.clone()).await;
+                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
             let mut accumulator_iterative = MmrAccumulator::<H>::new(vec![]);
-            let accumulator_batch = MmrAccumulator::<H>::new(leaf_hashes_blake3.clone());
-            for (leaf_index, leaf_hash) in leaf_hashes_blake3.clone().into_iter().enumerate() {
+            let accumulator_batch = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
+            for (leaf_index, leaf_hash) in leaf_hashes_tip5.clone().into_iter().enumerate() {
                 let archival_membership_proof: MmrMembershipProof<H> =
                     archival_iterative.append(leaf_hash).await;
                 let accumulator_membership_proof = accumulator_iterative.append(leaf_hash);
@@ -790,7 +790,7 @@ pub(crate) mod mmr_test {
             let empty_accumulator = MmrAccumulator::<H>::new(vec![]);
             assert!(empty_accumulator.verify_batch_update(
                 &archival_batch.get_peaks().await,
-                &leaf_hashes_blake3,
+                &leaf_hashes_tip5,
                 &[],
             ));
         }
@@ -995,7 +995,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn remove_last_leaf_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let input_digests: Vec<Digest> = random_elements(12);
         let mut mmr: ArchivalMmr<H, Storage> =
@@ -1031,7 +1031,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn remove_last_leaf_pbt() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let small_size: usize = 100;
         let big_size: usize = 350;
@@ -1054,8 +1054,8 @@ pub(crate) mod mmr_test {
     }
 
     #[tokio::test]
-    async fn variable_size_blake3_mmr_test() {
-        type H = blake3::Hasher;
+    async fn variable_size_tip5_mmr_test2() {
+        type H = Tip5;
 
         let node_counts: Vec<u64> = vec![
             1, 3, 4, 7, 8, 10, 11, 15, 16, 18, 19, 22, 23, 25, 26, 31, 32, 34, 35, 38, 39, 41, 42,
@@ -1142,7 +1142,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn leveldb_persist_storage_schema_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
             .await

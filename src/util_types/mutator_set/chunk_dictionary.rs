@@ -10,10 +10,10 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use triton_vm::prelude::Digest;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
@@ -121,8 +121,8 @@ mod chunk_dict_tests {
 
     use super::super::archival_mmr::mmr_test::mock;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-    use twenty_first::shared_math::other::random_elements;
-    use twenty_first::shared_math::tip5::{Digest, Tip5};
+    use twenty_first::math::other::random_elements;
+    use twenty_first::math::tip5::{Digest, Tip5};
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;

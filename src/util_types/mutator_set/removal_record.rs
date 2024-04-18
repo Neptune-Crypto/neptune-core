@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};

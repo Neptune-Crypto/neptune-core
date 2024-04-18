@@ -10,8 +10,7 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
-use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -135,7 +134,7 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
     let num_peaks = leaf_count.count_ones();
     let leaf_index = rng.next_u64() % leaf_count;
     let (inner_index, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, leaf_count);
-    let tree_height = log_2_ceil(inner_index as u128 + 1u128) - 1;
+    let tree_height = (inner_index as u128 + 1u128).next_power_of_two().ilog2() - 1;
 
     let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
         rng.gen(),
@@ -216,8 +215,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
 
         // generate root and authentication paths
         let tree_height =
-            log_2_floor(*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128)
-                as usize;
+            (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128).ilog2() as usize;
         let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
             rng.gen(),
             tree_height,

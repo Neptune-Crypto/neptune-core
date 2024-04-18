@@ -7,7 +7,7 @@ use crate::{
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
 };
 use serde::{Deserialize, Serialize};
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::tip5::Digest;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 

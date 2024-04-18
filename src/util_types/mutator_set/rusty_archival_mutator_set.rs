@@ -5,7 +5,7 @@ use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
-use twenty_first::shared_math::tip5::Digest;
+use twenty_first::math::tip5::Digest;
 
 use super::{
     active_window::ActiveWindow, archival_mmr::ArchivalMmr,
@@ -98,7 +98,7 @@ impl StorageWriter for RustyArchivalMutatorSet {
 mod tests {
     use itertools::Itertools;
     use rand::{random, thread_rng, RngCore};
-    use twenty_first::shared_math::tip5::Tip5;
+    use twenty_first::math::tip5::Tip5;
 
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::{

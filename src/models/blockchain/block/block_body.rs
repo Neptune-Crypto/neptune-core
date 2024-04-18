@@ -4,10 +4,10 @@ use crate::prelude::twenty_first;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use strum::EnumCount;
-use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::Digest;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;

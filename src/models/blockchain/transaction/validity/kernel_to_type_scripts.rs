@@ -12,7 +12,7 @@ use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism, PublicInput};
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToTypeScriptsWitness {
@@ -21,7 +21,7 @@ pub struct KernelToTypeScriptsWitness {
 }
 
 impl SecretWitness for KernelToTypeScriptsWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 
@@ -78,7 +78,7 @@ impl From<transaction::PrimitiveWitness> for KernelToTypeScripts {
 impl CompiledProgram for KernelToTypeScripts {
     fn rust_shadow(
         _public_input: &PublicInput,
-        _secret_input: &NonDeterminism<BFieldElement>,
+        _secret_input: &NonDeterminism,
     ) -> anyhow::Result<Vec<BFieldElement>> {
         todo!()
     }

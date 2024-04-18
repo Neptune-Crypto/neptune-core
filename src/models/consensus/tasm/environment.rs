@@ -8,8 +8,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use tasm_lib::{
-    triton_vm::program::NonDeterminism, twenty_first::shared_math::b_field_element::BFieldElement,
-    Digest,
+    triton_vm::program::NonDeterminism, twenty_first::math::b_field_element::BFieldElement, Digest,
 };
 
 thread_local! {
@@ -27,7 +26,7 @@ thread_local! {
 pub(crate) fn init(
     program_digest: Digest,
     input: &[BFieldElement],
-    nondeterminism: NonDeterminism<BFieldElement>,
+    nondeterminism: NonDeterminism,
 ) {
     let mut pub_input_reversed = input.to_vec();
     pub_input_reversed.reverse();

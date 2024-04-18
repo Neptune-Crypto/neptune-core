@@ -23,9 +23,9 @@ use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use triton_vm::prelude::{BFieldElement, NonDeterminism};
+use triton_vm::prelude::NonDeterminism;
 use twenty_first::{
-    shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
+    math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
 };
 
@@ -78,7 +78,7 @@ impl RemovalRecordsIntegrityWitness {
 }
 
 impl SecretWitness for RemovalRecordsIntegrityWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism {
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
