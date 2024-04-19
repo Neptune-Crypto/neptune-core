@@ -286,9 +286,7 @@ impl RemovalRecord {
             .all(|(_i, (proof, chunk))| {
                 let leaf_digest = Hash::hash(chunk);
                 let leaf_count = mutator_set.swbf_inactive.count_leaves();
-                let (verified, _final_state) = proof.verify(&peaks, leaf_digest, leaf_count);
-
-                verified
+                proof.verify(&peaks, leaf_digest, leaf_count)
             })
     }
 

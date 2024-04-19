@@ -261,7 +261,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
         for (&(leaf, _mt_index, _original_index), mp) in
             leafs_and_mt_indices.iter().zip(membership_proofs.iter())
         {
-            assert!(mp.verify(&dummy_peaks, leaf, leaf_count).0);
+            assert!(mp.verify(&dummy_peaks, leaf, leaf_count));
         }
 
         // collect membership proofs in vector, with indices matching those of the supplied leafs
@@ -276,7 +276,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
 
     // sanity check
     for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
     }
 
     (mmra, mps)
@@ -402,7 +402,7 @@ mod shared_tests_test {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
         let (mmra, mp) = pseudorandom_mmra_with_mp::<Hash>(rng.gen(), leaf);
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
     }
 
     #[test]
@@ -451,7 +451,7 @@ mod shared_tests_test {
             let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
             for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
-                    mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0,
+                    mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()),
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }

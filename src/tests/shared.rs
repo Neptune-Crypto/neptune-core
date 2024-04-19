@@ -471,7 +471,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
 
     for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
         assert!(
-            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
             "Returned MPs must be valid for returned AOCL"
         );
     }

@@ -303,7 +303,7 @@ impl RemovalRecordsIntegrityWitness {
             for (&(leaf, _mt_index, _original_index), mp) in
                 leafs_and_mt_indices.iter().zip(membership_proofs.iter())
             {
-                assert!(mp.verify(&dummy_peaks, leaf, leaf_count).0);
+                assert!(mp.verify(&dummy_peaks, leaf, leaf_count));
             }
 
             // collect membership proofs in vector, with indices matching those of the supplied leafs
@@ -318,7 +318,7 @@ impl RemovalRecordsIntegrityWitness {
 
         // sanity check
         for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
         }
 
         (mmra, mps)
@@ -359,7 +359,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
         for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
             assert!(
-                mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+                mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
                 "Returned MPs must be valid for returned AOCL"
             );
         }

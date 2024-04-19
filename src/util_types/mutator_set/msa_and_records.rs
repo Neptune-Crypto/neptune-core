@@ -213,7 +213,7 @@ impl Arbitrary for MsaAndRecords {
                                     .zip(personalized_chunk_dictionaries.iter())
                                     .map(|(((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)| {
                                         let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
-                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()).0);
+                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()));
                                         (((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)
                                     })
                                     .map(

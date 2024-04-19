@@ -250,7 +250,7 @@ impl MutatorSetAccumulator {
                 Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             ),
         );
-        let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
+        let is_aocl_member = membership_proof.auth_path_aocl.verify(
             &self.aocl.get_peaks(),
             leaf,
             self.aocl.count_leaves(),
@@ -294,7 +294,7 @@ impl MutatorSetAccumulator {
                     .dictionary
                     .get(&chunk_index)
                     .unwrap();
-                let (valid_auth_path, _) = mp_and_chunk.0.verify(
+                let valid_auth_path = mp_and_chunk.0.verify(
                     &self.swbf_inactive.get_peaks(),
                     Hash::hash(&mp_and_chunk.1),
                     self.swbf_inactive.count_leaves(),

@@ -128,7 +128,7 @@ impl Arbitrary for MmraAndMembershipProofs {
                 for (mmr_mp, leaf) in membership_proofs.iter().zip(leafs.iter()) {
                     let (_mti, _pi) =
                         leaf_index_to_mt_index_and_peak_index(mmr_mp.leaf_index, total_leaf_count);
-                    assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count).0);
+                    assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count));
                 }
 
                 MmraAndMembershipProofs {
@@ -174,14 +174,11 @@ mod test {
             .into_iter()
             .zip(mmra_and_membership_proofs.membership_proofs)
         {
-            prop_assert!(
-                mp.verify(
-                    &mmra_and_membership_proofs.mmra.get_peaks(),
-                    leaf,
-                    mmra_and_membership_proofs.mmra.count_leaves(),
-                )
-                .0
-            );
+            prop_assert!(mp.verify(
+                &mmra_and_membership_proofs.mmra.get_peaks(),
+                leaf,
+                mmra_and_membership_proofs.mmra.count_leaves(),
+            ));
         }
     }
 }

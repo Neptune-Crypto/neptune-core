@@ -168,7 +168,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
                     cc.canonical_commitment,
                     removal_record_integrity_witness.aocl.count_leaves(),
                 )
-                .0
             }));
 
         Ok(vec![])
