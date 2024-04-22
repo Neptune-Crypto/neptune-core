@@ -1609,6 +1609,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "strum 0.25.0",
+ "systemstat",
  "tarpc",
  "tasm-lib",
  "test-strategy",
@@ -2640,6 +2641,20 @@ name = "sync_wrapper"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
+
+[[package]]
+name = "systemstat"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a24aec24a9312c83999a28e3ef9db7e2afd5c64bf47725b758cdc1cafd5b0bd2"
+dependencies = [
+ "bytesize",
+ "lazy_static",
+ "libc",
+ "nom",
+ "time",
+ "winapi",
+]
 
 [[package]]
 name = "tarpc"

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use systemstat::{Platform, System};
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
@@ -160,6 +161,9 @@ pub trait RPC {
 
     /// Gracious shutdown.
     async fn shutdown() -> bool;
+
+    /// Get CPU temperature.
+    async fn cpu_temp() -> Option<f64>;
 }
 
 #[derive(Clone)]
@@ -683,6 +687,14 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .get_all_own_coins_with_possible_timelocks()
             .await
+    }
+
+    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f64> {
+        let current_system = System::new();
+        match current_system.cpu_temp() {
+            Ok(temp) => Some(temp.into()),
+            Err(_) => None,
+        }
     }
 }
 
@@ -1235,5 +1247,17 @@ mod rpc_server_tests {
             .block_digest(ctx, BlockSelector::Digest(Digest::default()))
             .await
             .is_none());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn can_get_server_temperature_test() {
+        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let current_server_temperature = rpc_server.cpu_temp(context::current()).await;
+
+        // Silicon Macs do not provide CPU temperature using systemstat
+        if std::env::consts::OS != "macos" {
+            assert!(current_server_temperature.is_some());
+        }
     }
 }
