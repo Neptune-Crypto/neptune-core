@@ -226,13 +226,13 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         let (peak_heights, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
         let peaks = self.digests.get_many(&peak_node_indices).await;
 
-        let peak_heights_and_values: Vec<_> = peaks
+        let peaks_and_heights: Vec<_> = peaks
             .iter()
             .zip(peak_heights.iter())
             .map(|(&x, &y)| (x, y))
             .collect();
 
-        peak_heights_and_values
+        peaks_and_heights
     }
 
     /// Remove the last leaf from the archival MMR
