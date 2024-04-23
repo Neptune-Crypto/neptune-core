@@ -1111,7 +1111,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_can_get_server_temperature() {
-        let (rpc_server, state_lock) =
+        let (rpc_server, _state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let current_server_temperature = rpc_server.get_cpu_temps(context::current()).await;
         // Silicon Macs do not provide CPU temperature using systemstat
