@@ -16,7 +16,7 @@ use itertools::Itertools;
 
 use twenty_first::util_types::mmr::{
     mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
-    shared_advanced, shared_basic,
+    shared_advanced,
 };
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
@@ -228,39 +228,17 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
 
     /// Return a list of tuples (peaks, height)
     pub async fn get_peaks_with_heights_async(&self) -> Vec<(Digest, u32)> {
-        if self.is_empty().await {
-            return vec![];
-        }
+        let leaf_count = self.count_leaves().await;
+        let (peak_heights, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
+        let peaks = self.digests.get_many(&peak_node_indices).await;
 
-        // 1. Find top peak
-        // 2. Jump to right sibling (will not be included)
-        // 3. Take left child of sibling, continue until a node in tree is found
-        // 4. Once new node is found, jump to right sibling (will not be included)
-        // 5. Take left child of sibling, continue until a node in tree is found
-        let mut peaks_and_heights: Vec<(Digest, u32)> = vec![];
-        let (mut top_peak, mut top_height) =
-            shared_advanced::leftmost_ancestor(self.digests.len().await - 1);
-        if top_peak > self.digests.len().await - 1 {
-            top_peak = shared_basic::left_child(top_peak, top_height);
-            top_height -= 1;
-        }
+        let peak_heights_and_values: Vec<_> = peaks
+            .iter()
+            .zip(peak_heights.iter())
+            .map(|(&x, &y)| (x, y))
+            .collect();
 
-        peaks_and_heights.push((self.digests.get(top_peak).await, top_height));
-        let mut height = top_height;
-        let mut candidate = shared_advanced::right_sibling(top_peak, height);
-        'outer: while height > 0 {
-            '_inner: while candidate > self.digests.len().await && height > 0 {
-                candidate = shared_basic::left_child(candidate, height);
-                height -= 1;
-                if candidate < self.digests.len().await {
-                    peaks_and_heights.push((self.digests.get(candidate).await, height));
-                    candidate = shared_advanced::right_sibling(candidate, height);
-                    continue 'outer;
-                }
-            }
-        }
-
-        peaks_and_heights
+        peak_heights_and_values
     }
 
     /// Remove the last leaf from the archival MMR
