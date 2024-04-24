@@ -199,7 +199,7 @@ pub trait RPC {
     async fn shutdown() -> bool;
 
     /// Get CPU temperature.
-    async fn get_cpu_temps() -> Option<f64>;
+    async fn cpu_temp() -> Option<f64>;
 }
 
 #[derive(Clone)]
@@ -723,7 +723,7 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    async fn get_cpu_temps(self, _context: tarpc::context::Context) -> Option<f64> {
+    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f64> {
         let current_system = System::new();
         match current_system.cpu_temp() {
             Ok(temp) => Some(temp.into()),
@@ -1113,7 +1113,7 @@ mod rpc_server_tests {
     async fn test_can_get_server_temperature() {
         let (rpc_server, _state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
-        let current_server_temperature = rpc_server.get_cpu_temps(context::current()).await;
+        let current_server_temperature = rpc_server.cpu_temp(context::current()).await;
         // Silicon Macs do not provide CPU temperature using systemstat
         if std::env::consts::OS == "macos" {
             assert!(current_server_temperature.is_none());
