@@ -647,7 +647,7 @@ impl GlobalState {
         output_utxos: Vec<Utxo>,
         fee: NeptuneCoins,
         public_announcements: Vec<PublicAnnouncement>,
-        timestamp: u64,
+        timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         privacy: bool,
     ) -> Result<Transaction> {
