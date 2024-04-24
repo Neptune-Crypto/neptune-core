@@ -127,8 +127,8 @@ pub trait RPC {
     /// Return the digest for the specified block selector (genesis, tip, or height)
     async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
 
-    /// Return the digest for the specified UTXO index
-    async fn utxo_digest(index: u64) -> Option<Digest>;
+    /// Return the digest for the specified UTXO leaf index
+    async fn utxo_digest(leaf_index: u64) -> Option<Digest>;
 
     /// Return the block header for the specified block
     async fn header(block_selector: BlockSelector) -> Option<BlockHeader>;
@@ -258,12 +258,12 @@ impl RPC for NeptuneRPCServer {
         self.confirmations_internal().await
     }
 
-    async fn utxo_digest(self, _: context::Context, index: u64) -> Option<Digest> {
+    async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
-        match index > 0 && index < aocl.len().await {
-            true => Some(aocl.get_leaf_async(index).await),
+        match leaf_index > 0 && leaf_index < aocl.count_leaves().await {
+            true => Some(aocl.get_leaf_async(leaf_index).await),
             false => None,
         }
     }
