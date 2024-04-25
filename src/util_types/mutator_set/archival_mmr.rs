@@ -41,8 +41,9 @@ where
 
     /// Return the digests of the peaks of the MMR
     pub async fn get_peaks(&self) -> Vec<Digest> {
-        let peaks_and_heights = self.get_peaks_with_heights_async().await;
-        peaks_and_heights.into_iter().map(|x| x.0).collect()
+        let leaf_count = self.count_leaves().await;
+        let (_, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
+        self.digests.get_many(&peak_node_indices).await
     }
 
     /// Whether the MMR is empty. Note that since indexing starts at
@@ -226,21 +227,6 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         MmrMembershipProof::new(leaf_index, authentication_path)
     }
 
-    /// Return a list of tuples (peaks, height)
-    pub async fn get_peaks_with_heights_async(&self) -> Vec<(Digest, u32)> {
-        let leaf_count = self.count_leaves().await;
-        let (peak_heights, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
-        let peaks = self.digests.get_many(&peak_node_indices).await;
-
-        let peaks_and_heights: Vec<_> = peaks
-            .iter()
-            .zip(peak_heights.iter())
-            .map(|(&x, &y)| (x, y))
-            .collect();
-
-        peaks_and_heights
-    }
-
     /// Remove the last leaf from the archival MMR
     pub async fn remove_last_leaf_async(&mut self) -> Option<Digest> {
         if self.is_empty().await {
@@ -280,7 +266,6 @@ pub(crate) mod mmr_test {
     use twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
-    use twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 
     type Storage = OrdinaryVec<Digest>;
 
@@ -774,10 +759,8 @@ pub(crate) mod mmr_test {
         assert_eq!(1, mmr.count_leaves().await);
         assert_eq!(1, mmr.count_nodes().await);
 
-        let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights_async().await;
-        assert_eq!(1, original_peaks_and_heights.len());
-        assert_eq!(0, original_peaks_and_heights[0].1);
+        let original_peaks: Vec<Digest> = mmr.get_peaks().await;
+        assert_eq!(1, original_peaks.len());
 
         {
             let leaf_index = 0;
@@ -791,11 +774,9 @@ pub(crate) mod mmr_test {
         assert_eq!(2, mmr.count_leaves().await);
         assert_eq!(3, mmr.count_nodes().await);
 
-        let new_peaks_and_heights = mmr.get_peaks_with_heights_async().await;
-        assert_eq!(1, new_peaks_and_heights.len());
-        assert_eq!(1, new_peaks_and_heights[0].1);
+        let new_peaks = mmr.get_peaks().await;
+        assert_eq!(1, new_peaks.len());
 
-        let new_peaks: Vec<Digest> = new_peaks_and_heights.iter().map(|x| x.0).collect();
         assert!(
             original_mmr
                 .verify_batch_update(&new_peaks, &[new_input_hash], &[])
@@ -845,10 +826,9 @@ pub(crate) mod mmr_test {
         assert_eq!(num_leaves, mmr.count_leaves().await);
         assert_eq!(1 + num_leaves, mmr.count_nodes().await);
 
-        let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights_async().await;
+        let original_peaks: Vec<Digest> = mmr.get_peaks().await;
         let expected_peaks = 2;
-        assert_eq!(expected_peaks, original_peaks_and_heights.len());
+        assert_eq!(expected_peaks, original_peaks.len());
 
         {
             let leaf_index = 0;
@@ -904,13 +884,8 @@ pub(crate) mod mmr_test {
             assert_eq!(leaf_count, mmr.count_leaves().await);
             assert_eq!(node_count, mmr.count_nodes().await);
 
-            let original_peaks_and_heights = mmr.get_peaks_with_heights_async().await;
-            let peak_heights_1: Vec<u32> = original_peaks_and_heights.iter().map(|x| x.1).collect();
-
-            let (peak_heights_2, _) = get_peak_heights_and_peak_node_indices(leaf_count);
-            assert_eq!(peak_heights_1, peak_heights_2);
-
-            let actual_peak_count = original_peaks_and_heights.len() as u64;
+            let original_peaks = mmr.get_peaks().await;
+            let actual_peak_count = original_peaks.len() as u64;
             assert_eq!(peak_count, actual_peak_count);
 
             // Verify that MMR root from odd number of digests and MMR bagged peaks agree
@@ -1031,12 +1006,8 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
             assert_eq!(size, mmr.count_leaves().await);
             assert_eq!(node_count, mmr.count_nodes().await);
-            let original_peaks_and_heights: Vec<(Digest, u32)> =
-                mmr.get_peaks_with_heights_async().await;
-            let peak_heights_1: Vec<u32> = original_peaks_and_heights.iter().map(|x| x.1).collect();
-            let (peak_heights_2, _) = get_peak_heights_and_peak_node_indices(size);
-            assert_eq!(peak_heights_1, peak_heights_2);
-            assert_eq!(peak_count, original_peaks_and_heights.len() as u64);
+            let original_peaks: Vec<Digest> = mmr.get_peaks().await;
+            assert_eq!(peak_count, original_peaks.len() as u64);
 
             // Verify that MMR root from odd number of digests and MMR bagged peaks agree
             let mmra_root = mmr.bag_peaks().await;
@@ -1054,7 +1025,6 @@ pub(crate) mod mmr_test {
                 let valid_res =
                     membership_proof.verify(&peaks, input_digests[leaf_index as usize], size);
                 assert!(valid_res);
-
                 let new_leaf: Digest = random();
 
                 // The below verify_modify tests should only fail if `wrong_leaf_index` is
