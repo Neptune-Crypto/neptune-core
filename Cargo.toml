@@ -123,8 +123,8 @@ harness = false
 
 
 [patch.crates-io]
-# 9478e0dbb70ae0795878d0402c8169c70df90485 is tip of branch: master as of 2024-04-22
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "9478e0dbb70ae0795878d0402c8169c70df90485" }
+# aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f is tip of branch: master as of 2024-04-24
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f" }
 
-# 2a331dd3267f53d04b3669d47eb0b54f04092e54 = tip of branch: master,  on 2024-04-22
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "2a331dd3267f53d04b3669d47eb0b54f04092e54" }
+# 0d2cb98c0495d30e53d28e82a35de44dc655c3ea = tip of branch: master,  on 2024-04-24
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "0d2cb98c0495d30e53d28e82a35de44dc655c3ea" }

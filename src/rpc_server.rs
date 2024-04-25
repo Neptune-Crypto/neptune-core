@@ -21,6 +21,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
@@ -60,7 +61,32 @@ pub struct BlockInfo {
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub num_inputs: usize,
     pub num_outputs: usize,
+    pub num_uncle_blocks: usize,
+    pub mining_reward: NeptuneCoins,
     pub fee: NeptuneCoins,
+    pub is_genesis: bool,
+    pub is_tip: bool,
+}
+
+impl BlockInfo {
+    fn from_block_and_digests(block: &Block, genesis_digest: Digest, tip_digest: Digest) -> Self {
+        let body = block.body();
+        let header = block.header();
+        let digest = block.hash();
+        Self {
+            digest,
+            height: header.height,
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            num_inputs: body.transaction.kernel.inputs.len(),
+            num_outputs: body.transaction.kernel.outputs.len(),
+            num_uncle_blocks: body.uncle_blocks.len(),
+            fee: body.transaction.kernel.fee,
+            mining_reward: crate::Block::get_mining_reward(header.height),
+            is_genesis: digest == genesis_digest,
+            is_tip: digest == tip_digest,
+        }
+    }
 }
 
 /// Provides alternatives for looking up a block.
@@ -122,14 +148,14 @@ pub trait RPC {
     /// Returns the digest of the latest n blocks
     async fn latest_tip_digests(n: usize) -> Vec<Digest>;
 
-    /// Returns information about the specified block
+    /// Returns information about the specified block if found
     async fn block_info(block_selector: BlockSelector) -> Option<BlockInfo>;
 
-    /// Return the digest for the specified block selector (genesis, tip, or height)
+    /// Return the digest for the specified block if found
     async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
 
-    /// Return the digest for the specified UTXO index
-    async fn utxo_digest(index: u64) -> Option<Digest>;
+    /// Return the digest for the specified UTXO leaf index if found
+    async fn utxo_digest(leaf_index: u64) -> Option<Digest>;
 
     /// Return the block header for the specified block
     async fn header(block_selector: BlockSelector) -> Option<BlockHeader>;
@@ -262,12 +288,12 @@ impl RPC for NeptuneRPCServer {
         self.confirmations_internal().await
     }
 
-    async fn utxo_digest(self, _: context::Context, index: u64) -> Option<Digest> {
+    async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
-        match index > 0 && index < aocl.len().await {
-            true => Some(aocl.get_leaf_async(index).await),
+        match leaf_index > 0 && leaf_index < aocl.count_leaves().await {
+            true => Some(aocl.get_leaf_async(leaf_index).await),
             false => None,
         }
     }
@@ -278,7 +304,13 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> Option<Digest> {
         let state = self.state.lock_guard().await;
-        block_selector.as_digest(&state).await
+        let archival_state = state.chain.archival_state();
+        let digest = block_selector.as_digest(&state).await?;
+        // verify the block actually exists
+        archival_state
+            .get_block_header(digest)
+            .await
+            .map(|_| digest)
     }
 
     async fn block_info(
@@ -291,17 +323,11 @@ impl RPC for NeptuneRPCServer {
         let archival_state = state.chain.archival_state();
 
         let block = archival_state.get_block(digest).await.unwrap()?;
-        let header = block.header();
-        let body = block.body();
-        Some(BlockInfo {
-            digest: block.hash(),
-            height: header.height,
-            timestamp: header.timestamp,
-            difficulty: header.difficulty,
-            num_inputs: body.transaction.kernel.inputs.len(),
-            num_outputs: body.transaction.kernel.outputs.len(),
-            fee: body.transaction.kernel.fee,
-        })
+        Some(BlockInfo::from_block_and_digests(
+            &block,
+            archival_state.genesis_block().hash(),
+            state.chain.light_state().hash(),
+        ))
     }
 
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
@@ -735,6 +761,7 @@ impl RPC for NeptuneRPCServer {
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
+    use crate::Block;
     use crate::{
         config_models::network::Network,
         models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
@@ -804,6 +831,7 @@ mod rpc_server_tests {
             .clone()
             .block_digest(ctx, BlockSelector::Digest(Digest::default()))
             .await;
+        let _ = rpc_server.clone().utxo_digest(ctx, 0).await;
         let _ = rpc_server.clone().synced_balance(ctx).await;
         let _ = rpc_server.clone().history(ctx).await;
         let _ = rpc_server.clone().wallet_status(ctx).await;
@@ -1120,5 +1148,179 @@ mod rpc_server_tests {
         } else {
             assert!(current_server_temperature.is_some());
         }
+  }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn utxo_digest_test() {
+        let (rpc_server, state_lock) =
+            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let global_state = state_lock.lock_guard().await;
+        let aocl_leaves = global_state
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .count_leaves()
+            .await;
+
+        debug_assert!(aocl_leaves > 0);
+
+        assert!(rpc_server
+            .clone()
+            .utxo_digest(context::current(), aocl_leaves - 1)
+            .await
+            .is_some());
+
+        assert!(rpc_server
+            .utxo_digest(context::current(), aocl_leaves)
+            .await
+            .is_none());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn block_info_test() {
+        let network = Network::RegTest;
+        let (rpc_server, state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let global_state = state_lock.lock_guard().await;
+        let ctx = context::current();
+
+        let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
+        let tip_hash = global_state.chain.light_state().hash();
+
+        let genesis_block_info = BlockInfo::from_block_and_digests(
+            global_state.chain.archival_state().genesis_block(),
+            genesis_hash,
+            tip_hash,
+        );
+
+        let tip_block_info = BlockInfo::from_block_and_digests(
+            global_state.chain.light_state(),
+            genesis_hash,
+            tip_hash,
+        );
+
+        // should find genesis block by Genesis selector
+        assert_eq!(
+            genesis_block_info,
+            rpc_server
+                .clone()
+                .block_info(ctx, BlockSelector::Genesis)
+                .await
+                .unwrap()
+        );
+
+        // should find latest/tip block by Tip selector
+        assert_eq!(
+            tip_block_info,
+            rpc_server
+                .clone()
+                .block_info(ctx, BlockSelector::Tip)
+                .await
+                .unwrap()
+        );
+
+        // should find genesis block by Height selector
+        assert_eq!(
+            genesis_block_info,
+            rpc_server
+                .clone()
+                .block_info(ctx, BlockSelector::Height(BlockHeight::from(0u64)))
+                .await
+                .unwrap()
+        );
+
+        // should find genesis block by Digest selector
+        assert_eq!(
+            genesis_block_info,
+            rpc_server
+                .clone()
+                .block_info(ctx, BlockSelector::Digest(genesis_hash))
+                .await
+                .unwrap()
+        );
+
+        // should not find any block when Height selector is u64::Max
+        assert!(rpc_server
+            .clone()
+            .block_info(ctx, BlockSelector::Height(BlockHeight::from(u64::MAX)))
+            .await
+            .is_none());
+
+        // should not find any block when Digest selector is Digest::default()
+        assert!(rpc_server
+            .clone()
+            .block_info(ctx, BlockSelector::Digest(Digest::default()))
+            .await
+            .is_none());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn block_digest_test() {
+        let network = Network::RegTest;
+        let (rpc_server, state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let global_state = state_lock.lock_guard().await;
+        let ctx = context::current();
+
+        let genesis_hash = Block::genesis_block(network).hash();
+
+        // should find genesis block by Genesis selector
+        assert_eq!(
+            genesis_hash,
+            rpc_server
+                .clone()
+                .block_digest(ctx, BlockSelector::Genesis)
+                .await
+                .unwrap()
+        );
+
+        // should find latest/tip block by Tip selector
+        assert_eq!(
+            global_state.chain.light_state().hash(),
+            rpc_server
+                .clone()
+                .block_digest(ctx, BlockSelector::Tip)
+                .await
+                .unwrap()
+        );
+
+        // should find genesis block by Height selector
+        assert_eq!(
+            genesis_hash,
+            rpc_server
+                .clone()
+                .block_digest(ctx, BlockSelector::Height(BlockHeight::from(0u64)))
+                .await
+                .unwrap()
+        );
+
+        // should find genesis block by Digest selector
+        assert_eq!(
+            genesis_hash,
+            rpc_server
+                .clone()
+                .block_digest(ctx, BlockSelector::Digest(genesis_hash))
+                .await
+                .unwrap()
+        );
+
+        // should not find any block when Height selector is u64::Max
+        assert!(rpc_server
+            .clone()
+            .block_digest(ctx, BlockSelector::Height(BlockHeight::from(u64::MAX)))
+            .await
+            .is_none());
+
+        // should not find any block when Digest selector is Digest::default()
+        assert!(rpc_server
+            .clone()
+            .block_digest(ctx, BlockSelector::Digest(Digest::default()))
+            .await
+            .is_none());
     }
 }

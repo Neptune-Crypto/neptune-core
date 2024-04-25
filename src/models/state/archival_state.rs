@@ -491,11 +491,15 @@ impl ArchivalState {
 
     /// Return the digests of the known blocks at a specific height
     pub async fn block_height_to_block_digests(&self, block_height: BlockHeight) -> Vec<Digest> {
-        self.block_index_db
-            .get(BlockIndexKey::Height(block_height))
-            .await
-            .map(|x| x.as_height_record())
-            .unwrap_or_else(Vec::new)
+        if block_height.is_genesis() {
+            vec![self.genesis_block().hash()]
+        } else {
+            self.block_index_db
+                .get(BlockIndexKey::Height(block_height))
+                .await
+                .map(|x| x.as_height_record())
+                .unwrap_or_else(Vec::new)
+        }
     }
 
     /// Return the digest of canonical block at a specific height, or None

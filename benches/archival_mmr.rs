@@ -244,3 +244,29 @@ mod batch_mutate_leaf_and_update_mps {
         }
     }
 }
+
+mod get_peaks {
+    use super::*;
+
+    mod get_peaks_of_about_1m {
+        use super::*;
+
+        const AMMR_LEAF_COUNT: u64 = 1_001_003;
+
+        fn get_peaks_impl(bencher: Bencher) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (_, ammr) = rt.block_on(new_ammr(AMMR_LEAF_COUNT));
+
+            bencher.bench_local(|| {
+                rt.block_on(async {
+                    ammr.get_peaks().await;
+                });
+            });
+        }
+
+        #[divan::bench]
+        fn get_peaks(bencher: Bencher) {
+            get_peaks_impl(bencher);
+        }
+    }
+}

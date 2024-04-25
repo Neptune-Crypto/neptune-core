@@ -817,7 +817,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=9478e0dbb70ae0795878d0402c8169c70df90485#9478e0dbb70ae0795878d0402c8169c70df90485"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f#aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f"
 dependencies = [
  "quote",
  "syn 2.0.58",
@@ -2681,7 +2681,7 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=9478e0dbb70ae0795878d0402c8169c70df90485#9478e0dbb70ae0795878d0402c8169c70df90485"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f#aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3094,9 +3094,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.40.0"
+version = "0.42.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa7b9ca092127dddef3e623e3ba6be6dfae12944a8fe88e1f035fd31ff347d20"
+checksum = "68f962fd97c7517009b37e31ab254f177970767eea3a32fa4aaccfb324299f9d"
 dependencies = [
  "arbitrary",
  "colored",
@@ -3128,14 +3128,15 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.40.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=2a331dd3267f53d04b3669d47eb0b54f04092e54#2a331dd3267f53d04b3669d47eb0b54f04092e54"
+version = "0.41.0"
+source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=0d2cb98c0495d30e53d28e82a35de44dc655c3ea#0d2cb98c0495d30e53d28e82a35de44dc655c3ea"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
  "blake3",
  "get-size",
  "hashbrown 0.14.3",
+ "hex",
  "itertools 0.12.1",
  "lazy_static",
  "num-bigint",
