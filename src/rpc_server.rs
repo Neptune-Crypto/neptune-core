@@ -1148,7 +1148,7 @@ mod rpc_server_tests {
         } else {
             assert!(current_server_temperature.is_some());
         }
-  }
+    }
 
     #[traced_test]
     #[tokio::test]
