@@ -595,4 +595,57 @@ mod mine_loop_tests {
 
         Ok(())
     }
+
+    /// This test mines a single block at height 1 on the regtest network
+    /// and then validates it with `Block::is_valid()` and
+    /// `Block::has_proof_of_work()`.
+    ///
+    /// At present this test is failing, which provides strong evidence for
+    /// the validity of issue 131.
+    /// https://github.com/Neptune-Crypto/neptune-core/issues/131
+    ///
+    /// The cause of the failure is that `mine_block_worker()` is comparing
+    /// hash(block_header) against difficulty threshold while
+    /// `Block::has_proof_of_work` is using hash(block) instead.
+    ///
+    /// The following commit will fix `mine_block_worker()` so that it also
+    /// uses hash(block) and then this test will pass.
+    #[traced_test]
+    #[tokio::test]
+    async fn mined_block_has_proof_of_work() -> Result<()> {
+        let network = Network::RegTest;
+        let global_state_lock =
+            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+
+        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+
+        let global_state = global_state_lock.lock_guard().await;
+        let tip_block_orig = global_state.chain.light_state();
+        let now = Timestamp::now();
+
+        let (transaction, coinbase_utxo_info) =
+            create_block_transaction(tip_block_orig, &global_state, now);
+
+        let (block_header, block_body) = make_block_template(tip_block_orig, transaction, now);
+
+        let block_timestamp = tip_block_orig.kernel.header.timestamp + Timestamp::seconds(1);
+        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, block_timestamp);
+        let unrestricted_mining = false;
+
+        mine_block_worker(
+            block_header,
+            block_body,
+            worker_thread_tx,
+            coinbase_utxo_info,
+            difficulty,
+            unrestricted_mining,
+        );
+
+        let mined_block_info = worker_thread_rx.await.unwrap();
+
+        assert!(mined_block_info.block.is_valid(tip_block_orig, now));
+        assert!(mined_block_info.block.has_proof_of_work(tip_block_orig));
+
+        Ok(())
+    }
 }
