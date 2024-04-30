@@ -136,27 +136,31 @@ async fn mine_block(
 }
 
 fn mine_block_worker(
-    mut block_header: BlockHeader,
+    block_header: BlockHeader,
     block_body: BlockBody,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
     difficulty: U32s<5>,
     unrestricted_mining: bool,
 ) {
-    info!(
-        "Mining on block with {} outputs. Attempting to find block with height {}",
-        block_body.transaction.kernel.outputs.len(),
-        block_header.height
-    );
     let threshold = Block::difficulty_to_digest_threshold(difficulty);
+    info!(
+        "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
+        block_body.transaction.kernel.outputs.len(),
+        block_header.height,
+        threshold
+    );
 
     // The RNG used to sample nonces must be thread-safe, which `thread_rng()` is not.
     // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
     // seeded with that seed. The `thread_rng()` object is dropped immediately.
     let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
 
+    let block_type = Block::mk_std_block_type(None);
+    let mut block = Block::new(block_header, block_body, block_type);
+
     // Mining takes place here
-    while Hash::hash(&block_header) >= threshold {
+    while block.hash() >= threshold {
         if !unrestricted_mining {
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -168,35 +172,50 @@ fn mine_block_worker(
         if sender.is_canceled() {
             info!(
                 "Abandoning mining of current block with height {}",
-                block_header.height
+                block.kernel.header.height
             );
             return;
         }
 
-        block_header.nonce = rng.gen();
+        // mutate nonce in the block's header.
+        //
+        // note that we are directly manipulating block internals so that
+        // block.hash() will return a new value, but we are depending on
+        // it re-computing the hash each time it is called.  An efficient
+        // Block impl would only recompute if Block has changed since last
+        // hash computation.
+        //
+        // todo: encapsulate Block so direct manipulation is not possible.
+        //       perhaps add a set_nonce() method for this mutation that
+        //       would cause hash to be recomputed, perhaps lazily.
+        block.kernel.header.nonce = rng.gen();
     }
 
+    let nonce = block.kernel.header.nonce;
     info!(
         "Found valid block with nonce: ({}, {}, {}).",
-        block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
+        nonce[0], nonce[1], nonce[2]
     );
 
-    let new_block_info = NewBlockFound {
-        block: Box::new(Block::new(
-            block_header,
-            block_body,
-            Block::mk_std_block_type(None),
-        )),
+    let new_block_found = NewBlockFound {
+        block: Box::new(block),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
     };
 
+    let hash = new_block_found.block.hash();
+    let hex = hash.to_hex();
+    let height = new_block_found.block.kernel.header.height;
     info!(
-        "PoW digest of new block: {}. Threshold was: {threshold}",
-        new_block_info.block.hash()
+        r#"Newly mined block details:
+              Height: {height}
+        Digest (Hex): {hex}
+        Digest (Raw): {hash}
+Difficulty threshold: {threshold}
+"#
     );
 
     sender
-        .send(new_block_info)
+        .send(new_block_found)
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
@@ -430,7 +449,7 @@ pub async fn mine(
                 }
             }
             new_block_res = worker_thread_rx => {
-                let new_block_info = match new_block_res {
+                let new_block_found = match new_block_res {
                     Ok(res) => res,
                     Err(err) => {
                         warn!("Mining thread was cancelled prematurely. Got: {}", err);
@@ -438,24 +457,24 @@ pub async fn mine(
                     }
                 };
 
-                debug!("Worker thread reports new block of height {}", new_block_info.block.kernel.header.height);
+                debug!("Worker thread reports new block of height {}", new_block_found.block.kernel.header.height);
 
                 // Sanity check, remove for more efficient mining.
                 // The below PoW check could fail due to race conditions. So we don't panic,
                 // we only ignore what the worker thread sent us.
-                if !new_block_info.block.has_proof_of_work(&latest_block) {
+                if !new_block_found.block.has_proof_of_work(&latest_block) {
                     error!("Own mined block did not have valid PoW Discarding.");
                 }
 
                 // The block, however, *must* be valid on other parameters. So here, we should panic
                 // if it is not.
                 let now = Timestamp::now();
-                assert!(new_block_info.block.is_valid(&latest_block, now), "Own mined block must be valid. Failed validity check after successful PoW check.");
+                assert!(new_block_found.block.is_valid(&latest_block, now), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
-                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_info.block.kernel.header.height, new_block_info.block.hash());
+                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
 
-                latest_block = *new_block_info.block.to_owned();
-                to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
+                latest_block = *new_block_found.block.to_owned();
+                to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
 
                 // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
                 // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
@@ -600,16 +619,18 @@ mod mine_loop_tests {
     /// and then validates it with `Block::is_valid()` and
     /// `Block::has_proof_of_work()`.
     ///
-    /// At present this test is failing, which provides strong evidence for
-    /// the validity of issue 131.
+    /// This is a regression test for issue #131.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/131
     ///
-    /// The cause of the failure is that `mine_block_worker()` is comparing
+    /// The cause of the failure was that `mine_block_worker()` was comparing
     /// hash(block_header) against difficulty threshold while
-    /// `Block::has_proof_of_work` is using hash(block) instead.
+    /// `Block::has_proof_of_work` uses hash(block) instead.
     ///
-    /// The following commit will fix `mine_block_worker()` so that it also
-    /// uses hash(block) and then this test will pass.
+    /// The fix was to modify `mine_block_worker()` so that it also
+    /// uses hash(block) and subsequently the test passes (unmodified).
+    ///
+    /// This test is present and fails in commit
+    /// b093631fd0d479e6c2cc252b08f18d920a1ec2e5 which is prior to the fix.
     #[traced_test]
     #[tokio::test]
     async fn mined_block_has_proof_of_work() -> Result<()> {

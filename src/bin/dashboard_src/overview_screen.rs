@@ -15,7 +15,6 @@ use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
-use neptune_core::models::blockchain::shared::Hash;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::{
@@ -25,7 +24,7 @@ use ratatui::{
 };
 use tarpc::context;
 use tokio::{select, task::JoinHandle, time};
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::prelude::Digest;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
@@ -40,6 +39,7 @@ pub struct OverviewData {
     network: Network,
     syncing: bool,
     is_mining: Option<bool>,
+    tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
 
@@ -74,6 +74,7 @@ impl OverviewData {
             syncing: Default::default(),
             is_mining: Default::default(),
             listen_address,
+            tip_digest: Default::default(),
             block_header: Default::default(),
             block_interval: Default::default(),
             archive_size: Default::default(),
@@ -103,6 +104,10 @@ impl OverviewData {
             network: Network::Testnet,
             is_mining: Some(false),
             syncing: false,
+            tip_digest: Some(
+                neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
+                    .hash(),
+            ),
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
                     .kernel
@@ -198,6 +203,7 @@ impl OverviewScreen {
 
                             {
                                 let mut own_overview_data = overview_data.lock().unwrap();
+                                own_overview_data.tip_digest = Some(resp.tip_digest);
                                 own_overview_data.block_header = Some(resp.tip_header);
                                 own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
                                 own_overview_data.mempool_tx_count = Some(resp.mempool_tx_count.try_into().unwrap());
@@ -392,8 +398,9 @@ impl Widget for OverviewScreen {
 
         lines.push(format!("mining: {}", dashifnotset!(data.is_mining)));
 
-        let tip_digest = data.block_header.as_ref().map(Hash::hash);
-        lines.push(format!("tip digest:\n{}\n\n", dashifnotset!(tip_digest),));
+        let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());
+        lines.push(format!("tip (hex): {}\n", dashifnotset!(tip_digest_hex),));
+        lines.push(format!("tip (raw): {}\n\n", dashifnotset!(data.tip_digest),));
 
         lines.push(format!(
             "latest block timestamp: {}",
