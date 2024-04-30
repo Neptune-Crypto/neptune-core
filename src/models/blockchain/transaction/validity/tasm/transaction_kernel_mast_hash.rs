@@ -19,7 +19,7 @@ use tasm_lib::list::set_length::SetLength;
 use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
-use tasm_lib::{rust_shadowing_helper_functions, ExecutionState};
+use tasm_lib::{rust_shadowing_helper_functions, InitVmState};
 use triton_vm::{prelude::BFieldElement, triton_asm};
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::{
@@ -35,9 +35,7 @@ impl TransactionKernelMastHash {
     pub(crate) fn input_state_with_kernel_in_memory(
         address: BFieldElement,
         transaction_kernel_encoded: &[BFieldElement],
-    ) -> ExecutionState {
-        use triton_vm::prelude::NonDeterminism;
-
+    ) -> InitVmState {
         assert!(address.value() > 1);
         // populate memory
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
@@ -51,11 +49,7 @@ impl TransactionKernelMastHash {
 
         let mut stack = tasm_lib::empty_stack();
         stack.push(address);
-        ExecutionState {
-            stack,
-            std_in: vec![],
-            nondeterminism: NonDeterminism::default().with_ram(memory),
-        }
+        InitVmState::with_stack_and_memory(stack, memory)
     }
 }
 
@@ -457,7 +451,7 @@ mod tests {
         let mut output_with_known_digest = test_rust_equivalence_given_complete_state(
             &ShadowedFunction::new(TransactionKernelMastHash),
             &execution_state.stack,
-            &execution_state.std_in,
+            &execution_state.public_input,
             &nondeterminism,
             &Some(Tip5::new(Domain::FixedLength)),
             None,
