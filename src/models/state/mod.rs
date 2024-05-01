@@ -940,7 +940,7 @@ impl GlobalState {
                     .get_block(revert_block.kernel.header.prev_block_digest)
                     .await?;
                 let previous_mutator_set = match maybe_revert_block_predecessor {
-                    Some(block) => block.kernel.body.mutator_set_accumulator,
+                    Some(block) => block.kernel.body.mutator_set_accumulator.clone(),
                     None => MutatorSetAccumulator::default(),
                 };
 
@@ -992,11 +992,11 @@ impl GlobalState {
                     .get_block(apply_block.kernel.header.prev_block_digest)
                     .await?;
                 let mut block_msa = match maybe_apply_block_predecessor {
-                    Some(block) => block.kernel.body.mutator_set_accumulator,
+                    Some(block) => block.kernel.body.mutator_set_accumulator.clone(),
                     None => MutatorSetAccumulator::default(),
                 };
-                let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
-                let removal_records = apply_block.kernel.body.transaction.kernel.inputs;
+                let addition_records = apply_block.kernel.body.transaction.kernel.outputs.clone();
+                let removal_records = apply_block.kernel.body.transaction.kernel.inputs.clone();
 
                 // apply additions
                 for addition_record in addition_records.iter() {

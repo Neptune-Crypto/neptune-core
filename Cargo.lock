@@ -1600,6 +1600,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand",
  "ratatui",
+ "readonly",
  "regex",
  "rs-leveldb",
  "semver",
@@ -2235,6 +2236,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "readonly"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a25d631e41bfb5fdcde1d4e2215f62f7f0afa3ff11e26563765bd6ea1d229aeb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2673,7 +2685,7 @@ dependencies = [
  "const_format",
  "derive_tasm_object",
  "hex",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "ndarray",
  "num",
  "num-traits",

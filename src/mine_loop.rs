@@ -178,17 +178,8 @@ fn mine_block_worker(
         }
 
         // mutate nonce in the block's header.
-        //
-        // note that we are directly manipulating block internals so that
-        // block.hash() will return a new value, but we are depending on
-        // it re-computing the hash each time it is called.  An efficient
-        // Block impl would only recompute if Block has changed since last
-        // hash computation.
-        //
-        // todo: encapsulate Block so direct manipulation is not possible.
-        //       perhaps add a set_nonce() method for this mutation that
-        //       would cause hash to be recomputed, perhaps lazily.
-        block.kernel.header.nonce = rng.gen();
+        // Block::hash() will subsequently return a new digest.
+        block.set_header_nonce(rng.gen());
     }
 
     let nonce = block.kernel.header.nonce;
