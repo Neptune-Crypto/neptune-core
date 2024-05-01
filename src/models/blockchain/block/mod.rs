@@ -9,7 +9,7 @@ use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::{abs, Zero};
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -46,6 +46,7 @@ use super::transaction::validity::TransactionValidationLogic;
 use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
+use crate::locks::std::AtomicMutex;
 use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
@@ -59,15 +60,40 @@ pub enum BlockType {
     Standard(ProofType),
 }
 
-// helper struct for deserializing Block.
-#[derive(Deserialize)]
-struct BlockSerialized {
-    kernel: BlockKernel,
-    block_type: BlockType,
-}
-
+// ## About the private `digest` field:
+//
+// The `digest` field represents the `Block` hash.  It is an optimization so
+// that the hash can be lazily computed at most once (per modification).
+//
+// It must be wrapped in `AtomicMutex<_>` for interior mutability because (a)
+// the hash() method is used in many methods that are `&self` and (b) because
+// `Block` is passed between tasks/threads, and thus `Rc<RefCell<_>>` is not an
+// option. note that AtomicMutex is just a wrapper for Arc<Mutex<_>>.
+//
+// The field must be reset whenever any modification occurs.  As such, we should
+// not permit direct modification of internal fields, particularly the `kernel`
+//
+// Therefore `[readonly::make]` is used to make public `Block` fields read-only
+// (not mutable) outside of this module.  All methods that modify Block also
+// reset the `digest` field.
+//
+// `#[derive(Clone)]` causes the cloned `Block` to reference/share the `digest`
+// field from the source `Block`, which is incorrect. Sharing is avoided by
+// setting `digest` field to Digest::default() each time a modification occurs.
+// It could also be achieved by manually implementing Clone, however it is
+// unnecessary.
+//
+// The field should not be serialized, so it has the `#[serde(skip)]` attribute.
+// Upon deserialization, the field will have Digest::default() which is desired
+// so that the digest will be recomputed if/when hash() is called.
+//
+// It is necessary to manually implement `PartialEq`, `Eq`, `BFieldCodec`, and
+// `GetSize` for `Block` because there exist no impls for `AtomicMutex<_>`
+// so derive fails. (note: same would be true for `Arc<Mutex<_>>`)
+//
+// A unit test-suite exists in module tests::digest_encapsulation.
 #[readonly::make]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,
@@ -76,24 +102,66 @@ pub struct Block {
     pub block_type: BlockType,
 
     // this is only here as an optimization for Block::hash()
-    // so that we only compute the hash once.
+    // so that we lazily compute the hash at most once.
     #[serde(skip)]
-    digest: Digest,
+    digest: AtomicMutex<Option<Digest>>,
 }
 
-// we manually impl Deserialize in order to compute
-// digest field which is not serialized.
-impl<'de> Deserialize<'de> for Block {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let BlockSerialized { kernel, block_type } = Deserialize::deserialize(deserializer)?;
-        Ok(Self {
-            digest: kernel.mast_hash(),
-            kernel,
-            block_type,
-        })
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        // TBD: is it faster overall to compare hashes or equality
+        // of kernel and blocktype fields case?
+        // In the (common?) case where hash has already been
+        // computed for both `Block` comparing hash equality
+        // should be faster.
+        self.hash() == other.hash()
+    }
+}
+impl Eq for Block {}
+
+impl BFieldCodec for Block {
+    type Error = anyhow::Error;
+
+    // we encode as:
+    //   u32:         len of kernel in bfe elems
+    //   BlockKernel: self.kernel
+    //   BlockType:   self.block_type
+    fn encode(&self) -> Vec<BFieldElement> {
+        let mut v = vec![];
+
+        let mut k = self.kernel.encode();
+        v.push((k.len() as u32).into());
+        v.append(&mut k);
+        v.append(&mut self.block_type.encode());
+        v
+    }
+
+    // we decode as per description of ::encode()
+    //    u32,BlockKernel,BlockType
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        let u32_elem_count = u32::static_length().unwrap();
+
+        let num_kernel_elems = *u32::decode(&sequence[0..u32_elem_count])? as usize;
+        let kernel_end = u32_elem_count + num_kernel_elems;
+
+        if sequence.len() < kernel_end + 1 {
+            anyhow::bail!("Cannot decode sequence of BFieldElements as Block: sequence too short");
+        }
+        let kernel_sequence = &sequence[u32_elem_count..kernel_end];
+        let kernel = BlockKernel::decode(kernel_sequence)?;
+
+        let block_type_sequence = &sequence[kernel_end..];
+        let block_type = BlockType::decode(block_type_sequence)?;
+
+        Ok(Box::new(Self {
+            kernel: *kernel,
+            block_type: *block_type,
+            digest: Default::default(), // calc'd in hash()
+        }))
+    }
+
+    fn static_length() -> Option<usize> {
+        None
     }
 }
 
@@ -104,7 +172,7 @@ impl From<TransferBlock> for Block {
             body: t_block.body,
         };
         Self {
-            digest: kernel.mast_hash(),
+            digest: Default::default(), // calc'd in hash()
             kernel,
             block_type: BlockType::Standard(t_block.proof_type),
         }
@@ -128,18 +196,55 @@ impl From<Block> for TransferBlock {
     }
 }
 
+impl GetSize for Block {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        // tbd: what about digest field?
+        self.kernel.get_heap_size() + self.block_type.get_heap_size()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + self.get_heap_size()
+    }
+}
+
 impl Block {
+    /// Returns the block Digest
+    ///
+    /// performance note:
+    ///
+    /// The digest is never computed until hash() is called.  Subsequent calls
+    /// will not recompute it unless the Block was modified since the last call.
     #[inline]
     pub fn hash(&self) -> Digest {
-        self.digest
+        let mut guard = self.digest.lock_guard();
+        match *guard {
+            Some(d) => d,
+            None => {
+                let digest = self.kernel.mast_hash();
+                *guard = Some(digest);
+                digest
+            }
+        }
+    }
+
+    #[inline]
+    fn unset_digest(&mut self) {
+        // note: this replaces the AtomicMutex.  We don't modify a shared
+        // reference.  This prevents modifying a Block we may have cloned from.
+        // The digest will be calc'd in hash()
+        self.digest = Default::default();
     }
 
     /// sets header header nonce.
     ///
-    /// note: this causes block digest to be recomputed.
+    /// note: this causes block digest to change.
     pub fn set_header_nonce(&mut self, nonce: [BFieldElement; 3]) {
         self.kernel.header.nonce = nonce;
-        self.digest = self.kernel.mast_hash();
+        self.unset_digest();
     }
 
     #[inline]
@@ -152,11 +257,12 @@ impl Block {
         &self.kernel.body
     }
 
+    /// note: this causes block digest to change to that of the new block.
     #[inline]
     pub fn set_block(&mut self, block: Block) {
         self.kernel.header = block.kernel.header;
         self.kernel.body = block.kernel.body;
-        self.digest = block.digest;
+        self.unset_digest();
     }
 
     pub fn get_mining_reward(block_height: BlockHeight) -> NeptuneCoins {
@@ -228,7 +334,7 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            prev_block_digest: Digest::default(),
+            prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
             // to be set to something difficult to predict ahead of time
             nonce: [
@@ -278,7 +384,7 @@ impl Block {
     pub fn new(header: BlockHeader, body: BlockBody, block_type: BlockType) -> Self {
         let kernel = BlockKernel { body, header };
         Self {
-            digest: kernel.mast_hash(),
+            digest: Default::default(), // calc'd in hash()
             kernel,
             block_type,
         }
@@ -301,7 +407,7 @@ impl Block {
     /// Merge a transaction into this block's transaction.
     /// The mutator set data must be valid in all inputs.
     ///
-    /// note: this causes block digest to be recomputed.
+    /// note: this causes block digest to change.
     pub async fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
@@ -357,7 +463,7 @@ impl Block {
 
         self.kernel.body = block_body;
         self.kernel.header = block_header;
-        self.digest = self.kernel.mast_hash();
+        self.unset_digest();
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
@@ -883,6 +989,26 @@ mod block_tests {
     mod digest_encapsulation {
         use super::*;
 
+        // test: verify clone + modify does not change original.
+        //
+        // note: a naive impl that derives Clone on `Block` containing
+        //       AtomicMutex<Option<Digest>> would link the digest in the clone
+        //       to the original because `AtomicMutex` is a wrapper around
+        //       `Arc<Mutex<_>>`
+        #[test]
+        fn clone_and_modify() {
+            let gblock = Block::genesis_block(Network::RegTest);
+            let g_hash = gblock.hash();
+
+            let mut g2 = gblock.clone();
+            assert_eq!(gblock.hash(), g_hash);
+            assert_eq!(gblock.hash(), g2.hash());
+
+            g2.set_header_nonce([1u8.into(), 1u8.into(), 1u8.into()]);
+            assert_ne!(gblock.hash(), g2.hash());
+            assert_eq!(gblock.hash(), g_hash);
+        }
+
         // test: verify digest is correct after Block::new().
         #[test]
         fn new() {
@@ -915,7 +1041,9 @@ mod block_tests {
 
             let mut block = gblock.clone();
             block.set_block(unique_block.clone());
+
             assert_eq!(unique_block.hash(), block.hash());
+            assert_ne!(unique_block.hash(), gblock.hash());
         }
 
         // test: verify digest is the same after conversion from
@@ -963,6 +1091,19 @@ mod block_tests {
 
             // verify that digest changed after merge.
             assert_ne!(block1.hash(), block1_merged.hash());
+        }
+
+        // test: verify block digest matches after BFieldCodec encode+decode
+        //       round trip.
+        #[test]
+        fn bfieldcodec_encode_and_decode() {
+            let gblock = Block::genesis_block(Network::RegTest);
+
+            let encoded: Vec<BFieldElement> = gblock.encode();
+            let decoded: Block = *Block::decode(&encoded).unwrap();
+
+            assert_eq!(gblock, decoded);
+            assert_eq!(gblock.hash(), decoded.hash());
         }
     }
 }
