@@ -12,7 +12,6 @@ use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::*;
-use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
@@ -88,7 +87,7 @@ fn make_block_template(
     let block_header = BlockHeader {
         version: zero,
         height: next_block_height,
-        prev_block_digest: previous_block.kernel.mast_hash(),
+        prev_block_digest: previous_block.hash(),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,

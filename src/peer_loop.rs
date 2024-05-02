@@ -1,4 +1,3 @@
-use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
@@ -450,15 +449,12 @@ impl PeerLoopHandler {
 
                         let global_state = self.global_state_lock.lock_guard().await;
 
-                        let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                        let tip_digest = global_state.chain.light_state().hash();
 
                         if global_state
                             .chain
                             .archival_state()
-                            .block_belongs_to_canonical_chain(
-                                block_candidate.kernel.mast_hash(),
-                                tip_digest,
-                            )
+                            .block_belongs_to_canonical_chain(block_candidate.hash(), tip_digest)
                             .await
                         {
                             peers_latest_canonical_block = match peers_latest_canonical_block {
@@ -497,13 +493,13 @@ impl PeerLoopHandler {
                         / 2,
                 );
                 let global_state = self.global_state_lock.lock_guard().await;
-                let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                let tip_digest = global_state.chain.light_state().hash();
 
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                let mut current_digest = peers_latest_canonical_block.kernel.mast_hash();
+                let mut current_digest = peers_latest_canonical_block.hash();
                 while returned_blocks.len() < responded_batch_size {
                     let children = global_state
                         .chain
@@ -715,7 +711,7 @@ impl PeerLoopHandler {
                 let mut canonical_chain_block_digest = block_digests[0];
                 if block_digests.len() > 1 {
                     let global_state = self.global_state_lock.lock_guard().await;
-                    let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                    let tip_digest = global_state.chain.light_state().hash();
                     for block_digest in block_digests {
                         if global_state
                             .chain

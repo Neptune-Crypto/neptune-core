@@ -1,4 +1,3 @@
-use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -1056,7 +1055,7 @@ impl GlobalState {
         }
 
         let current_tip_header = self.chain.light_state().header();
-        let current_tip_digest = self.chain.light_state().kernel.mast_hash();
+        let current_tip_digest = self.chain.light_state().hash();
 
         let current_tip_info: (Digest, Timestamp, BlockHeight) = (
             current_tip_digest,
@@ -1745,20 +1744,14 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(
-                    parent_block.kernel.mast_hash(),
-                    global_state.chain.archival_state()
-                )
+                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(
-                    parent_block.kernel.mast_hash(),
-                    global_state.chain.archival_state()
-                )
+                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
                 .await
         );
 
@@ -1969,20 +1962,14 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(
-                    fork_c_block.kernel.mast_hash(),
-                    global_state.chain.archival_state()
-                )
+                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(
-                    fork_c_block.kernel.mast_hash(),
-                    global_state.chain.archival_state()
-                )
+                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
                 .await
         );
 

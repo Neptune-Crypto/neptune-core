@@ -456,7 +456,7 @@ impl Block {
         }
 
         // 0.b) Block header points to previous block
-        if previous_block.kernel.mast_hash() != block_copy.kernel.header.prev_block_digest {
+        if previous_block.hash() != block_copy.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }

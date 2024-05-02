@@ -833,7 +833,6 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::consensus::mast_hash::MastHash;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::global_state_tests::create_transaction_with_timestamp;
@@ -2229,10 +2228,7 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(
-                    genesis.kernel.mast_hash(),
-                    genesis.kernel.mast_hash()
-                )
+                .block_belongs_to_canonical_chain(genesis.hash(), genesis.hash())
                 .await,
             "Genesis block is always part of the canonical chain, tip"
         );
@@ -2249,19 +2245,13 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(
-                    genesis.kernel.mast_hash(),
-                    mock_block_1.kernel.mast_hash()
-                )
+                .block_belongs_to_canonical_chain(genesis.hash(), mock_block_1.hash())
                 .await,
             "Genesis block is always part of the canonical chain, tip parent"
         );
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(
-                    mock_block_1.kernel.mast_hash(),
-                    mock_block_1.kernel.mast_hash()
-                )
+                .block_belongs_to_canonical_chain(mock_block_1.hash(), mock_block_1.hash())
                 .await,
             "Tip block is always part of the canonical chain"
         );
@@ -2300,10 +2290,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_4_a.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
                     .await,
                 "block {} does not belong to canonical chain",
                 i
@@ -2314,10 +2301,7 @@ mod archival_state_tests {
 
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(
-                    genesis.kernel.mast_hash(),
-                    mock_block_4_a.kernel.mast_hash()
-                )
+                .block_belongs_to_canonical_chain(genesis.hash(), mock_block_4_a.hash())
                 .await,
             "Genesis block is always part of the canonical chain, block height is four"
         );
@@ -2364,10 +2348,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_4_a.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
                     .await,
                 "canonical chain {} is canonical",
                 i
@@ -2389,10 +2370,7 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_4_a.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
@@ -2526,10 +2504,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_6_d.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_d.hash())
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
@@ -2560,10 +2535,7 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_6_d.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_d.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
@@ -2603,10 +2575,7 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_6_b.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_b.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
@@ -2629,10 +2598,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(
-                        block.kernel.mast_hash(),
-                        mock_block_6_b.kernel.mast_hash()
-                    )
+                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_b.hash())
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
@@ -3055,7 +3021,7 @@ mod archival_state_tests {
 
         // Test `get_children_blocks`
         let children_of_mock_block_1 = archival_state
-            .get_children_block_headers(mock_block_1.kernel.mast_hash())
+            .get_children_block_headers(mock_block_1.hash())
             .await;
         assert_eq!(1, children_of_mock_block_1.len());
         assert_eq!(mock_block_2.kernel.header, children_of_mock_block_1[0]);
@@ -3065,8 +3031,8 @@ mod archival_state_tests {
             .get_ancestor_block_digests(mock_block_2.hash(), 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(mock_block_1.kernel.mast_hash(), ancestor_digests[0]);
-        assert_eq!(genesis.kernel.mast_hash(), ancestor_digests[1]);
+        assert_eq!(mock_block_1.hash(), ancestor_digests[0]);
+        assert_eq!(genesis.hash(), ancestor_digests[1]);
 
         Ok(())
     }
