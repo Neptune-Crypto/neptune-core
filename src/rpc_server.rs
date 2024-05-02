@@ -1138,7 +1138,6 @@ mod rpc_server_tests {
         Ok(())
     }
 
-    #[allow(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn test_can_get_server_temperature() {
