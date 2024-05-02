@@ -676,7 +676,10 @@ mod tests {
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
         mempool
-            .update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2)
+            .update_with_block(
+                block_1.kernel.body.mutator_set_accumulator.clone(),
+                &block_2,
+            )
             .await;
         assert_eq!(1, mempool.len());
 
@@ -732,7 +735,7 @@ mod tests {
                 make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
             mempool
                 .update_with_block(
-                    previous_block.kernel.body.mutator_set_accumulator,
+                    previous_block.kernel.body.mutator_set_accumulator.clone(),
                     &next_block,
                 )
                 .await;
@@ -757,7 +760,7 @@ mod tests {
 
         mempool
             .update_with_block(
-                previous_block.kernel.body.mutator_set_accumulator,
+                previous_block.kernel.body.mutator_set_accumulator.clone(),
                 &block_14,
             )
             .await;

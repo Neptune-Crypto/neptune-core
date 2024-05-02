@@ -34,6 +34,7 @@ use crate::models::state::{GlobalState, GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DashBoardOverviewDataFromClient {
+    pub tip_digest: Digest,
     pub tip_header: BlockHeader,
     pub syncing: bool,
     pub available_balance: NeptuneCoins,
@@ -506,6 +507,7 @@ impl RPC for NeptuneRPCServer {
     ) -> DashBoardOverviewDataFromClient {
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
+        let tip_digest = state.chain.light_state().hash();
         let tip_header = state.chain.light_state().header().clone();
         let wallet_status = state.get_wallet_status_for_tip().await;
         let syncing = state.net.syncing;
@@ -520,6 +522,7 @@ impl RPC for NeptuneRPCServer {
         let confirmations = self.confirmations_internal().await;
 
         DashBoardOverviewDataFromClient {
+            tip_digest,
             tip_header,
             syncing,
             available_balance: wallet_status.synced_unspent_available_amount(now),

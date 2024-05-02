@@ -817,7 +817,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f#aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=694f27daf78aade0ed0dc07e3babaab036cd5572#694f27daf78aade0ed0dc07e3babaab036cd5572"
 dependencies = [
  "quote",
  "syn 2.0.58",
@@ -1600,6 +1600,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand",
  "ratatui",
+ "readonly",
  "regex",
  "rs-leveldb",
  "semver",
@@ -2236,6 +2237,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "readonly"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a25d631e41bfb5fdcde1d4e2215f62f7f0afa3ff11e26563765bd6ea1d229aeb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f#aa759b66efa9b5ea77e96d73bf27ed1edfbcfc3f"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=694f27daf78aade0ed0dc07e3babaab036cd5572#694f27daf78aade0ed0dc07e3babaab036cd5572"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3129,7 +3141,8 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "twenty-first"
 version = "0.41.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=0d2cb98c0495d30e53d28e82a35de44dc655c3ea#0d2cb98c0495d30e53d28e82a35de44dc655c3ea"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "453cce0ee28de3ffeb768cb158ffebbe55a9cd6bfb7bada1fac2d1853597c3bf"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",

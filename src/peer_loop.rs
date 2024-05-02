@@ -1276,7 +1276,9 @@ mod peer_loop_tests {
             .archival_state()
             .get_latest_block()
             .await;
-        different_genesis_block.kernel.header.nonce[2].increment();
+        let mut nonce = different_genesis_block.kernel.header.nonce;
+        nonce[2].increment();
+        different_genesis_block.set_header_nonce(nonce);
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1_with_different_genesis, _, _) = make_mock_block_with_valid_pow(

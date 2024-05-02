@@ -11,6 +11,7 @@ use num_traits::{abs, Zero};
 
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use std::sync::OnceLock;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -59,22 +60,97 @@ pub enum BlockType {
     Standard(ProofType),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+/// Public fields of `Block` are read-only, enforced by #[readonly::make].
+/// Modifications are possible only through `Block` methods.
+///
+/// Example:
+///
+/// test: verify that compile fails on an attempt to mutate block
+/// internals directly (bypassing encapsulation)
+///
+/// ```compile_fail,E0594
+/// use neptune_core::models::blockchain::block::Block;
+/// use neptune_core::config_models::network::Network;
+/// use neptune_core::prelude::twenty_first::math::b_field_element::BFieldElement;
+///
+/// let mut block = Block::genesis_block(Network::RegTest);
+///
+/// let height = block.kernel.header.height;
+///
+/// let one = BFieldElement::from(1u32);
+/// let nonce = [one, one, one];
+///
+/// // this line fails to compile because we try to
+/// // mutate an internal field.
+/// block.kernel.header.nonce = nonce;
+/// ```
+
+// ## About the private `digest` field:
+//
+// The `digest` field represents the `Block` hash.  It is an optimization so
+// that the hash can be lazily computed at most once (per modification).
+//
+// It is wrapped in `OnceLock<_>` for interior mutability because (a) the hash()
+// method is used in many methods that are `&self` and (b) because `Block` is
+// passed between tasks/threads, and thus `Rc<RefCell<_>>` is not an option.
+//
+// The field must be reset whenever the Block is modified.  As such, we should
+// not permit direct modification of internal fields, particularly `kernel`
+//
+// Therefore `[readonly::make]` is used to make public `Block` fields read-only
+// (not mutable) outside of this module.  All methods that modify Block also
+// reset the `digest` field.
+//
+// We manually implement `PartialEq` and `Eq` so that digest field will not be
+// compared.  Otherwise, we could have identical blocks except one has
+// initialized digest field and the other has not.
+//
+// The field should not be serialized, so it has the `#[serde(skip)]` attribute.
+// Upon deserialization, the field will have Digest::default() which is desired
+// so that the digest will be recomputed if/when hash() is called.
+//
+// We likewise skip the field for `BFieldCodec`, and `GetSize` because there
+// exist no impls for `OnceLock<_>` so derive fails.
+//
+// A unit test-suite exists in module tests::digest_encapsulation.
+#[readonly::make]
+#[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,
 
     /// type of block: Genesis, or Standard
     pub block_type: BlockType,
+
+    // this is only here as an optimization for Block::hash()
+    // so that we lazily compute the hash at most once.
+    #[serde(skip)]
+    #[bfield_codec(ignore)]
+    #[get_size(ignore)]
+    digest: OnceLock<Digest>,
 }
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        // TBD: is it faster overall to compare hashes or equality
+        // of kernel and blocktype fields?
+        // In the (common?) case where hash has already been
+        // computed for both `Block` comparing hash equality
+        // should be faster.
+        self.hash() == other.hash()
+    }
+}
+impl Eq for Block {}
 
 impl From<TransferBlock> for Block {
     fn from(t_block: TransferBlock) -> Self {
+        let kernel = BlockKernel {
+            header: t_block.header,
+            body: t_block.body,
+        };
         Self {
-            kernel: BlockKernel {
-                header: t_block.header,
-                body: t_block.body,
-            },
+            digest: Default::default(), // calc'd in hash()
+            kernel,
             block_type: BlockType::Standard(t_block.proof_type),
         }
     }
@@ -98,9 +174,29 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
+    /// Returns the block Digest
+    ///
+    /// performance note:
+    ///
+    /// The digest is never computed until hash() is called.  Subsequent calls
+    /// will not recompute it unless the Block was modified since the last call.
     #[inline]
     pub fn hash(&self) -> Digest {
-        self.kernel.mast_hash()
+        *self.digest.get_or_init(|| self.kernel.mast_hash())
+    }
+
+    #[inline]
+    fn unset_digest(&mut self) {
+        // note: this replaces the OnceLock so the digest will be calc'd in hash()
+        self.digest = Default::default();
+    }
+
+    /// sets header header nonce.
+    ///
+    /// note: this causes block digest to change.
+    pub fn set_header_nonce(&mut self, nonce: [BFieldElement; 3]) {
+        self.kernel.header.nonce = nonce;
+        self.unset_digest();
     }
 
     #[inline]
@@ -113,10 +209,12 @@ impl Block {
         &self.kernel.body
     }
 
+    /// note: this causes block digest to change to that of the new block.
     #[inline]
     pub fn set_block(&mut self, block: Block) {
         self.kernel.header = block.kernel.header;
         self.kernel.body = block.kernel.body;
+        self.digest = block.digest;
     }
 
     pub fn get_mining_reward(block_height: BlockHeight) -> NeptuneCoins {
@@ -188,7 +286,7 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            prev_block_digest: Digest::default(),
+            prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
             // to be set to something difficult to predict ahead of time
             nonce: [
@@ -236,8 +334,10 @@ impl Block {
     }
 
     pub fn new(header: BlockHeader, body: BlockBody, block_type: BlockType) -> Self {
+        let kernel = BlockKernel { body, header };
         Self {
-            kernel: BlockKernel { body, header },
+            digest: Default::default(), // calc'd in hash()
+            kernel,
             block_type,
         }
     }
@@ -258,6 +358,8 @@ impl Block {
 
     /// Merge a transaction into this block's transaction.
     /// The mutator set data must be valid in all inputs.
+    ///
+    /// note: this causes block digest to change.
     pub async fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
@@ -313,6 +415,7 @@ impl Block {
 
         self.kernel.body = block_body;
         self.kernel.header = block_header;
+        self.unset_digest();
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
@@ -584,9 +687,7 @@ mod block_tests {
     use rand::{random, thread_rng, Rng};
     use tracing_test::traced_test;
 
-    #[traced_test]
-    #[tokio::test]
-    async fn merge_transaction_test() {
+    async fn merge_transaction() -> (Block, Block, Block) {
         let mut rng = thread_rng();
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
@@ -606,7 +707,7 @@ mod block_tests {
             .to_address();
         let genesis_block = Block::genesis_block(network);
 
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
         let now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         assert!(
@@ -634,9 +735,22 @@ mod block_tests {
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
 
-        block_1
+        let mut block_1_merged = block_1.clone();
+
+        block_1_merged
             .accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator)
             .await;
+
+        (genesis_block, block_1, block_1_merged)
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn merge_transaction_test() {
+        let (genesis_block, _, block_1) = merge_transaction().await;
+        let now = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
+
         assert!(
             block_1.is_valid(&genesis_block, now + seven_months),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
@@ -816,6 +930,130 @@ mod block_tests {
                 .sum::<NeptuneCoins>();
 
             assert!(total_premine <= premine_max_size);
+        }
+    }
+
+    /// This module has tests that verify a block's digest
+    /// is always in a correct state.
+    ///
+    /// All operations that create or modify a Block should
+    /// have a test here.
+    mod digest_encapsulation {
+        use super::*;
+
+        // test: verify clone + modify does not change original.
+        //
+        // note: a naive impl that derives Clone on `Block` containing
+        //       Arc<Mutex<Option<Digest>>> would link the digest in the clone
+        #[test]
+        fn clone_and_modify() {
+            let gblock = Block::genesis_block(Network::RegTest);
+            let g_hash = gblock.hash();
+
+            let mut g2 = gblock.clone();
+            assert_eq!(gblock.hash(), g_hash);
+            assert_eq!(gblock.hash(), g2.hash());
+
+            g2.set_header_nonce([1u8.into(), 1u8.into(), 1u8.into()]);
+            assert_ne!(gblock.hash(), g2.hash());
+            assert_eq!(gblock.hash(), g_hash);
+        }
+
+        // test: verify digest is correct after Block::new().
+        #[test]
+        fn new() {
+            let gblock = Block::genesis_block(Network::RegTest);
+            let g2 = gblock.clone();
+
+            let block = Block::new(g2.kernel.header, g2.kernel.body, g2.block_type);
+            assert_eq!(gblock.hash(), block.hash());
+        }
+
+        // test: verify digest changes after nonce is updated.
+        #[test]
+        fn set_header_nonce() {
+            let gblock = Block::genesis_block(Network::RegTest);
+            let mut rng = thread_rng();
+
+            let mut new_block = gblock.clone();
+            new_block.set_header_nonce(rng.gen());
+            assert_ne!(gblock.hash(), new_block.hash());
+        }
+
+        // test: verify set_block() copies source digest
+        #[test]
+        fn set_block() {
+            let gblock = Block::genesis_block(Network::RegTest);
+            let mut rng = thread_rng();
+
+            let mut unique_block = gblock.clone();
+            unique_block.set_header_nonce(rng.gen());
+
+            let mut block = gblock.clone();
+            block.set_block(unique_block.clone());
+
+            assert_eq!(unique_block.hash(), block.hash());
+            assert_ne!(unique_block.hash(), gblock.hash());
+        }
+
+        // test: verify digest is the same after conversion from
+        //       TransferBlock and back.
+        #[tokio::test]
+        async fn from_transfer_block() {
+            // note: we have to generate a block becau            // TransferBlock::into() will panic if it
+            // encounters the genesis block.
+            let global_state_lock =
+                get_mock_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+            let spending_key = global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key(0);
+            let address = spending_key.to_address();
+            let mut rng = thread_rng();
+
+            let gblock = Block::genesis_block(Network::RegTest);
+
+            let (source_block, _, _) = make_mock_block(&gblock, None, address, rng.gen());
+
+            let transfer_block = TransferBlock::from(source_block.clone());
+            let new_block = Block::from(transfer_block);
+            assert_eq!(source_block.hash(), new_block.hash());
+        }
+
+        // test: verify digest is correct after deserializing
+        #[test]
+        fn deserialize() {
+            let gblock = Block::genesis_block(Network::RegTest);
+
+            let bytes = bincode::serialize(&gblock).unwrap();
+            let block: Block = bincode::deserialize(&bytes).unwrap();
+
+            assert_eq!(gblock.hash(), block.hash());
+        }
+
+        // test: verify block digest changes after accumulating
+        // a transaction into the block.
+        #[tokio::test]
+        async fn accumulate_transaction() {
+            let (_, block1, block1_merged) = merge_transaction().await;
+
+            // verify that digest changed after merge.
+            assert_ne!(block1.hash(), block1_merged.hash());
+        }
+
+        // test: verify block digest matches after BFieldCodec encode+decode
+        //       round trip.
+        #[test]
+        fn bfieldcodec_encode_and_decode() {
+            let gblock = Block::genesis_block(Network::RegTest);
+
+            let encoded: Vec<BFieldElement> = gblock.encode();
+            let decoded: Block = *Block::decode(&encoded).unwrap();
+
+            assert_eq!(gblock, decoded);
+            assert_eq!(gblock.hash(), decoded.hash());
         }
     }
 }
