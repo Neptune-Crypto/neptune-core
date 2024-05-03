@@ -644,11 +644,18 @@ impl PeerLoopHandler {
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
 
+                    debug!("block_is_new: {}", block_is_new);
+
                     // Only request block if it is new, and if we are not currently reconciling
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
                     if self.global_state_lock.lock_guard().await.net.syncing {
+                        debug!(
+                            "ignoring peer block with height {} because we are presently syncing",
+                            block_notification.height
+                        );
+
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -659,8 +666,19 @@ impl PeerLoopHandler {
                             .expect("Sending to main thread must succeed");
                     } else if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty()
                     {
+                        debug!(
+                            "sending BlockRequestByHeight to peer for block with height {}",
+                            block_notification.height
+                        );
                         peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
                             .await?;
+                    } else {
+                        debug!(
+                            "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
+                            block_notification.height,
+                            block_is_new,
+                            !peer_state_info.fork_reconciliation_blocks.is_empty()
+                        );
                     }
                 }
 
