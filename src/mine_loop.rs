@@ -192,12 +192,15 @@ fn mine_block_worker(
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
     };
 
+    let timestamp = new_block_found.block.kernel.header.timestamp;
+    let timestamp_standard = timestamp.standard_format();
     let hash = new_block_found.block.hash();
     let hex = hash.to_hex();
     let height = new_block_found.block.kernel.header.height;
     info!(
         r#"Newly mined block details:
               Height: {height}
+              Time:   {timestamp_standard} ({timestamp})
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
