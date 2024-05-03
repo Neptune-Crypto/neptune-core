@@ -105,7 +105,7 @@ impl Timestamp {
             NaiveDateTime::from_timestamp_millis(self.0.value().try_into().unwrap_or(0)).unwrap();
         let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
         let offset: DateTime<Local> = DateTime::from(utc);
-        offset.to_rfc2822()
+        offset.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
     }
 
     pub fn arbitrary_between(start: Timestamp, stop: Timestamp) -> BoxedStrategy<Timestamp> {
