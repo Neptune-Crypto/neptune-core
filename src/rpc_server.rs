@@ -14,13 +14,13 @@ use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
 use twenty_first::math::digest::Digest;
-use twenty_first::prelude::U32s;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::Block;
+use crate::models::blockchain::block::block_info::BlockInfo;
+use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
@@ -29,7 +29,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalState, GlobalStateLock, UtxoReceiverData};
+use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DashBoardOverviewDataFromClient {
@@ -50,69 +50,6 @@ pub struct DashBoardOverviewDataFromClient {
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
-}
-
-/// Provides summary information about a Block
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BlockInfo {
-    pub height: BlockHeight,
-    pub digest: Digest,
-    pub timestamp: Timestamp,
-    pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-    pub num_inputs: usize,
-    pub num_outputs: usize,
-    pub num_uncle_blocks: usize,
-    pub mining_reward: NeptuneCoins,
-    pub fee: NeptuneCoins,
-    pub is_genesis: bool,
-    pub is_tip: bool,
-}
-
-impl BlockInfo {
-    fn from_block_and_digests(block: &Block, genesis_digest: Digest, tip_digest: Digest) -> Self {
-        let body = block.body();
-        let header = block.header();
-        let digest = block.hash();
-        Self {
-            digest,
-            height: header.height,
-            timestamp: header.timestamp,
-            difficulty: header.difficulty,
-            num_inputs: body.transaction.kernel.inputs.len(),
-            num_outputs: body.transaction.kernel.outputs.len(),
-            num_uncle_blocks: body.uncle_blocks.len(),
-            fee: body.transaction.kernel.fee,
-            mining_reward: crate::Block::get_mining_reward(header.height),
-            is_genesis: digest == genesis_digest,
-            is_tip: digest == tip_digest,
-        }
-    }
-}
-
-/// Provides alternatives for looking up a block.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum BlockSelector {
-    Digest(Digest),      // Identifies block by Digest (hash)
-    Height(BlockHeight), // Identifies block by Height (count from genesis)
-    Genesis,             // Indicates the genesis block
-    Tip,                 // Indicates the latest canonical block
-}
-
-impl BlockSelector {
-    async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
-        match self {
-            BlockSelector::Digest(d) => Some(*d),
-            BlockSelector::Height(h) => {
-                state
-                    .chain
-                    .archival_state()
-                    .block_height_to_canonical_block_digest(*h, state.chain.light_state().hash())
-                    .await
-            }
-            BlockSelector::Tip => Some(state.chain.light_state().hash()),
-            BlockSelector::Genesis => Some(state.chain.archival_state().genesis_block().hash()),
-        }
-    }
 }
 
 #[tarpc::service]

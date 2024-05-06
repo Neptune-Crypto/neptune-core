@@ -16,8 +16,9 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
+use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
-use neptune_core::rpc_server::{BlockSelector, RPCClient};
+use neptune_core::rpc_server::RPCClient;
 use std::io::stdout;
 use twenty_first::math::digest::Digest;
 
@@ -31,6 +32,10 @@ enum Command {
     OwnListenAddressForPeers,
     OwnInstanceId,
     BlockHeight,
+    BlockInfo {
+        /// one of: genesis, tip, height/N, digest/hex
+        block_selector: BlockSelector,
+    },
     Confirmations,
     PeerInfo,
     AllSanctionedPeers,
@@ -286,6 +291,13 @@ async fn main() -> Result<()> {
         Command::BlockHeight => {
             let block_height = client.block_height(ctx).await?;
             println!("Block height: {}", block_height)
+        }
+        Command::BlockInfo { block_selector } => {
+            let data = client.block_info(ctx, block_selector).await?;
+            match data {
+                Some(block_info) => println!("{}", block_info),
+                None => println!("Not found"),
+            }
         }
         Command::Confirmations => {
             let val = client.confirmations(ctx).await?;
