@@ -417,6 +417,28 @@ impl ArchivalState {
         }
     }
 
+    /// Return parent of tip block. Returns `None` iff tip is genesis block.
+    pub async fn get_tip_parent(&self) -> Option<Block> {
+        let tip_digest = self
+            .block_index_db
+            .get(BlockIndexKey::BlockTipDigest)
+            .await?;
+        let tip_digest: Digest = tip_digest.as_tip_digest();
+        let tip_header = self
+            .block_index_db
+            .get(BlockIndexKey::Block(tip_digest))
+            .await
+            .map(|x| x.as_block_record().block_header)
+            .expect("Indicated block must exist in block record");
+
+        let parent = self
+            .get_block(tip_header.prev_block_digest)
+            .await
+            .expect("Fetching indicated block must succeed");
+
+        Some(parent.expect("Indicated block must exist"))
+    }
+
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
@@ -1927,52 +1949,76 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn get_latest_block_test() -> Result<()> {
-        let mut rng = thread_rng();
-        let network = Network::Alpha;
-        let mut archival_state: ArchivalState = make_test_archival_state(network).await;
+    async fn get_tip_block_test() -> Result<()> {
+        for network in [
+            Network::Alpha,
+            Network::Beta,
+            Network::Main,
+            Network::RegTest,
+            Network::Testnet,
+        ] {
+            let mut archival_state: ArchivalState = make_test_archival_state(network).await;
 
-        let ret = archival_state.get_latest_block_from_disk().await?;
-        assert!(
-            ret.is_none(),
-            "Must return None when no block is stored in DB"
-        );
+            assert!(
+                archival_state.get_tip_from_disk().await.unwrap().is_none(),
+                "Must return None when no block is stored in DB"
+            );
+            assert_eq!(
+                archival_state.genesis_block(),
+                &archival_state.get_tip().await
+            );
+            assert!(
+                archival_state.get_tip_parent().await.is_none(),
+                "Genesis tip has no parent"
+            );
 
-        // Add a block to archival state and verify that this is returned
-        let own_wallet = WalletSecret::new_random();
-        let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
-        let genesis = *archival_state.genesis_block.clone();
-        let (mock_block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis, None, own_receiving_address, rng.gen());
-        add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
+            // Add a block to archival state and verify that this is returned
+            let mut rng = thread_rng();
+            let own_wallet = WalletSecret::new_random();
+            let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
+            let genesis = *archival_state.genesis_block.clone();
+            let (mock_block_1, _, _) =
+                make_mock_block_with_valid_pow(&genesis, None, own_receiving_address, rng.gen());
+            add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
+                .await
+                .unwrap();
 
-        let ret1 = archival_state.get_latest_block_from_disk().await?;
-        assert!(
-            ret1.is_some(),
-            "Must return a block when one is stored to DB"
-        );
-        assert_eq!(
-            mock_block_1,
-            ret1.unwrap(),
-            "Returned block must match the one inserted"
-        );
+            assert_eq!(
+                mock_block_1,
+                archival_state.get_tip_from_disk().await.unwrap().unwrap(),
+                "Returned block must match the one inserted"
+            );
+            assert_eq!(mock_block_1, archival_state.get_tip().await);
+            assert_eq!(
+                archival_state.genesis_block(),
+                &archival_state.get_tip_parent().await.unwrap()
+            );
 
-        // Add a 2nd block and verify that this new block is now returned
-        let (mock_block_2, _, _) =
-            make_mock_block_with_valid_pow(&mock_block_1, None, own_receiving_address, rng.gen());
-        add_block_to_archival_state(&mut archival_state, mock_block_2.clone()).await?;
-        let ret2 = archival_state.get_latest_block_from_disk().await?;
-        assert!(
-            ret2.is_some(),
-            "Must return a block when one is stored to DB"
-        );
+            // Add a 2nd block and verify that this new block is now returned
+            let (mock_block_2, _, _) = make_mock_block_with_valid_pow(
+                &mock_block_1,
+                None,
+                own_receiving_address,
+                rng.gen(),
+            );
+            add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
+                .await
+                .unwrap();
+            let ret2 = archival_state.get_tip_from_disk().await.unwrap();
+            assert!(
+                ret2.is_some(),
+                "Must return a block when one is stored to DB"
+            );
+            assert_eq!(
+                mock_block_2,
+                ret2.unwrap(),
+                "Returned block must match the one inserted"
+            );
+            assert_eq!(mock_block_2, archival_state.get_tip().await);
+            assert_eq!(mock_block_1, archival_state.get_tip_parent().await.unwrap());
+        }
 
-        assert_eq!(
-            mock_block_2,
-            ret2.unwrap(),
-            "Returned block must match the one inserted"
-        );
-
+        //
         Ok(())
     }
 
