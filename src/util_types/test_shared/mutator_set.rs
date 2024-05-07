@@ -308,13 +308,9 @@ pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
         working_indices.dedup();
         for wi in working_indices {
             let wi_odd = wi | 1;
-            if nodes.get(&wi_odd).is_none() {
-                nodes.insert(wi_odd, rng.gen::<Digest>());
-            }
+            nodes.entry(wi_odd).or_insert_with(|| rng.gen::<Digest>());
             let wi_even = wi_odd ^ 1;
-            if nodes.get(&wi_even).is_none() {
-                nodes.insert(wi_even, rng.gen::<Digest>());
-            }
+            nodes.entry(wi_even).or_insert_with(|| rng.gen::<Digest>());
             let hash = H::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
             nodes.insert(wi >> 1, hash);
         }

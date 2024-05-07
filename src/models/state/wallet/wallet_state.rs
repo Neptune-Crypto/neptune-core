@@ -427,9 +427,9 @@ impl WalletState {
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
             if addition_record_to_utxo_info.contains_key(addition_record) {
-                let utxo = addition_record_to_utxo_info[&addition_record].0.clone();
-                let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
-                let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
+                let utxo = addition_record_to_utxo_info[addition_record].0.clone();
+                let sender_randomness = addition_record_to_utxo_info[addition_record].1;
+                let receiver_preimage = addition_record_to_utxo_info[addition_record].2;
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",
                     new_block.hash(),

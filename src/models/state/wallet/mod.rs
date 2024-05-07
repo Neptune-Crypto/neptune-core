@@ -804,10 +804,11 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
-        let mut rng = thread_rng();
         // An archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
+
+        let mut rng = thread_rng();
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;

@@ -786,8 +786,8 @@ mod connect_tests {
         let mut own_handshake = state.get_own_handshakedata().await;
 
         // Set reported versions to something incompatible
-        own_handshake.version = "0.0.3".to_owned();
-        other_handshake.version = "0.0.0".to_owned();
+        "0.0.3".clone_into(&mut own_handshake.version);
+        "0.0.0".clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(

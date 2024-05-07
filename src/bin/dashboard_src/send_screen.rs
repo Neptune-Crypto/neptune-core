@@ -266,7 +266,7 @@ impl SendScreen {
                 }
                 DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)) => {
                     if let Ok(mut own_focus) = self.focus.try_lock() {
-                        self.address = string.trim().to_owned();
+                        string.trim().clone_into(&mut self.address);
                         *own_focus = SendScreenWidget::Amount;
                         escalate_event = Some(DashboardEvent::RefreshScreen);
                     } else {
@@ -350,6 +350,9 @@ impl Widget for SendScreen {
                 self.address.clone()
             };
             let mut address_lines = vec![];
+
+            // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
+            #[allow(clippy::assigning_clones)]
             while address.len() > width {
                 let (line, remainder) = address.split_at(width);
                 address_lines.push(line.to_owned());
