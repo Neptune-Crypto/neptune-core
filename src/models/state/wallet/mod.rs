@@ -804,10 +804,6 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
-        // An archival state is needed for how we currently add inputs to a transaction.
-        // So it's just used to generate test data, not in any of the functions that are
-        // actually tested.
-
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
@@ -820,10 +816,10 @@ mod wallet_tests {
         let premine_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let premine_receiver_global_state_lock =
+        let premine_receiver_global_state =
             mock_genesis_global_state(network, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
-            premine_receiver_global_state_lock.lock_guard_mut().await;
+            premine_receiver_global_state.lock_guard_mut().await;
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let preminers_original_balance = premine_receiver_global_state
@@ -920,6 +916,11 @@ mod wallet_tests {
                 .synced_unspent_available_amount(launch + seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
+
+        own_wallet_state
+            .update_wallet_state_with_new_block(&previous_msa, &block_1)
+            .await
+            .unwrap();
 
         // Verify that update added 4 UTXOs to list of monitored transactions:
         // three as regular outputs, and one as coinbase UTXO

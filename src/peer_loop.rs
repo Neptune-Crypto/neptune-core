@@ -1601,8 +1601,9 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_request_batch_out_of_order_test() -> Result<()> {
-        // Scenario: Same as above, but the peer supplies their hashes in a wrong order.
-        // Ensure that the correct blocks are returned, in the right order.
+        // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
+        // A peer requests a batch of blocks starting from block 1,  but the peer supplies their
+        // hashes in a wrong order. Ensure that the correct blocks are returned, in the right order.
 
         let mut rng = thread_rng();
         let network = Network::Alpha;
@@ -1626,9 +1627,9 @@ mod peer_loop_tests {
 
         global_state_mut.set_new_tip(block_1.clone()).await?;
         global_state_mut.set_new_tip(block_2_a.clone()).await?;
-        global_state_mut.set_new_tip(block_3_a.clone()).await?;
         global_state_mut.set_new_tip(block_2_b.clone()).await?;
         global_state_mut.set_new_tip(block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_a.clone()).await?;
 
         drop(global_state_mut);
 
@@ -1664,9 +1665,11 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
-        let mut rng = thread_rng();
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
-        // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
+        // A peer requests a block at height 2. Verify that the correct block at height 2 is
+        // returned.
+
+        let mut rng = thread_rng();
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
@@ -1688,9 +1691,9 @@ mod peer_loop_tests {
 
         global_state_mut.set_new_tip(block_1.clone()).await?;
         global_state_mut.set_new_tip(block_2_a.clone()).await?;
-        global_state_mut.set_new_tip(block_3_a.clone()).await?;
         global_state_mut.set_new_tip(block_2_b.clone()).await?;
         global_state_mut.set_new_tip(block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_a.clone()).await?;
 
         drop(global_state_mut);
 
