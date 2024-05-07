@@ -694,7 +694,7 @@ mod rpc_server_tests {
         config_models::network::Network,
         models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
         rpc_server::NeptuneRPCServer,
-        tests::shared::get_mock_global_state,
+        tests::shared::mock_genesis_global_state,
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
@@ -708,7 +708,7 @@ mod rpc_server_tests {
         wallet_secret: WalletSecret,
         peer_count: u8,
     ) -> (NeptuneRPCServer, GlobalStateLock) {
-        let global_state_lock = get_mock_global_state(network, peer_count, wallet_secret).await;
+        let global_state_lock = mock_genesis_global_state(network, peer_count, wallet_secret).await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         (
             NeptuneRPCServer {

@@ -264,26 +264,7 @@ pub async fn add_block_to_archival_state(
     archival_state: &mut ArchivalState,
     new_block: Block,
 ) -> Result<()> {
-    let tip_digest: Option<Digest> = archival_state
-        .block_index_db
-        .get(BlockIndexKey::BlockTipDigest)
-        .await
-        .map(|x| x.as_tip_digest());
-    let tip_header: Option<BlockHeader> = match tip_digest {
-        Some(digest) => Some(
-            archival_state
-                .block_index_db
-                .get(BlockIndexKey::Block(digest))
-                .await
-                .unwrap()
-                .as_block_record()
-                .block_header,
-        ),
-        None => None,
-    };
-    archival_state
-        .write_block(&new_block, tip_header.map(|x| x.proof_of_work_family))
-        .await?;
+    archival_state.write_block_as_tip(&new_block).await?;
 
     archival_state.update_mutator_set(&new_block).await.unwrap();
 
@@ -302,21 +283,6 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
-}
-
-/// Helper function for tests to update state with a new block
-pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> {
-    let previous_pow_family = state.chain.light_state().kernel.header.proof_of_work_family;
-    state
-        .chain
-        .archival_state_mut()
-        .write_block(&new_block, Some(previous_pow_family))
-        .await?;
-    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
-        state.chain.light_state_mut().set_block(new_block);
-    }
-
-    Ok(())
 }
 
 // Box<Vec<T>> is unnecessary because Vec<T> is already heap-allocated.
@@ -1007,7 +973,10 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(wallet_secret: WalletSecret, network: Network) -> WalletState {
+pub async fn mock_genesis_wallet_state(
+    wallet_secret: WalletSecret,
+    network: Network,
+) -> WalletState {
     let cli_args: cli_args::Args = cli_args::Args {
         number_of_mps_per_utxo: 30,
         network,
@@ -1017,7 +986,8 @@ pub async fn get_mock_wallet_state(wallet_secret: WalletSecret, network: Network
     WalletState::new_from_wallet_secret(&data_dir, wallet_secret.clone(), &cli_args).await
 }
 
-pub async fn make_unit_test_archival_state(
+/// Return an archival state populated with the genesis block
+pub async fn mock_genesis_archival_state(
     network: Network,
 ) -> (ArchivalState, PeerDatabases, DataDirectory) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).await.unwrap();

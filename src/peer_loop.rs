@@ -1187,7 +1187,7 @@ mod peer_loop_tests {
         config_models::network::Network,
         models::{peer::TransactionNotification, state::wallet::WalletSecret},
         tests::shared::{
-            add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
+            get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
             get_test_genesis_setup, make_mock_block_with_invalid_pow,
             make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
         },
@@ -1288,7 +1288,7 @@ mod peer_loop_tests {
             .await
             .chain
             .archival_state()
-            .get_latest_block()
+            .get_tip()
             .await;
         let mut nonce = different_genesis_block.kernel.header.nonce;
         nonce[2].increment();
@@ -1370,7 +1370,7 @@ mod peer_loop_tests {
             .await
             .chain
             .archival_state()
-            .get_latest_block()
+            .get_tip()
             .await;
 
         // Make a with hash above what the implied threshold from
@@ -1458,17 +1458,13 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
-        add_block(&mut global_state_mut, block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock_peer_messages = Mock::new(vec![
@@ -1515,19 +1511,16 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_request_batch_in_order_test() -> Result<()> {
-        let mut rng = thread_rng();
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
         // are returned.
+
+        let mut rng = thread_rng();
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1542,11 +1535,11 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        add_block(&mut global_state_mut, block_1.clone()).await?;
-        add_block(&mut global_state_mut, block_2_a.clone()).await?;
-        add_block(&mut global_state_mut, block_3_a.clone()).await?;
-        add_block(&mut global_state_mut, block_2_b.clone()).await?;
-        add_block(&mut global_state_mut, block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_2_a.clone()).await?;
+        global_state_mut.set_new_tip(block_2_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_a.clone()).await?;
 
         drop(global_state_mut);
 
@@ -1608,18 +1601,15 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_request_batch_out_of_order_test() -> Result<()> {
-        let mut rng = thread_rng();
         // Scenario: Same as above, but the peer supplies their hashes in a wrong order.
         // Ensure that the correct blocks are returned, in the right order.
+
+        let mut rng = thread_rng();
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1634,11 +1624,11 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        add_block(&mut global_state_mut, block_1.clone()).await?;
-        add_block(&mut global_state_mut, block_2_a.clone()).await?;
-        add_block(&mut global_state_mut, block_3_a.clone()).await?;
-        add_block(&mut global_state_mut, block_2_b.clone()).await?;
-        add_block(&mut global_state_mut, block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_2_a.clone()).await?;
+        global_state_mut.set_new_tip(block_3_a.clone()).await?;
+        global_state_mut.set_new_tip(block_2_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_b.clone()).await?;
 
         drop(global_state_mut);
 
@@ -1681,11 +1671,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1700,11 +1686,11 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        add_block(&mut global_state_mut, block_1.clone()).await?;
-        add_block(&mut global_state_mut, block_2_a.clone()).await?;
-        add_block(&mut global_state_mut, block_3_a.clone()).await?;
-        add_block(&mut global_state_mut, block_2_b.clone()).await?;
-        add_block(&mut global_state_mut, block_3_b.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_2_a.clone()).await?;
+        global_state_mut.set_new_tip(block_3_a.clone()).await?;
+        global_state_mut.set_new_tip(block_2_b.clone()).await?;
+        global_state_mut.set_new_tip(block_3_b.clone()).await?;
 
         drop(global_state_mut);
 
@@ -1750,7 +1736,7 @@ mod peer_loop_tests {
             .await
             .chain
             .archival_state()
-            .get_latest_block()
+            .get_tip()
             .await;
 
         let (mock_block_1, _, _) =
@@ -1811,7 +1797,7 @@ mod peer_loop_tests {
             .await
             .chain
             .archival_state()
-            .get_latest_block()
+            .get_tip()
             .await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1893,11 +1879,7 @@ mod peer_loop_tests {
         let mut global_state_mut = state_lock.lock_guard_mut().await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let own_recipient_address = global_state_mut
             .wallet_state
             .wallet_secret
@@ -1927,7 +1909,7 @@ mod peer_loop_tests {
             own_recipient_address,
             rng.gen(),
         );
-        add_block(&mut global_state_mut, block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
 
         drop(global_state_mut);
 
@@ -1992,11 +1974,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) = make_mock_block_with_valid_pow(
@@ -2011,7 +1989,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
-        add_block(&mut global_state_mut, block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock = Mock::new(vec![
@@ -2079,7 +2057,7 @@ mod peer_loop_tests {
         let global_state = state_lock.lock_guard().await;
         let peer_address = get_dummy_socket_address(0);
 
-        let genesis_block: Block = global_state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state.chain.archival_state().get_tip().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) = make_mock_block_with_valid_pow(
@@ -2162,11 +2140,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let (block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis_block.clone(),
             None,
@@ -2181,7 +2155,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
         let (block_5, _, _) =
             make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address, rng.gen());
-        add_block(&mut global_state_mut, block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock = Mock::new(vec![
@@ -2255,11 +2229,12 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
-        let mut rng = thread_rng();
         // In this scenario, the client knows the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
+
+        let mut rng = thread_rng();
         let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 1).await?;
@@ -2271,11 +2246,7 @@ mod peer_loop_tests {
             .into_values()
             .collect::<Vec<_>>();
 
-        let genesis_block: Block = global_state_mut
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) = make_mock_block_with_valid_pow(
@@ -2290,7 +2261,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
-        add_block(&mut global_state_mut, block_1.clone()).await?;
+        global_state_mut.set_new_tip(block_1.clone()).await?;
         drop(global_state_mut);
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;

@@ -403,8 +403,8 @@ mod tests {
             },
         },
         tests::shared::{
-            get_mock_global_state, get_mock_wallet_state, make_mock_block,
-            make_mock_transaction_with_wallet,
+            make_mock_block, make_mock_transaction_with_wallet, mock_genesis_global_state,
+            mock_genesis_wallet_state,
         },
     };
     use anyhow::Result;
@@ -419,7 +419,7 @@ mod tests {
     pub async fn insert_then_get_then_remove_then_get() {
         let mut mempool = Mempool::new(ByteSize::gb(1));
         let network = Network::Alpha;
-        let wallet_state = get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let transaction = make_mock_transaction_with_wallet(
             vec![],
             vec![],
@@ -448,7 +448,7 @@ mod tests {
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
         let mut mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -497,7 +497,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let wallet_state =
-            get_mock_wallet_state(WalletSecret::devnet_wallet(), Network::Alpha).await;
+            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), Network::Alpha).await;
         let mut mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
@@ -558,7 +558,7 @@ mod tests {
         let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let premine_receiver_global_state_lock =
-            get_mock_global_state(network, 2, devnet_wallet).await;
+            mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
 
@@ -568,7 +568,7 @@ mod tests {
         let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
         let other_global_state_lock =
-            get_mock_global_state(network, 2, other_wallet_secret.clone()).await;
+            mock_genesis_global_state(network, 2, other_wallet_secret.clone()).await;
         let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
@@ -779,7 +779,7 @@ mod tests {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let network = Network::RegTest;
         let preminer_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let now = Block::genesis_block(network).kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;

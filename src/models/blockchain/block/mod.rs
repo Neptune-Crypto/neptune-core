@@ -681,7 +681,9 @@ mod block_tests {
             blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
-        tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
+        tests::shared::{
+            make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
+        },
         util_types::mutator_set::archival_mmr::ArchivalMmr,
     };
     use strum::IntoEnumIterator;
@@ -697,7 +699,7 @@ mod block_tests {
         // has a wallet which receives a premine-UTXO.
         let network = Network::RegTest;
         let global_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
             .lock_guard()
             .await
@@ -1007,7 +1009,7 @@ mod block_tests {
             // note: we have to generate a block becau            // TransferBlock::into() will panic if it
             // encounters the genesis block.
             let global_state_lock =
-                get_mock_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+                mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
             let spending_key = global_state_lock
                 .lock_guard()
                 .await
