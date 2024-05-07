@@ -133,34 +133,11 @@ pub fn get_dummy_version() -> String {
     "0.1.0".to_string()
 }
 
-pub async fn get_dummy_latest_block(
-    input_block: Option<Block>,
-) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
-    let network = Network::RegTest;
-    let block = match input_block {
-        None => Block::genesis_block(network),
-        Some(block) => block,
-    };
-
-    let latest_block_info: LatestBlockInfo = block.clone().into();
-    let block_header = block.kernel.header.clone();
-    (
-        block,
-        latest_block_info,
-        Arc::new(std::sync::Mutex::new(block_header)),
-    )
-}
-
 /// Return a handshake object with a randomly set instance ID
 pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        tip_header: get_dummy_latest_block(None)
-            .await
-            .2
-            .lock()
-            .unwrap()
-            .to_owned(),
+        tip_header: Block::genesis_block(network).header().to_owned(),
         listen_port: Some(8080),
         network,
         version: get_dummy_version(),
@@ -189,12 +166,12 @@ pub async fn get_dummy_peer_connection_data_genesis(
 /// Get a global state object for unit test purposes. This global state
 /// populated with state from the genesis block, e.g. in the archival mutator
 /// set and the wallet.
-pub async fn get_mock_global_state(
+pub async fn mock_genesis_global_state(
     network: Network,
     peer_count: u8,
     wallet: WalletSecret,
 ) -> GlobalStateLock {
-    let (archival_state, peer_db, _data_dir) = make_unit_test_archival_state(network).await;
+    let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
 
     let syncing = false;
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
@@ -204,8 +181,16 @@ pub async fn get_mock_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
-    let (block, _, _) = get_dummy_latest_block(None).await;
-    let light_state: LightState = LightState::from(block.clone());
+    let genesis_block = archival_state.get_tip().await;
+
+    // Sanity check
+    assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
+
+    let light_state: LightState = LightState::from(genesis_block.to_owned());
+    println!(
+        "Genesis light state MSA hash: {}",
+        light_state.body().mutator_set_accumulator.hash()
+    );
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
         archival_state,
@@ -216,7 +201,7 @@ pub async fn get_mock_global_state(
         ..Default::default()
     };
 
-    let wallet_state = get_mock_wallet_state(wallet, network).await;
+    let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
     GlobalStateLock::new(
         wallet_state,
@@ -250,7 +235,7 @@ pub async fn get_test_genesis_setup(
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let devnet_wallet = WalletSecret::devnet_wallet();
-    let state = get_mock_global_state(network, peer_count, devnet_wallet).await;
+    let state = mock_genesis_global_state(network, peer_count, devnet_wallet).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,
