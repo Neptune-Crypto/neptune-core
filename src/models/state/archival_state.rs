@@ -11,13 +11,12 @@ use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::{debug, warn};
-use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
-use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
@@ -217,12 +216,8 @@ impl ArchivalState {
         &self.genesis_block
     }
 
-    /// Write a newly found block to database and to disk.
-    pub async fn write_block(
-        &mut self,
-        new_block: &Block,
-        current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
-    ) -> Result<()> {
+    /// Write a newly found block to database and to disk, and set it as tip.
+    pub async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -334,15 +329,11 @@ impl ArchivalState {
             BlockIndexValue::Height(blocks_at_same_height),
         ));
 
-        // Mark block as tip if its PoW family is larger than current most canonical
-        if current_max_pow_family.is_none()
-            || current_max_pow_family.unwrap() < new_block.kernel.header.proof_of_work_family
-        {
-            block_index_entries.push((
-                BlockIndexKey::BlockTipDigest,
-                BlockIndexValue::BlockTipDigest(new_block.hash()),
-            ));
-        }
+        // Mark block as tip
+        block_index_entries.push((
+            BlockIndexKey::BlockTipDigest,
+            BlockIndexValue::BlockTipDigest(new_block.hash()),
+        ));
 
         let mut batch = WriteBatchAsync::new();
         for (k, v) in block_index_entries.into_iter() {
