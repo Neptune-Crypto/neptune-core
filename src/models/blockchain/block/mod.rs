@@ -618,15 +618,7 @@ impl Block {
     /// compare the hash of the current block against the difficulty determined by
     /// the previous.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
-        // check that hash is below threshold
-        if self.hash()
-            > Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty)
-        {
-            warn!("Block digest exceeds target difficulty");
-            return false;
-        }
-
-        true
+        self.hash() <= Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty)
     }
 
     /// Converts `difficulty` to type `Digest` so that the hash of a block can be
