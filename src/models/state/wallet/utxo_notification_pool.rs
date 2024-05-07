@@ -192,7 +192,8 @@ impl UtxoNotificationPool {
         self.notifications.values().cloned().collect_vec()
     }
 
-    /// Add an expected incoming UTXO to this data model
+    /// Add an expected incoming UTXO that the wallet will register if it shows up in a later block.
+    /// It's the caller's responsibility that the UTXO is spendable.
     pub fn add_expected_utxo(
         &mut self,
         utxo: Utxo,
