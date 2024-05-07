@@ -1,6 +1,5 @@
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use neptune_core::prelude::twenty_first;
 
 use anyhow::{bail, Result};
 use clap::{CommandFactory, Parser};
@@ -20,7 +19,6 @@ use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
 use std::io::stdout;
-use twenty_first::math::digest::Digest;
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -33,7 +31,7 @@ enum Command {
     OwnInstanceId,
     BlockHeight,
     BlockInfo {
-        /// one of: genesis, tip, height/N, digest/hex
+        /// one of: genesis, tip, height/<n>, digest/<hex>
         block_selector: BlockSelector,
     },
     Confirmations,
@@ -45,7 +43,8 @@ enum Command {
     },
     TipHeader,
     Header {
-        hash: Digest,
+        /// one of: genesis, tip, height/<n>, digest/<hex>
+        block_selector: BlockSelector,
     },
     SyncedBalance,
     WalletStatus,
@@ -345,8 +344,8 @@ async fn main() -> Result<()> {
                 .expect("Tip header should be found");
             println!("{val}")
         }
-        Command::Header { hash } => {
-            let res = client.header(ctx, BlockSelector::Digest(hash)).await?;
+        Command::Header { block_selector } => {
+            let res = client.header(ctx, block_selector).await?;
             if res.is_none() {
                 println!("Block did not exist in database.");
             } else {

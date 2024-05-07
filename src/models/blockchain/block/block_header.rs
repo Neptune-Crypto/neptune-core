@@ -52,8 +52,8 @@ impl Display for BlockHeader {
             Proof-of-work-line: {}\n\
             Proof-of-work-family: {}",
             self.height,
-            self.timestamp,
-            self.prev_block_digest,
+            self.timestamp.standard_format(),
+            self.prev_block_digest.to_hex(),
             self.proof_of_work_line,
             self.proof_of_work_family
         );

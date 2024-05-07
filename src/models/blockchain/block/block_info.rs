@@ -1,6 +1,7 @@
 //! BlockInfo is a concise summary of a block intended for human
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
+use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::block_header::TARGET_DIFFICULTY_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
@@ -16,7 +17,10 @@ use twenty_first::prelude::U32s;
 pub struct BlockInfo {
     pub height: BlockHeight,
     pub digest: Digest,
+    pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
+    pub proof_of_work_line: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub num_inputs: usize,
     pub num_outputs: usize,
@@ -33,7 +37,10 @@ impl std::fmt::Display for BlockInfo {
         let buf = String::new()
             + &format!("height: {}\n", self.height)
             + &format!("digest: {}\n", self.digest.to_hex())
+            + &format!("prev_block_digest: {}\n", self.prev_block_digest.to_hex())
             + &format!("timestamp: {}\n", self.timestamp.standard_format())
+            + &format!("proof_of_work_line: {}\n", self.proof_of_work_line)
+            + &format!("proof_of_work_family: {}\n", self.proof_of_work_family)
             + &format!("difficulty: {}\n", self.difficulty)
             + &format!("num_inputs: {}\n", self.num_inputs)
             + &format!("num_outputs: {}\n", self.num_outputs)
@@ -58,9 +65,12 @@ impl BlockInfo {
         let digest = block.hash();
         Self {
             digest,
+            prev_block_digest: header.prev_block_digest,
             height: header.height,
             timestamp: header.timestamp,
             difficulty: header.difficulty,
+            proof_of_work_line: header.proof_of_work_line,
+            proof_of_work_family: header.proof_of_work_family,
             num_inputs: body.transaction.kernel.inputs.len(),
             num_outputs: body.transaction.kernel.outputs.len(),
             num_uncle_blocks: body.uncle_blocks.len(),
