@@ -662,4 +662,60 @@ mod mine_loop_tests {
 
         Ok(())
     }
+
+    /// This test mines a single block at height 1 on the regtest network
+    /// and then validates that the header timestamp has changed and
+    /// that it is within the last second (from now).
+    ///
+    /// This is a regression test for issue #149.
+    /// https://github.com/Neptune-Crypto/neptune-core/issues/149
+    #[traced_test]
+    #[tokio::test]
+    async fn block_timestamp_represents_time_block_found() -> Result<()> {
+        let network = Network::RegTest;
+        let global_state_lock =
+            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+
+        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+
+        let global_state = global_state_lock.lock_guard().await;
+        let tip_block_orig = global_state.chain.light_state();
+
+        // pretend/simulate that it takes at least 10 seconds to mine the block.
+        let ten_seconds_ago = Timestamp::now() - Timestamp::seconds(10);
+
+        let (transaction, coinbase_utxo_info) =
+            create_block_transaction(tip_block_orig, &global_state, ten_seconds_ago);
+
+        let (block_header, block_body) =
+            make_block_template(tip_block_orig, transaction, ten_seconds_ago);
+
+        // sanity check that our initial state is correct.
+        assert_eq!(block_header.timestamp, ten_seconds_ago);
+
+        let initial_header_timestamp = block_header.timestamp;
+        let unrestricted_mining = false;
+        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, ten_seconds_ago);
+
+        mine_block_worker(
+            block_header,
+            block_body,
+            worker_thread_tx,
+            coinbase_utxo_info,
+            difficulty,
+            unrestricted_mining,
+        );
+
+        let mined_block_info = worker_thread_rx.await.unwrap();
+
+        let block_timestamp = mined_block_info.block.kernel.header.timestamp;
+
+        assert!(block_timestamp > initial_header_timestamp);
+        assert!(block_timestamp < Timestamp::now());
+
+        // verify timestamp is within the last second.
+        assert!(Timestamp::now() - block_timestamp < Timestamp::seconds(1));
+
+        Ok(())
+    }
 }
