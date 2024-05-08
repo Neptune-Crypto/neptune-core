@@ -196,8 +196,18 @@ impl Block {
     /// sets header header nonce.
     ///
     /// note: this causes block digest to change.
+    #[inline]
     pub fn set_header_nonce(&mut self, nonce: [BFieldElement; 3]) {
         self.kernel.header.nonce = nonce;
+        self.unset_digest();
+    }
+
+    /// sets header timestamp.
+    ///
+    /// note: this causes block digest to change.
+    #[inline]
+    pub fn set_header_timestamp(&mut self, timestamp: Timestamp) {
+        self.kernel.header.timestamp = timestamp;
         self.unset_digest();
     }
 

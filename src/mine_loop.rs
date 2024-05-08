@@ -179,6 +179,12 @@ fn mine_block_worker(
         // mutate nonce in the block's header.
         // Block::hash() will subsequently return a new digest.
         block.set_header_nonce(rng.gen());
+
+        // See issue #149 and test block_timestamp_represents_time_block_found()
+        // this ensures header timestamp represents the moment block is found.
+        // this is simplest impl.  Efficiencies can perhaps be gained by only
+        // performing every N iterations, or other strategies.
+        block.set_header_timestamp(Timestamp::now());
     }
 
     let nonce = block.kernel.header.nonce;
@@ -669,6 +675,9 @@ mod mine_loop_tests {
     ///
     /// This is a regression test for issue #149.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/149
+    ///
+    /// note: this test fails in 318b7a20baf11a7a99f249660f1f70484c586012
+    ///       and should always pass in later commits.
     #[traced_test]
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
