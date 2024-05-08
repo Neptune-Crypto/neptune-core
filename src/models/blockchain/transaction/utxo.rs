@@ -307,10 +307,10 @@ mod utxo_tests {
     #[test]
     fn utxo_timelock_test() {
         let mut rng = thread_rng();
-        let release_date = rng.gen::<Timestamp>();
+        let release_date = Timestamp(BFieldElement::new(rng.next_u64() >> 2));
         let mut delta = release_date + Timestamp::seconds(1);
         while delta > release_date {
-            delta = Timestamp(BFieldElement::new(rng.next_u64() >> 1));
+            delta = Timestamp(BFieldElement::new(rng.next_u64() >> 2));
         }
         let mut utxo = Utxo::new(
             LockScript {
