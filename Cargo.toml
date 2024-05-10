@@ -46,7 +46,7 @@ tarpc = { version = "^0.34", features = [
     "serde-transport-json",
     "tcp",
 ] }
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "694f27daf78aade0ed0dc07e3babaab036cd5572" }
+tasm-lib = "0.2.1"
 tiny-bip39 = "1.0"
 tokio = { version = "1.37", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
@@ -121,3 +121,10 @@ harness = false
 [[bench]]
 name = "archival_mmr"
 harness = false
+
+[patch.crates-io]
+# 694f27daf78aade0ed0dc07e3babaab036cd5572 is tip of branch: master as of 2024-04-30
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "694f27daf78aade0ed0dc07e3babaab036cd5572" }
+
+# 0d2cb98c0495d30e53d28e82a35de44dc655c3ea = tip of branch: master,  on 2024-04-24
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "0d2cb98c0495d30e53d28e82a35de44dc655c3ea" }

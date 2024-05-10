@@ -15,7 +15,7 @@
 
 use super::block_height::BlockHeight;
 use crate::models::state::GlobalState;
-use crate::twenty_first::error::FromHexDigestError;
+use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
 use serde::{Deserialize, Serialize};
 use std::num::ParseIntError;
@@ -62,7 +62,7 @@ pub enum BlockSelectorParseError {
     WrongSelectorLength(usize),
 
     #[error("Bad Digest")]
-    BadDigest(#[from] FromHexDigestError),
+    BadDigest(#[from] TryFromHexDigestError),
 
     #[error("Bad Height")]
     BadHeight(#[from] ParseIntError),
