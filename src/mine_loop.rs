@@ -683,7 +683,7 @@ mod mine_loop_tests {
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
 
