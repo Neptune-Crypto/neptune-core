@@ -32,7 +32,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
-/// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
+/// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
 /// to mine, but a simple one is to pick transactions in descending order of
 /// highest `FeeDensity`.
@@ -53,6 +53,7 @@ use num_rational::BigRational as FeeDensity;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
+
 // 5 minutes in secs
 pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
@@ -64,16 +65,18 @@ type LookupItem<'a> = (Digest, &'a Transaction);
 pub struct Mempool {
     max_total_size: usize,
 
-    // Maintain for constant lookup
+    /// Contains transactions, with a mapping from transaction ID to transaction.
+    /// Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
 
-    // Maintain for fast min and max
+    /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
+    /// both descending and ascending order.
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
 }
 
 impl Mempool {
-    /// instantiate a new `Mempool`
+    /// instantiate a new, empty `Mempool`
     pub fn new(max_total_size: ByteSize) -> Self {
         let table = Default::default();
         let queue = Default::default();
@@ -99,8 +102,8 @@ impl Mempool {
         self.tx_dictionary.get(&transaction_id)
     }
 
-    /// Returns `Some(txid, transaction)` iff a transcation conflicts with a block that's already in
-    /// the mempool. Returns `None` otherwise.
+    /// Returns `Some(txid, transaction)` iff a transcation conflicts with a transaction
+    /// that's already in the mempool. Returns `None` otherwise.
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
@@ -165,6 +168,7 @@ impl Mempool {
             self.queue.len(),
             "mempool's table and queue length must agree after shrink"
         );
+
         None
     }
 
@@ -223,6 +227,9 @@ impl Mempool {
         transactions
     }
 
+    /// Removes the transaction with the highest [`FeeDensity`] from the mempool.
+    /// Returns the removed value.
+    ///
     /// Computes in θ(lg N)
     #[allow(dead_code)]
     pub fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
@@ -235,6 +242,9 @@ impl Mempool {
         }
     }
 
+    /// Removes the transaction with the lowest [`FeeDensity`] from the mempool.
+    /// Returns the removed value.
+    ///
     /// Computes in θ(lg N)
     pub fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
@@ -246,6 +256,8 @@ impl Mempool {
         }
     }
 
+    /// Removes all transactions from the mempool that do not satisfy the
+    /// predicate.
     /// Modelled after [HashMap::retain](std::collections::HashMap::retain())
     ///
     /// Computes in O(capacity) >= O(N)
@@ -270,7 +282,9 @@ impl Mempool {
         self.shrink_to_fit()
     }
 
-    /// Prune based on `Transaction.timestamp`
+    /// Remove transactions from mempool that are older than the specified
+    /// timestamp. Prunes base on the transaction's timestamp.
+    ///
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) {
         let cutoff = Timestamp::now() - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
@@ -283,8 +297,8 @@ impl Mempool {
     }
 
     /// Remove from the mempool all transactions that become invalid because
-    /// of this newly mined block. Also update all mutator set data for monitored
-    /// transactions that were not removed in the previous step.
+    /// of a newly received block. Also update all mutator set data for mempool
+    /// transactions that were not removed.
     pub async fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
@@ -318,6 +332,9 @@ impl Mempool {
                 .map(|rr| rr.absolute_indices.to_array())
                 .collect();
 
+            // A transaction should be kept in the mempool if it is true that
+            // *all* of its index sets have at least one index that's not
+            // present in the mined block's transaction.
             transaction_index_sets.iter().all(|index_set| {
                 index_set
                     .iter()
