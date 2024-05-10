@@ -429,7 +429,7 @@ impl MutatorSetAccumulator {
             for mp in preserved_membership_proofs.iter_mut() {
                 for (chunk_index, (_, chunk)) in mp.target_chunks.dictionary.iter_mut() {
                     if mutation_data_preimage.contains_key(chunk_index) {
-                        *chunk = mutation_data_preimage[chunk_index].0.to_owned();
+                        mutation_data_preimage[chunk_index].0.clone_into(chunk);
                     }
                 }
             }

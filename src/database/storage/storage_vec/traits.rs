@@ -230,8 +230,6 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
 
 pub trait StorageVec<T: Send>: StorageVecBase<T> + StorageVecStream<T> {}
 
-pub(in super::super) trait StorageVecIterMut<T: Send>: StorageVec<T> {}
-
 #[cfg(test)]
 pub(in super::super) mod tests {
     use super::*;

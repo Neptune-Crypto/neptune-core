@@ -427,9 +427,9 @@ impl WalletState {
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
             if addition_record_to_utxo_info.contains_key(addition_record) {
-                let utxo = addition_record_to_utxo_info[&addition_record].0.clone();
-                let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
-                let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
+                let utxo = addition_record_to_utxo_info[addition_record].0.clone();
+                let sender_randomness = addition_record_to_utxo_info[addition_record].1;
+                let receiver_preimage = addition_record_to_utxo_info[addition_record].2;
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",
                     new_block.hash(),
@@ -557,7 +557,9 @@ impl WalletState {
         assert_eq!(
             new_block.kernel.body.mutator_set_accumulator.clone().hash(),
             msa_state.hash(),
-            "Mutator set in wallet-handler must agree with that from applied block"
+            "\n\nMutator set in applied block:\n{}\n\nmust agree with that in wallet handler:\n{}\n\n",
+            new_block.kernel.body.mutator_set_accumulator.clone().hash(),
+            msa_state.hash(),
         );
 
         changed_mps.sort();
@@ -774,7 +776,8 @@ mod tests {
 
     use crate::{
         config_models::network::Network,
-        tests::shared::{get_mock_global_state, get_mock_wallet_state, make_mock_block},
+        models::state::wallet::utxo_notification_pool::ExpectedUtxo,
+        tests::shared::{make_mock_block, mock_genesis_global_state, mock_genesis_wallet_state},
     };
 
     use super::*;
@@ -782,7 +785,6 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn wallet_state_prune_abandoned_mutxos() {
-        let mut rng = thread_rng();
         // Get genesis block. Verify wallet is empty
         // Add two blocks to state containing no UTXOs for own wallet
         // Add a UTXO (e.g. coinbase) in block 3a (height = 3)
@@ -797,10 +799,11 @@ mod tests {
         // Prune
         // Verify that MUTXO *is* marked as abandoned
 
+        let mut rng = thread_rng();
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
-        let own_global_state_lock = get_mock_global_state(network, 0, own_wallet_secret).await;
+        let own_global_state_lock = mock_genesis_global_state(network, 0, own_wallet_secret).await;
         let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = own_global_state
@@ -835,10 +838,7 @@ mod tests {
             own_global_state
                 .chain
                 .archival_state_mut()
-                .write_block(
-                    &new_block,
-                    Some(latest_block.kernel.header.proof_of_work_family),
-                )
+                .write_block_as_tip(&new_block)
                 .await
                 .unwrap();
             own_global_state
@@ -874,33 +874,17 @@ mod tests {
                 rng.gen(),
             );
         own_global_state
-            .wallet_state
-            .expected_utxos
-            .add_expected_utxo(
-                block_3a_coinbase_utxo.clone(),
-                block_3a_coinbase_sender_randomness,
-                own_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
-            )
-            .unwrap();
-        own_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3a)
-            .await
-            .unwrap();
-        own_global_state
-            .chain
-            .archival_state_mut()
-            .write_block(
-                &block_3a,
-                Some(latest_block.kernel.header.proof_of_work_family),
+            .set_new_self_mined_tip(
+                block_3a,
+                ExpectedUtxo::new(
+                    block_3a_coinbase_utxo,
+                    block_3a_coinbase_sender_randomness,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                ),
             )
             .await
             .unwrap();
-        own_global_state
-            .chain
-            .light_state_mut()
-            .set_block(block_3a.clone());
 
         assert!(
             own_global_state
@@ -933,23 +917,9 @@ mod tests {
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
             make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3b)
+            .set_new_tip(block_3b.clone())
             .await
             .unwrap();
-        own_global_state
-            .chain
-            .archival_state_mut()
-            .write_block(
-                &block_3b,
-                Some(latest_block.kernel.header.proof_of_work_family),
-            )
-            .await
-            .unwrap();
-        own_global_state
-            .chain
-            .light_state_mut()
-            .set_block(block_3b.clone());
 
         assert!(
             own_global_state
@@ -974,31 +944,15 @@ mod tests {
 
         // Mine nine blocks on top of 3b, update states
         latest_block = block_3b;
-        mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
             own_global_state
-                .wallet_state
-                .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
+                .set_new_tip(new_block.clone())
                 .await
                 .unwrap();
-            own_global_state
-                .chain
-                .archival_state_mut()
-                .write_block(
-                    &new_block,
-                    Some(latest_block.kernel.header.proof_of_work_family),
-                )
-                .await
-                .unwrap();
-            own_global_state
-                .chain
-                .light_state_mut()
-                .set_block(new_block.clone());
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
 
         let prune_count_11 = own_global_state
@@ -1026,23 +980,9 @@ mod tests {
         let (block_12, _, _) =
             make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_12)
+            .set_new_tip(block_12.clone())
             .await
             .unwrap();
-        own_global_state
-            .chain
-            .archival_state_mut()
-            .write_block(
-                &block_12,
-                Some(latest_block.kernel.header.proof_of_work_family),
-            )
-            .await
-            .unwrap();
-        own_global_state
-            .chain
-            .light_state_mut()
-            .set_block(block_12.clone());
 
         assert!(
             own_global_state
@@ -1089,7 +1029,7 @@ mod tests {
         let wallet = WalletSecret::devnet_wallet();
         let genesis_block = Block::genesis_block(network);
 
-        let wallet_state = get_mock_wallet_state(wallet, network).await;
+        let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
         // are we synchronized to the genesis block?
         assert_eq!(

@@ -504,7 +504,7 @@ mod mine_loop_tests {
     use crate::{
         config_models::network::Network,
         models::{consensus::timestamp::Timestamp, state::UtxoReceiverData},
-        tests::shared::get_mock_global_state,
+        tests::shared::mock_genesis_global_state,
     };
 
     use super::*;
@@ -515,7 +515,7 @@ mod mine_loop_tests {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::RegTest;
         let premine_receiver_global_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
         assert!(
@@ -635,7 +635,7 @@ mod mine_loop_tests {
     async fn mined_block_has_proof_of_work() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
 
@@ -683,7 +683,7 @@ mod mine_loop_tests {
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock =
-            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
 

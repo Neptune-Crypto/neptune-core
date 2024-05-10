@@ -369,8 +369,8 @@ mod wallet_tests {
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
-        add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
-        make_mock_transaction_with_generation_key,
+        make_mock_block, make_mock_transaction_with_generation_key, mock_genesis_global_state,
+        mock_genesis_wallet_state,
     };
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
@@ -385,7 +385,7 @@ mod wallet_tests {
         // to the wallet state at initialization.
         let network = Network::RegTest;
         let mut wallet_state_premine_recipient =
-            get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
+            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -401,7 +401,7 @@ mod wallet_tests {
         );
 
         let random_wallet = WalletSecret::new_random();
-        let wallet_state_other = get_mock_wallet_state(random_wallet, network).await;
+        let wallet_state_other = mock_genesis_wallet_state(random_wallet, network).await;
         let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
         assert!(
             monitored_utxos_other.is_empty(),
@@ -455,7 +455,8 @@ mod wallet_tests {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
-        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret.clone(), network).await;
+        let mut own_wallet_state =
+            mock_genesis_wallet_state(own_wallet_secret.clone(), network).await;
         let other_wallet_secret = WalletSecret::new_random();
         let other_recipient_address = other_wallet_secret
             .nth_generation_spending_key(0)
@@ -589,7 +590,7 @@ mod wallet_tests {
         let mut rng = thread_rng();
         let own_wallet_secret = WalletSecret::new_random();
         let network = Network::RegTest;
-        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
+        let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -804,24 +805,21 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
         let mut rng = thread_rng();
-        // An archival state is needed for how we currently add inputs to a transaction.
-        // So it's just used to generate test data, not in any of the functions that are
-        // actually tested.
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
-        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
+        let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block(network);
-        let premine_wallet = get_mock_wallet_state(WalletSecret::devnet_wallet(), network)
+        let premine_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let premine_receiver_global_state_lock =
-            get_mock_global_state(network, 2, premine_wallet).await;
+        let premine_receiver_global_state =
+            mock_genesis_global_state(network, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
-            premine_receiver_global_state_lock.lock_guard_mut().await;
+            premine_receiver_global_state.lock_guard_mut().await;
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let preminers_original_balance = premine_receiver_global_state
@@ -903,16 +901,10 @@ mod wallet_tests {
                 )
                 .unwrap();
         }
-        own_wallet_state
-            .update_wallet_state_with_new_block(&previous_msa, &block_1)
-            .await?;
-        add_block(&mut premine_receiver_global_state, block_1.clone())
+        premine_receiver_global_state
+            .set_new_tip(block_1.clone())
             .await
             .unwrap();
-        premine_receiver_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&previous_msa, &block_1)
-            .await?;
 
         assert_eq!(
             preminers_original_balance
@@ -924,6 +916,11 @@ mod wallet_tests {
                 .synced_unspent_available_amount(launch + seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
+
+        own_wallet_state
+            .update_wallet_state_with_new_block(&previous_msa, &block_1)
+            .await
+            .unwrap();
 
         // Verify that update added 4 UTXOs to list of monitored transactions:
         // three as regular outputs, and one as coinbase UTXO
@@ -969,16 +966,10 @@ mod wallet_tests {
                     &next_block,
                 )
                 .await?;
-            add_block(&mut premine_receiver_global_state, block_1.clone())
+            premine_receiver_global_state
+                .set_new_tip(next_block.clone())
                 .await
                 .unwrap();
-            premine_receiver_global_state
-                .wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                    &next_block,
-                )
-                .await?;
         }
 
         let block_18 = next_block;
@@ -1046,7 +1037,8 @@ mod wallet_tests {
                 &block_2_b,
             )
             .await?;
-        add_block(&mut premine_receiver_global_state, block_2_b.clone())
+        premine_receiver_global_state
+            .set_new_tip(block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state

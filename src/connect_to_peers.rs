@@ -473,9 +473,8 @@ mod connect_tests {
         ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
     };
     use crate::tests::shared::{
-        get_dummy_handshake_data_for_genesis, get_dummy_latest_block,
-        get_dummy_peer_connection_data_genesis, get_dummy_socket_address, get_test_genesis_setup,
-        to_bytes,
+        get_dummy_handshake_data_for_genesis, get_dummy_peer_connection_data_genesis,
+        get_dummy_socket_address, get_test_genesis_setup, to_bytes,
     };
     use crate::{MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE};
 
@@ -787,8 +786,8 @@ mod connect_tests {
         let mut own_handshake = state.get_own_handshakedata().await;
 
         // Set reported versions to something incompatible
-        own_handshake.version = "0.0.3".to_owned();
-        other_handshake.version = "0.0.0".to_owned();
+        "0.0.3".clone_into(&mut own_handshake.version);
+        "0.0.0".clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(
@@ -873,7 +872,6 @@ mod connect_tests {
         cli.max_peers = 2;
         state_lock.set_cli(cli).await;
 
-        let (_, _, _latest_block_header) = get_dummy_latest_block(None).await;
         let answer = answer_peer(
             mock,
             state_lock.clone(),
