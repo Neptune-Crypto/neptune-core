@@ -1151,7 +1151,8 @@ impl GlobalState {
     }
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
-    /// The received block will be set as the new tip, regardless of its accumulated PoW.
+    /// The received block will be set as the new tip, regardless of its accumulated PoW. or its
+    /// validity.
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
@@ -1159,8 +1160,7 @@ impl GlobalState {
     ) -> Result<()> {
         // note: we make this fn internal so we can log its duration and ensure it will
         // never be called directly by another fn, without the timings.
-
-        async fn store_block_internal_worker(
+        async fn set_new_tip_internal_worker(
             myself: &mut GlobalState,
             new_block: Block,
             coinbase_utxo_info: Option<ExpectedUtxo>,
@@ -1194,7 +1194,10 @@ impl GlobalState {
                     .expect("UTXO notification from miner must be accepted");
             }
 
-            // Get parent of tip for mutator-set data needed for various updates
+            // Get parent of tip for mutator-set data needed for various updates. Parent of the
+            // stored block will always exist since all blocks except the genesis block have a
+            // parent, and the genesis block is considered code, not data, so the genesis block
+            // will never be changed or updated through this method.
             let tip_parent = myself
                 .chain
                 .archival_state()
@@ -1202,7 +1205,7 @@ impl GlobalState {
                 .await
                 .expect("Parent must exist when storing a new block");
 
-            // Sanity check
+            // Sanity check that must always be true for a valid block
             assert_eq!(
                 tip_parent.hash(),
                 new_block.header().prev_block_digest,
@@ -1231,7 +1234,7 @@ impl GlobalState {
             Ok(())
         }
 
-        crate::macros::duration_async_info!(store_block_internal_worker(
+        crate::macros::duration_async_info!(set_new_tip_internal_worker(
             self,
             new_block,
             coinbase_utxo_info
