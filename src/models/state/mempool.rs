@@ -140,6 +140,8 @@ impl Mempool {
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction. Also, the caller must ensure that the witness type is correct --
     /// this method accepts only fully proven transactions (or, for the time being, faith witnesses).
+    /// The caller must also ensure that the transaction does not have a timestamp
+    /// in the too distant future.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         match transaction.witness.vast.witness_type {
             WitnessType::RawWitness(_) => panic!("Can only insert fully proven transactions into mempool; not accepting raw witnesses."),
