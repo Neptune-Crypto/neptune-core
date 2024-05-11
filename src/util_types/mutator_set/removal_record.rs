@@ -1,7 +1,6 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -25,6 +24,7 @@ use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
     NUM_TRIALS,
 };
+use super::MutatorSetError;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -70,27 +70,27 @@ impl AbsoluteIndexSet {
     /// Split the [`AbsoluteIndexSet`] into two hash maps, one for chunks in
     /// the inactive part of the Bloom filter and another one for chunks in the
     /// active part of the Bloom filter.
+    ///
+    /// Returns an error if a removal index is a future value, i.e. one that's
+    /// not yet covered by the active window.
     #[allow(clippy::type_complexity)]
     pub fn split_by_activity(
         &self,
         mutator_set: &MutatorSetAccumulator,
-    ) -> anyhow::Result<(HashMap<u64, Vec<u128>>, HashMap<u64, Vec<u128>>)> {
+    ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
         let mut inactive = indices_to_hash_map(&self.0);
         let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
-        let mut active = HashMap::default();
+        let mut active: Vec<_> = Default::default();
         for (chunk_index, absolute_indices) in inactive.iter() {
             if *chunk_index > aw_chunk_index_max {
-                bail!(
-                    "Absolute indices [{}] corresponding to chunk index
-                    {chunk_index} is a future index. Current active window
-                    covers chunk indices {aw_chunk_index_min} to
-                    {aw_chunk_index_max} (inclusive).",
-                    absolute_indices.iter().join(", ")
-                );
+                return Err(MutatorSetError::AbsoluteRemovalIndexIsFutureIndex {
+                    current_max_chunk_index: aw_chunk_index_max,
+                    saw_chunk_index: *chunk_index,
+                });
             }
 
             if *chunk_index >= aw_chunk_index_min {
-                active.insert(*chunk_index, absolute_indices.to_owned());
+                active.extend(absolute_indices);
             }
         }
 
@@ -402,8 +402,8 @@ mod removal_record_tests {
             empty set when window hasn't slid yet"
         );
         assert_eq!(
-            NUM_TRIALS,
-            active.into_values().flatten().count() as u32,
+            NUM_TRIALS as usize,
+            active.len(),
             "All indices must be located in the active window when window hasn't slid"
         );
     }

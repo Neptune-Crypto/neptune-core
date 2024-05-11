@@ -45,6 +45,10 @@ pub enum MutatorSetError {
     RequestedAoclAuthPathOutOfBounds((u64, u64)),
     RequestedSwbfAuthPathOutOfBounds((u64, u64)),
     MutatorSetIsEmpty,
+    AbsoluteRemovalIndexIsFutureIndex {
+        current_max_chunk_index: u64,
+        saw_chunk_index: u64,
+    },
 }
 
 /// Get the (absolute) indices for removing this item from the mutator set.
