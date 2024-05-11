@@ -15,6 +15,10 @@ pub const CHUNK_SIZE: u32 = 1 << 12;
 pub const BATCH_SIZE: u32 = 1 << 3;
 pub const NUM_TRIALS: u32 = 45;
 
+/// Given a set of absolute indices, return a hashmap of
+/// {chunk_index => absolute_indices}
+/// where the values are sorted after chunk index, i.e. put in the correct
+/// chunk bucket.
 pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u64, Vec<u128>> {
     all_indices
         .iter()

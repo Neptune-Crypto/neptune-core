@@ -21,7 +21,7 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::get_swbf_indices;
 use super::removal_record::AbsoluteIndexSet;
-use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
+use super::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
     ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
@@ -248,7 +248,8 @@ impl MutatorSetAccumulator {
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
-        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
+        let aocl_leaf_count = self.aocl.count_leaves();
+        if aocl_leaf_count <= membership_proof.auth_path_aocl.leaf_index {
             return false;
         }
 
@@ -260,11 +261,10 @@ impl MutatorSetAccumulator {
                 Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             ),
         );
-        let is_aocl_member = membership_proof.auth_path_aocl.verify(
-            &self.aocl.get_peaks(),
-            leaf,
-            self.aocl.count_leaves(),
-        );
+        let is_aocl_member =
+            membership_proof
+                .auth_path_aocl
+                .verify(&self.aocl.get_peaks(), leaf, aocl_leaf_count);
         if !is_aocl_member {
             return false;
         }
@@ -286,48 +286,50 @@ impl MutatorSetAccumulator {
             membership_proof.auth_path_aocl.leaf_index,
         ));
 
-        let chunkidx_to_indices_dict = indices_to_hash_map(&all_indices.to_array());
-        'outer: for (chunk_index, indices) in chunkidx_to_indices_dict.into_iter() {
-            if chunk_index < current_batch_index {
-                // verify mmr auth path
-                if !membership_proof
-                    .target_chunks
-                    .dictionary
-                    .contains_key(&chunk_index)
-                {
-                    entries_in_dictionary = false;
-                    break 'outer;
-                }
+        let Ok((indices_in_inactive_swbf, indices_in_active_swbf)) =
+            all_indices.split_by_activity(self)
+        else {
+            return false;
+        };
 
-                let mp_and_chunk: &(MmrMembershipProof<Hash>, Chunk) = membership_proof
+        for (chunk_index, indices) in indices_in_inactive_swbf {
+            if !membership_proof
+                .target_chunks
+                .dictionary
+                .contains_key(&chunk_index)
+            {
+                entries_in_dictionary = false;
+                break;
+            }
+
+            let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof<Hash>, Chunk) =
+                membership_proof
                     .target_chunks
                     .dictionary
                     .get(&chunk_index)
                     .unwrap();
-                let valid_auth_path = mp_and_chunk.0.verify(
-                    &self.swbf_inactive.get_peaks(),
-                    Hash::hash(&mp_and_chunk.1),
-                    self.swbf_inactive.count_leaves(),
-                );
+            let valid_auth_path = swbf_inactive_mp.verify(
+                &self.swbf_inactive.get_peaks(),
+                Hash::hash(swbf_inactive_chunk),
+                self.swbf_inactive.count_leaves(),
+            );
 
-                all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
+            all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
-                'inner_inactive: for index in indices {
-                    let index_within_chunk = index % CHUNK_SIZE as u128;
-                    if !mp_and_chunk.1.contains(index_within_chunk as u32) {
-                        has_absent_index = true;
-                        break 'inner_inactive;
-                    }
+            'inner_inactive: for index in indices {
+                let index_within_chunk = index % CHUNK_SIZE as u128;
+                if !swbf_inactive_chunk.contains(index_within_chunk as u32) {
+                    has_absent_index = true;
+                    break 'inner_inactive;
                 }
-            } else {
-                // indices are in active window
-                'inner_active: for index in indices {
-                    let relative_index = index - window_start;
-                    if !self.swbf_active.contains(relative_index as u32) {
-                        has_absent_index = true;
-                        break 'inner_active;
-                    }
-                }
+            }
+        }
+
+        for index in indices_in_active_swbf {
+            let relative_index = index - window_start;
+            if !self.swbf_active.contains(relative_index as u32) {
+                has_absent_index = true;
+                break;
             }
         }
 
