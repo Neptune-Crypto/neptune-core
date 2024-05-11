@@ -194,7 +194,7 @@ pub async fn mock_genesis_global_state(
         light_state,
         archival_state,
     });
-    let mempool = Mempool::new(ByteSize::gb(1));
+    let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     let cli_args = cli_args::Args {
         network,
         ..Default::default()
