@@ -21,7 +21,7 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::get_swbf_indices;
 use super::removal_record::AbsoluteIndexSet;
-use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE};
+use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
     ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
@@ -66,7 +66,7 @@ impl MutatorSetAccumulator {
     pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
-        // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
+        // by the sender and/or receiver of the UTXO. And `add` must be run by all nodes keeping
         // track of the mutator set.
 
         // add to list
@@ -101,6 +101,16 @@ impl MutatorSetAccumulator {
             0 => 0,
             n => (n - 1) / BATCH_SIZE as u64,
         }
+    }
+
+    /// Return the lowest and the highest chunk index that are represented in
+    /// the active window, inclusive.
+    /// The returned limits are inclusive, i.e. they point to the chunk with
+    /// the lowest chunk index and the chunk with the highest chunk index that
+    /// are still contained in the active window.
+    pub fn active_window_chunk_interval(&self) -> (u64, u64) {
+        let batch_index = self.get_batch_index();
+        (batch_index, batch_index + (WINDOW_SIZE / CHUNK_SIZE) as u64)
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
@@ -495,9 +505,51 @@ mod ms_accumulator_tests {
         test_shared::mutator_set::*,
     };
     use itertools::{izip, Itertools};
+    use proptest::prop_assert_eq;
     use rand::{thread_rng, Rng};
+    use test_strategy::proptest;
 
     use super::*;
+
+    #[test]
+    fn active_window_chunk_interval_unit_test() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (start_empty, end_empty) = accumulator.active_window_chunk_interval();
+        assert_eq!(0, start_empty);
+        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end_empty);
+
+        // Insert batch-size items and verify that a new batch interval is reported
+        for _ in 0..BATCH_SIZE + 1 {
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+
+            let (start, end) = accumulator.active_window_chunk_interval();
+            assert_eq!(0, start);
+            assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+            accumulator.add(&addition_record);
+        }
+
+        let (start_final, end_final) = accumulator.active_window_chunk_interval();
+        assert_eq!(1, start_final);
+        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64 + 1, end_final);
+    }
+
+    #[proptest(cases = 10)]
+    fn batch_index_and_active_window_chunk_interval_agree(
+        #[strategy(1u64..10u64 * BATCH_SIZE as u64)] num_insertions: u64,
+    ) {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        for _ in 0..num_insertions {
+            let (start, end) = accumulator.active_window_chunk_interval();
+            let batch_interval = accumulator.get_batch_index();
+            prop_assert_eq!(batch_interval, start);
+            prop_assert_eq!(batch_interval + (WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            accumulator.add(&addition_record);
+        }
+    }
 
     #[tokio::test]
     async fn mutator_set_batch_remove_accumulator_test() {
