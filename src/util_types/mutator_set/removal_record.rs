@@ -1,6 +1,7 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -64,6 +65,38 @@ impl AbsoluteIndexSet {
 
     pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS as usize] {
         &mut self.0
+    }
+
+    /// Split the [`AbsoluteIndexSet`] into two hash maps, one for chunks in
+    /// the inactive part of the Bloom filter and another one for chunks in the
+    /// active part of the Bloom filter.
+    #[allow(clippy::type_complexity)]
+    pub fn split_by_activity(
+        &self,
+        mutator_set: &MutatorSetAccumulator,
+    ) -> anyhow::Result<(HashMap<u64, Vec<u128>>, HashMap<u64, Vec<u128>>)> {
+        let mut inactive = indices_to_hash_map(&self.0);
+        let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
+        let mut active = HashMap::default();
+        for (chunk_index, absolute_indices) in inactive.iter() {
+            if *chunk_index > aw_chunk_index_max {
+                bail!(
+                    "Absolute indices [{}] corresponding to chunk index
+                    {chunk_index} is a future index. Current active window
+                    covers chunk indices {aw_chunk_index_min} to
+                    {aw_chunk_index_max} (inclusive).",
+                    absolute_indices.iter().join(", ")
+                );
+            }
+
+            if *chunk_index >= aw_chunk_index_min {
+                active.insert(*chunk_index, absolute_indices.to_owned());
+            }
+        }
+
+        inactive.retain(|x, _| *x < aw_chunk_index_min);
+
+        Ok((inactive, active))
     }
 }
 
@@ -319,6 +352,7 @@ mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng, RngCore};
+    use test_strategy::proptest;
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
@@ -348,6 +382,30 @@ mod removal_record_tests {
         // order of magnitude as reported size result.
         assert!(serialization_result.len() * 2 > reported_size);
         assert!(reported_size * 2 > serialization_result.len());
+    }
+
+    #[test]
+    fn split_by_activity_one_element_test() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+        accumulator.add(&mp.addition_record(item));
+        let removal_record: RemovalRecord = accumulator.drop(item, &mp);
+        let (inactive, active) = removal_record
+            .absolute_indices
+            .split_by_activity(&accumulator)
+            .unwrap();
+
+        assert!(
+            inactive.is_empty(),
+            "Indices in inactive part of Bloom filter must be
+            empty set when window hasn't slid yet"
+        );
+        assert_eq!(
+            NUM_TRIALS,
+            active.into_values().flatten().count() as u32,
+            "All indices must be located in the active window when window hasn't slid"
+        );
     }
 
     #[test]
