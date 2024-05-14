@@ -358,7 +358,7 @@ async fn main() -> Result<()> {
         }
         Command::WalletStatus => {
             let wallet_status: WalletStatus = client.wallet_status(ctx).await?;
-            println!("{}", wallet_status)
+            println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
         Command::OwnReceivingAddress => {
             let rec_addr: generation_address::ReceivingAddress =
