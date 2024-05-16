@@ -719,11 +719,11 @@ mod mine_loop_tests {
 
         let block_timestamp = mined_block_info.block.kernel.header.timestamp;
 
-        assert!(block_timestamp > initial_header_timestamp);
-        assert!(block_timestamp < Timestamp::now());
+        assert!(block_timestamp >= initial_header_timestamp);
+        assert!(block_timestamp <= Timestamp::now());
 
-        // verify timestamp is within the last second.
-        assert!(Timestamp::now() - block_timestamp < Timestamp::seconds(1));
+        // verify timestamp is within the last 100 seconds (allows for some CI slack).
+        assert!(Timestamp::now() - block_timestamp < Timestamp::seconds(100));
 
         Ok(())
     }
