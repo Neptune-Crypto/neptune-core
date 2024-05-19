@@ -752,7 +752,7 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    async fn cpu_temp(self, _context: Context) -> Option<f64> {
+    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f64> {
         let current_system = System::new();
         match current_system.cpu_temp() {
             Ok(temp) => Some(temp.into()),
