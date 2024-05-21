@@ -67,8 +67,8 @@ impl AbsoluteIndexSet {
         &mut self.0
     }
 
-    /// Split the [`AbsoluteIndexSet`] into two hash maps, one for chunks in
-    /// the inactive part of the Bloom filter and another one for chunks in the
+    /// Split the [`AbsoluteIndexSet`] into two parts, one for chunks in the
+    /// inactive part of the Bloom filter and another one for chunks in the
     /// active part of the Bloom filter.
     ///
     /// Returns an error if a removal index is a future value, i.e. one that's
@@ -78,23 +78,19 @@ impl AbsoluteIndexSet {
         &self,
         mutator_set: &MutatorSetAccumulator,
     ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
-        let mut inactive = indices_to_hash_map(&self.0);
         let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
-        let mut active: Vec<_> = Default::default();
-        for (chunk_index, absolute_indices) in inactive.iter() {
-            if *chunk_index > aw_chunk_index_max {
-                return Err(MutatorSetError::AbsoluteRemovalIndexIsFutureIndex {
-                    current_max_chunk_index: aw_chunk_index_max,
-                    saw_chunk_index: *chunk_index,
-                });
-            }
+        let (inactive, active): (HashMap<_, _>, HashMap<_, _>) = indices_to_hash_map(&self.0)
+            .into_iter()
+            .partition(|&(chunk_index, _)| chunk_index < aw_chunk_index_min);
 
-            if *chunk_index >= aw_chunk_index_min {
-                active.extend(absolute_indices);
-            }
+        if let Some(chunk_index) = active.keys().find(|&&k| k > aw_chunk_index_max) {
+            return Err(MutatorSetError::AbsoluteRemovalIndexIsFutureIndex {
+                current_max_chunk_index: aw_chunk_index_max,
+                saw_chunk_index: *chunk_index,
+            });
         }
 
-        inactive.retain(|x, _| *x < aw_chunk_index_min);
+        let active = active.into_values().flatten().collect_vec();
 
         Ok((inactive, active))
     }

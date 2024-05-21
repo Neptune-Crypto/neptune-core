@@ -112,7 +112,7 @@ impl Mempool {
         self.tx_dictionary.get(&transaction_id)
     }
 
-    /// Returns `Some(txid, transaction)` iff a transcation conflicts with a transaction
+    /// Returns `Some(txid, transaction)` iff a transaction conflicts with a transaction
     /// that's already in the mempool. Returns `None` otherwise.
     fn transaction_conflicts_with(
         &self,
