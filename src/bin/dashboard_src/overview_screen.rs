@@ -57,7 +57,9 @@ pub struct OverviewData {
     up_since: Option<u64>,
     cpu_load: Option<f64>,
     cpu_capacity: Option<f64>,
-    cpu_temperature: Option<f64>,
+
+    /// CPU temperature in degrees Celcius
+    cpu_temperature: Option<f32>,
     ram_total: Option<ByteSize>,
     ram_available: Option<ByteSize>,
     ram_used: Option<ByteSize>,
@@ -215,6 +217,7 @@ impl OverviewScreen {
                                 own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
                                 own_overview_data.is_mining = resp.is_mining;
                                 own_overview_data.confirmations = resp.confirmations;
+                                own_overview_data.cpu_temperature = resp.cpu_temp;
                             }
 
                             *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
@@ -501,7 +504,7 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.cpu_capacity)
         ));
         lines.push(format!(
-            "cpu temperature: {} K",
+            "cpu temperature: {} °C",
             dashifnotset!(data.cpu_temperature)
         ));
         lines.push(format!(
