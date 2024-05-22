@@ -412,12 +412,14 @@ impl Mempool {
     /// # Example
     ///
     /// ```
-    /// use neptune_core::models::state::mempool::Mempool;
     /// use bytesize::ByteSize;
+    /// use neptune_core::models::blockchain::block::Block;
+    /// use neptune_core::models::state::mempool::Mempool;
+    /// use neptune_core::config_models::network::Network;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis_block(network);
-    /// let mempool = Mempool::new(ByteSize::gb(1), genesis_block);
+    /// let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
