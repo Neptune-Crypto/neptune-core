@@ -39,7 +39,10 @@ async fn main() -> Result<()> {
         Ok(transp) => transp,
         Err(err) => {
             eprintln!("{err}");
-            bail!("Connection to neptune-core failed. Is a node running?");
+            bail!(
+                "Connection to neptune-core failed. Is a node running?  Or is the client still \
+                starting up?"
+            );
         }
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
@@ -49,7 +52,10 @@ async fn main() -> Result<()> {
         Ok(nw) => nw,
         Err(err) => {
             eprintln!("{err}");
-            bail!("Could not ping neptune-core. Do configurations match?");
+            bail!(
+                "Could not ping neptune-core. Do configurations match? Or is the client still \
+                starting up?"
+            );
         }
     };
 
