@@ -32,7 +32,7 @@ use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
     pub tip_digest: Digest,
     pub tip_header: BlockHeader,
@@ -51,6 +51,9 @@ pub struct DashBoardOverviewDataFromClient {
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
+
+    /// CPU temperature in degrees Celcius
+    pub cpu_temp: Option<f32>,
 }
 
 #[tarpc::service]
@@ -163,7 +166,7 @@ pub trait RPC {
     async fn shutdown() -> bool;
 
     /// Get CPU temperature.
-    async fn cpu_temp() -> Option<f64>;
+    async fn cpu_temp() -> Option<f32>;
 }
 
 #[derive(Clone)]
@@ -191,6 +194,15 @@ impl NeptuneRPCServer {
                 Some(confirmations)
             }
             None => None,
+        }
+    }
+
+    /// Return temperature of CPU, if available.
+    fn cpu_temp_inner() -> Option<f32> {
+        let current_system = System::new();
+        match current_system.cpu_temp() {
+            Ok(temp) => Some(temp),
+            Err(_) => None,
         }
     }
 }
@@ -450,6 +462,7 @@ impl RPC for NeptuneRPCServer {
         let syncing = state.net.syncing;
         let mempool_size = state.mempool.get_size();
         let mempool_tx_count = state.mempool.len();
+        let cpu_temp = Self::cpu_temp_inner();
 
         let peer_count = Some(state.net.peer_map.len());
 
@@ -469,6 +482,7 @@ impl RPC for NeptuneRPCServer {
             peer_count,
             is_mining,
             confirmations,
+            cpu_temp,
         }
     }
 
@@ -689,12 +703,9 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f64> {
-        let current_system = System::new();
-        match current_system.cpu_temp() {
-            Ok(temp) => Some(temp.into()),
-            Err(_) => None,
-        }
+    #[doc = r" Return the temperature of the CPU in degrees Celcius."]
+    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f32> {
+        Self::cpu_temp_inner()
     }
 }
 
