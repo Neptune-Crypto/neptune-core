@@ -31,6 +31,20 @@ With a functioning version of cargo, compilation on Windows should just work out
 
 - Run `cargo install --locked --path .`
 
+ ### MacOS 
+
+ - Open a terminal to run the following commands.
+ - Make sure you have `Homebrew` installed. If not, install it from [here](https://brew.sh/).
+ - Install curl: `brew install curl`
+ - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+ - Source the rust environment: `source "$HOME/.cargo/env"`
+ - Install Xcode command line tools: `xcode-select --install`
+ - Install LevelDB: `brew install leveldb`
+ - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
+ - Enter the repository: `cd neptune-core`
+ - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
+
+ - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --locked --path .` (needs at least 4 GB of RAM and a few minutes)
 
 ## Running & Connecting
 
