@@ -1262,13 +1262,11 @@ mod rpc_server_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn can_get_server_temperature_test() {
+    async fn getting_temperature_doesnt_crash_test() {
+        // On your local machine, this should return a temperature but in CI,
+        // the RPC call returns `None`, so we only verify that the call doesn't
+        // crash the host machine, we don't verify that any value is returned.
         let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
-        let current_server_temperature = rpc_server.cpu_temp(context::current()).await;
-
-        // Silicon Macs do not provide CPU temperature using systemstat
-        if std::env::consts::OS != "macos" {
-            assert!(current_server_temperature.is_some());
-        }
+        let _current_server_temperature = rpc_server.cpu_temp(context::current()).await;
     }
 }
