@@ -1,4 +1,4 @@
-# How different parts of the state handle reorganizations
+# How neptune-core handles reorganizations
 Neptune is a blockchain which features recursive STARK proofs as part of its
 consensus mechanism. This implies that participants can synchronize trustlessly
 by simply downloading the latest block and verifying this. Unlike most other
@@ -21,7 +21,7 @@ The client's state consists of the following parts:
 - mempool
 
 The wallet handles transactions that the client holds the spending keys for.
-The light state contains the latest blocks which verifies the validity of the
+The light state contains the latest block which verifies the validity of the
 entire history of the blockchain. The archival state is optional and allows,
 among other things, the client to re-synchronize wallets that are no longer
 up-to-date. The mempool keeps track of transactions that are not yet included
