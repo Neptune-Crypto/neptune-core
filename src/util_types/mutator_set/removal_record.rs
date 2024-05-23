@@ -24,6 +24,7 @@ use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
     NUM_TRIALS,
 };
+use super::MutatorSetError;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -64,6 +65,34 @@ impl AbsoluteIndexSet {
 
     pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS as usize] {
         &mut self.0
+    }
+
+    /// Split the [`AbsoluteIndexSet`] into two parts, one for chunks in the
+    /// inactive part of the Bloom filter and another one for chunks in the
+    /// active part of the Bloom filter.
+    ///
+    /// Returns an error if a removal index is a future value, i.e. one that's
+    /// not yet covered by the active window.
+    #[allow(clippy::type_complexity)]
+    pub fn split_by_activity(
+        &self,
+        mutator_set: &MutatorSetAccumulator,
+    ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
+        let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
+        let (inactive, active): (HashMap<_, _>, HashMap<_, _>) = indices_to_hash_map(&self.0)
+            .into_iter()
+            .partition(|&(chunk_index, _)| chunk_index < aw_chunk_index_min);
+
+        if let Some(chunk_index) = active.keys().find(|&&k| k > aw_chunk_index_max) {
+            return Err(MutatorSetError::AbsoluteRemovalIndexIsFutureIndex {
+                current_max_chunk_index: aw_chunk_index_max,
+                saw_chunk_index: *chunk_index,
+            });
+        }
+
+        let active = active.into_values().flatten().collect_vec();
+
+        Ok((inactive, active))
     }
 }
 
@@ -279,14 +308,34 @@ impl RemovalRecord {
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
-        let peaks = mutator_set.swbf_inactive.get_peaks();
+        let Ok((inactive, _)) = self.absolute_indices.split_by_activity(mutator_set) else {
+            return false;
+        };
+
+        let required_chunk_indices: HashSet<u64> = inactive.into_keys().collect();
+        let proven_chunk_indices: HashSet<u64> =
+            self.target_chunks.dictionary.keys().copied().collect();
+        if required_chunk_indices != proven_chunk_indices {
+            return false;
+        }
+
+        let swbfi_peaks = mutator_set.swbf_inactive.get_peaks();
+        let swbfi_leaf_count = mutator_set.swbf_inactive.count_leaves();
         self.target_chunks
             .dictionary
             .iter()
-            .all(|(_i, (proof, chunk))| {
+            .all(|(chunk_index, (mmr_proof, chunk))| {
                 let leaf_digest = Hash::hash(chunk);
-                let leaf_count = mutator_set.swbf_inactive.count_leaves();
-                proof.verify(&peaks, leaf_digest, leaf_count)
+
+                if *chunk_index != mmr_proof.leaf_index {
+                    return false;
+                }
+
+                // TODO: This in-bounds check can be removed after upstream
+                // dependency twenty-first has been updated with
+                // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
+                let in_bounds = swbfi_leaf_count > mmr_proof.leaf_index;
+                in_bounds && mmr_proof.verify(&swbfi_peaks, leaf_digest, swbfi_leaf_count)
             })
     }
 
@@ -319,6 +368,7 @@ mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng, RngCore};
+    use test_strategy::proptest;
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
@@ -348,6 +398,30 @@ mod removal_record_tests {
         // order of magnitude as reported size result.
         assert!(serialization_result.len() * 2 > reported_size);
         assert!(reported_size * 2 > serialization_result.len());
+    }
+
+    #[test]
+    fn split_by_activity_one_element_test() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+        accumulator.add(&mp.addition_record(item));
+        let removal_record: RemovalRecord = accumulator.drop(item, &mp);
+        let (inactive, active) = removal_record
+            .absolute_indices
+            .split_by_activity(&accumulator)
+            .unwrap();
+
+        assert!(
+            inactive.is_empty(),
+            "Indices in inactive part of Bloom filter must be
+            empty set when window hasn't slid yet"
+        );
+        assert_eq!(
+            NUM_TRIALS as usize,
+            active.len(),
+            "All indices must be located in the active window when window hasn't slid"
+        );
     }
 
     #[test]
@@ -448,6 +522,87 @@ mod removal_record_tests {
     }
 
     #[test]
+    fn validate_on_out_of_bounds_index() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (min_index_in_active_window, max_index_in_active_window) =
+            accumulator.active_window_chunk_interval();
+        let num_chunks_in_active_window = max_index_in_active_window - min_index_in_active_window;
+
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let addition_record: AdditionRecord =
+            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+
+        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+        accumulator.add(&addition_record);
+        let mut rr_for_aocl0 = accumulator.drop(item, &mp);
+
+        // Add so many items, that the current active window is completely
+        // replaced by the inactive part of the sliding-window Bloom filter.
+        // That way, the removal record is guaranteed to be invalid against
+        // the empty mutator set.
+        for _ in 0..(BATCH_SIZE as u64) * num_chunks_in_active_window + 1 {
+            RemovalRecord::batch_update_from_addition(&mut [&mut rr_for_aocl0], &accumulator);
+            accumulator.add(&addition_record);
+        }
+
+        assert!(rr_for_aocl0.validate(&accumulator));
+        assert!(!rr_for_aocl0.validate(&MutatorSetAccumulator::default()));
+    }
+
+    #[proptest(cases = 10)]
+    fn removal_record_missing_chunk_element_is_invalid_pbt(
+        #[strategy(1u64..20*BATCH_SIZE as u64)] initial_additions: u64,
+        #[strategy(0u64..(#initial_additions as u64))] index_to_drop: u64,
+    ) {
+        // Construct a valid removal record, verify that it is considered
+        // valid, then remove one element from its chunk dictionary and verify
+        // that it is now considered invalid.
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let mut mps = vec![];
+        let mut items = vec![];
+        for j in 0..initial_additions {
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record: AdditionRecord =
+                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+            MsMembershipProof::batch_update_from_addition(
+                &mut mps.iter_mut().collect_vec(),
+                &items,
+                &accumulator,
+                &addition_record,
+            )
+            .unwrap();
+            accumulator.add(&addition_record);
+
+            if j == index_to_drop {
+                mps.push(mp.clone());
+                items.push(item);
+            }
+        }
+
+        let msmp = mps[0].clone();
+        let item = items[0];
+
+        let mut rr = accumulator.drop(item, &msmp);
+        assert!(rr.validate(&accumulator));
+
+        // If the removal record has no indices in the inactive part of the
+        // Bloom filter, then continue to next test case.
+        let (inactive, _) = rr.absolute_indices.split_by_activity(&accumulator).unwrap();
+        if inactive.is_empty() {
+            return Ok(());
+        }
+
+        let to_remove = **inactive
+            .keys()
+            .collect_vec()
+            .choose(&mut thread_rng())
+            .unwrap();
+        rr.target_chunks.dictionary.remove(&to_remove);
+        assert!(!rr.validate(&accumulator));
+    }
+
+    #[test]
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
 
@@ -538,7 +693,6 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
-        let mut original_first_removal_record = None;
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
@@ -548,7 +702,8 @@ mod removal_record_tests {
                 commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
-            // Update all removal records from addition, then add the element
+            // Update all removal records and membership proofs from addition,
+            // then add the element.
             RemovalRecord::batch_update_from_addition(
                 &mut removal_records
                     .iter_mut()
@@ -585,9 +740,6 @@ mod removal_record_tests {
             }
 
             let rr = accumulator.drop(item, &mp);
-            if original_first_removal_record.is_none() {
-                original_first_removal_record = Some(rr.clone());
-            };
 
             removal_records.push((i as usize, rr));
         }
@@ -604,7 +756,9 @@ mod removal_record_tests {
                 &random_removal_record,
             );
 
+            assert!(accumulator.can_remove(&random_removal_record));
             accumulator.remove(&random_removal_record);
+            assert!(!accumulator.can_remove(&random_removal_record));
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
@@ -615,14 +769,6 @@ mod removal_record_tests {
                 assert!(accumulator.can_remove(removal_record));
             }
         }
-
-        // Verify that the original removal record is no longer valid since its
-        // MMR MPs are deprecated
-        assert!(original_first_removal_record
-            .as_ref()
-            .unwrap()
-            .validate(&accumulator));
-        assert!(!accumulator.can_remove(&original_first_removal_record.unwrap()));
     }
 
     #[test]

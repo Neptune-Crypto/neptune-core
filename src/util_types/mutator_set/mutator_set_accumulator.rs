@@ -21,7 +21,7 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::get_swbf_indices;
 use super::removal_record::AbsoluteIndexSet;
-use super::shared::{indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE};
+use super::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
     ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
@@ -66,7 +66,7 @@ impl MutatorSetAccumulator {
     pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
-        // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
+        // by the sender and/or receiver of the UTXO. And `add` must be run by all nodes keeping
         // track of the mutator set.
 
         // add to list
@@ -101,6 +101,16 @@ impl MutatorSetAccumulator {
             0 => 0,
             n => (n - 1) / BATCH_SIZE as u64,
         }
+    }
+
+    /// Return the lowest and the highest chunk index that are represented in
+    /// the active window, inclusive.
+    /// The returned limits are inclusive, i.e. they point to the chunk with
+    /// the lowest chunk index and the chunk with the highest chunk index that
+    /// are still contained in the active window.
+    pub fn active_window_chunk_interval(&self) -> (u64, u64) {
+        let batch_index = self.get_batch_index();
+        (batch_index, batch_index + (WINDOW_SIZE / CHUNK_SIZE) as u64)
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
@@ -238,7 +248,8 @@ impl MutatorSetAccumulator {
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
-        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
+        let aocl_leaf_count = self.aocl.count_leaves();
+        if aocl_leaf_count <= membership_proof.auth_path_aocl.leaf_index {
             return false;
         }
 
@@ -250,11 +261,10 @@ impl MutatorSetAccumulator {
                 Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             ),
         );
-        let is_aocl_member = membership_proof.auth_path_aocl.verify(
-            &self.aocl.get_peaks(),
-            leaf,
-            self.aocl.count_leaves(),
-        );
+        let is_aocl_member =
+            membership_proof
+                .auth_path_aocl
+                .verify(&self.aocl.get_peaks(), leaf, aocl_leaf_count);
         if !is_aocl_member {
             return false;
         }
@@ -276,48 +286,50 @@ impl MutatorSetAccumulator {
             membership_proof.auth_path_aocl.leaf_index,
         ));
 
-        let chunkidx_to_indices_dict = indices_to_hash_map(&all_indices.to_array());
-        'outer: for (chunk_index, indices) in chunkidx_to_indices_dict.into_iter() {
-            if chunk_index < current_batch_index {
-                // verify mmr auth path
-                if !membership_proof
-                    .target_chunks
-                    .dictionary
-                    .contains_key(&chunk_index)
-                {
-                    entries_in_dictionary = false;
-                    break 'outer;
-                }
+        let Ok((indices_in_inactive_swbf, indices_in_active_swbf)) =
+            all_indices.split_by_activity(self)
+        else {
+            return false;
+        };
 
-                let mp_and_chunk: &(MmrMembershipProof<Hash>, Chunk) = membership_proof
+        for (chunk_index, indices) in indices_in_inactive_swbf {
+            if !membership_proof
+                .target_chunks
+                .dictionary
+                .contains_key(&chunk_index)
+            {
+                entries_in_dictionary = false;
+                break;
+            }
+
+            let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof<Hash>, Chunk) =
+                membership_proof
                     .target_chunks
                     .dictionary
                     .get(&chunk_index)
                     .unwrap();
-                let valid_auth_path = mp_and_chunk.0.verify(
-                    &self.swbf_inactive.get_peaks(),
-                    Hash::hash(&mp_and_chunk.1),
-                    self.swbf_inactive.count_leaves(),
-                );
+            let valid_auth_path = swbf_inactive_mp.verify(
+                &self.swbf_inactive.get_peaks(),
+                Hash::hash(swbf_inactive_chunk),
+                self.swbf_inactive.count_leaves(),
+            );
 
-                all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
+            all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
-                'inner_inactive: for index in indices {
-                    let index_within_chunk = index % CHUNK_SIZE as u128;
-                    if !mp_and_chunk.1.contains(index_within_chunk as u32) {
-                        has_absent_index = true;
-                        break 'inner_inactive;
-                    }
+            'inner_inactive: for index in indices {
+                let index_within_chunk = index % CHUNK_SIZE as u128;
+                if !swbf_inactive_chunk.contains(index_within_chunk as u32) {
+                    has_absent_index = true;
+                    break 'inner_inactive;
                 }
-            } else {
-                // indices are in active window
-                'inner_active: for index in indices {
-                    let relative_index = index - window_start;
-                    if !self.swbf_active.contains(relative_index as u32) {
-                        has_absent_index = true;
-                        break 'inner_active;
-                    }
-                }
+            }
+        }
+
+        for index in indices_in_active_swbf {
+            let relative_index = index - window_start;
+            if !self.swbf_active.contains(relative_index as u32) {
+                has_absent_index = true;
+                break;
             }
         }
 
@@ -495,9 +507,51 @@ mod ms_accumulator_tests {
         test_shared::mutator_set::*,
     };
     use itertools::{izip, Itertools};
+    use proptest::prop_assert_eq;
     use rand::{thread_rng, Rng};
+    use test_strategy::proptest;
 
     use super::*;
+
+    #[test]
+    fn active_window_chunk_interval_unit_test() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (start_empty, end_empty) = accumulator.active_window_chunk_interval();
+        assert_eq!(0, start_empty);
+        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end_empty);
+
+        // Insert batch-size items and verify that a new batch interval is reported
+        for _ in 0..BATCH_SIZE + 1 {
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+
+            let (start, end) = accumulator.active_window_chunk_interval();
+            assert_eq!(0, start);
+            assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+            accumulator.add(&addition_record);
+        }
+
+        let (start_final, end_final) = accumulator.active_window_chunk_interval();
+        assert_eq!(1, start_final);
+        assert_eq!((WINDOW_SIZE / CHUNK_SIZE) as u64 + 1, end_final);
+    }
+
+    #[proptest(cases = 10)]
+    fn batch_index_and_active_window_chunk_interval_agree(
+        #[strategy(1u64..10u64 * BATCH_SIZE as u64)] num_insertions: u64,
+    ) {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        for _ in 0..num_insertions {
+            let (start, end) = accumulator.active_window_chunk_interval();
+            let batch_interval = accumulator.get_batch_index();
+            prop_assert_eq!(batch_interval, start);
+            prop_assert_eq!(batch_interval + (WINDOW_SIZE / CHUNK_SIZE) as u64, end);
+
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            accumulator.add(&addition_record);
+        }
+    }
 
     #[tokio::test]
     async fn mutator_set_batch_remove_accumulator_test() {

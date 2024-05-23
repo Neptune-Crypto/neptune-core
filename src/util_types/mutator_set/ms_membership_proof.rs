@@ -24,7 +24,6 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
-use super::get_swbf_indices;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
@@ -32,6 +31,7 @@ use super::shared::{
     get_batch_mutation_argument_for_removal_record,
     prepare_authenticated_batch_modification_for_removal_record_reversion, BATCH_SIZE, CHUNK_SIZE,
 };
+use super::{commit, get_swbf_indices};
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -58,6 +58,14 @@ pub struct MsMembershipProof {
 }
 
 impl MsMembershipProof {
+    pub fn addition_record(&self, item: Digest) -> AdditionRecord {
+        commit(
+            item,
+            self.sender_randomness,
+            self.receiver_preimage.hash::<Hash>(),
+        )
+    }
+
     /// Compute the indices that will be added to the SWBF if this item is removed.
     pub fn compute_indices(&self, item: Digest) -> AbsoluteIndexSet {
         AbsoluteIndexSet::new(&get_swbf_indices(

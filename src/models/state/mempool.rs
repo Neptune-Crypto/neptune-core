@@ -32,7 +32,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
-/// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
+/// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
 /// to mine, but a simple one is to pick transactions in descending order of
 /// highest `FeeDensity`.
@@ -53,6 +53,7 @@ use num_rational::BigRational as FeeDensity;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
+
 // 5 minutes in secs
 pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
@@ -64,17 +65,23 @@ type LookupItem<'a> = (Digest, &'a Transaction);
 pub struct Mempool {
     max_total_size: usize,
 
-    // Maintain for constant lookup
+    /// Contains transactions, with a mapping from transaction ID to transaction.
+    /// Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
 
-    // Maintain for fast min and max
+    /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
+    /// both descending and ascending order.
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
+
+    /// Records the digest of the block that the transactions were synced to.
+    /// Used to discover reorganizations.
+    tip_digest: Digest,
 }
 
 impl Mempool {
-    /// instantiate a new `Mempool`
-    pub fn new(max_total_size: ByteSize) -> Self {
+    /// instantiate a new, empty `Mempool`
+    pub fn new(max_total_size: ByteSize, tip_digest: Digest) -> Self {
         let table = Default::default();
         let queue = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
@@ -82,7 +89,13 @@ impl Mempool {
             max_total_size,
             tx_dictionary: table,
             queue,
+            tip_digest,
         }
+    }
+
+    /// Update the block digest to which all transactions are synced.
+    fn set_tip_digest_sync_label(&mut self, tip_digest: Digest) {
+        self.tip_digest = tip_digest;
     }
 
     /// check if transaction exists in mempool
@@ -99,8 +112,8 @@ impl Mempool {
         self.tx_dictionary.get(&transaction_id)
     }
 
-    /// Returns `Some(txid, transaction)` iff a transcation conflicts with a block that's already in
-    /// the mempool. Returns `None` otherwise.
+    /// Returns `Some(txid, transaction)` iff a transaction conflicts with a transaction
+    /// that's already in the mempool. Returns `None` otherwise.
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
@@ -127,6 +140,8 @@ impl Mempool {
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction. Also, the caller must ensure that the witness type is correct --
     /// this method accepts only fully proven transactions (or, for the time being, faith witnesses).
+    /// The caller must also ensure that the transaction does not have a timestamp
+    /// in the too distant future.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         match transaction.witness.vast.witness_type {
             WitnessType::RawWitness(_) => panic!("Can only insert fully proven transactions into mempool; not accepting raw witnesses."),
@@ -165,6 +180,7 @@ impl Mempool {
             self.queue.len(),
             "mempool's table and queue length must agree after shrink"
         );
+
         None
     }
 
@@ -177,6 +193,12 @@ impl Mempool {
         }
 
         None
+    }
+
+    /// Delete all transactions from the mempool.
+    pub fn clear(&mut self) {
+        self.queue.clear();
+        self.tx_dictionary.clear();
     }
 
     /// Return the number of transactions currently stored in the Mempool.
@@ -223,6 +245,9 @@ impl Mempool {
         transactions
     }
 
+    /// Removes the transaction with the highest [`FeeDensity`] from the mempool.
+    /// Returns the removed value.
+    ///
     /// Computes in θ(lg N)
     #[allow(dead_code)]
     pub fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
@@ -235,6 +260,9 @@ impl Mempool {
         }
     }
 
+    /// Removes the transaction with the lowest [`FeeDensity`] from the mempool.
+    /// Returns the removed value.
+    ///
     /// Computes in θ(lg N)
     pub fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
@@ -246,6 +274,8 @@ impl Mempool {
         }
     }
 
+    /// Removes all transactions from the mempool that do not satisfy the
+    /// predicate.
     /// Modelled after [HashMap::retain](std::collections::HashMap::retain())
     ///
     /// Computes in O(capacity) >= O(N)
@@ -270,7 +300,9 @@ impl Mempool {
         self.shrink_to_fit()
     }
 
-    /// Prune based on `Transaction.timestamp`
+    /// Remove transactions from mempool that are older than the specified
+    /// timestamp. Prunes base on the transaction's timestamp.
+    ///
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) {
         let cutoff = Timestamp::now() - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
@@ -283,13 +315,22 @@ impl Mempool {
     }
 
     /// Remove from the mempool all transactions that become invalid because
-    /// of this newly mined block. Also update all mutator set data for monitored
-    /// transactions that were not removed in the previous step.
+    /// of a newly received block. Also update all mutator set data for mempool
+    /// transactions that were not removed.
     pub async fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
     ) {
+        // If we discover a reorganization, we currently just clear the mempool,
+        // as we don't have the ability to roll transaction removal record integrity
+        // proofs back to previous blocks. It would be nice if we could handle a
+        // reorganization that's at least a few blocks deep though.
+        let previous_block_digest = block.header().prev_block_digest;
+        if self.tip_digest != previous_block_digest {
+            self.clear();
+        }
+
         // The general strategy is to check whether the SWBF index set of a given
         // transaction in the mempool is disjoint (*i.e.*, not contained by) the
         // SWBF indices coming from the block transaction. If they are not disjoint,
@@ -318,6 +359,9 @@ impl Mempool {
                 .map(|rr| rr.absolute_indices.to_array())
                 .collect();
 
+            // A transaction should be kept in the mempool if it is true that
+            // *all* of its index sets have at least one index that's not
+            // present in the mined block's transaction.
             transaction_index_sets.iter().all(|index_set| {
                 index_set
                     .iter()
@@ -339,6 +383,10 @@ impl Mempool {
         // transactions in the mempool. So we should shrink it to max size after
         // applying the block.
         self.shrink_to_max_size();
+
+        // Update the sync-label to keep track of reorganizations
+        let current_block_digest = block.hash();
+        self.set_tip_digest_sync_label(current_block_digest);
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -364,10 +412,14 @@ impl Mempool {
     /// # Example
     ///
     /// ```
-    /// use neptune_core::models::state::mempool::Mempool;
     /// use bytesize::ByteSize;
+    /// use neptune_core::models::blockchain::block::Block;
+    /// use neptune_core::models::state::mempool::Mempool;
+    /// use neptune_core::config_models::network::Network;
     ///
-    /// let mempool = Mempool::new(ByteSize::gb(1));
+    /// let network = Network::Main;
+    /// let genesis_block = Block::genesis_block(network);
+    /// let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
@@ -406,6 +458,7 @@ mod tests {
             make_mock_block, make_mock_transaction_with_wallet, mock_genesis_global_state,
             mock_genesis_wallet_state,
         },
+        util_types::mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE},
     };
     use anyhow::Result;
     use itertools::Itertools;
@@ -417,8 +470,9 @@ mod tests {
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
-        let mut mempool = Mempool::new(ByteSize::gb(1));
         let network = Network::Alpha;
+        let genesis_block = Block::genesis_block(network);
+        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
         let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let transaction = make_mock_transaction_with_wallet(
             vec![],
@@ -447,7 +501,8 @@ mod tests {
 
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
-        let mut mempool = Mempool::new(ByteSize::gb(1));
+        let genesis_block = Block::genesis_block(network);
+        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
         let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
@@ -475,6 +530,7 @@ mod tests {
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
         }
+
         assert!(!mempool.is_empty())
     }
 
@@ -490,15 +546,17 @@ mod tests {
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
         }
+
         assert!(!mempool.is_empty())
     }
 
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_transactions() {
-        let wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), Network::Alpha).await;
-        let mut mempool = Mempool::new(ByteSize::gb(1));
+        let network = Network::Alpha;
+        let genesis_block = Block::genesis_block(network);
+        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
+        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -507,7 +565,7 @@ mod tests {
         let eight_days_ago = Timestamp::now() - Timestamp::days(8);
         let timestamp = Some(eight_days_ago);
 
-        for i in 0u32..5 {
+        for i in 0u32..6 {
             let t = make_mock_transaction_with_wallet(
                 vec![],
                 vec![],
@@ -528,7 +586,8 @@ mod tests {
             );
             mempool.insert(&t);
         }
-        assert_eq!(mempool.len(), 10);
+
+        assert_eq!(mempool.len(), 11);
         mempool.prune_stale_transactions();
         assert_eq!(mempool.len(), 5)
     }
@@ -536,6 +595,9 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn remove_transactions_with_block_test() -> Result<()> {
+        // We need the global state to construct a transaction. This global state
+        // has a wallet which receives a premine-UTXO.
+
         let seed = {
             let mut rng: StdRng =
                 SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
@@ -553,14 +615,13 @@ mod tests {
         };
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        // We need the global state to construct a transaction. This global state
-        // has a wallet which receives a premine-UTXO.
+
         let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let premine_receiver_global_state_lock =
+        let premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut premine_receiver_global_state =
-            premine_receiver_global_state_lock.lock_guard_mut().await;
+            premine_receiver_global_state.lock_guard_mut().await;
 
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
@@ -579,17 +640,6 @@ mod tests {
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
 
         // Update both states with block 1
-        premine_receiver_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
-            .await?;
-        premine_receiver_global_state
-            .chain
-            .light_state_mut()
-            .set_block(block_1.clone());
         other_global_state
             .wallet_state
             .expected_utxos
@@ -601,16 +651,13 @@ mod tests {
             )
             .expect("UTXO notification from miner must be accepted");
         other_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
-            .await?;
-        other_global_state
-            .chain
-            .light_state_mut()
-            .set_block(block_1.clone());
+            .set_new_tip(block_1.clone())
+            .await
+            .unwrap();
+        premine_receiver_global_state
+            .set_new_tip(block_1.clone())
+            .await
+            .unwrap();
 
         // Create a transaction that's valid to be included in block 2
         let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
@@ -628,6 +675,7 @@ mod tests {
                 utxo: new_utxo,
             });
         }
+
         let mut now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let tx_by_preminer = premine_receiver_global_state
@@ -638,8 +686,8 @@ mod tests {
             )
             .await?;
 
-        // Add this transaction to the mempool
-        let mut mempool = Mempool::new(ByteSize::gb(1));
+        // Add this transaction to a mempool
+        let mut mempool = Mempool::new(ByteSize::gb(1), block_1.hash());
         mempool.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -687,28 +735,14 @@ mod tests {
         // updated and valid-again mutator set data
         let mut tx_by_other_updated: Transaction =
             mempool.get_transactions_for_block(usize::MAX)[0].clone();
-
-        debug!(
-            "mempool now has transaction relative to mutator set hash {}",
-            tx_by_other_updated.kernel.mutator_set_hash
+        assert!(
+            tx_by_other_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
+            "Block with tx with updated mutator set data must be confirmable wrt. block_2"
         );
 
         let (block_3_with_no_input, _, _) =
             make_mock_block(&block_2, None, premine_receiver_address, rng.gen());
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
-
-        debug!(
-            "Just made block with previous mutator set hash {}",
-            block_2.kernel.body.mutator_set_accumulator.hash()
-        );
-        debug!(
-            "Just made block with next mutator set hash {}",
-            block_3_with_updated_tx
-                .kernel
-                .body
-                .mutator_set_accumulator
-                .hash()
-        );
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
@@ -726,11 +760,11 @@ mod tests {
             "Block with tx with updated mutator set data must be valid"
         );
 
-        // Mine 10 more blocks without including the transaction but while still keeping the
-        // mempool updated. After these 10 blocks are mined, the transaction must still be
+        // Mine 11 blocks without including the transaction but while still keeping the
+        // mempool updated. After these 11 blocks are mined, the transaction must still be
         // valid.
-        let mut previous_block = block_3_with_no_input;
-        for _ in 0..10 {
+        let mut previous_block = block_2;
+        for _ in 0..11 {
             let (next_block, _, _) =
                 make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
             mempool
@@ -771,6 +805,140 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn reorganization_does_not_crash_mempool() {
+        // Verify that reorganizations do not crash the client, and other
+        // qualities.
+
+        // First put a transaction into the mempool. Then mine block 1a does
+        // not contain this transaction, such that mempool is still non-empty.
+        // Then mine a a block 1b that also does not contain this transaction.
+        let network = Network::RegTest;
+        let devnet_wallet = WalletSecret::devnet_wallet();
+        let premine_receiver_global_state =
+            mock_genesis_global_state(network, 2, devnet_wallet).await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state.lock_guard_mut().await;
+        let premine_address = premine_receiver_global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
+        let other_wallet_secret = WalletSecret::new_random();
+        let other_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
+
+        let utxo = Utxo::new(
+            premine_address.lock_script(),
+            NeptuneCoins::new(1).to_native_coins(),
+        );
+        let tx_receiver_data = UtxoReceiverData {
+            utxo,
+            receiver_privacy_digest: premine_address.privacy_digest,
+            sender_randomness: random(),
+            public_announcement: PublicAnnouncement::default(),
+        };
+
+        let genesis_block = premine_receiver_global_state
+            .chain
+            .archival_state()
+            .genesis_block()
+            .to_owned();
+        let now = genesis_block.kernel.header.timestamp;
+        let in_seven_years = now + Timestamp::months(7 * 12);
+        let unmined_tx = premine_receiver_global_state
+            .create_transaction(vec![tx_receiver_data], NeptuneCoins::new(1), in_seven_years)
+            .await
+            .unwrap();
+
+        premine_receiver_global_state.mempool.insert(&unmined_tx);
+
+        let mut rng = thread_rng();
+
+        // Add enough blocks to move the active window. The transaction must stay in
+        // the mempool, since it is not being mined.
+        let mut current_block = genesis_block.clone();
+        const NUM_BLOCKS_TO_SLIDE_ENTIRE_ACTIVE_WINDOW: u32 = WINDOW_SIZE / CHUNK_SIZE * BATCH_SIZE;
+
+        // This will invalidate the removal record with a probability of
+        // 99.995 %. So a later test will fail 1/20'000 times.
+        const PROBABLY_ENOUGH_BLOCKS_TO_INVALIDATE_REMOVAL_RECORD: u32 =
+            NUM_BLOCKS_TO_SLIDE_ENTIRE_ACTIVE_WINDOW / 5;
+        for _ in 0..PROBABLY_ENOUGH_BLOCKS_TO_INVALIDATE_REMOVAL_RECORD {
+            let (next_block, _, _) = make_mock_block(
+                &current_block,
+                Some(in_seven_years),
+                other_address,
+                rng.gen(),
+            );
+            premine_receiver_global_state
+                .set_new_tip(next_block.clone())
+                .await
+                .unwrap();
+
+            let mempool_txs = premine_receiver_global_state
+                .mempool
+                .get_transactions_for_block(usize::MAX);
+            assert_eq!(
+                1,
+                mempool_txs.len(),
+                "The inserted tx must stay in the mempool"
+            );
+            assert!(
+                mempool_txs[0]
+                    .is_confirmable_relative_to(&next_block.body().mutator_set_accumulator),
+                "Mempool tx must stay confirmable after each new block has been applied"
+            );
+            assert_eq!(
+                next_block.hash(),
+                premine_receiver_global_state.mempool.tip_digest,
+                "Mempool's sync digest must be set correctly"
+            );
+
+            current_block = next_block;
+        }
+
+        let tx_from_mempool0: Transaction = premine_receiver_global_state
+            .mempool
+            .get_transactions_for_block(usize::MAX)[0]
+            .clone();
+        assert!(
+            !tx_from_mempool0
+                .is_confirmable_relative_to(&genesis_block.body().mutator_set_accumulator),
+            "tx may not be confirmable relative to the genesis block"
+        );
+
+        // Now make a deep reorganization and verify that nothing crashes
+        let (block_1b, _, _) = make_mock_block(
+            &genesis_block,
+            Some(in_seven_years),
+            other_address,
+            rng.gen(),
+        );
+        assert!(
+            block_1b.header().height.previous().is_genesis(),
+            "Sanity check that new tip has height 1"
+        );
+        premine_receiver_global_state
+            .set_new_tip(block_1b.clone())
+            .await
+            .unwrap();
+
+        // Verify that all retained txs (if any) are confirmable against
+        // the new tip.
+        assert!(
+            premine_receiver_global_state
+                .mempool
+                .get_transactions_for_block(usize::MAX)
+                .iter()
+                .all(|tx| tx.is_confirmable_relative_to(&block_1b.body().mutator_set_accumulator)),
+            "All retained txs in the mempool must be confirmable relative to the new block.
+             Or the mempool must be empty."
+        );
     }
 
     #[traced_test]
