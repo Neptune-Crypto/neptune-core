@@ -896,7 +896,7 @@ pub fn make_mock_block(
     let pow_line = previous_block.kernel.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
     let zero = BFieldElement::zero();
-    let target_difficulty = Block::difficulty_control(previous_block, block_timestamp);
+    let target_difficulty = Block::difficulty_control(previous_block, block_timestamp, None);
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,

@@ -50,6 +50,7 @@ fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     mut block_timestamp: Timestamp,
+    target_block_interval: Option<u64>,
 ) -> (BlockHeader, BlockBody) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
@@ -82,7 +83,8 @@ fn make_block_template(
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
         block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
     }
-    let difficulty: U32s<5> = Block::difficulty_control(previous_block, block_timestamp);
+    let difficulty: U32s<5> =
+        Block::difficulty_control(previous_block, block_timestamp, target_block_interval);
 
     let block_header = BlockHeader {
         version: zero,
@@ -210,6 +212,7 @@ fn mine_block_worker(
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
+          Difficulty: {difficulty}
 "#
     );
 
@@ -373,7 +376,7 @@ pub async fn mine(
                     now,
                 );
                 let (block_header, block_body) =
-                    make_block_template(&latest_block, transaction, now);
+                    make_block_template(&latest_block, transaction, now, None);
                 let miner_task = mine_block(
                     block_header,
                     block_body,
@@ -538,7 +541,7 @@ mod mine_loop_tests {
             "Coinbase transaction with empty mempool must have zero inputs"
         );
         let (block_header_template_empty_mempool, block_body_empty_mempool) =
-            make_block_template(&genesis_block, transaction_empty_mempool, now);
+            make_block_template(&genesis_block, transaction_empty_mempool, now, None);
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
@@ -597,6 +600,7 @@ mod mine_loop_tests {
             &genesis_block,
             transaction_non_empty_mempool,
             now + Timestamp::months(7),
+            None,
         );
         let block_template_non_empty_mempool = Block::new(
             block_header_template,
@@ -646,10 +650,11 @@ mod mine_loop_tests {
         let (transaction, coinbase_utxo_info) =
             create_block_transaction(tip_block_orig, &global_state, now);
 
-        let (block_header, block_body) = make_block_template(tip_block_orig, transaction, now);
+        let (block_header, block_body) =
+            make_block_template(tip_block_orig, transaction, now, None);
 
         let block_timestamp = tip_block_orig.kernel.header.timestamp + Timestamp::seconds(1);
-        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, block_timestamp);
+        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, block_timestamp, None);
         let unrestricted_mining = false;
 
         mine_block_worker(
@@ -697,14 +702,14 @@ mod mine_loop_tests {
             create_block_transaction(tip_block_orig, &global_state, ten_seconds_ago);
 
         let (block_header, block_body) =
-            make_block_template(tip_block_orig, transaction, ten_seconds_ago);
+            make_block_template(tip_block_orig, transaction, ten_seconds_ago, None);
 
         // sanity check that our initial state is correct.
         assert_eq!(block_header.timestamp, ten_seconds_ago);
 
         let initial_header_timestamp = block_header.timestamp;
         let unrestricted_mining = false;
-        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, ten_seconds_ago);
+        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, ten_seconds_ago, None);
 
         mine_block_worker(
             block_header,
@@ -724,6 +729,110 @@ mod mine_loop_tests {
 
         // verify timestamp is within the last 100 seconds (allows for some CI slack).
         assert!(Timestamp::now() - block_timestamp < Timestamp::seconds(100));
+
+        Ok(())
+    }
+
+    /// This tests the difficulty adjustment algorithm.
+    ///
+    /// We mine ten blocks with a target block interval of 1 second, so all
+    /// blocks should be mined in approx 10 seconds.
+    ///
+    /// We set a time limit of 2x the expected time, ie 20 seconds, and panic if
+    /// mining all blocks takes longer than that.  We also assert that
+    /// total time should not be less than 0.5x, ie 5 seconds.
+    ///
+    /// We use unrestricted mining (100% CPU) to avoid complications
+    /// from the sleep(100 millis) call in mining loop when restricted mining is
+    /// enabled.
+    ///
+    /// This also serves as a regression test for issue #154.
+    /// https://github.com/Neptune-Crypto/neptune-core/issues/154
+    #[traced_test]
+    #[tokio::test]
+    async fn mine_ten_blocks_in_ten_seconds() -> Result<()> {
+        let network = Network::RegTest;
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+
+        let mut prev_block = global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .clone();
+
+        let unrestricted_mining = false;
+        let target_block_interval = 1000; // 1 second.
+        let num_blocks = 10;
+        let expected_duration = (target_block_interval * num_blocks) as u128;
+        let max_duration = expected_duration * 2;
+
+        let start_instant = std::time::SystemTime::now();
+
+        for _i in 0..num_blocks {
+            let start_time = Timestamp::now();
+            let start_st = std::time::SystemTime::now();
+
+            let (transaction, coinbase_utxo_info) = {
+                let global_state = global_state_lock.lock_guard().await;
+                create_block_transaction(&prev_block, &global_state, start_time)
+            };
+
+            let (block_header, block_body) = make_block_template(
+                &prev_block,
+                transaction,
+                start_time,
+                Some(target_block_interval),
+            );
+
+            let difficulty: U32s<5> = Block::difficulty_control(
+                &prev_block,
+                block_header.timestamp,
+                Some(target_block_interval),
+            );
+
+            let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+            let height = block_header.height;
+
+            mine_block_worker(
+                block_header,
+                block_body,
+                worker_thread_tx,
+                coinbase_utxo_info,
+                difficulty,
+                unrestricted_mining,
+            );
+
+            let mined_block_info = worker_thread_rx.await.unwrap();
+
+            // note: this assertion often fails prior to fix for #154.
+            assert!(mined_block_info.block.is_valid_extended(
+                &prev_block,
+                Timestamp::now(),
+                Some(target_block_interval)
+            ));
+
+            prev_block = *mined_block_info.block;
+
+            println!(
+                "Found block {} in {} milliseconds",
+                height,
+                start_st.elapsed()?.as_millis()
+            );
+
+            let elapsed = start_instant.elapsed()?.as_millis();
+            if elapsed > max_duration {
+                panic!("test time limit exceeded.  expected_duration: {expected_duration}, limit: {max_duration}, actual: {elapsed}");
+            }
+        }
+
+        let actual_duration = start_instant.elapsed()?.as_millis();
+
+        println!("actual duration: {actual_duration}, expected duration: {expected_duration}");
+
+        assert!(actual_duration < expected_duration * 2);
+        assert!(actual_duration > expected_duration / 2);
 
         Ok(())
     }

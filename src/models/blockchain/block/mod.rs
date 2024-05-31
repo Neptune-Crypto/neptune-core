@@ -434,6 +434,16 @@ impl Block {
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
     pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
+        self.is_valid_extended(previous_block, now, None)
+    }
+
+    /// like is_valid() but also allows specifying a custom target_block_interval.
+    pub(crate) fn is_valid_extended(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        target_block_interval: Option<u64>,
+    ) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let block_copy = self.to_owned();
@@ -494,7 +504,11 @@ impl Block {
 
         // 0.e) Target difficulty, and other control parameters, were updated correctly
         if block_copy.kernel.header.difficulty
-            != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp)
+            != Self::difficulty_control(
+                previous_block,
+                block_copy.kernel.header.timestamp,
+                target_block_interval,
+            )
         {
             warn!("Value for new difficulty is incorrect.");
             return false;
@@ -642,16 +656,19 @@ impl Block {
     pub fn difficulty_control(
         old_block: &Block,
         new_timestamp: Timestamp,
+        target_block_interval: Option<u64>,
     ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
         // no adjustment if the previous block is the genesis block
         if old_block.kernel.header.height.is_genesis() {
             return old_block.kernel.header.difficulty;
         }
 
+        let target_block_interval = target_block_interval.unwrap_or(TARGET_BLOCK_INTERVAL);
+
         // otherwise, compute PID control signal
         let t = new_timestamp - old_block.kernel.header.timestamp;
 
-        let new_error = t.0.value() as i64 - TARGET_BLOCK_INTERVAL as i64;
+        let new_error = t.0.value() as i64 - target_block_interval as i64;
 
         let adjustment = -new_error / 100;
         let absolute_adjustment = abs(adjustment) as u64;
