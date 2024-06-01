@@ -202,12 +202,21 @@ impl Block {
         self.unset_digest();
     }
 
-    /// sets header timestamp.
+    /// sets header timestamp and difficulty.
+    ///
+    /// These must be set as a pair because the difficulty depends
+    /// on the timestamp, and may change with it.
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub fn set_header_timestamp(&mut self, timestamp: Timestamp) {
+    pub fn set_header_timestamp_and_difficulty(
+        &mut self,
+        timestamp: Timestamp,
+        difficulty: U32s<5>,
+    ) {
         self.kernel.header.timestamp = timestamp;
+        self.kernel.header.difficulty = difficulty;
+
         self.unset_digest();
     }
 
@@ -510,7 +519,15 @@ impl Block {
                 target_block_interval,
             )
         {
-            warn!("Value for new difficulty is incorrect.");
+            warn!(
+                "Value for new difficulty is incorrect.  actual: {},  expected: {}",
+                block_copy.kernel.header.difficulty,
+                Self::difficulty_control(
+                    previous_block,
+                    block_copy.kernel.header.timestamp,
+                    target_block_interval
+                )
+            );
             return false;
         }
 
@@ -669,7 +686,6 @@ impl Block {
         let t = new_timestamp - old_block.kernel.header.timestamp;
 
         let new_error = t.0.value() as i64 - target_block_interval as i64;
-
         let adjustment = -new_error / 100;
         let absolute_adjustment = abs(adjustment) as u64;
         let adjustment_is_positive = adjustment >= 0;
@@ -677,6 +693,7 @@ impl Block {
         let adj_lo = absolute_adjustment as u32;
         let adjustment_u32s =
             U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
+
         if adjustment_is_positive {
             old_block.kernel.header.difficulty + adjustment_u32s
         } else if adjustment_u32s > old_block.kernel.header.difficulty - MINIMUM_DIFFICULTY.into() {
@@ -765,6 +782,41 @@ mod block_tests {
             .await;
 
         (genesis_block, block_1, block_1_merged)
+    }
+
+    // #[traced_test]
+    #[test]
+    fn test_difficulty_control_matches() {
+        let mut rng = thread_rng();
+        let network = Network::RegTest;
+
+        let a_wallet_secret = WalletSecret::new_random();
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+
+        for multiplier in [10, 100, 1000, 10000, 100000, 1000000] {
+            let mut block_prev = Block::genesis_block(network);
+            let mut now = block_prev.kernel.header.timestamp;
+
+            for i in (0..100).step_by(1) {
+                let duration = i as u64 * multiplier;
+                now = now + Timestamp::millis(duration);
+
+                let (block, _, _) =
+                    make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
+
+                println!(
+                    "height: {}, now: {}",
+                    block.kernel.header.height,
+                    now.standard_format()
+                );
+
+                let control =
+                    Block::difficulty_control(&block_prev, block.kernel.header.timestamp, None);
+                assert_eq!(block.kernel.header.difficulty, control);
+
+                block_prev = block;
+            }
+        }
     }
 
     #[traced_test]

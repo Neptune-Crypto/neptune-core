@@ -102,13 +102,16 @@ fn make_block_template(
 }
 
 /// Attempt to mine a valid block for the network
+#[allow(clippy::too_many_arguments)]
 async fn mine_block(
     block_header: BlockHeader,
     block_body: BlockBody,
+    previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
     difficulty: U32s<5>,
     unrestricted_mining: bool,
+    target_block_interval: Option<u64>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
     // very lengthy and CPU intensive task, which should execute
@@ -126,25 +129,30 @@ async fn mine_block(
         mine_block_worker(
             block_header,
             block_body,
+            previous_block,
             sender,
             coinbase_utxo_info,
             difficulty,
             unrestricted_mining,
+            target_block_interval,
         )
     })
     .await
     .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mine_block_worker(
     block_header: BlockHeader,
     block_body: BlockBody,
+    previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
     difficulty: U32s<5>,
     unrestricted_mining: bool,
+    target_block_interval: Option<u64>,
 ) {
-    let threshold = Block::difficulty_to_digest_threshold(difficulty);
+    let mut threshold = Block::difficulty_to_digest_threshold(difficulty);
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
         block_body.transaction.kernel.outputs.len(),
@@ -186,7 +194,11 @@ fn mine_block_worker(
         // this ensures header timestamp represents the moment block is found.
         // this is simplest impl.  Efficiencies can perhaps be gained by only
         // performing every N iterations, or other strategies.
-        block.set_header_timestamp(Timestamp::now());
+        let now = Timestamp::now();
+        let new_difficulty: U32s<5> =
+            Block::difficulty_control(&previous_block, now, target_block_interval);
+        threshold = Block::difficulty_to_digest_threshold(new_difficulty);
+        block.set_header_timestamp_and_difficulty(now, new_difficulty);
     }
 
     let nonce = block.kernel.header.nonce;
@@ -380,10 +392,12 @@ pub async fn mine(
                 let miner_task = mine_block(
                     block_header,
                     block_body,
+                    latest_block.clone(),
                     worker_thread_tx,
                     coinbase_utxo_info,
                     latest_block.kernel.header.difficulty,
                     global_state_lock.cli().unrestricted_mining,
+                    None, // using default TARGET_BLOCK_INTERVAL
                 );
                 global_state_lock.set_mining(true).await;
                 Some(
@@ -660,10 +674,12 @@ mod mine_loop_tests {
         mine_block_worker(
             block_header,
             block_body,
+            tip_block_orig.clone(),
             worker_thread_tx,
             coinbase_utxo_info,
             difficulty,
             unrestricted_mining,
+            None,
         );
 
         let mined_block_info = worker_thread_rx.await.unwrap();
@@ -714,10 +730,12 @@ mod mine_loop_tests {
         mine_block_worker(
             block_header,
             block_body,
+            tip_block_orig.clone(),
             worker_thread_tx,
             coinbase_utxo_info,
             difficulty,
             unrestricted_mining,
+            None,
         );
 
         let mined_block_info = worker_thread_rx.await.unwrap();
@@ -738,15 +756,20 @@ mod mine_loop_tests {
     /// We mine ten blocks with a target block interval of 1 second, so all
     /// blocks should be mined in approx 10 seconds.
     ///
-    /// We set a time limit of 2x the expected time, ie 20 seconds, and panic if
-    /// mining all blocks takes longer than that.  We also assert that
-    /// total time should not be less than 0.5x, ie 5 seconds.
+    /// We set a test time limit of 3x the expected time, ie 30 seconds, and
+    /// panic if mining all blocks takes longer than that.
     ///
-    /// We use unrestricted mining (100% CPU) to avoid complications
-    /// from the sleep(100 millis) call in mining loop when restricted mining is
-    /// enabled.
+    /// We also assert upper and lower bounds for variance from the expected 10
+    /// seconds.  The variance limit is 1.3, so the upper bound is 13 seconds
+    /// and the lower bound is 7692.
     ///
-    /// This also serves as a regression test for issue #154.
+    /// We ignore the first 2 blocks after genesis because they are typically
+    /// mined very fast.
+    ///
+    /// We use unrestricted mining (100% CPU) to avoid complications from the
+    /// sleep(100 millis) call in mining loop when restricted mining is enabled.
+    ///
+    /// This serves as a regression test for issue #154.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/154
     #[traced_test]
     #[tokio::test]
@@ -762,15 +785,30 @@ mod mine_loop_tests {
             .light_state()
             .clone();
 
-        let unrestricted_mining = false;
-        let target_block_interval = 1000; // 1 second.
+        // adjust these to simulate longer mining runs, possibly
+        // with shorter or longer target intervals.
+        // expected_duration = num_blocks * target_block_interval
         let num_blocks = 10;
+        let target_block_interval = 1000; // 1 seconds.
+
+        let unrestricted_mining = false;
         let expected_duration = (target_block_interval * num_blocks) as u128;
-        let max_duration = expected_duration * 2;
+        let allowed_variance = 1.3;
+        let min_duration = (expected_duration as f64 / allowed_variance) as u64;
+        let max_duration = (expected_duration as f64 * allowed_variance) as u64;
+        let max_test_time = expected_duration * 3;
 
-        let start_instant = std::time::SystemTime::now();
+        // we ignore the first 2 blocks after genesis because they are
+        // typically mined very fast.
+        let ignore_first_n_blocks = 2;
 
-        for _i in 0..num_blocks {
+        let mut start_instant = std::time::SystemTime::now();
+
+        for i in 0..num_blocks + ignore_first_n_blocks {
+            if i == ignore_first_n_blocks {
+                start_instant = std::time::SystemTime::now();
+            }
+
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
@@ -798,10 +836,12 @@ mod mine_loop_tests {
             mine_block_worker(
                 block_header,
                 block_body,
+                prev_block.clone(),
                 worker_thread_tx,
                 coinbase_utxo_info,
                 difficulty,
                 unrestricted_mining,
+                Some(target_block_interval),
             );
 
             let mined_block_info = worker_thread_rx.await.unwrap();
@@ -822,17 +862,17 @@ mod mine_loop_tests {
             );
 
             let elapsed = start_instant.elapsed()?.as_millis();
-            if elapsed > max_duration {
-                panic!("test time limit exceeded.  expected_duration: {expected_duration}, limit: {max_duration}, actual: {elapsed}");
+            if elapsed > max_test_time {
+                panic!("test time limit exceeded.  expected_duration: {expected_duration}, limit: {max_test_time}, actual: {elapsed}");
             }
         }
 
-        let actual_duration = start_instant.elapsed()?.as_millis();
+        let actual_duration = start_instant.elapsed()?.as_millis() as u64;
 
-        println!("actual duration: {actual_duration}, expected duration: {expected_duration}");
+        println!("actual duration: {actual_duration}\nexpected duration: {expected_duration}\nmin_duration: {min_duration}\nmax_duration: {max_duration}\nallowed_variance: {allowed_variance}");
 
-        assert!(actual_duration < expected_duration * 2);
-        assert!(actual_duration > expected_duration / 2);
+        assert!(actual_duration > min_duration);
+        assert!(actual_duration < max_duration);
 
         Ok(())
     }
