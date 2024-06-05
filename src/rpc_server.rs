@@ -14,7 +14,8 @@ use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalStateLock, UtxoReceiverData};
+use crate::models::state::ChangeNotifyMethod;
+use crate::models::state::{GlobalStateLock, UtxoReceiver};
 use crate::prelude::twenty_first;
 use anyhow::Result;
 use get_size::GetSize;
@@ -579,7 +580,7 @@ impl RPC for NeptuneRPCServer {
             // The UtxoNotifyType (Onchain or Offchain) is automatically detected
             // based on whether the address belongs to our wallet or not.
             receiver_data.push(
-                match UtxoReceiverData::auto(
+                match UtxoReceiver::auto(
                     &state.wallet_state,
                     &address,
                     utxo,
@@ -601,7 +602,10 @@ impl RPC for NeptuneRPCServer {
         // does not require acquiring write lock.  This is important
         // becauce internally it calls prove() which is a very lengthy
         // operation.
-        let (transaction, tx_data) = match state.create_transaction(receiver_data, fee, now).await {
+        let (transaction, tx_data) = match state
+            .create_transaction(receiver_data, fee, now, ChangeNotifyMethod::default())
+            .await
+        {
             Ok((tx, data)) => (tx, data),
             Err(err) => {
                 tracing::error!("Could not create transaction: {}", err);

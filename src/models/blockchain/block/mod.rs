@@ -709,9 +709,8 @@ mod block_tests {
 
     use crate::{
         config_models::network::Network,
-        database::storage::storage_schema::SimpleRustyStorage,
-        database::NeptuneLevelDb,
-        models::{state::wallet::WalletSecret, state::UtxoReceiverData},
+        database::{storage::storage_schema::SimpleRustyStorage, NeptuneLevelDb},
+        models::state::{wallet::WalletSecret, ChangeNotifyMethod, UtxoReceiver},
         tests::shared::{
             make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
         },
@@ -755,7 +754,7 @@ mod block_tests {
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), NeptuneCoins::new(10));
         let reciever_data =
-            UtxoReceiverData::fake_announcement(new_utxo, random(), other_address.privacy_digest);
+            UtxoReceiver::fake_announcement(new_utxo, random(), other_address.privacy_digest);
         let (new_tx, tx_data) = global_state_lock
             .lock_guard()
             .await
@@ -763,6 +762,7 @@ mod block_tests {
                 vec![reciever_data],
                 NeptuneCoins::new(1),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();

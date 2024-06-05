@@ -54,12 +54,13 @@ pub mod shared;
 mod utxo_receiver;
 pub mod wallet;
 
+pub use utxo_receiver::ChangeNotifyMethod;
 pub use utxo_receiver::UtxoNotifyMethod;
-pub use utxo_receiver::UtxoReceiverData;
+pub use utxo_receiver::UtxoReceiver;
 
 #[derive(Debug, Clone)]
-pub struct TransactionData {
-    pub receiver_data: Vec<UtxoReceiverData>,
+pub struct TransactionDetails {
+    pub receiver_data: Vec<UtxoReceiver>,
     pub removal_records: Vec<RemovalRecord>,
     pub addition_records: Vec<AdditionRecord>,
     pub input_utxos: Vec<(Utxo, LockScript, MsMembershipProof)>,
@@ -431,7 +432,7 @@ impl GlobalState {
 
     /// Given a list of UTXOs with receiver data, generate the corresponding
     /// addition records.
-    pub fn generate_addition_records(receiver_data: &[UtxoReceiverData]) -> Vec<AdditionRecord> {
+    pub fn generate_addition_records(receiver_data: &[UtxoReceiver]) -> Vec<AdditionRecord> {
         receiver_data
             .iter()
             .map(|rd| {
@@ -448,7 +449,10 @@ impl GlobalState {
     /// in input amount and output amount goes back to us.
     /// The caller should also notify the wallet to expect the change Utxo
     /// so that we can synchronize it after it is confirmed.
-    pub async fn add_change(&self, change_amount: NeptuneCoins) -> ExpectedUtxo {
+    pub async fn add_change(
+        &self,
+        change_amount: NeptuneCoins,
+    ) -> Result<(ExpectedUtxo, PublicAnnouncement)> {
         // generate utxo
         let own_spending_key_for_change = self
             .wallet_state
@@ -471,12 +475,17 @@ impl GlobalState {
 
         let receiver_preimage = own_spending_key_for_change.privacy_preimage;
 
-        ExpectedUtxo::new(
+        let public_announcement =
+            own_receiving_address.generate_public_announcement(&utxo, sender_randomness)?;
+
+        let expected_utxo = ExpectedUtxo::new(
             utxo,
             sender_randomness,
             receiver_preimage,
             UtxoNotifier::Myself,
-        )
+        );
+
+        Ok((expected_utxo, public_announcement))
     }
 
     /// Generate a primitive witness for a transaction from various disparate witness data.
@@ -522,7 +531,7 @@ impl GlobalState {
     /// from some selection of owned UTXOs.
     async fn create_transaction_from_tx_data(
         &self,
-        tx_utxo_data: TransactionData,
+        tx_utxo_data: TransactionDetails,
     ) -> Result<Transaction> {
         let mutator_set_accumulator = self
             .chain
@@ -557,28 +566,38 @@ impl GlobalState {
 
     /// creates a Transaction.
     ///
-    /// also returns TransactionData which provides unblinded view of the
+    /// UtxoReceiver::auto() should normally be used.  This will generate
+    /// OffChain notifications for UTXOs destined for our wallet and OnChain
+    /// notifications for all other UTXOs.
+    ///
+    /// Likewise ChangeNotifyMethod::default() should be used, which corresponds
+    /// to ChangeNotifyMethod::OffChain.  This controls notification behavior
+    /// for a change UTXO which is automatically generated if needed.
+    ///
+    /// returns TransactionDetails which provides unblinded view of the
     /// transaction data.
     ///
-    /// It is the caller's responsibility to inform the wallet of any
-    /// expected utxos, ie offchain secrets, for utxos that match wallet keys.
+    /// It is the caller's responsibility to inform the wallet of any expected
+    /// utxos, ie offchain secret notifications, for utxos that match wallet
+    /// keys.
     ///
     /// Example:
     ///
     /// ```compile_fail
-    /// let utxo_receivers = vec![UtxoReceiverData::auto(&wallet_state, &address, utxo, sender_randomness, receiver_preimage)];
-    /// let (transaction, tx_data) = state.create_transaction(utxo_receivers, fee, now).await?;
+    /// let utxo_receivers = vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_preimage)];
+    /// let (transaction, tx_data) = state.create_transaction(utxo_receivers, fee, now, ChangeNotifyMethod::default()).await?;
     /// state.add_expected_utxos_to_wallet(tx_data.expected_utxos).await?;
     /// ```
     pub async fn create_transaction(
         &self,
-        receiver_data: Vec<UtxoReceiverData>,
+        receiver_data: Vec<UtxoReceiver>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-    ) -> Result<(Transaction, TransactionData)> {
+        change_notify_method: ChangeNotifyMethod,
+    ) -> Result<(Transaction, TransactionDetails)> {
         // UTXO data: inputs, outputs, and supporting witness data
         let tx_data = self
-            .generate_tx_data_for_transaction(receiver_data, fee, timestamp)
+            .generate_tx_data_for_transaction(receiver_data, fee, timestamp, change_notify_method)
             .await?;
 
         Ok((
@@ -594,10 +613,11 @@ impl GlobalState {
     /// membership proofs), addition records, and output UTXOs.
     async fn generate_tx_data_for_transaction(
         &self,
-        receiver_data: Vec<UtxoReceiverData>,
+        receiver_data: Vec<UtxoReceiver>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-    ) -> Result<TransactionData> {
+        change_notify_method: ChangeNotifyMethod,
+    ) -> Result<TransactionDetails> {
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend: NeptuneCoins = receiver_data
             .iter()
@@ -629,10 +649,10 @@ impl GlobalState {
         let mut outputs = Self::generate_addition_records(&receiver_data);
         let mut output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
 
-        let public_announcements = receiver_data
+        let mut public_announcements = receiver_data
             .iter()
             .filter_map(|rd| match &rd.utxo_notify_method {
-                UtxoNotifyMethod::Onchain(pa) => Some(pa.clone()),
+                UtxoNotifyMethod::OnChain(pa) => Some(pa.clone()),
                 _ => None,
             })
             .collect_vec();
@@ -640,7 +660,7 @@ impl GlobalState {
         let mut expected_utxos = receiver_data
             .iter()
             .filter_map(|rd| match &rd.utxo_notify_method {
-                UtxoNotifyMethod::Offchain => Some(rd.into()),
+                UtxoNotifyMethod::OffChain => Some(rd.into()),
                 _ => None,
             })
             .collect_vec();
@@ -648,13 +668,20 @@ impl GlobalState {
         // keep track of change (if any)
         if total_spend < input_amount {
             let change_amount = input_amount.checked_sub(&total_spend).unwrap();
-            let change_expected_utxo = self.add_change(change_amount).await;
+            let (change_expected_utxo, change_public_announcement) =
+                self.add_change(change_amount).await?;
             outputs.push(change_expected_utxo.addition_record);
             output_utxos.push(change_expected_utxo.utxo.clone());
-            expected_utxos.push(change_expected_utxo);
+
+            match change_notify_method {
+                ChangeNotifyMethod::OffChain => expected_utxos.push(change_expected_utxo),
+                ChangeNotifyMethod::OnChain => {
+                    public_announcements.push(change_public_announcement)
+                }
+            }
         }
 
-        Ok(TransactionData {
+        Ok(TransactionDetails {
             receiver_data,
             removal_records: inputs,
             addition_records: outputs,
@@ -1391,7 +1418,7 @@ mod global_state_tests {
         let public_announcement = recipient_address
             .generate_public_announcement(&output_utxo, sender_randomness)
             .unwrap();
-        let receiver_data = vec![UtxoReceiverData::onchain(
+        let receiver_data = vec![UtxoReceiver::onchain(
             output_utxo.clone(),
             sender_randomness,
             receiver_privacy_digest,
@@ -1419,6 +1446,7 @@ mod global_state_tests {
                 receiver_data.clone(),
                 NeptuneCoins::new(1),
                 launch + six_months - one_month,
+                ChangeNotifyMethod::default(),
             )
             .await
             .is_err());
@@ -1431,6 +1459,7 @@ mod global_state_tests {
                 receiver_data,
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
+                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1472,7 +1501,7 @@ mod global_state_tests {
                 .generate_public_announcement(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
-            other_receiver_data.push(UtxoReceiverData::onchain(
+            other_receiver_data.push(UtxoReceiver::onchain(
                 utxo,
                 other_sender_randomness,
                 other_receiver_digest,
@@ -1487,6 +1516,7 @@ mod global_state_tests {
                 other_receiver_data,
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
+                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1959,7 +1989,7 @@ mod global_state_tests {
         let fee = NeptuneCoins::one();
         let sender_randomness: Digest = rng.gen();
         let receiver_data_for_alice = vec![
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(41).to_native_coins(),
@@ -1967,7 +1997,7 @@ mod global_state_tests {
                 sender_randomness,
                 alice_spending_key.to_address().privacy_digest,
             ),
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(59).to_native_coins(),
@@ -1979,7 +2009,7 @@ mod global_state_tests {
 
         // Two outputs for Bob
         let receiver_data_for_bob = vec![
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(141).to_native_coins(),
@@ -1987,7 +2017,7 @@ mod global_state_tests {
                 sender_randomness,
                 bob_spending_key.to_address().privacy_digest,
             ),
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(59).to_native_coins(),
@@ -2008,6 +2038,7 @@ mod global_state_tests {
                     .concat(),
                     fee,
                     launch + seven_months,
+                    ChangeNotifyMethod::default(),
                 )
                 .await
                 .unwrap();
@@ -2122,7 +2153,7 @@ mod global_state_tests {
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
         let receiver_data_from_alice = vec![
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2130,7 +2161,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(49).to_native_coins(),
@@ -2143,7 +2174,12 @@ mod global_state_tests {
         let (tx_from_alice, tx_data_alice) = alice_state_lock
             .lock_guard()
             .await
-            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1), now)
+            .create_transaction(
+                receiver_data_from_alice.clone(),
+                NeptuneCoins::new(1),
+                now,
+                ChangeNotifyMethod::default(),
+            )
             .await
             .unwrap();
 
@@ -2156,7 +2192,7 @@ mod global_state_tests {
             .unwrap();
 
         let receiver_data_from_bob = vec![
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2164,7 +2200,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2172,7 +2208,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            UtxoReceiverData::fake_announcement(
+            UtxoReceiver::fake_announcement(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(98).to_native_coins(),
@@ -2184,7 +2220,12 @@ mod global_state_tests {
         let (tx_from_bob, tx_data_bob) = bob_state_lock
             .lock_guard()
             .await
-            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2), now)
+            .create_transaction(
+                receiver_data_from_bob.clone(),
+                NeptuneCoins::new(2),
+                now,
+                ChangeNotifyMethod::default(),
+            )
             .await
             .unwrap();
 
