@@ -570,26 +570,28 @@ mod mine_loop_tests {
         let four_neptune_coins = NeptuneCoins::new(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
-        let public_announcement = PublicAnnouncement::default();
         let tx_output = Utxo {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let (tx_by_preminer, _) = premine_receiver_global_state
+        let (tx_by_preminer, tx_data) = premine_receiver_global_state
             .create_transaction(
-                vec![
-                    (UtxoReceiverData {
-                        utxo: tx_output,
-                        sender_randomness,
-                        receiver_privacy_digest,
-                        public_announcement,
-                    }),
-                ],
+                vec![UtxoReceiverData::fake_announcement(
+                    tx_output,
+                    sender_randomness,
+                    receiver_privacy_digest,
+                )],
                 NeptuneCoins::new(1),
                 now + Timestamp::months(7),
             )
             .await
             .unwrap();
+
+        // inform wallet of any expected utxos from this tx.
+        premine_receiver_global_state
+            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .await?;
+
         premine_receiver_global_state
             .mempool
             .insert(&tx_by_preminer);
