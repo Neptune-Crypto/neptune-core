@@ -1,12 +1,28 @@
+use super::address::generation_address::SpendingKey;
+use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use super::rusty_wallet_database::RustyWalletDatabase;
+use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
+use super::wallet_status::{WalletStatus, WalletStatusElement};
+use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
+use crate::config_models::cli_args::Args;
+use crate::config_models::data_directory::DataDirectory;
+use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::NeptuneLevelDb;
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::models::consensus::timestamp::Timestamp;
+use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
-
-use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use crate::Hash;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
@@ -21,23 +37,6 @@ use tracing::{debug, error, info, warn};
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use super::rusty_wallet_database::RustyWalletDatabase;
-use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
-use super::wallet_status::{WalletStatus, WalletStatusElement};
-use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
-use crate::config_models::cli_args::Args;
-use crate::config_models::data_directory::DataDirectory;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
-use crate::Hash;
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -267,7 +266,7 @@ impl WalletState {
         // TODO: These spending keys should probably be derived dynamically from some
         // state in the wallet. And we should allow for other types than just generation
         // addresses.
-        let spending_keys = [self.wallet_secret.nth_generation_spending_key(0)];
+        let spending_keys = self.get_known_spending_keys();
 
         // get recognized UTXOs
         let recognized_utxos = spending_keys
@@ -284,6 +283,29 @@ impl WalletState {
                 false
             } else { true })
             .collect_vec()
+    }
+
+    // returns true if the utxo can be unlocked by one of the
+    // known wallet keys.
+    pub fn is_wallet_utxo(&self, utxo: &Utxo) -> bool {
+        self.get_known_spending_keys()
+            .iter()
+            .map(|k| k.to_address().lock_script().hash())
+            .any(|h| h == utxo.lock_script_hash)
+    }
+
+    // TODO: These spending keys should probably be derived dynamically from some
+    // state in the wallet. And we should allow for other types than just generation
+    // addresses.
+    //
+    // Probably the wallet should keep track of index of latest derived key
+    // that has been requested by the user for purpose of receiving
+    // funds.  We could also perform a sequential scan at startup (or import)
+    // of keys that have received funds, up to some "gap".  In bitcoin/bip32
+    // this gap is defined as 20 keys in a row that have never received funds.
+    fn get_known_spending_keys(&self) -> Vec<SpendingKey> {
+        // for we always return just the 1st key.
+        vec![self.wallet_secret.nth_generation_spending_key(0)]
     }
 
     /// Update wallet state with new block. Assume the given block
@@ -710,6 +732,8 @@ impl WalletState {
 
         let mut ret: Vec<(Utxo, LockScript, MsMembershipProof)> = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
+
+        // Todo: what about other spending keys?
         let lock_script = self
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -730,6 +754,7 @@ impl WalletState {
         Ok(ret)
     }
 
+    #[cfg(test)]
     // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
     // paid in the transaction.
     pub async fn allocate_sufficient_input_funds(
