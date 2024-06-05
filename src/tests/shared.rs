@@ -4,6 +4,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
+use crate::models::state::UtxoNotifyMethod;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
@@ -705,14 +706,17 @@ pub async fn make_mock_transaction_with_generation_key(
         let addition_record = commit(
             Hash::hash(&rd.utxo),
             rd.sender_randomness,
-            rd.receiver_privacy_digest,
+            rd.receiver_preimage,
         );
         outputs.push(addition_record);
     }
 
     let public_announcements = receiver_data
         .iter()
-        .map(|x| x.public_announcement.clone())
+        .filter_map(|x| match &x.utxo_notify_method {
+            UtxoNotifyMethod::Onchain(pa) => Some(pa.clone()),
+            _ => None,
+        })
         .collect_vec();
     let timestamp = Timestamp::now();
 

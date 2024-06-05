@@ -711,10 +711,7 @@ mod block_tests {
         config_models::network::Network,
         database::storage::storage_schema::SimpleRustyStorage,
         database::NeptuneLevelDb,
-        models::{
-            blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
-            state::UtxoReceiverData,
-        },
+        models::{state::wallet::WalletSecret, state::UtxoReceiverData},
         tests::shared::{
             make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
         },
@@ -757,14 +754,10 @@ mod block_tests {
 
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), NeptuneCoins::new(10));
-        let reciever_data = UtxoReceiverData {
-            public_announcement: PublicAnnouncement::default(),
-            receiver_privacy_digest: other_address.privacy_digest,
-            sender_randomness: random(),
-            utxo: new_utxo,
-        };
-        let (new_tx, _) = global_state_lock
-            .lock_guard_mut()
+        let reciever_data =
+            UtxoReceiverData::fake_announcement(new_utxo, random(), other_address.privacy_digest);
+        let (new_tx, tx_data) = global_state_lock
+            .lock_guard()
             .await
             .create_transaction(
                 vec![reciever_data],
@@ -774,6 +767,14 @@ mod block_tests {
             .await
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
+
+        // inform wallet of any expected utxos from this tx.
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .await
+            .unwrap();
 
         let mut block_1_merged = block_1.clone();
 

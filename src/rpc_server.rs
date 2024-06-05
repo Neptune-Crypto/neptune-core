@@ -1,9 +1,21 @@
+use crate::config_models::network::Network;
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::block_info::BlockInfo;
+use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
+use crate::models::peer::InstanceId;
+use crate::models::peer::PeerInfo;
+use crate::models::peer::PeerStanding;
+use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+use crate::models::state::wallet::wallet_status::WalletStatus;
+use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 use crate::prelude::twenty_first;
-
 use anyhow::Result;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
@@ -17,21 +29,6 @@ use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use crate::config_models::network::Network;
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::block_info::BlockInfo;
-use crate::models::blockchain::block::block_selector::BlockSelector;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::channel::RPCServerToMain;
-use crate::models::peer::InstanceId;
-use crate::models::peer::PeerInfo;
-use crate::models::peer::PeerStanding;
-use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -147,10 +144,16 @@ pub trait RPC {
     /// Clears standing for ip, whether connected or not
     async fn clear_standing_by_ip(ip: IpAddr);
 
-    /// Send coins
+    /// Send coins to a single recipient.
     async fn send(
         amount: NeptuneCoins,
         address: generation_address::ReceivingAddress,
+        fee: NeptuneCoins,
+    ) -> Option<Digest>;
+
+    /// Send coins to multiple recipients
+    async fn send_to_many(
+        outputs: Vec<(generation_address::ReceivingAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -532,138 +535,106 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
     async fn send(
         self,
-        _ctx: context::Context,
+        ctx: context::Context,
         amount: NeptuneCoins,
         address: generation_address::ReceivingAddress,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
+        self.send_to_many(ctx, vec![(address, amount)], fee).await
+    }
+
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
+    ///
+    // TODO: add an endpoint to get recommended fee density.
+    async fn send_to_many(
+        self,
+        _ctx: context::Context,
+        outputs: Vec<(generation_address::ReceivingAddress, NeptuneCoins)>,
+        fee: NeptuneCoins,
+    ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
-
-        let coins = amount.to_native_coins();
-        let utxo = Utxo::new(address.lock_script(), coins);
         let now = Timestamp::now();
 
-        // note: for future changes:
-        // No consensus data should be read within this read-lock.
-        // Else the lock must be held until
-        // create_transaction() completes, so entire op is atomic.
-        // See: https://github.com/Neptune-Crypto/neptune-core/issues/134
         let state = self.state.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
-        let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = state
-            .wallet_state
-            .wallet_secret
-            .generate_sender_randomness(block_height, receiver_privacy_digest);
-        drop(state);
 
-        // 1. Build transaction object
-        // TODO: Allow user to set fee here. Don't set it automatically as we want the user
-        // to be in control of this. But we could add an endpoint to get recommended fee
-        // density.
-        let public_announcement =
-            match address.generate_public_announcement(&utxo, sender_randomness) {
-                Ok(pa) => pa,
-                Err(_) => {
-                    tracing::error!(
-                        "Failed to generate transaction because could not encrypt to address."
-                    );
-                    return None;
-                }
-            };
-        let receiver_data = [(UtxoReceiverData {
-            utxo,
-            sender_randomness,
-            receiver_privacy_digest,
-            public_announcement,
-        })]
-        .to_vec();
+        let mut receiver_data = vec![];
 
-        // Pause miner if we are mining
-        let was_mining = self.state.mining().await;
-        if was_mining {
-            let _ = self
-                .rpc_server_to_main_tx
-                .send(RPCServerToMain::PauseMiner)
-                .await;
+        for (address, amount) in outputs.into_iter() {
+            let coins = amount.to_native_coins();
+            let utxo = Utxo::new(address.lock_script(), coins);
+
+            let receiver_privacy_digest = address.privacy_digest;
+            let sender_randomness = state
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(block_height, receiver_privacy_digest);
+
+            // Generate receiver data list (just one item)
+            //
+            // The UtxoNotifyType (Onchain or Offchain) is automatically detected
+            // based on whether the address belongs to our wallet or not.
+            receiver_data.push(
+                match UtxoReceiverData::auto(
+                    &state.wallet_state,
+                    &address,
+                    utxo,
+                    sender_randomness,
+                    receiver_privacy_digest,
+                ) {
+                    Ok(pa) => pa,
+                    Err(e) => {
+                        tracing::error!("Failed to generate transaction. error was: {:?}", e);
+                        return None;
+                    }
+                },
+            );
         }
 
-        // All cryptographic data must be in relation to a single block
-        // and a read-lock must therefore be held over GlobalState to ensure this.
-        // Note that create_transaction() does not modify any state.
-        let transaction_result = self
-            .state
-            .lock_guard()
-            .await
-            .create_transaction(receiver_data, fee, now)
-            .await;
-
-        let (transaction, maybe_change_utxo_data) = match transaction_result {
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and
+        // does not require acquiring write lock.  This is important
+        // becauce internally it calls prove() which is a very lengthy
+        // operation.
+        let (transaction, tx_data) = match state.create_transaction(receiver_data, fee, now).await {
             Ok((tx, data)) => (tx, data),
             Err(err) => {
                 tracing::error!("Could not create transaction: {}", err);
                 return None;
             }
         };
+        drop(state);
 
-        // 2. Inform wallet.
-        //
-        //    If we have a change Utxo, we add it to pool
-        //    of expected incoming UTXOs so that we can
-        //    synchronize it after it is confirmed.
-        //
-        //    Here we modify state, so we briefly acquire write-lock.
-        //    TBD:
-        //      a) is this really necessary?  why can't wallet be
-        //         informed of change UTXO when block is received like
-        //         any other incoming utxo?  If not necessary, we can
-        //         avoid any mutation/write during send().
-        //      b) if it's necessary to notify wallet of incoming change
-        //         which adds to balance, should we not also notify
-        //         of all utxos that could affect wallet's balance?
-        //         In particular, it seems like the wallet balance
-        //         should decrease by the amount spent.
-        if let Some(change_utxo_data) = maybe_change_utxo_data {
-            let _change_addition_record = self
-                .state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
-                    change_utxo_data.change_utxo,
-                    change_utxo_data.change_sender_randomness,
-                    change_utxo_data.receiver_preimage,
-                    UtxoNotifier::Myself,
-                )
-                .expect("Adding change UTXO to UTXO notification pool must succeed");
+        // Inform wallet of any expected incoming utxos.
+        // note that this (briefly) mutates self.
+        if let Err(e) = self
+            .state
+            .lock_guard_mut()
+            .await
+            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .await
+        {
+            tracing::error!("Could not add expected utxos to wallet: {}", e);
+            return None;
         }
 
-        // 3. Send transaction message to main
+        // Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::Send(Box::new(transaction.clone())))
             .await;
 
-        // Restart mining if it was paused
-        if was_mining {
-            let _ = self
-                .rpc_server_to_main_tx
-                .send(RPCServerToMain::RestartMiner)
-                .await;
-        }
-
+        // ensure we write new state out to disk.
         self.state.flush_databases().await.expect("flushed DBs");
 
-        if response.is_ok() {
-            Some(Hash::hash(&transaction))
-        } else {
-            None
+        match response {
+            Ok(_) => Some(Hash::hash(&transaction)),
+            _ => None,
         }
     }
 
@@ -840,6 +811,14 @@ mod rpc_server_tests {
                 ctx,
                 NeptuneCoins::one(),
                 own_receiving_address,
+                NeptuneCoins::one(),
+            )
+            .await;
+        let _ = rpc_server
+            .clone()
+            .send_to_many(
+                ctx,
+                vec![(own_receiving_address, NeptuneCoins::one())],
                 NeptuneCoins::one(),
             )
             .await;
