@@ -520,7 +520,10 @@ mod mine_loop_tests {
 
     use crate::{
         config_models::network::Network,
-        models::{consensus::timestamp::Timestamp, state::UtxoReceiverData},
+        models::{
+            consensus::timestamp::Timestamp,
+            state::{ChangeNotifyMethod, UtxoReceiver},
+        },
         tests::shared::mock_genesis_global_state,
     };
 
@@ -576,13 +579,14 @@ mod mine_loop_tests {
         };
         let (tx_by_preminer, tx_data) = premine_receiver_global_state
             .create_transaction(
-                vec![UtxoReceiverData::fake_announcement(
+                vec![UtxoReceiver::fake_announcement(
                     tx_output,
                     sender_randomness,
                     receiver_privacy_digest,
                 )],
                 NeptuneCoins::new(1),
                 now + Timestamp::months(7),
+                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();

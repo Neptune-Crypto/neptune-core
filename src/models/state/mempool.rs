@@ -451,7 +451,7 @@ mod tests {
             shared::SIZE_20MB_IN_BYTES,
             state::{
                 wallet::{utxo_notification_pool::UtxoNotifier, WalletSecret},
-                UtxoReceiverData,
+                ChangeNotifyMethod, UtxoReceiver,
             },
         },
         tests::shared::{
@@ -660,7 +660,7 @@ mod tests {
             .unwrap();
 
         // Create a transaction that's valid to be included in block 2
-        let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
+        let mut output_utxos_generated_by_me: Vec<UtxoReceiver> = vec![];
         for i in 0..7 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
             let new_utxo = Utxo {
@@ -668,7 +668,7 @@ mod tests {
                 lock_script_hash: premine_receiver_address.lock_script().hash(),
             };
 
-            output_utxos_generated_by_me.push(UtxoReceiverData::fake_announcement(
+            output_utxos_generated_by_me.push(UtxoReceiver::fake_announcement(
                 new_utxo,
                 random(),
                 premine_receiver_address.privacy_digest,
@@ -682,6 +682,7 @@ mod tests {
                 output_utxos_generated_by_me,
                 NeptuneCoins::new(1),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await?;
 
@@ -700,7 +701,7 @@ mod tests {
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let output_utxo_data_by_miner = vec![UtxoReceiverData::fake_announcement(
+        let output_utxo_data_by_miner = vec![UtxoReceiver::fake_announcement(
             Utxo {
                 coins: NeptuneCoins::new(68).to_native_coins(),
                 lock_script_hash: other_receiver_address.lock_script().hash(),
@@ -713,6 +714,7 @@ mod tests {
                 output_utxo_data_by_miner,
                 NeptuneCoins::new(1),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -848,7 +850,7 @@ mod tests {
             NeptuneCoins::new(1).to_native_coins(),
         );
         let tx_receiver_data =
-            UtxoReceiverData::fake_announcement(utxo, random(), premine_address.privacy_digest);
+            UtxoReceiver::fake_announcement(utxo, random(), premine_address.privacy_digest);
 
         let genesis_block = premine_receiver_global_state
             .chain
@@ -858,7 +860,12 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
         let (unmined_tx, tx_data_premine) = premine_receiver_global_state
-            .create_transaction(vec![tx_receiver_data], NeptuneCoins::new(1), in_seven_years)
+            .create_transaction(
+                vec![tx_receiver_data],
+                NeptuneCoins::new(1),
+                in_seven_years,
+                ChangeNotifyMethod::default(),
+            )
             .await
             .unwrap();
 
@@ -974,12 +981,13 @@ mod tests {
             lock_script_hash: premine_address.lock_script().hash(),
         };
         let receiver_data =
-            UtxoReceiverData::fake_announcement(utxo, random(), premine_address.privacy_digest);
+            UtxoReceiver::fake_announcement(utxo, random(), premine_address.privacy_digest);
         let (tx_by_preminer_low_fee, tx_data_low_fee) = preminer_state
             .create_transaction(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(1),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await?;
 
@@ -1008,6 +1016,7 @@ mod tests {
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(10),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await?;
 
@@ -1034,6 +1043,7 @@ mod tests {
                 vec![receiver_data],
                 NeptuneCoins::new(4),
                 now + seven_months,
+                ChangeNotifyMethod::default(),
             )
             .await?;
 

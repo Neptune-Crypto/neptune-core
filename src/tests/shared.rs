@@ -73,7 +73,7 @@ use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
-use crate::models::state::UtxoReceiverData;
+use crate::models::state::UtxoReceiver;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -690,7 +690,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 // keep fn interface. Can be helper function to `create_transaction`.
 pub async fn make_mock_transaction_with_generation_key(
     input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
-    receiver_data: Vec<UtxoReceiverData>,
+    receiver_data: Vec<UtxoReceiver>,
     fee: NeptuneCoins,
     tip_msa: MutatorSetAccumulator,
 ) -> Transaction {
@@ -714,7 +714,7 @@ pub async fn make_mock_transaction_with_generation_key(
     let public_announcements = receiver_data
         .iter()
         .filter_map(|x| match &x.utxo_notify_method {
-            UtxoNotifyMethod::Onchain(pa) => Some(pa.clone()),
+            UtxoNotifyMethod::OnChain(pa) => Some(pa.clone()),
             _ => None,
         })
         .collect_vec();
