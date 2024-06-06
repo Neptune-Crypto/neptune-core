@@ -132,3 +132,90 @@ impl UtxoReceiver {
         Self::fake_announcement(utxo, rand::random(), rand::random())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::mock_genesis_global_state;
+    use rand::Rng;
+
+    #[tokio::test]
+    async fn test_utxoreceiver_auto_on_chain() -> Result<()> {
+        let global_state_lock =
+            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+
+        let state = global_state_lock.lock_guard().await;
+        let block_height = state.chain.light_state().header().height;
+
+        // generate a new receiving address that is not from our wallet.
+        let mut rng = rand::thread_rng();
+        let seed: Digest = rng.gen();
+        let address = ReceivingAddress::derive_from_seed(seed);
+
+        let utxo = Utxo::new(address.lock_script(), NeptuneCoins::one().to_native_coins());
+
+        let receiver_privacy_digest = address.privacy_digest;
+        let sender_randomness = state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
+
+        let utxo_receiver = UtxoReceiver::auto(
+            &state.wallet_state,
+            &address,
+            utxo.clone(),
+            sender_randomness,
+            receiver_privacy_digest,
+        )?;
+
+        assert!(matches!(
+            utxo_receiver.utxo_notify_method,
+            UtxoNotifyMethod::OnChain(_)
+        ));
+        assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
+        assert_eq!(utxo_receiver.receiver_preimage, receiver_privacy_digest);
+        assert_eq!(utxo_receiver.utxo, utxo);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_utxoreceiver_auto_off_chain() -> Result<()> {
+        let global_state_lock =
+            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+
+        let state = global_state_lock.lock_guard().await;
+        let block_height = state.chain.light_state().header().height;
+
+        // obtain a receiving address from our wallet.
+        let spending_key = state.wallet_state.get_known_spending_keys()[0];
+        let address = spending_key.to_address();
+
+        let utxo = Utxo::new(address.lock_script(), NeptuneCoins::one().to_native_coins());
+
+        let receiver_privacy_digest = address.privacy_digest;
+        let sender_randomness = state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
+
+        let utxo_receiver = UtxoReceiver::auto(
+            &state.wallet_state,
+            &address,
+            utxo.clone(),
+            sender_randomness,
+            receiver_privacy_digest,
+        )?;
+
+        assert!(matches!(
+            utxo_receiver.utxo_notify_method,
+            UtxoNotifyMethod::OffChain
+        ));
+        assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
+        assert_eq!(utxo_receiver.receiver_preimage, receiver_privacy_digest);
+        assert_eq!(utxo_receiver.utxo, utxo);
+        Ok(())
+    }
+}

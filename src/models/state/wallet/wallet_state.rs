@@ -303,7 +303,7 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    fn get_known_spending_keys(&self) -> Vec<SpendingKey> {
+    pub fn get_known_spending_keys(&self) -> Vec<SpendingKey> {
         // for we always return just the 1st key.
         vec![self.wallet_secret.nth_generation_spending_key(0)]
     }
