@@ -569,24 +569,17 @@ impl RPC for NeptuneRPCServer {
             let coins = amount.to_native_coins();
             let utxo = Utxo::new(address.lock_script(), coins);
 
-            let receiver_privacy_digest = address.privacy_digest;
             let sender_randomness = state
                 .wallet_state
                 .wallet_secret
-                .generate_sender_randomness(block_height, receiver_privacy_digest);
+                .generate_sender_randomness(block_height, address.privacy_digest);
 
             // Generate receiver data list (just one item)
             //
             // The UtxoNotifyType (Onchain or Offchain) is automatically detected
             // based on whether the address belongs to our wallet or not.
             receiver_data.push(
-                match UtxoReceiver::auto(
-                    &state.wallet_state,
-                    &address,
-                    utxo,
-                    sender_randomness,
-                    receiver_privacy_digest,
-                ) {
+                match UtxoReceiver::auto(&state.wallet_state, &address, utxo, sender_randomness) {
                     Ok(pa) => pa,
                     Err(e) => {
                         tracing::error!("Failed to generate transaction. error was: {:?}", e);
@@ -627,18 +620,21 @@ impl RPC for NeptuneRPCServer {
             return None;
         }
 
+        // ensure we write new state out to disk.
+        self.state.flush_databases().await.expect("flushed DBs");
+
         // Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::Send(Box::new(transaction.clone())))
             .await;
 
-        // ensure we write new state out to disk.
-        self.state.flush_databases().await.expect("flushed DBs");
-
         match response {
             Ok(_) => Some(Hash::hash(&transaction)),
-            _ => None,
+            Err(e) => {
+                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+                None
+            }
         }
     }
 
@@ -722,6 +718,8 @@ impl RPC for NeptuneRPCServer {
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
+    use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
+    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::Block;
     use crate::{
         config_models::network::Network,
@@ -731,7 +729,9 @@ mod rpc_server_tests {
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
+    use generation_address::ReceivingAddress;
     use num_traits::{One, Zero};
+    use rand::Rng;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
@@ -742,7 +742,15 @@ mod rpc_server_tests {
         peer_count: u8,
     ) -> (NeptuneRPCServer, GlobalStateLock) {
         let global_state_lock = mock_genesis_global_state(network, peer_count, wallet_secret).await;
-        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+        let (dummy_tx, mut dummy_rx) =
+            tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+
+        tokio::spawn(async move {
+            while let Some(i) = dummy_rx.recv().await {
+                tracing::debug!("mock Main got message = {:?}", i);
+            }
+        });
+
         (
             NeptuneRPCServer {
                 socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
@@ -1286,5 +1294,95 @@ mod rpc_server_tests {
         // crash the host machine, we don't verify that any value is returned.
         let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let _current_server_temperature = rpc_server.cpu_temp(context::current()).await;
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn send_to_many_test() -> Result<()> {
+        // --- Init.  Basics ---
+        let network = Network::RegTest;
+        let (rpc_server, state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let ctx = context::current();
+        let mut rng = rand::thread_rng();
+
+        // --- Init.  get wallet spending key ---
+        let genesis_block = Block::genesis_block(network);
+        let wallet_spending_key = state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_known_spending_keys()[0];
+
+        // --- Init.  generate a block, with coinbase going to our wallet ---
+        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
+            &genesis_block,
+            None,
+            wallet_spending_key.to_address(),
+            rng.gen(),
+        );
+
+        // --- Init.  append the block to blockchain ---
+        state_lock
+            .lock_guard_mut()
+            .await
+            .set_new_self_mined_tip(
+                block_1,
+                ExpectedUtxo::new(
+                    cb_utxo,
+                    cb_output_randomness,
+                    wallet_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                ),
+            )
+            .await?;
+
+        // --- Setup. generate an output that our wallet cannot claim. ---
+        let output1 = (
+            ReceivingAddress::derive_from_seed(rng.gen()),
+            NeptuneCoins::new(5),
+        );
+
+        // --- Setup. generate an output that our wallet can claim. ---
+        let output2 = {
+            let spending_key = state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .get_known_spending_keys()[0];
+            (spending_key.to_address(), NeptuneCoins::new(25))
+        };
+
+        // --- Setup. assemble outputs and fee ---
+        let outputs = vec![output1, output2];
+        let fee = NeptuneCoins::new(1);
+
+        // --- Store: store num expected utxo before spend ---
+        let num_expected_utxo = state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .expected_utxos
+            .len();
+
+        // --- Operation: perform send_to_many
+        let result = rpc_server.clone().send_to_many(ctx, outputs, fee).await;
+
+        // --- Test: verify op returns a value.
+        assert!(result.is_some());
+
+        // --- Test: verify expected_utxos.len() has increased by 2.
+        //           (one off-chain utxo + one change utxo)
+        assert_eq!(
+            state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .expected_utxos
+                .len(),
+            num_expected_utxo + 2
+        );
+
+        Ok(())
     }
 }
