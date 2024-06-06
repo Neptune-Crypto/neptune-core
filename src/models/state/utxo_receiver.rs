@@ -38,7 +38,7 @@ impl Default for ChangeNotifyMethod {
 pub struct UtxoReceiver {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
+    pub receiver_privacy_digest: Digest,
     pub utxo_notify_method: UtxoNotifyMethod,
 }
 
@@ -47,7 +47,7 @@ impl From<&UtxoReceiver> for ExpectedUtxo {
         ExpectedUtxo::new(
             d.utxo.clone(),
             d.sender_randomness,
-            d.receiver_preimage,
+            d.receiver_privacy_digest,
             UtxoNotifier::Myself,
         )
     }
@@ -66,7 +66,7 @@ impl UtxoReceiver {
         address: &ReceivingAddress,
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_preimage: Digest,
+        receiver_privacy_digest: Digest,
     ) -> Result<Self> {
         let utxo_notify_method = match wallet_state.is_wallet_utxo(&utxo) {
             true => UtxoNotifyMethod::OffChain,
@@ -77,7 +77,7 @@ impl UtxoReceiver {
         Ok(Self {
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             utxo_notify_method,
         })
     }
@@ -88,13 +88,13 @@ impl UtxoReceiver {
     pub fn onchain(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_preimage: Digest,
+        receiver_privacy_digest: Digest,
         public_announcement: PublicAnnouncement,
     ) -> Self {
         Self {
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             utxo_notify_method: UtxoNotifyMethod::OnChain(public_announcement),
         }
     }
@@ -102,11 +102,15 @@ impl UtxoReceiver {
     /// instantiates `UtxoReceiver` using OffChain notification method.
     ///
     /// For normal situations, auto() should be used instead.
-    pub fn offchain(utxo: Utxo, sender_randomness: Digest, receiver_preimage: Digest) -> Self {
+    pub fn offchain(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_privacy_digest: Digest,
+    ) -> Self {
         Self {
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             utxo_notify_method: UtxoNotifyMethod::OffChain,
         }
     }
@@ -116,12 +120,12 @@ impl UtxoReceiver {
     pub fn fake_announcement(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_preimage: Digest,
+        receiver_privacy_digest: Digest,
     ) -> Self {
         Self {
             utxo,
             sender_randomness,
-            receiver_preimage,
+            receiver_privacy_digest,
             utxo_notify_method: UtxoNotifyMethod::OnChain(PublicAnnouncement::default()),
         }
     }
@@ -176,7 +180,10 @@ mod tests {
             UtxoNotifyMethod::OnChain(_)
         ));
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
-        assert_eq!(utxo_receiver.receiver_preimage, receiver_privacy_digest);
+        assert_eq!(
+            utxo_receiver.receiver_privacy_digest,
+            receiver_privacy_digest
+        );
         assert_eq!(utxo_receiver.utxo, utxo);
         Ok(())
     }
@@ -214,7 +221,10 @@ mod tests {
             UtxoNotifyMethod::OffChain
         ));
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
-        assert_eq!(utxo_receiver.receiver_preimage, receiver_privacy_digest);
+        assert_eq!(
+            utxo_receiver.receiver_privacy_digest,
+            receiver_privacy_digest
+        );
         assert_eq!(utxo_receiver.utxo, utxo);
         Ok(())
     }

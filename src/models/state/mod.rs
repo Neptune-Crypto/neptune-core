@@ -439,7 +439,7 @@ impl GlobalState {
                 commit(
                     Hash::hash(&rd.utxo),
                     rd.sender_randomness,
-                    rd.receiver_preimage,
+                    rd.receiver_privacy_digest,
                 )
             })
             .collect_vec()
@@ -584,7 +584,7 @@ impl GlobalState {
     /// Example:
     ///
     /// ```compile_fail
-    /// let utxo_receivers = vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_preimage)];
+    /// let utxo_receivers = vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_privacy_digest)];
     /// let (transaction, tx_data) = state.create_transaction(utxo_receivers, fee, now, ChangeNotifyMethod::default()).await?;
     /// state.add_expected_utxos_to_wallet(tx_data.expected_utxos).await?;
     /// ```
