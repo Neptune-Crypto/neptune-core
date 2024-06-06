@@ -706,7 +706,7 @@ pub async fn make_mock_transaction_with_generation_key(
         let addition_record = commit(
             Hash::hash(&rd.utxo),
             rd.sender_randomness,
-            rd.receiver_preimage,
+            rd.receiver_privacy_digest,
         );
         outputs.push(addition_record);
     }
