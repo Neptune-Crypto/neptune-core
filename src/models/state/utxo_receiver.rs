@@ -66,7 +66,6 @@ impl UtxoReceiver {
         address: &ReceivingAddress,
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_privacy_digest: Digest,
     ) -> Result<Self> {
         let utxo_notify_method = match wallet_state.is_wallet_utxo(&utxo) {
             true => UtxoNotifyMethod::OffChain,
@@ -77,7 +76,7 @@ impl UtxoReceiver {
         Ok(Self {
             utxo,
             sender_randomness,
-            receiver_privacy_digest,
+            receiver_privacy_digest: address.privacy_digest,
             utxo_notify_method,
         })
     }
@@ -161,18 +160,16 @@ mod tests {
 
         let utxo = Utxo::new(address.lock_script(), NeptuneCoins::one().to_native_coins());
 
-        let receiver_privacy_digest = address.privacy_digest;
         let sender_randomness = state
             .wallet_state
             .wallet_secret
-            .generate_sender_randomness(block_height, receiver_privacy_digest);
+            .generate_sender_randomness(block_height, address.privacy_digest);
 
         let utxo_receiver = UtxoReceiver::auto(
             &state.wallet_state,
             &address,
             utxo.clone(),
             sender_randomness,
-            receiver_privacy_digest,
         )?;
 
         assert!(matches!(
@@ -182,7 +179,7 @@ mod tests {
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
         assert_eq!(
             utxo_receiver.receiver_privacy_digest,
-            receiver_privacy_digest
+            address.privacy_digest
         );
         assert_eq!(utxo_receiver.utxo, utxo);
         Ok(())
@@ -202,18 +199,16 @@ mod tests {
 
         let utxo = Utxo::new(address.lock_script(), NeptuneCoins::one().to_native_coins());
 
-        let receiver_privacy_digest = address.privacy_digest;
         let sender_randomness = state
             .wallet_state
             .wallet_secret
-            .generate_sender_randomness(block_height, receiver_privacy_digest);
+            .generate_sender_randomness(block_height, address.privacy_digest);
 
         let utxo_receiver = UtxoReceiver::auto(
             &state.wallet_state,
             &address,
             utxo.clone(),
             sender_randomness,
-            receiver_privacy_digest,
         )?;
 
         assert!(matches!(
@@ -223,7 +218,7 @@ mod tests {
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
         assert_eq!(
             utxo_receiver.receiver_privacy_digest,
-            receiver_privacy_digest
+            address.privacy_digest
         );
         assert_eq!(utxo_receiver.utxo, utxo);
         Ok(())
