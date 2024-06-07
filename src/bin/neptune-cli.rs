@@ -1,24 +1,47 @@
-use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-
 use anyhow::{bail, Result};
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
-
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
+use neptune_core::models::blockchain::block::block_selector::BlockSelector;
+use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::generation_address;
+use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
+use neptune_core::rpc_server::RPCClient;
 use std::io;
+use std::io::stdout;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
-use neptune_core::models::blockchain::block::block_selector::BlockSelector;
-use neptune_core::models::state::wallet::wallet_status::WalletStatus;
-use neptune_core::rpc_server::RPCClient;
-use std::io::stdout;
+// for parsing SendToMany <output> arguments.
+#[derive(Debug, Clone)]
+struct TransactionOutput {
+    address: String,
+    amount: NeptuneCoins,
+}
+
+impl FromStr for TransactionOutput {
+    type Err = anyhow::Error;
+
+    // parses address:amount into TransactionOutput{address, amount}
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts = s.split(':').collect::<Vec<_>>();
+
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid transaction output.  missing :")
+        }
+
+        Ok(Self {
+            address: parts[0].to_string(),
+            amount: NeptuneCoins::from_str(parts[1])?,
+        })
+    }
+}
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -62,6 +85,12 @@ enum Command {
     Send {
         amount: NeptuneCoins,
         address: String,
+        fee: NeptuneCoins,
+    },
+    SendToMany {
+        /// format: address:amount address:amount ...
+        #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
+        outputs: Vec<TransactionOutput>,
         fee: NeptuneCoins,
     },
     PauseMiner,
@@ -398,7 +427,19 @@ async fn main() -> Result<()> {
                 generation_address::ReceivingAddress::from_bech32m(address.clone(), args.network)?;
 
             client.send(ctx, amount, receiving_address, fee).await?;
-            println!("Send-command issues. Recipient: {address}; amount: {amount}");
+            println!("Send completed.");
+        }
+        Command::SendToMany { outputs, fee } => {
+            let parsed_outputs = outputs
+                .into_iter()
+                .map(|o| {
+                    generation_address::ReceivingAddress::from_bech32m(o.address, args.network)
+                        .map(|v| (v, o.amount))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            client.send_to_many(ctx, parsed_outputs, fee).await?;
+            println!("Send completed.");
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
