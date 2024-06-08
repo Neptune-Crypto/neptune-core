@@ -11,7 +11,8 @@ use anyhow::Result;
 /// that a Utxo exists which they can claim/spend.
 #[derive(Debug, Clone)]
 pub enum UtxoNotifyMethod {
-    OnChain(PublicAnnouncement),
+    OnChainPubKey(PublicAnnouncement),
+    OnChainSymmetricKey,
     OffChain,
 }
 
@@ -22,7 +23,8 @@ pub enum UtxoNotifyMethod {
 /// not carry any data.  Also, it defaults to `OffChain`.
 #[derive(Debug, Clone)]
 pub enum ChangeNotifyMethod {
-    OnChain,
+    OnChainPubKey,
+    OnChainSymmetricKey,
     OffChain,
 }
 
@@ -61,6 +63,9 @@ impl UtxoReceiver {
     /// notification will be used.  Else `OnChain` notification.
     ///
     /// This method should normally be used when instantiating `UtxoReceiver`
+    ///
+    /// note: in the future, OnChainSymmetric may be preferred instead of
+    /// OffChain for `Utxo` that can be claimed by our wallet.
     pub fn auto(
         wallet_state: &WalletState,
         address: &ReceivingAddress,
@@ -69,7 +74,7 @@ impl UtxoReceiver {
     ) -> Result<Self> {
         let utxo_notify_method = match wallet_state.is_wallet_utxo(&utxo) {
             true => UtxoNotifyMethod::OffChain,
-            false => UtxoNotifyMethod::OnChain(
+            false => UtxoNotifyMethod::OnChainPubKey(
                 address.generate_public_announcement(&utxo, sender_randomness)?,
             ),
         };
@@ -84,7 +89,7 @@ impl UtxoReceiver {
     /// instantiates `UtxoReceiver` using OnChain notification method.
     ///
     /// For normal situations, auto() should be used instead.
-    pub fn onchain(
+    pub fn onchain_pubkey(
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_privacy_digest: Digest,
@@ -94,7 +99,7 @@ impl UtxoReceiver {
             utxo,
             sender_randomness,
             receiver_privacy_digest,
-            utxo_notify_method: UtxoNotifyMethod::OnChain(public_announcement),
+            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey(public_announcement),
         }
     }
 
@@ -125,7 +130,7 @@ impl UtxoReceiver {
             utxo,
             sender_randomness,
             receiver_privacy_digest,
-            utxo_notify_method: UtxoNotifyMethod::OnChain(PublicAnnouncement::default()),
+            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey(PublicAnnouncement::default()),
         }
     }
 
@@ -146,7 +151,7 @@ mod tests {
     use rand::Rng;
 
     #[tokio::test]
-    async fn test_utxoreceiver_auto_on_chain() -> Result<()> {
+    async fn test_utxoreceiver_auto_on_chain_pubkey() -> Result<()> {
         let global_state_lock =
             mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
 
@@ -174,7 +179,7 @@ mod tests {
 
         assert!(matches!(
             utxo_receiver.utxo_notify_method,
-            UtxoNotifyMethod::OnChain(_)
+            UtxoNotifyMethod::OnChainPubKey(_)
         ));
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
         assert_eq!(
