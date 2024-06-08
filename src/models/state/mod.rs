@@ -567,8 +567,8 @@ impl GlobalState {
     /// creates a Transaction.
     ///
     /// UtxoReceiver::auto() should normally be used.  This will generate
-    /// OffChain notifications for UTXOs destined for our wallet and OnChain
-    /// notifications for all other UTXOs.
+    /// OffChain notifications for UTXOs destined for our wallet and
+    /// OnChainPubKey notifications for all other UTXOs.
     ///
     /// Likewise ChangeNotifyMethod::default() should be used, which corresponds
     /// to ChangeNotifyMethod::OffChain.  This controls notification behavior
@@ -652,7 +652,7 @@ impl GlobalState {
         let mut public_announcements = receiver_data
             .iter()
             .filter_map(|rd| match &rd.utxo_notify_method {
-                UtxoNotifyMethod::OnChain(pa) => Some(pa.clone()),
+                UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
                 _ => None,
             })
             .collect_vec();
@@ -675,7 +675,8 @@ impl GlobalState {
 
             match change_notify_method {
                 ChangeNotifyMethod::OffChain => expected_utxos.push(change_expected_utxo),
-                ChangeNotifyMethod::OnChain => {
+                ChangeNotifyMethod::OnChainSymmetricKey => unimplemented!(),
+                ChangeNotifyMethod::OnChainPubKey => {
                     public_announcements.push(change_public_announcement)
                 }
             }
@@ -1418,7 +1419,7 @@ mod global_state_tests {
         let public_announcement = recipient_address
             .generate_public_announcement(&output_utxo, sender_randomness)
             .unwrap();
-        let receiver_data = vec![UtxoReceiver::onchain(
+        let receiver_data = vec![UtxoReceiver::onchain_pubkey(
             output_utxo.clone(),
             sender_randomness,
             receiver_privacy_digest,
@@ -1501,7 +1502,7 @@ mod global_state_tests {
                 .generate_public_announcement(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
-            other_receiver_data.push(UtxoReceiver::onchain(
+            other_receiver_data.push(UtxoReceiver::onchain_pubkey(
                 utxo,
                 other_sender_randomness,
                 other_receiver_digest,

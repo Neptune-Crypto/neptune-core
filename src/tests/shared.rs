@@ -714,7 +714,7 @@ pub async fn make_mock_transaction_with_generation_key(
     let public_announcements = receiver_data
         .iter()
         .filter_map(|x| match &x.utxo_notify_method {
-            UtxoNotifyMethod::OnChain(pa) => Some(pa.clone()),
+            UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
             _ => None,
         })
         .collect_vec();
