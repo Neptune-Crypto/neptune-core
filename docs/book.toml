@@ -1,0 +1,6 @@
+[book]
+authors = ["Alan Szepieniec"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Neptune Documentation"

@@ -1,4 +1,5 @@
-# How neptune-core handles reorganizations
+# Reorganization
+
 Neptune is a blockchain which features recursive STARK proofs as part of its
 consensus mechanism. This implies that participants can synchronize trustlessly
 by simply downloading the latest block and verifying this. Unlike most other

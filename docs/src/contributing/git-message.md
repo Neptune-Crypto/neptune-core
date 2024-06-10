@@ -1,0 +1,5 @@
+# Git Message
+
+```
+{{#include .gitmessage}}
+```
