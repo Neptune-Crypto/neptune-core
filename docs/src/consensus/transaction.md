@@ -53,6 +53,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
    - for each input UTXO:
      - compute the removal record index set
+     - verify that at least one index has not been seen before
    - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
    - output the hash of the salted UTXOs.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
