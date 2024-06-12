@@ -14,7 +14,7 @@ A block kernel consists of a header and a body. The block header has constant si
 
 The block body holds the variable-size data, consisting of:
  - `transaction` every block contains one transaction, which represents the merger of all broadcasted transactions that the miner decided to confirm.
- - `mutator_set_accumulator` the [mutator set](../mutator-set.md) is the data structure that holds the UTXOs. It is simultaneously an accumulator (giving rise to a compact representation and compact membership proofs) and an anonymity architecture (so that outputs from one transactions cannot be linked to inputs to another).
+ - `mutator_set_accumulator` the <span style="color:red">mutator set</span> is the data structure that holds the UTXOs. It is simultaneously an accumulator (giving rise to a compact representation and compact membership proofs) and an anonymity architecture (so that outputs from one transactions cannot be linked to inputs to another).
  - `lock_free_mmr_accumulator` the data structure holding lock-free UTXOs
  - `block_mmr_accumulator` the peaks of a Merkle mountain range that contains all historical blocks in the current block's line.
  - `uncle_blocks` the digests of uncle blocks not listed so far. The miner needs to prove that between the latest common ancestor between the current block and all listed uncles, none of the listed uncles were included before.
@@ -28,7 +28,7 @@ A block is *valid* if (any of):
 
 ### A: Genesis Block
 
-The genesis block is hardcoded in the source code.
+The genesis block is hardcoded in the source code, see `genesis_block` in `block/mod.rs`.
 
 ### B: Incremental Validity
 
@@ -54,9 +54,18 @@ A block is valid if it lives in the `block_mmr_accumulator` of a valid block. Th
  1. It is possible to prove that one block is an ancestor of another.
  2. Archival nodes do not need to store old block proofs; storing the most recent block proof suffices.
  3. Non-tip blocks can be quickly verified to be valid and, if the receiver is synchronized to the tip, canonical as well.
- 4. In case of reorganization, storing the now-abandoned tip proof continues to suffice to establish the *validity* of shared blocks. (That said, an archival node should take care to prove *canonicity* of shared blocks also, and to do this he must synchronize and download all blocks on the new fork.)
+ 4. In case of reorganization, storing the now-abandoned tip proof continues to suffice to establish the *validity* of shared blocks. (That said, an archival node should prove *canonicity* of shared blocks also, and to do this he must synchronize and download all blocks on the new fork.)
 
 ## Confirmability
 
+A block is *confirmable* if (all of):
+ - ***a)*** it is valid
+ - ***b)*** its timestamp is less than 10 minutes into the future
+ - ***c)*** its size is less than the `max_block_size` stipulated by the previous block
+ - ***d)*** its hash is less than the previous block's `target_difficulty`.
+
+Confirmability is not something that can be proven. It must be checked explicitly by the node upon receiving the block.
+
 ## Canonicity
 
+A block is *canonical* if it lives on the <span style="color:red">longest chain</span>.

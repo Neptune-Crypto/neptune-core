@@ -88,7 +88,24 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - output the unique type script hashes
  - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
 
-All subprograms can be proven individually given access to the transaction's witness.
+Diagram 1 shows how the explicit inputs and outputs of all the subprograms relate to each other. Single arrows denote inputs or outputs. Double lines indicate that the program(s) on the one end hash to the digest(s) on the other.
+
+| ![Transaction Validity Diagram](./transaction-validity-diagram.svg) |
+|:-------------------------------------------------------------------:|
+|             **Diagram 1:** Transaction validity.                    |
+
+All subprograms can be proven individually given access to the transaction's witness. The next table shows which fields of the `TransactionPrimitiveWitness` are (potentially) used in which subprogram.
+
+| field                     | used by                                                                       |
+|---------------------------|-------------------------------------------------------------------------------|
+| `input_utxos`             | `RemovalRecordsIntegrity`, `CollectLockScripts`, `CollectTypeScripts`         |
+| `input_lock_scripts`      | `CollectLockScripts`, `LockScript`                                            |
+| `type_scripts`            | `CollectTypeScripts`, `TypeScript`                                            |
+| `lock_script_witnesses`   | `LockScript`                                                                  |
+| `input_membership_proofs` | `RemovalRecordsIntegrity`                                                     |
+| `output_utxos`            | `KernelToOutputs`, `CollectTypeScripts`                                       |
+| `mutator_set_accumulator` | `RemovalRecordsIntegrity`                                                     |
+| `kernel`                  | `RemovalRecordsIntegrity`, `KernelToOutputs`, `LockScript`(?) `TypeScript`(?) |
 
 Note that none of the subprograms require that each removal record lists one SWBF index that does not yet live in the mutator set SWBF. This absence is required for the transaction to be confirmable, but not for it to be valid. If the transaction has an input whose index set is already entirely contained by the mutator set SWBF, then this transaction can never be confirmed. Even if there is a reorganization that results in the absence criterion being satisfied, the transaction commits to the mutator set hash and this commitment cannot be undone.
 
@@ -100,9 +117,9 @@ Where (b) generates a separate proof for every individual subclaim, (c) generate
 
 Two transactions can be merged into one. Among other things, this operation replaces two proofs with just one. The program `TransactionMerger :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies a transaction resulting from a merger as follows:
  - divine `txa : TransactionKernel`
- - verify `txa` using some divined proof
+ - verify proof for `txa` (proof is divined)
  - divine `txb : TransactionKernel`
- - verify `txb` using some divined proof
+ - verify proof for `txb` (proof is divined)
  - for each removal record `rr` in `txa.inputs`
    - verify that `rr` is not a member of `txb.inputs`
  - for each removal record `rr` in `txb.inputs`
