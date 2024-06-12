@@ -51,9 +51,11 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the input UTXOs
    - divine the salt
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
+   - keep a set of all announced indices and initialize it to the empty set
    - for each input UTXO:
      - compute the removal record index set
-     - verify that at least one index has not been seen before
+     - add the indices to the set of all announced indices and filter out duplicates
+     - verify that the set of all announced indices has grown
    - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
    - output the hash of the salted UTXOs.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
@@ -72,7 +74,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - for each UTXO:
      - collect the lock script hash
    - output all lock script hashes.
- - `LockScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Unlocks a single input UTXO. The concrete program value of a lockscript depends on the UTXO. By default, this program is created by a generation address, in which case it asserts knowledge of a preimage to a hardcoded digest.
+ - `LockScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Unlocks a single input UTXO. The concrete program value of a lockscript depends on the UTXO. By default, this program is created by a generation address, in which case it asserts knowledge of a preimage to a hardcoded digest. This lock script for every UTXO must halt gracefully.
  - `CollectTypeScripts :: (inputs_salted_utxos_hash : Digest) × (outputs_salted_utxos_hash : Digest) ⟶ (type_script_hashes : [Digest])` Collects the type scripts into a more digestible format. Specifically:
    - divine all input UTXOs
    - divine the salt for input UTXOs
@@ -84,7 +86,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
      - collect the type script hash
    - filter out duplicates
    - output the unique type script hashes
- - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts.
+ - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
 
 All subprograms can be proven individually given access to the transaction's witness.
 
