@@ -1,3 +1,4 @@
+use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -874,7 +875,7 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body, Block::mk_std_block_type(None)),
+        Block::new(block_header, block_body, BlockProof::Invalid),
         coinbase_utxo,
         coinbase_output_randomness,
     )

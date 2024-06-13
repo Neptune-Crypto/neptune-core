@@ -2010,12 +2010,10 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
 
-        let (mut block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
-            &genesis_block,
-            None,
-            genesis_spending_key.to_address(),
-            rng.gen(),
-        );
+        let (coinbase_transaction, coinbase_expected_utxo) = genesis_state_lock
+            .lock_guard()
+            .await
+            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -2062,30 +2060,31 @@ mod global_state_tests {
                 },
             },
         ];
-        {
-            let tx_to_alice_and_bob = create_transaction_with_timestamp(
-                &genesis_state_lock,
-                &[
-                    receiver_data_for_alice.clone(),
-                    receiver_data_for_bob.clone(),
-                ]
-                .concat(),
-                fee,
-                launch + seven_months,
-            )
-            .await
-            .unwrap();
 
-            // Absorb and verify validity
-            block_1
-                .accumulate_transaction(
-                    tx_to_alice_and_bob,
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                )
-                .await;
-            let now = genesis_block.kernel.header.timestamp;
-            assert!(block_1.is_valid(&genesis_block, now + seven_months));
-        }
+        let tx_to_alice_and_bob = create_transaction_with_timestamp(
+            &genesis_state_lock,
+            &[
+                receiver_data_for_alice.clone(),
+                receiver_data_for_bob.clone(),
+            ]
+            .concat(),
+            fee,
+            launch + seven_months,
+        )
+        .await
+        .unwrap();
+
+        let block_transaction = tx_to_alice_and_bob.merge_with(coinbase_transaction);
+
+        let block_1 = Block::new_block_from_template(
+            &genesis_block,
+            block_transaction,
+            Timestamp::now(),
+            None,
+        );
+
+        let now = genesis_block.kernel.header.timestamp;
+        assert!(block_1.is_valid(&genesis_block, now + seven_months));
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2131,8 +2130,8 @@ mod global_state_tests {
             .set_new_self_mined_tip(
                 block_1.clone(),
                 ExpectedUtxo::new(
-                    cb_utxo,
-                    cb_output_randomness,
+                    coinbase_expected_utxo.utxo,
+                    coinbase_expected_utxo.sender_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 ),
@@ -2243,22 +2242,18 @@ mod global_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (mut block_2, _cb_utxo_block_2, _cb_sender_randomness_block_2) =
-            make_mock_block_with_valid_pow(
-                &block_1,
-                None,
-                genesis_spending_key.to_address(),
-                rng.gen(),
-            );
-        block_2
-            .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
+        let (coinbase_transaction, _expected_utxo) = genesis_state_lock
+            .lock_guard()
+            .await
+            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+        let block_transaction = coinbase_transaction
+            .merge_with(tx_from_alice)
+            .merge_with(tx_from_bob);
+        let block_2 =
+            Block::new_block_from_template(&block_1, block_transaction, Timestamp::now(), None);
+
         assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());
-
-        block_2
-            .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
     }
 
     #[traced_test]
