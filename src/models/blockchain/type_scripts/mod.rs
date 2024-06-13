@@ -1,5 +1,5 @@
 use crate::{
-    models::consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram, ValidationLogic},
+    models::consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram},
     Hash,
 };
 use get_size::GetSize;
@@ -68,7 +68,7 @@ impl TypeScript {
     }
 }
 
-pub trait TypeScriptWitness: ValidationLogic {
+pub trait TypeScriptWitness {
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;

@@ -6,9 +6,7 @@ use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
 use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::{
-    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-};
+use crate::models::consensus::SecretWitness;
 use crate::models::{
     blockchain::transaction::primitive_witness::SaltedUtxos,
     consensus::tasm::program::ConsensusProgram,
@@ -172,19 +170,6 @@ pub struct NativeCurrencyWitness {
     pub input_salted_utxos: SaltedUtxos,
     pub output_salted_utxos: SaltedUtxos,
     pub kernel: TransactionKernel,
-}
-
-impl ValidationLogic for NativeCurrencyWitness {
-    fn vast(&self) -> ValidityTree {
-        ValidityTree::new(
-            ValidityAstType::Atomic(
-                Some(Box::new(NativeCurrency.program())),
-                self.claim(),
-                WhichProgram::NativeCurrency,
-            ),
-            WitnessType::RawWitness(self.nondeterminism().into()),
-        )
-    }
 }
 
 impl TypeScriptWitness for NativeCurrencyWitness {

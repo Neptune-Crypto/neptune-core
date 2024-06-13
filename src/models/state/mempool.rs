@@ -10,8 +10,8 @@
 
 use crate::{
     models::{
-        blockchain::type_scripts::neptune_coins::NeptuneCoins,
-        consensus::{timestamp::Timestamp, WitnessType},
+        blockchain::{transaction::TransactionProof, type_scripts::neptune_coins::NeptuneCoins},
+        consensus::timestamp::Timestamp,
     },
     prelude::twenty_first,
     util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
@@ -143,13 +143,14 @@ impl Mempool {
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
-        match transaction.witness.vast.witness_type {
-            WitnessType::RawWitness(_) => panic!("Can only insert fully proven transactions into mempool; not accepting raw witnesses."),
-            WitnessType::Decomposition => panic!("Can only insert fully proven transactions into mempool; not accepting decompositions."),
-            WitnessType::None => panic!("Can only insert fully proven transactions into mempool; not accepting none."),
-            WitnessType::Faith => {},
-            WitnessType::Proof(_) => {},
-        }
+        let _proof = match transaction.proof {
+            TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
+            TransactionProof::Witness(_) => panic!("can only insert single-proof transactions into mempool; not accepting witnesses"),
+            TransactionProof::SingleProof(_) => {},
+            TransactionProof::ProofCollection(_) => panic!("can only insert single-proof transactions into mempool; not accepting proof collections"),
+            TransactionProof::MultiClaimProof(_) => panic!("can only insert single-proof (single-claim) transactions into mempool; not accepting multi-claim proofs"),
+        };
+
         // If transaction to be inserted conflicts with a transaction that's already
         // in the mempool we preserve only the one with the highest fee density.
         if let Some((txid, tx)) = self.transaction_conflicts_with(transaction) {
@@ -340,8 +341,7 @@ impl Mempool {
         let swbf_index_set_union: HashSet<_> = block
             .kernel
             .body
-            .transaction
-            .kernel
+            .transaction_kernel
             .inputs
             .iter()
             .flat_map(|rr| rr.absolute_indices.to_array())

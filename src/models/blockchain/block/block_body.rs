@@ -1,3 +1,4 @@
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::consensus::mast_hash::{HasDiscriminant, MastHash};
 use crate::prelude::twenty_first;
 
@@ -10,7 +11,6 @@ use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, EnumCount)]
@@ -32,7 +32,7 @@ impl HasDiscriminant for BlockBodyField {
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
-    pub transaction: Transaction,
+    pub transaction_kernel: TransactionKernel,
 
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
     /// accumulator (=> compact representation and membership proofs) and an anonymity
@@ -58,7 +58,7 @@ impl MastHash for BlockBody {
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         vec![
-            self.transaction.kernel.encode(),
+            self.transaction_kernel.encode(),
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),

@@ -7,7 +7,6 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
-use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::TypeScript;
@@ -44,62 +43,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use self::primitive_witness::SaltedUtxos;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-
-/// Prepare a Block for mining
-fn make_block_template(
-    previous_block: &Block,
-    transaction: Transaction,
-    mut block_timestamp: Timestamp,
-    target_block_interval: Option<u64>,
-) -> (BlockHeader, BlockBody) {
-    let additions = transaction.kernel.outputs.clone();
-    let removals = transaction.kernel.inputs.clone();
-    let mut next_mutator_set_accumulator: MutatorSetAccumulator =
-        previous_block.kernel.body.mutator_set_accumulator.clone();
-
-    // Apply the mutator set update to the mutator set accumulator
-    // This function mutates the MS accumulator that is given as argument to
-    // the function such that the next mutator set accumulator is calculated.
-    let mutator_set_update = MutatorSetUpdate::new(removals, additions);
-    mutator_set_update
-        .apply_to_accumulator(&mut next_mutator_set_accumulator)
-        .expect("Mutator set mutation must work");
-
-    let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmra.append(previous_block.hash());
-    let block_body: BlockBody = BlockBody {
-        transaction,
-        mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
-        block_mmr_accumulator: block_mmra,
-        uncle_blocks: vec![],
-    };
-
-    let zero = BFieldElement::zero();
-    let new_pow_line: U32s<5> =
-        previous_block.kernel.header.proof_of_work_family + previous_block.kernel.header.difficulty;
-    let next_block_height = previous_block.kernel.header.height.next();
-    if block_timestamp < previous_block.kernel.header.timestamp {
-        warn!("Received block is timestamped in the future; mining on future-timestamped block.");
-        block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
-    }
-    let difficulty: U32s<5> =
-        Block::difficulty_control(previous_block, block_timestamp, target_block_interval);
-
-    let block_header = BlockHeader {
-        version: zero,
-        height: next_block_height,
-        prev_block_digest: previous_block.hash(),
-        timestamp: block_timestamp,
-        nonce: [zero, zero, zero],
-        max_block_size: MOCK_MAX_BLOCK_SIZE,
-        proof_of_work_line: new_pow_line,
-        proof_of_work_family: new_pow_line,
-        difficulty,
-    };
-
-    (block_header, block_body)
-}
 
 /// Attempt to mine a valid block for the network
 #[allow(clippy::too_many_arguments)]
@@ -155,7 +98,7 @@ fn mine_block_worker(
     let mut threshold = Block::difficulty_to_digest_threshold(difficulty);
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
-        block_body.transaction.kernel.outputs.len(),
+        block_body.transaction_kernel.outputs.len(),
         block_header.height,
         threshold
     );
@@ -281,11 +224,11 @@ fn make_coinbase_transaction(
         mutator_set_accumulator,
         kernel: kernel.clone(),
     };
-    let transaction_validation_logic = TransactionValidationLogic::from(primitive_witness);
+    let transaction_proof = TransactionProof::Witness(primitive_witness);
     (
         Transaction {
             kernel,
-            witness: transaction_validation_logic,
+            proof: transaction_proof,
         },
         sender_randomness,
     )
@@ -295,7 +238,6 @@ fn make_coinbase_transaction(
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
 fn create_block_transaction(
-    latest_block: &Block,
     global_state: &GlobalState,
     timestamp: Timestamp,
 ) -> (Transaction, ExpectedUtxo) {
@@ -311,30 +253,8 @@ fn create_block_transaction(
         .iter()
         .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
 
-    let coinbase_recipient_spending_key = global_state
-        .wallet_state
-        .wallet_secret
-        .nth_generation_spending_key(0);
-    let receiving_address = coinbase_recipient_spending_key.to_address();
-    let next_block_height: BlockHeight = latest_block.kernel.header.height.next();
-
-    let lock_script = receiving_address.lock_script();
-    let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
-
-    let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
-        &coinbase_utxo,
-        receiving_address.privacy_digest,
-        &global_state.wallet_state.wallet_secret,
-        next_block_height,
-        latest_block.kernel.body.mutator_set_accumulator.clone(),
-        timestamp,
-    );
-
-    debug!(
-        "Creating block transaction with mutator set hash: {}",
-        latest_block.kernel.body.mutator_set_accumulator.hash()
-    );
+    let (coinbase_transaction, utxo_info_for_coinbase) =
+        global_state.make_coinbase_transaction(transaction_fees, timestamp);
 
     // Merge incoming transactions with the coinbase transaction
     let merged_transaction = transactions_to_include
@@ -342,13 +262,6 @@ fn create_block_transaction(
         .fold(coinbase_transaction, |acc, transaction| {
             Transaction::merge_with(acc, transaction)
         });
-
-    let utxo_info_for_coinbase = ExpectedUtxo::new(
-        coinbase_utxo,
-        coinbase_sender_randomness,
-        coinbase_recipient_spending_key.privacy_preimage,
-        UtxoNotifier::OwnMiner,
-    );
 
     (merged_transaction, utxo_info_for_coinbase)
 }
@@ -382,11 +295,8 @@ pub async fn mine(
             } else {
                 // Build the block template and spawn the worker thread to mine on it
                 let now = Timestamp::now();
-                let (transaction, coinbase_utxo_info) = create_block_transaction(
-                    &latest_block,
-                    global_state_lock.lock_guard().await.deref(),
-                    now,
-                );
+                let (transaction, coinbase_utxo_info) =
+                    create_block_transaction(global_state_lock.lock_guard().await.deref(), now);
                 let (block_header, block_body) =
                     make_block_template(&latest_block, transaction, now, None);
                 let miner_task = mine_block(

@@ -196,7 +196,7 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         if archival_mutator_set.ams().aocl.is_empty().await {
-            for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
+            for addition_record in genesis_block.kernel.body.transaction_kernel.outputs.iter() {
                 archival_mutator_set.ams_mut().add(addition_record).await;
             }
             let genesis_hash = genesis_block.hash();
@@ -720,8 +720,7 @@ impl ArchivalState {
             for addition_record in roll_back_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .iter()
                 .rev()
@@ -740,7 +739,7 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            for removal_record in roll_back_block.kernel.body.transaction.kernel.inputs.iter() {
+            for removal_record in roll_back_block.kernel.body.transaction_kernel.inputs.iter() {
                 self.archival_mutator_set
                     .ams_mut()
                     .revert_remove(removal_record)
@@ -771,16 +770,14 @@ impl ArchivalState {
             let mut addition_records: Vec<AdditionRecord> = apply_forward_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .clone();
             addition_records.reverse();
             let mut removal_records = apply_forward_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .inputs
                 .clone();
             removal_records.reverse();
@@ -913,8 +910,7 @@ mod archival_state_tests {
             Block::genesis_block(network)
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .len() as u64,
             archival_state
@@ -1017,12 +1013,6 @@ mod archival_state_tests {
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
         {
-            let (mut mock_block_2, _, _) = make_mock_block_with_valid_pow(
-                &mock_block_1,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
             let sender_tx = genesis_receiver_global_state
                 .create_transaction(
                     vec![UtxoReceiverData {
@@ -1039,12 +1029,15 @@ mod archival_state_tests {
                 )
                 .await
                 .unwrap();
-            mock_block_2
-                .accumulate_transaction(
-                    sender_tx,
-                    &mock_block_1.kernel.body.mutator_set_accumulator,
-                )
-                .await;
+            let (mut mock_block_2, _, _) = make_mock_block_with_valid_pow(
+                &mock_block_1,
+                None,
+                own_receiving_address,
+                rng.gen(),
+            );
+
+            let mock_block_2 =
+                Block::new_block_from_template(&mock_block_1, sender_tx, Timestamp::now(), None);
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
             genesis_receiver_global_state
@@ -1194,7 +1187,7 @@ mod archival_state_tests {
                 .write_block_as_tip(&mock_block_1b)
                 .await
                 .unwrap();
-            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
+            num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
             archival_state
@@ -1336,10 +1329,10 @@ mod archival_state_tests {
             // Genesis block may have a different number of outputs than the blocks produced above
             if i == 0 {
                 _aocl_index_of_consumed_input +=
-                    genesis_block.kernel.body.transaction.kernel.outputs.len() as u64;
+                    genesis_block.kernel.body.transaction_kernel.outputs.len() as u64;
             } else {
                 _aocl_index_of_consumed_input +=
-                    next_block.kernel.body.transaction.kernel.outputs.len() as u64;
+                    next_block.kernel.body.transaction_kernel.outputs.len() as u64;
             }
 
             previous_block = next_block;
@@ -1358,7 +1351,7 @@ mod archival_state_tests {
                 .archival_state_mut()
                 .write_block_as_tip(&mock_block_1b)
                 .await?;
-            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
+            num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
             global_state
@@ -1556,8 +1549,8 @@ mod archival_state_tests {
         println!("Accumulated transaction into block_1.");
         println!(
             "Transaction has {} inputs (removal records) and {} outputs (addition records)",
-            block_1.kernel.body.transaction.kernel.inputs.len(),
-            block_1.kernel.body.transaction.kernel.outputs.len()
+            block_1.kernel.body.transaction_kernel.inputs.len(),
+            block_1.kernel.body.transaction_kernel.outputs.len()
         );
 
         // Expect incoming transactions
@@ -1728,16 +1721,16 @@ mod archival_state_tests {
         block_2
             .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
             .await;
-        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
-        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+        assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());
 
         block_2
             .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)
             .await;
 
         // Sanity checks
-        assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());
-        assert_eq!(6, block_2.kernel.body.transaction.kernel.outputs.len());
+        assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
+        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
         let now = block_1.kernel.header.timestamp;
         assert!(block_2.is_valid(&block_1, now));
 

@@ -1,12 +1,11 @@
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
-use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -48,13 +47,10 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
-use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::blockchain::type_scripts::TypeScript;
@@ -75,14 +71,9 @@ use crate::models::state::GlobalStateLock;
 use crate::models::state::UtxoReceiverData;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
-use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
-use crate::util_types::test_shared::mutator_set::pseudorandom_mmra_with_mps;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
@@ -386,96 +377,96 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     }
 }
 
-pub fn pseudorandom_removal_record_integrity_witness(
-    seed: [u8; 32],
-) -> RemovalRecordsIntegrityWitness {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let num_inputs = 2;
-    let num_outputs = 2;
-    let num_public_announcements = 1;
+// pub fn pseudorandom_removal_record_integrity_witness(
+//     seed: [u8; 32],
+// ) -> RemovalRecordsIntegrityWitness {
+//     let mut rng: StdRng = SeedableRng::from_seed(seed);
+//     let num_inputs = 2;
+//     let num_outputs = 2;
+//     let num_public_announcements = 1;
 
-    let input_utxos = (0..num_inputs)
-        .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let mut membership_proofs = (0..num_inputs)
-        .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let addition_records = input_utxos
-        .iter()
-        .zip(membership_proofs.iter())
-        .map(|(utxo, msmp)| {
-            commit(
-                Hash::hash(utxo),
-                msmp.sender_randomness,
-                msmp.receiver_preimage.hash::<Hash>(),
-            )
-        })
-        .collect_vec();
-    let canonical_commitments = addition_records
-        .iter()
-        .map(|ar| ar.canonical_commitment)
-        .collect_vec();
-    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
-    assert_eq!(num_inputs, mmr_mps.len());
-    assert_eq!(num_inputs, canonical_commitments.len());
+//     let input_utxos = (0..num_inputs)
+//         .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
+//         .collect_vec();
+//     let mut membership_proofs = (0..num_inputs)
+//         .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
+//         .collect_vec();
+//     let addition_records = input_utxos
+//         .iter()
+//         .zip(membership_proofs.iter())
+//         .map(|(utxo, msmp)| {
+//             commit(
+//                 Hash::hash(utxo),
+//                 msmp.sender_randomness,
+//                 msmp.receiver_preimage.hash::<Hash>(),
+//             )
+//         })
+//         .collect_vec();
+//     let canonical_commitments = addition_records
+//         .iter()
+//         .map(|ar| ar.canonical_commitment)
+//         .collect_vec();
+//     let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
+//     assert_eq!(num_inputs, mmr_mps.len());
+//     assert_eq!(num_inputs, canonical_commitments.len());
 
-    for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
-        assert!(
-            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
-            "Returned MPs must be valid for returned AOCL"
-        );
-    }
+//     for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+//         assert!(
+//             mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
+//             "Returned MPs must be valid for returned AOCL"
+//         );
+//     }
 
-    for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
-        ms_mp.auth_path_aocl = mmr_mp.clone();
-    }
-    let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
-    let swbfa_hash: Digest = rng.gen();
-    let mut kernel = pseudorandom_transaction_kernel(
-        rng.gen(),
-        num_inputs,
-        num_outputs,
-        num_public_announcements,
-    );
-    kernel.mutator_set_hash = Hash::hash_pair(
-        Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-        Hash::hash_pair(swbfa_hash, Digest::default()),
-    );
-    kernel.inputs = input_utxos
-        .iter()
-        .zip(membership_proofs.iter())
-        .map(|(utxo, msmp)| {
-            (
-                Hash::hash(utxo),
-                msmp.sender_randomness,
-                msmp.receiver_preimage,
-                msmp.auth_path_aocl.leaf_index,
-            )
-        })
-        .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
-        .map(|ais| RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new(&ais),
-            target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
-        })
-        .rev()
-        .collect_vec();
+//     for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
+//         ms_mp.auth_path_aocl = mmr_mp.clone();
+//     }
+//     let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
+//     let swbfa_hash: Digest = rng.gen();
+//     let mut kernel = pseudorandom_transaction_kernel(
+//         rng.gen(),
+//         num_inputs,
+//         num_outputs,
+//         num_public_announcements,
+//     );
+//     kernel.mutator_set_hash = Hash::hash_pair(
+//         Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+//         Hash::hash_pair(swbfa_hash, Digest::default()),
+//     );
+//     kernel.inputs = input_utxos
+//         .iter()
+//         .zip(membership_proofs.iter())
+//         .map(|(utxo, msmp)| {
+//             (
+//                 Hash::hash(utxo),
+//                 msmp.sender_randomness,
+//                 msmp.receiver_preimage,
+//                 msmp.auth_path_aocl.leaf_index,
+//             )
+//         })
+//         .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
+//         .map(|ais| RemovalRecord {
+//             absolute_indices: AbsoluteIndexSet::new(&ais),
+//             target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
+//         })
+//         .rev()
+//         .collect_vec();
 
-    let mut kernel_index_set_hashes = kernel
-        .inputs
-        .iter()
-        .map(|rr| Hash::hash(&rr.absolute_indices))
-        .collect_vec();
-    kernel_index_set_hashes.sort();
+//     let mut kernel_index_set_hashes = kernel
+//         .inputs
+//         .iter()
+//         .map(|rr| Hash::hash(&rr.absolute_indices))
+//         .collect_vec();
+//     kernel_index_set_hashes.sort();
 
-    RemovalRecordsIntegrityWitness {
-        input_utxos,
-        membership_proofs,
-        aocl,
-        swbfi,
-        swbfa_hash,
-        kernel,
-    }
-}
+//     RemovalRecordsIntegrityWitness {
+//         input_utxos,
+//         membership_proofs,
+//         aocl,
+//         swbfi,
+//         swbfa_hash,
+//         kernel,
+//     }
+// }
 
 pub fn random_transaction_kernel() -> TransactionKernel {
     let mut rng = thread_rng();
@@ -756,12 +747,9 @@ pub async fn make_mock_transaction_with_generation_key(
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };
-    let validity_logic = TransactionValidationLogic::from(primitive_witness);
+    let proof = TransactionProof::Witness(primitive_witness);
 
-    Transaction {
-        kernel,
-        witness: validity_logic,
-    }
+    Transaction { kernel, proof }
 }
 
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
@@ -782,10 +770,7 @@ pub fn make_mock_transaction(
             coinbase: None,
             mutator_set_hash: random(),
         },
-        witness: TransactionValidationLogic {
-            vast: ValidityTree::axiom(),
-            maybe_primitive_witness: None,
-        },
+        proof: TransactionProof::Invalid,
     }
 }
 
@@ -813,10 +798,7 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        witness: TransactionValidationLogic {
-            vast: ValidityTree::axiom(),
-            maybe_primitive_witness: None,
-        },
+        proof: TransactionProof::Invalid,
     }
 }
 
@@ -866,26 +848,8 @@ pub fn make_mock_block(
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let primitive_witness = PrimitiveWitness {
-        input_utxos: SaltedUtxos::empty(),
-        type_scripts: vec![TypeScript::native_currency()],
-        lock_script_witnesses: vec![],
-        input_membership_proofs: vec![],
-        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
-        mutator_set_accumulator: previous_mutator_set.clone(),
-        input_lock_scripts: vec![],
-        kernel: tx_kernel.clone(),
-    };
-    let mut validation_logic = TransactionValidationLogic::from(primitive_witness);
-    validation_logic.vast.prove();
-
-    let transaction = Transaction {
-        witness: validation_logic,
-        kernel: tx_kernel,
-    };
-
     let block_body: BlockBody = BlockBody {
-        transaction,
+        transaction_kernel: tx_kernel,
         mutator_set_accumulator: next_mutator_set.clone(),
         lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
         block_mmr_accumulator: block_mmr,
@@ -901,7 +865,7 @@ pub fn make_mock_block(
         version: zero,
         height: new_block_height,
         prev_block_digest: previous_block.hash(),
-        timestamp: block_body.transaction.kernel.timestamp,
+        timestamp: block_body.transaction_kernel.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         proof_of_work_line: pow_family,

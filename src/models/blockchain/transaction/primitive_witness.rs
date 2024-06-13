@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -11,16 +13,19 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
     structure::tasm_object::TasmObject,
+    triton_vm::program::NonDeterminism,
     twenty_first::{
         math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
         util_types::algebraic_hasher::AlgebraicHasher,
     },
     Digest,
 };
+use tracing::{debug, warn};
 
 use crate::{
     models::{
-        blockchain::type_scripts::TypeScript, consensus::timestamp::Timestamp,
+        blockchain::type_scripts::TypeScript,
+        consensus::{mast_hash::MastHash, timestamp::Timestamp},
         state::wallet::address::generation_address,
     },
     util_types::mutator_set::{
@@ -179,6 +184,191 @@ impl PrimitiveWitness {
                 )
             })
             .collect_vec()
+    }
+
+    /// Verify the transaction directly from the primitive witness, without proofs or
+    /// decomposing into subclaims.
+    pub async fn validate(&self) -> bool {
+        // verify lock scripts
+        for (lock_script, secret_input) in self
+            .input_lock_scripts
+            .iter()
+            .zip(self.lock_script_witnesses.iter())
+        {
+            // We need to clone these fields because they live on `self` and
+            // `self` is dropped before the async code finishes -- so we can't
+            // pass references
+            let lock_script = lock_script.clone();
+            let secret_input = secret_input.clone();
+
+            // The lock script is satisfied if it halts gracefully (i.e.,
+            // without crashing). We do not care about the output.
+            let public_input = Hash::hash(self).reversed().encode();
+
+            // we wrap triton-vm script execution in spawn_blocking as it
+            // could be a lengthy CPU intensive call.
+            let result = tokio::task::spawn_blocking(move || {
+                lock_script.program.run(
+                    public_input.into(),
+                    NonDeterminism::new(secret_input.to_vec()),
+                )
+            })
+            .await;
+
+            match result {
+                Ok(_) => (),
+                Err(err) => {
+                    warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
+                    return false;
+                }
+            };
+        }
+
+        // Verify correct computation of removal records. Also, collect
+        // the removal records' hashes in order to validate them against
+        // those provided in the transaction kernel later.
+        // We only check internal consistency not removability relative
+        // to a given mutator set accumulator.
+        let mut witnessed_removal_records = vec![];
+        for (input_utxo, msmp) in self
+            .input_utxos
+            .utxos
+            .iter()
+            .zip(self.input_membership_proofs.iter())
+        {
+            let item = Hash::hash(input_utxo);
+            // TODO: write these functions in tasm
+            if !self.mutator_set_accumulator.verify(item, msmp) {
+                warn!(
+                    "Cannot generate removal record for an item with an invalid membership proof."
+                );
+                debug!(
+                    "witness mutator set hash: {}",
+                    self.mutator_set_accumulator.hash()
+                );
+                debug!("kernel mutator set hash: {}", self.kernel.mutator_set_hash);
+                return false;
+            }
+            let removal_record = self.mutator_set_accumulator.drop(item, msmp);
+            witnessed_removal_records.push(removal_record);
+        }
+
+        // collect type script hashes
+        let type_script_hashes = self
+            .output_utxos
+            .utxos
+            .iter()
+            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
+            .sorted_by_key(|d| d.values().map(|b| b.value()))
+            .dedup()
+            .collect_vec();
+
+        // verify that all type script hashes are represented by the witness's type script list
+        let mut type_script_dictionary = HashMap::<Digest, &TypeScript>::new();
+        for ts in self.type_scripts.iter() {
+            type_script_dictionary.insert(ts.hash(), ts);
+        }
+        if !type_script_hashes
+            .clone()
+            .into_iter()
+            .all(|tsh| type_script_dictionary.contains_key(&tsh))
+        {
+            warn!("Transaction contains input(s) or output(s) with unknown typescript.");
+            return false;
+        }
+
+        // verify type scripts
+        for type_script_hash in type_script_hashes {
+            let Some(type_script) = type_script_dictionary.get(&type_script_hash) else {
+                warn!("Type script hash not found; should not get here.");
+                return false;
+            };
+
+            let public_input = self.kernel.mast_hash().encode();
+            let secret_input = self
+                .kernel
+                .mast_sequences()
+                .into_iter()
+                .flatten()
+                .collect_vec();
+
+            // we wrap triton-vm script execution in spawn_blocking as it
+            // could be a lengthy CPU intensive call.
+            let type_script_clone = (*type_script).clone();
+            let result = tokio::task::spawn_blocking(move || {
+                type_script_clone
+                    .program
+                    .run(public_input.into(), NonDeterminism::new(secret_input))
+            })
+            .await;
+
+            // The type script is satisfied if it halts gracefully, i.e.,
+            // without panicking. So we don't care about the output
+            if let Err(e) = result {
+                warn!(
+                    "Type script {} not satisfied for transaction: {}",
+                    type_script_hash, e
+                );
+                return false;
+            }
+        }
+
+        // Verify that the removal records generated from the primitive
+        // witness correspond to the removal records listed in the
+        // transaction kernel.
+        if witnessed_removal_records
+            .iter()
+            .map(|rr| Hash::hash_varlen(&rr.encode()))
+            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+            .collect_vec()
+            != self
+                .kernel
+                .inputs
+                .iter()
+                .map(|rr| Hash::hash_varlen(&rr.encode()))
+                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                .collect_vec()
+        {
+            warn!("Removal records as generated from witness do not match with those listed as inputs in transaction kernel.");
+            let witnessed_removal_record_hashes = witnessed_removal_records
+                .iter()
+                .map(|rr| Hash::hash_varlen(&rr.encode()))
+                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                .collect_vec();
+            let listed_removal_record_hashes = self
+                .kernel
+                .inputs
+                .iter()
+                .map(|rr| Hash::hash_varlen(&rr.encode()))
+                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                .collect_vec();
+            warn!(
+                "observed: {}",
+                witnessed_removal_record_hashes.iter().join(",")
+            );
+            warn!("listed: {}", listed_removal_record_hashes.iter().join(","));
+            return false;
+        }
+
+        // Verify that the mutator set accumulator listed in the
+        // primitive witness corresponds to the hash listed in the
+        // transaction's kernel.
+        if self.mutator_set_accumulator.hash() != self.kernel.mutator_set_hash {
+            warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
+            debug!(
+                "Transaction mutator set hash: {}",
+                self.kernel.mutator_set_hash
+            );
+            debug!(
+                "Witness mutator set hash: {}",
+                self.mutator_set_accumulator.hash()
+            );
+            return false;
+        }
+
+        // in regards to public announcements: there isn't anything to verify
+
+        true
     }
 }
 
@@ -389,18 +579,16 @@ pub(crate) fn arbitrary_primitive_witness_with(
 #[cfg(test)]
 mod test {
     use super::PrimitiveWitness;
-    use crate::models::blockchain::{
-        transaction::validity::TransactionValidationLogic,
-        type_scripts::neptune_coins::NeptuneCoins,
-    };
+    use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::mast_hash::MastHash;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    #[proptest(cases = 5)]
-    fn arbitrary_transaction_is_valid(
+    #[proptest(cases = 5, async = "tokio")]
+    async fn arbitrary_transaction_is_valid(
         #[strategy(1usize..3)] _num_inputs: usize,
         #[strategy(1usize..3)] _num_outputs: usize,
         #[strategy(0usize..3)] _num_public_announcements: usize,
@@ -409,9 +597,9 @@ mod test {
     ) {
         let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
         prop_assert!(
-            TransactionValidationLogic::from(transaction_primitive_witness)
-                .vast
+            TransactionProof::Witness(transaction_primitive_witness)
                 .verify(kernel_hash)
+                .await
         );
     }
 

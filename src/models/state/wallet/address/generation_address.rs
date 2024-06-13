@@ -1,3 +1,4 @@
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::commit;
 
@@ -31,7 +32,6 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
@@ -160,13 +160,12 @@ impl SpendingKey {
     /// Return announces a list of (addition record, utxo, sender randomness, receiver preimage)
     pub fn scan_for_announced_utxos(
         &self,
-        transaction: &Transaction,
+        transaction_kernel: &TransactionKernel,
     ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let mut received_utxos_with_randomnesses = vec![];
 
         // for all public scripts that contain a ciphertext for me,
-        for matching_announcement in transaction
-            .kernel
+        for matching_announcement in transaction_kernel
             .public_announcements
             .iter()
             .filter(|pa| public_announcement_is_marked(pa))
@@ -591,7 +590,9 @@ mod test_generation_addresses {
             .unwrap();
         let mut mock_tx = make_mock_transaction(vec![], vec![]);
 
-        assert!(spending_key.scan_for_announced_utxos(&mock_tx).is_empty());
+        assert!(spending_key
+            .scan_for_announced_utxos(&mock_tx.kernel)
+            .is_empty());
 
         // Add a pubscript for our keys and verify that they are recognized
         assert!(public_announcement_is_marked(&public_announcement));
@@ -600,7 +601,7 @@ mod test_generation_addresses {
             .public_announcements
             .push(public_announcement);
 
-        let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx);
+        let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx.kernel);
         assert_eq!(1, announced_txs.len());
 
         let (read_ar, read_utxo, read_sender_randomness, returned_receiver_preimage) =

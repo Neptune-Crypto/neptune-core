@@ -11,11 +11,6 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::SecretWitness;
-use crate::models::consensus::ValidationLogic;
-use crate::models::consensus::ValidityAstType;
-use crate::models::consensus::ValidityTree;
-use crate::models::consensus::WhichProgram;
-use crate::models::consensus::WitnessType;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -430,19 +425,6 @@ impl SecretWitness for TimeLockWitness {
 
     fn program(&self) -> Program {
         TimeLock.program()
-    }
-}
-
-impl ValidationLogic for TimeLockWitness {
-    fn vast(&self) -> ValidityTree {
-        ValidityTree::new(
-            ValidityAstType::Atomic(
-                Some(Box::new(self.program())),
-                self.claim(),
-                WhichProgram::TimeLock,
-            ),
-            WitnessType::RawWitness(self.nondeterminism().into()),
-        )
     }
 }
 

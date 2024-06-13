@@ -1,3 +1,4 @@
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
@@ -31,7 +32,6 @@ use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-use crate::models::blockchain::transaction::Transaction;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -226,13 +226,12 @@ impl WalletState {
         wallet_state
     }
 
-    /// Return a list of UTXOs spent by this wallet in the transaction
+    /// Return a list of UTXOs spent by this wallet in the transaction kernel
     async fn scan_for_spent_utxos(
         &self,
-        transaction: &Transaction,
+        transaction_kernel: &TransactionKernel,
     ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
-        let confirmed_absolute_index_sets = transaction
-            .kernel
+        let confirmed_absolute_index_sets = transaction_kernel
             .inputs
             .iter()
             .map(|rr| rr.absolute_indices.clone())
@@ -257,12 +256,12 @@ impl WalletState {
         spent_own_utxos
     }
 
-    /// Scan the given transaction for announced UTXOs as
+    /// Scan the given transaction kernel for announced UTXOs as
     /// recognized by owned `SpendingKey`s, and then verify
     /// those announced UTXOs are actually present.
     fn scan_for_announced_utxos(
         &self,
-        transaction: &Transaction,
+        transaction_kernel: &TransactionKernel,
     ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         // TODO: These spending keys should probably be derived dynamically from some
         // state in the wallet. And we should allow for other types than just generation
@@ -272,14 +271,14 @@ impl WalletState {
         // get recognized UTXOs
         let recognized_utxos = spending_keys
             .iter()
-            .map(|spending_key| spending_key.scan_for_announced_utxos(transaction))
+            .map(|spending_key| spending_key.scan_for_announced_utxos(transaction_kernel))
             .collect_vec()
             .concat();
 
         // filter for presence in transaction
         recognized_utxos
             .into_iter()
-            .filter(|(ar, ut, _sr, _rp)| if !transaction.kernel.outputs.contains(ar) {
+            .filter(|(ar, ut, _sr, _rp)| if !transaction_kernel.outputs.contains(ar) {
                 warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {ut:#?}");
                 false
             } else { true })
@@ -293,20 +292,21 @@ impl WalletState {
         current_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
     ) -> Result<()> {
-        let transaction: Transaction = new_block.kernel.body.transaction.clone();
+        let transaction_kernel = new_block.kernel.body.transaction_kernel.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
-            self.scan_for_spent_utxos(&transaction).await;
+            self.scan_for_spent_utxos(&transaction_kernel).await;
 
         // utxo, sender randomness, receiver preimage, addition record
         let mut received_outputs: Vec<(AdditionRecord, Utxo, Digest, Digest)> = vec![];
-        received_outputs.append(&mut self.scan_for_announced_utxos(&transaction));
+        received_outputs.append(&mut self.scan_for_announced_utxos(&transaction_kernel));
         debug!(
             "received_outputs as announced outputs = {}",
             received_outputs.len()
         );
-        let expected_utxos_in_this_block =
-            self.expected_utxos.scan_for_expected_utxos(&transaction);
+        let expected_utxos_in_this_block = self
+            .expected_utxos
+            .scan_for_expected_utxos(&transaction_kernel);
         received_outputs.append(&mut expected_utxos_in_this_block.clone());
         debug!("received total outputs: = {}", received_outputs.len());
 
@@ -389,12 +389,12 @@ impl WalletState {
         let mut changed_mps = vec![];
         let mut msa_state: MutatorSetAccumulator = current_mutator_set_accumulator.clone();
 
-        let mut removal_records = transaction.kernel.inputs.clone();
+        let mut removal_records = transaction_kernel.inputs.clone();
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        for addition_record in new_block.kernel.body.transaction.kernel.outputs.iter() {
+        for addition_record in new_block.kernel.body.transaction_kernel.outputs.iter() {
             // Don't pull this declaration out of the for-loop since the hash map can grow
             // within this loop.
             let utxo_digests = valid_membership_proofs_and_own_utxo_count
@@ -505,7 +505,7 @@ impl WalletState {
         debug!("Block has {} removal records", removal_records.len());
         debug!(
             "Transaction has {} inputs",
-            new_block.kernel.body.transaction.kernel.inputs.len()
+            new_block.kernel.body.transaction_kernel.inputs.len()
         );
         let mut block_tx_input_count: usize = 0;
         while let Some(removal_record) = removal_records.pop() {

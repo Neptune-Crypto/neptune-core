@@ -8,6 +8,7 @@ use crate::util_types::mutator_set::commit;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::CheckedSub;
+use num_traits::Zero;
 use std::cmp::max;
 use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
@@ -24,12 +25,13 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
+use super::blockchain::transaction;
 use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
-use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::PublicAnnouncement;
 use super::blockchain::transaction::Transaction;
+use super::blockchain::transaction::TransactionProof;
 use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::time_lock::TimeLock;
@@ -438,6 +440,73 @@ impl GlobalState {
             .collect_vec()
     }
 
+    pub fn make_coinbase_transaction(
+        &self,
+        transaction_fees: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> (Transaction, ExpectedUtxo) {
+        let coinbase_recipient_spending_key = self
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let receiving_address = coinbase_recipient_spending_key.to_address();
+        let receiver_digest = receiving_address.privacy_digest;
+        let latest_block = self.chain.light_state();
+        let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
+        let next_block_height: BlockHeight = latest_block.header().height.next();
+
+        let lock_script = receiving_address.lock_script();
+        let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
+        let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
+        let sender_randomness: Digest = self
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(next_block_height, receiver_digest);
+
+        let coinbase_addition_record = commit(
+            Hash::hash(&coinbase_utxo),
+            sender_randomness,
+            receiver_digest,
+        );
+
+        let kernel = TransactionKernel {
+            inputs: vec![],
+            outputs: vec![coinbase_addition_record],
+            public_announcements: vec![],
+            fee: NeptuneCoins::zero(),
+            coinbase: Some(coinbase_amount),
+            timestamp,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+        };
+
+        let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
+            input_utxos: SaltedUtxos::empty(),
+            type_scripts: vec![TypeScript::native_currency()],
+            input_lock_scripts: vec![],
+            lock_script_witnesses: vec![],
+            input_membership_proofs: vec![],
+            output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
+            mutator_set_accumulator,
+            kernel: kernel.clone(),
+        };
+        let transaction_proof = TransactionProof::Witness(primitive_witness);
+
+        let utxo_info_for_coinbase = ExpectedUtxo::new(
+            coinbase_utxo,
+            sender_randomness,
+            coinbase_recipient_spending_key.privacy_preimage,
+            UtxoNotifier::OwnMiner,
+        );
+
+        (
+            Transaction {
+                kernel,
+                proof: transaction_proof,
+            },
+            utxo_info_for_coinbase,
+        )
+    }
+
     /// Generate a change UTXO and transaction output to ensure that the difference
     /// in input amount and output amount goes back to us. Also, make sure to expect
     /// the UTXO so that we can synchronize it after it is confirmed.
@@ -710,17 +779,13 @@ impl GlobalState {
             mutator_set_accumulator,
         );
 
-        // Convert the validity tree into a single proof.
+        // Generate a proof for the transaction.
         // Down the line we want to support proving only the lock scripts, or only
         // the lock scripts and removal records integrity, but nothing else.
-        // That's a concern for later though.
-        let mut transaction_validity_logic = TransactionValidationLogic::from(primitive_witness);
-        transaction_validity_logic.vast.prove();
-        transaction_validity_logic.maybe_primitive_witness = None;
-        Transaction {
-            kernel,
-            witness: transaction_validity_logic,
-        }
+        // That's a concern for later though. Right now we don't even support
+        // proving, so we just wrap the primitive witness.
+        let proof = TransactionProof::Witness(primitive_witness);
+        Transaction { kernel, proof }
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
@@ -946,7 +1011,7 @@ impl GlobalState {
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
                 // revert removals
-                let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
+                let removal_records = revert_block.kernel.body.transaction_kernel.inputs.clone();
                 for removal_record in removal_records.iter().rev() {
                     // membership_proof.revert_update_from_removal(&removal);
                     membership_proof
@@ -994,8 +1059,8 @@ impl GlobalState {
                     Some(block) => block.kernel.body.mutator_set_accumulator.clone(),
                     None => MutatorSetAccumulator::default(),
                 };
-                let addition_records = apply_block.kernel.body.transaction.kernel.outputs.clone();
-                let removal_records = apply_block.kernel.body.transaction.kernel.inputs.clone();
+                let addition_records = apply_block.kernel.body.transaction_kernel.outputs.clone();
+                let removal_records = apply_block.kernel.body.transaction_kernel.inputs.clone();
 
                 // apply additions
                 for addition_record in addition_records.iter() {
@@ -1433,7 +1498,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        assert!(tx.is_valid());
+        assert!(tx.is_valid().await);
 
         // but if we backdate the timestamp two months, not anymore!
         tx.kernel.timestamp = tx.kernel.timestamp - Timestamp::months(2);
@@ -1487,7 +1552,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        assert!(new_tx.is_valid());
+        assert!(new_tx.is_valid().await);
         assert_eq!(
             4,
             new_tx.kernel.outputs.len(),
@@ -2025,8 +2090,8 @@ mod global_state_tests {
         println!("Accumulated transaction into block_1.");
         println!(
             "Transaction has {} inputs (removal records) and {} outputs (addition records)",
-            block_1.kernel.body.transaction.kernel.inputs.len(),
-            block_1.kernel.body.transaction.kernel.outputs.len()
+            block_1.kernel.body.transaction_kernel.inputs.len(),
+            block_1.kernel.body.transaction_kernel.outputs.len()
         );
 
         // Update states with `block_1`
@@ -2188,8 +2253,8 @@ mod global_state_tests {
         block_2
             .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
             .await;
-        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
-        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+        assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());
 
         block_2
             .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)

@@ -10,6 +10,8 @@ A transaction kernel consists of the following fields:
  - `timestamp: Timestamp` When the transaction took or takes place.
  - `mutator_set_hash: Digest` A commitment to the mutator set that is to be updated by the transaction.
 
+Note that while addition records and removal records are both commitments to UTXOs, they are different types of commitments. The removal record is an index set into the SWBF (with supporting chunk dictionary) whereas the addition record is a hash digest.
+
 ## Validity
 
 A transaction is *valid* if (any of):
@@ -166,19 +168,22 @@ The claim for certifying the validity of transaction based on its inclusion in a
 ### F: Transaction Data Update
 
 A transaction is valid if another transaction that is identical except for fixing an older mutator set hash or timestamp, was valid. Specifically, the program `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies the update of transaction data as follows:
- - divine `tx : TransactionKernel`
- - verify `tx` with some divined proof
- - create a new `TransactionKernel` object `kernel`
- - set all fields of `kernel` to the matching field of `tx` except:
-   - set `kernel.timestamp` such that `kernel.timestamp >= tx.timestamp`
-   - set `kernel.mutator_set_hash =/= tx.mutator_set_hash` only if the following instructions execute gracefully without crashing
-     - divine the mutator set AOCL MMR accumulator `kernel_aocl`
-     - authenticate `kernel_aocl` against the mutator set MAST hash `kernel.mutator_set_hash` using a divined authentication path
-     - divine the mutator set AOCL MMR accumultar `tx_aocl`
-     - authenticate the `tx_aocl` against the mutator set MAST hash `tx.mutator_set_hash` using a divined authentication path
-     - verify that there is a set of AOCL leafs whose addition sends `tx_aocl` to `kernel_aocl`
-
-Note that it is not necessary to verify that the removal records' authentication paths were updated correctly as this is implied by `tx` being valid.
+ - divine `old_kernel : TransactionKernel`
+ - verify `old_kernel` with some divined proof
+ - create a new `TransactionKernel` object `new_kernel`
+ - set all fields of `new_kernel` to the matching field of `old_kernel` except:
+   - set `new_kernel.timestamp` such that `new_kernel.timestamp >= old_kernel.timestamp`
+   - set `new_kernel.mutator_set_hash =/= tx.mutator_set_hash` only if the following instructions execute gracefully without crashing
+     - divine the mutator set AOCL MMR accumulator `new_kernel_aocl`
+     - authenticate `new_kernel_aocl` against the mutator set MAST hash `new_kernel.mutator_set_hash` using a divined authentication path
+     - divine the mutator set AOCL MMR accumultar `old_kernel_aocl`
+     - authenticate the `old_kernel_aocl` against the mutator set MAST hash `old_kernel.mutator_set_hash` using a divined authentication path
+     - verify that there is a set of AOCL leafs whose addition sends `old_kernel_aocl` to `new_kernel_aocl`
+   - set `new_kernel.inputs` to the following list:
+     - each index set is identical to the matching index set from `old_kernel`
+     - read the chunks dictionary
+     - for every index in the inactive part of the SWBF, verify that it lives in some chunk
+     - for every chunk in the chunk dictionary, verify its authentication path (either from `divine_sibling` or memory -- to be decided)
 
 ### G: Transaction Proof Update
 

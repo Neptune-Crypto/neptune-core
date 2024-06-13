@@ -1,4 +1,5 @@
 use crate::{
+    models::blockchain::transaction::transaction_kernel::TransactionKernel,
     prelude::twenty_first,
     util_types::mutator_set::{addition_record::AdditionRecord, commit},
 };
@@ -17,10 +18,7 @@ use tracing::{error, info, warn};
 use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
 use crate::models::{
-    blockchain::{
-        shared::Hash,
-        transaction::{utxo::Utxo, Transaction},
-    },
+    blockchain::{shared::Hash, transaction::utxo::Utxo},
     peer::InstanceId,
 };
 
@@ -165,16 +163,16 @@ impl UtxoNotificationPool {
         self.len().is_zero()
     }
 
-    /// Scan the transaction for outputs that match with list of expected
+    /// Scan the transaction kernel for outputs that match with list of expected
     /// incoming UTXOs, and returns expected UTXOs that are present in the
     /// transaction.
     /// Returns a list of (addition record, UTXO, sender randomness, receiver_preimage)
     pub fn scan_for_expected_utxos(
         &self,
-        transaction: &Transaction,
+        transaction_kernel: &TransactionKernel,
     ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let mut received_expected_utxos = vec![];
-        for tx_output in transaction.kernel.outputs.iter() {
+        for tx_output in transaction_kernel.outputs.iter() {
             if let Some(expected_utxo) = self.notifications.get(tx_output) {
                 received_expected_utxos.push((
                     tx_output.to_owned(),
@@ -404,7 +402,7 @@ mod wallet_state_tests {
             make_mock_transaction(vec![], vec![expected_addition_record]);
 
         let ret_with_tx_containing_utxo =
-            notification_pool.scan_for_expected_utxos(&mock_tx_containing_expected_utxo);
+            notification_pool.scan_for_expected_utxos(&mock_tx_containing_expected_utxo.kernel);
         assert_eq!(1, ret_with_tx_containing_utxo.len());
 
         // Call scan but with another input. Verify that it returns the empty list
@@ -414,7 +412,8 @@ mod wallet_state_tests {
             receiver_preimage.hash::<Hash>(),
         );
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
-        let ret_with_tx_without_utxo = notification_pool.scan_for_expected_utxos(&tx_without_utxo);
+        let ret_with_tx_without_utxo =
+            notification_pool.scan_for_expected_utxos(&tx_without_utxo.kernel);
         assert!(ret_with_tx_without_utxo.is_empty());
 
         // Verify that we can remove the expected UTXO again

@@ -1,12 +1,10 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::{ValidityTree, WitnessType};
-use crate::prelude::{triton_vm, twenty_first};
+use crate::prelude::twenty_first;
 
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
-pub mod validity;
 
 use anyhow::{bail, Result};
 use arbitrary::Arbitrary;
@@ -16,21 +14,19 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
-use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use tasm_lib::Digest;
-use tracing::{debug, error, warn};
-use triton_vm::prelude::NonDeterminism;
+use tracing::error;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
-use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
-use super::type_scripts::TypeScript;
+use crate::triton_vm::proof::Claim;
+use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -49,12 +45,45 @@ impl PublicAnnouncement {
     }
 }
 
+const NUM_TX_SUBPROGRAMS: usize = 6;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+pub enum TransactionProof {
+    #[default]
+    Invalid,
+    Witness(PrimitiveWitness),
+    SingleProof(Proof),
+    ProofCollection([(Claim, Proof); NUM_TX_SUBPROGRAMS]),
+    MultiClaimProof(([Claim; NUM_TX_SUBPROGRAMS], Proof)),
+}
+impl TransactionProof {
+    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
+        match self {
+            TransactionProof::Invalid => false,
+            TransactionProof::Witness(primitive_witness) => {
+                primitive_witness.validate().await
+                    && primitive_witness.kernel.mast_hash() == kernel_mast_hash
+            }
+            TransactionProof::SingleProof(_) => todo!(),
+            TransactionProof::ProofCollection(_) => todo!(),
+            TransactionProof::MultiClaimProof(_) => todo!(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum TransactionProofError {
+    CannotUpdateProofVariant,
+    CannotUpdatePrimitiveWitness,
+    CannotUpdateSingleProof,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
     #[bfield_codec(ignore)]
-    pub witness: TransactionValidationLogic,
+    pub proof: TransactionProof,
 }
 
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
@@ -79,12 +108,12 @@ impl Transaction {
         let mut msa_state: MutatorSetAccumulator =
             old_primitive_witness.mutator_set_accumulator.clone();
         let block_addition_records: Vec<AdditionRecord> =
-            block.kernel.body.transaction.kernel.outputs.clone();
+            block.kernel.body.transaction_kernel.outputs.clone();
         let mut transaction_removal_records: Vec<RemovalRecord> =
             old_primitive_witness.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord> =
             transaction_removal_records.iter_mut().collect();
-        let mut block_removal_records = block.kernel.body.transaction.kernel.inputs.clone();
+        let mut block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
         block_removal_records.reverse();
         let mut block_removal_records: Vec<&mut RemovalRecord> =
             block_removal_records.iter_mut().collect::<Vec<_>>();
@@ -154,8 +183,11 @@ impl Transaction {
         );
 
         let kernel = primitive_witness.kernel.clone();
-        let witness = TransactionValidationLogic::from(primitive_witness);
-        Ok(Transaction { kernel, witness })
+        let witness = TransactionProof::Witness(primitive_witness);
+        Ok(Transaction {
+            kernel,
+            proof: witness,
+        })
     }
 
     /// Create a new `Transaction` by updating the given one with the mutator set
@@ -170,8 +202,8 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
     ) -> Result<Transaction> {
-        let block_addition_records = block.kernel.body.transaction.kernel.outputs.clone();
-        let block_removal_records = block.kernel.body.transaction.kernel.inputs.clone();
+        let block_addition_records = block.kernel.body.transaction_kernel.outputs.clone();
+        let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
         let mutator_set_update =
             MutatorSetUpdate::new(block_removal_records, block_addition_records);
 
@@ -198,18 +230,12 @@ impl Transaction {
         new_kernel.inputs = new_inputs;
         new_kernel.mutator_set_hash = msa_hash;
 
-        // compute updated witness through recursion
-        let validation_tree = TransactionValidationLogic::validation_tree_from_mutator_set_update(
-            &old_transaction.witness.vast,
-            &old_transaction.kernel,
-            previous_mutator_set_accumulator,
-            &new_kernel,
-            &mutator_set_update,
-        );
+        // compute updated proof through recursion
+        let update_proof = todo!();
 
         Ok(Transaction {
             kernel: new_kernel,
-            witness: TransactionValidationLogic::new(validation_tree, None),
+            proof: TransactionProof::SingleProof(update_proof),
         })
     }
 
@@ -220,27 +246,33 @@ impl Transaction {
         &self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
-    ) -> Result<Transaction> {
-        if let Some(primitive_witness) = &self.witness.maybe_primitive_witness {
-            Self::new_with_updated_mutator_set_records_given_primitive_witness(
-                primitive_witness,
-                block,
-            )
-        } else {
-            Self::new_with_updated_mutator_set_records_given_proof(
-                self,
-                previous_mutator_set_accumulator,
-                block,
-            )
+    ) -> Result<Transaction, TransactionProofError> {
+        match &self.proof {
+            TransactionProof::Witness(primitive_witness) => {
+                Self::new_with_updated_mutator_set_records_given_primitive_witness(
+                    primitive_witness,
+                    block,
+                )
+                .map_err(|_| TransactionProofError::CannotUpdatePrimitiveWitness)
+            }
+            TransactionProof::SingleProof(proof) => {
+                Self::new_with_updated_mutator_set_records_given_proof(
+                    self,
+                    previous_mutator_set_accumulator,
+                    block,
+                )
+                .map_err(|_| TransactionProofError::CannotUpdateSingleProof)
+            }
+            _ => Err(TransactionProofError::CannotUpdateProofVariant),
         }
     }
 
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
-    pub fn is_valid(&self) -> bool {
+    pub async fn is_valid(&self) -> bool {
         let kernel_hash = self.kernel.mast_hash();
-        self.witness.vast.verify(kernel_hash)
+        self.proof.verify(kernel_hash).await
     }
 
     fn merge_primitive_witnesses(
@@ -317,63 +349,11 @@ impl Transaction {
             mutator_set_hash: self.kernel.mutator_set_hash,
         };
 
-        let (merged_witness, maybe_primitive_witness) = match (
-            &self.witness.vast.witness_type,
-            &other.witness.vast.witness_type,
-        ) {
-            (WitnessType::Decomposition, WitnessType::Decomposition) => {
-                if self.witness.maybe_primitive_witness.is_some()
-                    && other.witness.maybe_primitive_witness.is_some()
-                {
-                    let self_witness = self.witness.maybe_primitive_witness.unwrap();
-                    let other_witness = other.witness.maybe_primitive_witness.unwrap();
-                    let primitive_witness = Self::merge_primitive_witnesses(
-                        self_witness,
-                        other_witness,
-                        &merged_kernel,
-                    );
-                    let vast = TransactionValidationLogic::validation_tree_from_primitive_witness(
-                        primitive_witness.clone(),
-                    );
-                    (vast, Some(primitive_witness))
-                } else {
-                    error!("Cannot merge two unproven transactions when primitive witnesses are not both present.");
-                    return self.clone();
-                }
-            }
-
-            // TODO: Merge with recursion
-            (WitnessType::Proof(_own_proof), WitnessType::Proof(_other_proof)) => {
-                // 1. verify proof 1
-                // 2. verify proof 2
-                // 3. prove correctness of steps 1 and 2
-                // 4. use resulting proof as new witness
-                let vast = TransactionValidationLogic::validation_tree_from_merger(
-                    &self.kernel,
-                    &self.witness.vast,
-                    &other.kernel,
-                    &other.witness.vast,
-                    &merged_kernel,
-                );
-                (vast, None)
-            }
-            (WitnessType::Faith, _) => (ValidityTree::axiom(), None),
-            (_, WitnessType::Faith) => (ValidityTree::axiom(), None),
-            (a, b) => {
-                todo!(
-                    "Can only merge primitive witnesses for now. WitnessTypes were {:?} and {:?}",
-                    a,
-                    b
-                );
-            }
-        };
+        let merger_proof = todo!();
 
         Transaction {
             kernel: merged_kernel,
-            witness: TransactionValidationLogic {
-                vast: merged_witness,
-                maybe_primitive_witness,
-            },
+            proof: TransactionProof::SingleProof(merger_proof),
         }
     }
 
@@ -398,188 +378,6 @@ impl Transaction {
             .inputs
             .iter()
             .all(|rr| rr.validate(mutator_set_accumulator))
-    }
-
-    /// Verify the transaction directly from the primitive witness, without proofs or
-    /// decomposing into subclaims.
-    pub async fn validate_primitive_witness(
-        &self,
-        primitive_witness: &'static PrimitiveWitness,
-    ) -> bool {
-        // verify lock scripts
-        for (lock_script, secret_input) in primitive_witness
-            .input_lock_scripts
-            .iter()
-            .zip(primitive_witness.lock_script_witnesses.iter())
-        {
-            // The lock script is satisfied if it halts gracefully (i.e.,
-            // without crashing). We do not care about the output.
-            let public_input = Hash::hash(&self.kernel).reversed().encode();
-
-            // we wrap triton-vm script execution in spawn_blocking as it
-            // could be a lengthy CPU intensive call.
-            let result = tokio::task::spawn_blocking(|| {
-                lock_script.program.run(
-                    public_input.into(),
-                    NonDeterminism::new(secret_input.to_vec()),
-                )
-            })
-            .await;
-
-            match result {
-                Ok(_) => (),
-                Err(err) => {
-                    warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
-                    return false;
-                }
-            };
-        }
-
-        // Verify correct computation of removal records. Also, collect
-        // the removal records' hashes in order to validate them against
-        // those provided in the transaction kernel later.
-        // We only check internal consistency not removability relative
-        // to a given mutator set accumulator.
-        let mut witnessed_removal_records = vec![];
-        for (input_utxo, msmp) in primitive_witness
-            .input_utxos
-            .utxos
-            .iter()
-            .zip(primitive_witness.input_membership_proofs.iter())
-        {
-            let item = Hash::hash(input_utxo);
-            // TODO: write these functions in tasm
-            if !primitive_witness.mutator_set_accumulator.verify(item, msmp) {
-                warn!(
-                    "Cannot generate removal record for an item with an invalid membership proof."
-                );
-                debug!(
-                    "witness mutator set hash: {}",
-                    primitive_witness.mutator_set_accumulator.hash()
-                );
-                debug!("kernel mutator set hash: {}", self.kernel.mutator_set_hash);
-                return false;
-            }
-            let removal_record = primitive_witness.mutator_set_accumulator.drop(item, msmp);
-            witnessed_removal_records.push(removal_record);
-        }
-
-        // collect type script hashes
-        let type_script_hashes = primitive_witness
-            .output_utxos
-            .utxos
-            .iter()
-            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
-            .sorted_by_key(|d| d.values().map(|b| b.value()))
-            .dedup()
-            .collect_vec();
-
-        // verify that all type script hashes are represented by the witness's type script list
-        let mut type_script_dictionary = HashMap::<Digest, &TypeScript>::new();
-        for ts in primitive_witness.type_scripts.iter() {
-            type_script_dictionary.insert(ts.hash(), ts);
-        }
-        if !type_script_hashes
-            .clone()
-            .into_iter()
-            .all(|tsh| type_script_dictionary.contains_key(&tsh))
-        {
-            warn!("Transaction contains input(s) or output(s) with unknown typescript.");
-            return false;
-        }
-
-        // verify type scripts
-        for type_script_hash in type_script_hashes {
-            let Some(type_script) = type_script_dictionary.get(&type_script_hash) else {
-                warn!("Type script hash not found; should not get here.");
-                return false;
-            };
-
-            let public_input = self.kernel.mast_hash().encode();
-            let secret_input = self
-                .kernel
-                .mast_sequences()
-                .into_iter()
-                .flatten()
-                .collect_vec();
-
-            // we wrap triton-vm script execution in spawn_blocking as it
-            // could be a lengthy CPU intensive call.
-            let type_script_clone = (*type_script).clone();
-            let result = tokio::task::spawn_blocking(move || {
-                type_script_clone
-                    .program
-                    .run(public_input.into(), NonDeterminism::new(secret_input))
-            })
-            .await;
-
-            // The type script is satisfied if it halts gracefully, i.e.,
-            // without panicking. So we don't care about the output
-            if let Err(e) = result {
-                warn!(
-                    "Type script {} not satisfied for transaction: {}",
-                    type_script_hash, e
-                );
-                return false;
-            }
-        }
-
-        // Verify that the removal records generated from the primitive
-        // witness correspond to the removal records listed in the
-        // transaction kernel.
-        if witnessed_removal_records
-            .iter()
-            .map(|rr| Hash::hash_varlen(&rr.encode()))
-            .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-            .collect_vec()
-            != self
-                .kernel
-                .inputs
-                .iter()
-                .map(|rr| Hash::hash_varlen(&rr.encode()))
-                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-                .collect_vec()
-        {
-            warn!("Removal records as generated from witness do not match with those listed as inputs in transaction kernel.");
-            let witnessed_removal_record_hashes = witnessed_removal_records
-                .iter()
-                .map(|rr| Hash::hash_varlen(&rr.encode()))
-                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-                .collect_vec();
-            let listed_removal_record_hashes = self
-                .kernel
-                .inputs
-                .iter()
-                .map(|rr| Hash::hash_varlen(&rr.encode()))
-                .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
-                .collect_vec();
-            warn!(
-                "observed: {}",
-                witnessed_removal_record_hashes.iter().join(",")
-            );
-            warn!("listed: {}", listed_removal_record_hashes.iter().join(","));
-            return false;
-        }
-
-        // Verify that the mutator set accumulator listed in the
-        // primitive witness corresponds to the hash listed in the
-        // transaction's kernel.
-        if primitive_witness.mutator_set_accumulator.hash() != self.kernel.mutator_set_hash {
-            warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
-            debug!(
-                "Transaction mutator set hash: {}",
-                self.kernel.mutator_set_hash
-            );
-            debug!(
-                "Witness mutator set hash: {}",
-                primitive_witness.mutator_set_accumulator.hash()
-            );
-            return false;
-        }
-
-        // in regards to public announcements: there isn't anything to verify
-
-        true
     }
 }
 

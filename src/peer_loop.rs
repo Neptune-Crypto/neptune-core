@@ -776,7 +776,7 @@ impl PeerLoopHandler {
                 );
 
                 // If transaction is invalid, punish
-                if !transaction.is_valid() {
+                if !transaction.is_valid().await {
                     warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);

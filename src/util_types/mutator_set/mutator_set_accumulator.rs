@@ -356,6 +356,9 @@ impl MutatorSetAccumulator {
         self.add_helper(addition_record);
     }
 
+    /// Remove an item given its removal record. It is the caller's
+    /// responsibility to ensure that the removal record can be applied, for
+    /// instance by using [`can_remove`](Self::can_remove).
     pub fn remove(&mut self, removal_record: &RemovalRecord) {
         self.remove_helper(removal_record);
     }
