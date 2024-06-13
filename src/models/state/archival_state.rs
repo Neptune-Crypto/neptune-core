@@ -1099,7 +1099,7 @@ mod archival_state_tests {
         Ok(())
     }
 
-    #[traced_test]
+    // #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_multiple_inputs_outputs_in_block_test() {
         // Make a rollback of one block that contains multiple inputs and outputs.
@@ -1119,12 +1119,6 @@ mod archival_state_tests {
         let mut num_utxos = Block::premine_utxos(network).len();
 
         // 1. Create new block 1 with one input and four outputs and store it to disk
-        let (mut block_1a, _, _) = make_mock_block_with_valid_pow(
-            &archival_state.genesis_block,
-            None,
-            own_receiving_address,
-            rng.gen(),
-        );
         let genesis_block = archival_state.genesis_block.clone();
         let now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
@@ -1156,17 +1150,18 @@ mod archival_state_tests {
             .create_transaction(receiver_data, NeptuneCoins::new(4), now + seven_months)
             .await
             .unwrap();
-
-        block_1a
-            .accumulate_transaction(
-                sender_tx,
-                &archival_state
-                    .genesis_block
-                    .kernel
-                    .body
-                    .mutator_set_accumulator,
-            )
-            .await;
+        let (coinbase_tx, _) = global_state_lock
+            .global_state_lock
+            .lock_guard_mut()
+            .await
+            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+        let merged_tx = coinbase_tx.merge_with(sender_tx);
+        let block_1a = Block::new_block_from_template(
+            &archival_state.genesis_block,
+            merged_tx,
+            now + seven_months,
+            None,
+        );
 
         assert!(block_1a.is_valid(&genesis_block, now + seven_months));
 
@@ -1250,13 +1245,6 @@ mod archival_state_tests {
 
         for i in 0..10 {
             // Create next block with inputs and outputs
-            let (mut next_block, _, _) = make_mock_block_with_valid_pow(
-                &previous_block,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
-            let now = next_block.kernel.header.timestamp;
             let seven_months = Timestamp::months(7);
             let receiver_data = vec![
                 UtxoReceiverData {
@@ -1278,17 +1266,16 @@ mod archival_state_tests {
                     public_announcement: PublicAnnouncement::default(),
                 },
             ];
+            let now = Timestamp::now();
             let sender_tx = global_state
                 .create_transaction(receiver_data, NeptuneCoins::new(4), now + seven_months)
                 .await
                 .unwrap();
-
-            next_block
-                .accumulate_transaction(
-                    sender_tx,
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                )
-                .await;
+            let (coinbase_tx, _) =
+                global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
+            let block_tx = coinbase_tx.merge_with(sender_tx);
+            let next_block =
+                Block::new_block_from_template(&previous_block, block_tx, now + seven_months, None);
 
             assert!(
                 next_block.is_valid(&previous_block, now + seven_months),
@@ -1405,15 +1392,11 @@ mod archival_state_tests {
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mut block_1_a, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address, rng.gen());
         let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
 
-        // Verify that block_1 that only contains the coinbase output is valid
-        assert!(block_1_a.has_proof_of_work(&genesis_block));
-        assert!(block_1_a.is_valid(&genesis_block, now));
-
-        // Add a valid input to the block transaction
+        let (cbtx, cb_expected) =
+            global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let receiver_data = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
@@ -1430,21 +1413,17 @@ mod archival_state_tests {
             .create_transaction(vec![receiver_data], one_money, now + seven_months)
             .await
             .unwrap();
+        let block_tx = sender_tx.merge_with(cbtx);
+        let block_1_a = Block::new_block_from_template(&genesis_block, block_tx, now, None);
 
-        block_1_a
-            .accumulate_transaction(
-                sender_tx,
-                &genesis_block.kernel.body.mutator_set_accumulator,
-            )
-            .await;
-
-        // Block with signed transaction must validate
+        // Verify that block_1 is valid
+        assert!(block_1_a.has_proof_of_work(&genesis_block));
         assert!(block_1_a.is_valid(&genesis_block, now + seven_months));
 
         Ok(())
     }
 
-    #[traced_test]
+    // #[traced_test]
     #[tokio::test]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
@@ -1470,13 +1449,6 @@ mod archival_state_tests {
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-
-        let (mut block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
-            &genesis_block,
-            None,
-            genesis_spending_key.to_address(),
-            rng.gen(),
-        );
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -1522,29 +1494,30 @@ mod archival_state_tests {
                 },
             },
         ];
-        {
-            let tx_to_alice_and_bob = create_transaction_with_timestamp(
-                &genesis_state_lock,
-                &[
-                    receiver_data_for_alice.clone(),
-                    receiver_data_for_bob.clone(),
-                ]
-                .concat(),
-                fee,
-                launch + seven_months,
-            )
-            .await
-            .unwrap();
+        let tx_to_alice_and_bob = create_transaction_with_timestamp(
+            &genesis_state_lock,
+            &[
+                receiver_data_for_alice.clone(),
+                receiver_data_for_bob.clone(),
+            ]
+            .concat(),
+            fee,
+            launch + seven_months,
+        )
+        .await
+        .unwrap();
 
-            // Absorb and verify validity
-            block_1
-                .accumulate_transaction(
-                    tx_to_alice_and_bob,
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                )
-                .await;
-            assert!(block_1.is_valid(&genesis_block, launch + seven_months));
-        }
+        let now = genesis_block.kernel.header.timestamp;
+        let (cbtx, cb_expected) = genesis_state_lock
+            .lock_guard_mut()
+            .await
+            .make_coinbase_transaction(NeptuneCoins::zero(), now);
+        let block_tx = cbtx.merge_with(tx_to_alice_and_bob);
+
+        let block_1 = Block::new_block_from_template(&genesis_block, block_tx, now, None);
+
+        // Verify validity
+        assert!(block_1.is_valid(&genesis_block, launch + seven_months));
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -1560,8 +1533,8 @@ mod archival_state_tests {
                 .wallet_state
                 .expected_utxos
                 .add_expected_utxo(
-                    cb_utxo,
-                    cb_output_randomness,
+                    cb_expected.utxo,
+                    cb_expected.sender_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 )
@@ -1711,22 +1684,13 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
-            make_mock_block_with_valid_pow(
-                &block_1,
-                None,
-                genesis_spending_key.to_address(),
-                rng.gen(),
-            );
-        block_2
-            .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
-        assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
-        assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());
-
-        block_2
-            .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
+        let (cbtx, cb_expected) = genesis_state_lock
+            .lock_guard()
+            .await
+            .make_coinbase_transaction(NeptuneCoins::zero(), launch + seven_months);
+        let block_tx = cbtx.merge_with(tx_from_alice).merge_with(tx_from_bob);
+        let block_2 =
+            Block::new_block_from_template(&block_1, block_tx, launch + seven_months, None);
 
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
@@ -1771,8 +1735,8 @@ mod archival_state_tests {
             .wallet_state
             .expected_utxos
             .add_expected_utxo(
-                cb_utxo_block_2,
-                cb_sender_randomness_block_2,
+                cb_expected.utxo,
+                cb_expected.sender_randomness,
                 genesis_spending_key.privacy_preimage,
                 UtxoNotifier::Cli,
             )
