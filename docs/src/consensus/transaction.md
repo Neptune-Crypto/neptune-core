@@ -54,6 +54,9 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - keep a set of all announced indices and initialize it to the empty set
    - for each input UTXO:
      - compute the removal record index set
+     - read the removal record chunks dictionary from memory
+     - for each entry in this dictionary, verify that the chunk belongs to the SWBF MMR from the mutator set accumulator (authentication paths are either read from memory or divined in -- to be decided)
+     - for all indices in the index set, verify that if it is in the inactive part of the SWBF, then it lives in some dictionary entry (chunk)
      - add the indices to the set of all announced indices and filter out duplicates
      - verify that the set of all announced indices has grown
    - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
@@ -162,7 +165,7 @@ The claim for certifying the validity of transaction based on its inclusion in a
 
 ### F: Transaction Data Update
 
-A transaction is valid if another transaction that is identical except for fixing an older mutator set hash or timestamp, was valid. Specifically, the program The program `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies the update of transaction data as follows:
+A transaction is valid if another transaction that is identical except for fixing an older mutator set hash or timestamp, was valid. Specifically, the program `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies the update of transaction data as follows:
  - divine `tx : TransactionKernel`
  - verify `tx` with some divined proof
  - create a new `TransactionKernel` object `kernel`
@@ -173,7 +176,9 @@ A transaction is valid if another transaction that is identical except for fixin
      - authenticate `kernel_aocl` against the mutator set MAST hash `kernel.mutator_set_hash` using a divined authentication path
      - divine the mutator set AOCL MMR accumultar `tx_aocl`
      - authenticate the `tx_aocl` against the mutator set MAST hash `tx.mutator_set_hash` using a divined authentication path
-     - verify that there is a set of AOCL leafs whose addition sends `tx_aocl` to `kernel_aocl`.
+     - verify that there is a set of AOCL leafs whose addition sends `tx_aocl` to `kernel_aocl`
+
+Note that it is not necessary to verify that the removal records' authentication paths were updated correctly as this is implied by `tx` being valid.
 
 ### G: Transaction Proof Update
 
