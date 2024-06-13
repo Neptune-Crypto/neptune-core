@@ -1,1 +1,0 @@
-Some UML diagrams of neptune-core and related crates are available at [tinyurl.com/neptune-diagrams](https://tinyurl.com/neptune-diagrams).

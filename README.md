@@ -42,6 +42,14 @@ With a functioning version of cargo, compilation on Windows should just work out
 
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience that you will then be able to open and receive connections to other nodes through Nepture Core's built-in peer-discovery process.
 
+## Documentation
+
+Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local copy:
+
+ - install mdBook: `cargo install mdbook`
+ - enter into the `docs/` directory: `cd docs`
+ - run server: `mdbook serve --open`
+
 ## Dashboard
 
 This software comes with a dashboard that communicates with the daemon. The dashboard is a console-based user interface to generate addresses, receive and send money, and monitor the behavior of the client. The daemon must be running before the dashboard is started. To start the dashboard, run: `neptune-dashboard`. (If you set daemon's RPC port to a custom value specify that value with the flag `--port [port]`.)

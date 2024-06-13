@@ -1,4 +1,8 @@
-# Synchronization for Archival Nodes
+# Syncing
+
+Syncing is different depending on the node type.
+
+## Synchronization for Archival Nodes
 
 Synchronization describes the state that a blockchain client can be in.
 
