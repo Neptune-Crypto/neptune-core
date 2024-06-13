@@ -715,11 +715,11 @@ mod tests {
         mempool.insert(&tx_by_other_original);
 
         // Create next block which includes preminer's transaction
-        let (mut block_2, _, _) =
-            make_mock_block(&block_1, None, premine_receiver_address, rng.gen());
-        block_2
-            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
+        let (coinbase_transaction, _expected_utxo) = premine_receiver_global_state
+            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+        let block_transaction = tx_by_preminer.merge_with(coinbase_transaction);
+        let block_2 =
+            Block::new_block_from_template(&block_1, block_transaction, Timestamp::now(), None);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -740,23 +740,20 @@ mod tests {
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
         );
 
-        let (block_3_with_no_input, _, _) =
-            make_mock_block(&block_2, None, premine_receiver_address, rng.gen());
-        let mut block_3_with_updated_tx = block_3_with_no_input.clone();
+        let (coinbase_transaction, _expected_utxo) = premine_receiver_global_state
+            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+        let block_transaction = tx_by_other_updated.clone().merge_with(coinbase_transaction);
+        let block_3 =
+            Block::new_block_from_template(&block_2, block_transaction, Timestamp::now(), None);
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
             tx_by_other_updated.kernel.mutator_set_hash
         );
-        block_3_with_updated_tx
-            .accumulate_transaction(
-                tx_by_other_updated.clone(),
-                &block_2.kernel.body.mutator_set_accumulator,
-            )
-            .await;
+
         now = block_2.kernel.header.timestamp;
         assert!(
-            block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
+            block_3.is_valid(&block_2, now + seven_months),
             "Block with tx with updated mutator set data must be valid"
         );
 
@@ -776,16 +773,17 @@ mod tests {
             previous_block = next_block;
         }
 
-        let (mut block_14, _, _) =
-            make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
-        assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
-        block_14
-            .accumulate_transaction(
-                tx_by_other_updated,
-                &previous_block.kernel.body.mutator_set_accumulator,
-            )
-            .await;
+        let (coinbase_transaction, _expected_utxo) =
+            other_global_state.make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+        let block_transaction = coinbase_transaction.merge_with(tx_by_other_updated);
+        let block_14 = Block::new_block_from_template(
+            &previous_block,
+            block_transaction,
+            Timestamp::now(),
+            None,
+        );
+        assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         now = previous_block.kernel.header.timestamp;
         assert!(
             block_14.is_valid(&previous_block, now+seven_months),
