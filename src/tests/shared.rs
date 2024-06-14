@@ -875,7 +875,7 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body, BlockProof::Invalid),
+        Block::new(block_header, block_body, BlockProof::DummyProof),
         coinbase_utxo,
         coinbase_output_randomness,
     )

@@ -61,6 +61,7 @@ pub enum BlockProof {
     #[default]
     Invalid,
     SingleProof(Proof),
+    DummyProof, // TODO: remove me
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -150,10 +151,15 @@ impl From<TransferBlock> for Block {
             header: t_block.header,
             body: t_block.body,
         };
+        let proof = if t_block.proof.0.is_empty() {
+            BlockProof::DummyProof
+        } else {
+            BlockProof::SingleProof(t_block.proof)
+        };
         Self {
             digest: Default::default(), // calc'd in hash()
             kernel,
-            proof: BlockProof::SingleProof(t_block.proof),
+            proof,
         }
     }
 }
@@ -170,6 +176,7 @@ impl From<Block> for TransferBlock {
                 error!("Invalid blocks cannot be transferred");
                 panic!()
             }
+            BlockProof::DummyProof => Proof(vec![]),
         };
         Self {
             header: block.kernel.header,
@@ -236,7 +243,7 @@ impl Block {
         };
 
         // TODO: Produce a proof of block correctness.
-        let block_proof = BlockProof::Invalid;
+        let block_proof = BlockProof::DummyProof;
 
         (block_header, block_body, block_proof)
     }
