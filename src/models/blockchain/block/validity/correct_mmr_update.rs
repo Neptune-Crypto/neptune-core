@@ -1,4 +1,4 @@
-use crate::{models::consensus::tasm::program::ConsensusProgram, Hash};
+use crate::{models::proof_abstractions::tasm::program::ConsensusProgram, Hash};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
@@ -8,7 +8,7 @@ use tasm_lib::{
     },
 };
 
-use crate::models::consensus::SecretWitness;
+use crate::models::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMmrUpdateWitness {

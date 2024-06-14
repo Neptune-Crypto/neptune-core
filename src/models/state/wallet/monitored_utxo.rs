@@ -1,4 +1,4 @@
-use crate::{models::consensus::timestamp::Timestamp, prelude::twenty_first};
+use crate::{models::proof_abstractions::timestamp::Timestamp, prelude::twenty_first};
 
 use std::collections::VecDeque;
 

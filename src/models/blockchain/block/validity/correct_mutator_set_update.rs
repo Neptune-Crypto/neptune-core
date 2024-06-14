@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
 
 use crate::{
-    models::consensus::{tasm::program::ConsensusProgram, SecretWitness},
+    models::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
     util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
 };
 

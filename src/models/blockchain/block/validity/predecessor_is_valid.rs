@@ -10,7 +10,7 @@ use tasm_lib::{
 
 use crate::models::{
     blockchain::block::Block,
-    consensus::{tasm::program::ConsensusProgram, SecretWitness},
+    proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
 };
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]

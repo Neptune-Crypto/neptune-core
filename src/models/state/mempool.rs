@@ -11,7 +11,7 @@
 use crate::{
     models::{
         blockchain::{transaction::TransactionProof, type_scripts::neptune_coins::NeptuneCoins},
-        consensus::timestamp::Timestamp,
+        proof_abstractions::timestamp::Timestamp,
     },
     prelude::twenty_first,
     util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,

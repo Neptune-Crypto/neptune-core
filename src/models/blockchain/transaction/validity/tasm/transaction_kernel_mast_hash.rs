@@ -432,7 +432,7 @@ mod tests {
     use twenty_first::math::bfield_codec::BFieldCodec;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
-    use crate::models::consensus::mast_hash::MastHash;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
 
     use super::*;
 

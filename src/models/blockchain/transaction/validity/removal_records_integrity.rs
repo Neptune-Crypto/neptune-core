@@ -1,6 +1,6 @@
 use crate::models::blockchain::transaction;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
@@ -29,9 +29,7 @@ use twenty_first::{
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
 };
 
-use crate::models::consensus::{
-    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-};
+use crate::models::proof_abstractions::SecretWitness;
 use crate::{
     models::blockchain::{
         shared::Hash,
@@ -123,19 +121,6 @@ impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
 
         Self {
             witness: removal_records_integrity_witness,
-        }
-    }
-}
-
-impl ValidationLogic for RemovalRecordsIntegrity {
-    fn vast(&self) -> ValidityTree {
-        ValidityTree {
-            vast_type: ValidityAstType::Atomic(
-                Some(Box::new(self.witness.program())),
-                self.witness.claim(),
-                WhichProgram::RemovalRecordsIntegrity,
-            ),
-            witness_type: WitnessType::RawWitness(self.witness.nondeterminism().into()),
         }
     }
 }

@@ -6,7 +6,7 @@ use super::block_header::TARGET_DIFFICULTY_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use serde::{Deserialize, Serialize};
 use twenty_first::math::digest::Digest;

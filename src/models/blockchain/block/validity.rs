@@ -9,7 +9,7 @@ use tasm_lib::{
 };
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::consensus::{tasm::program::ConsensusProgram, SecretWitness};
+use crate::models::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness};
 
 use self::{
     coinbase_is_valid::CoinbaseIsValid,

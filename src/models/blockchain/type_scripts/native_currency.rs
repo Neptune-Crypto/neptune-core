@@ -5,15 +5,15 @@ use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::SecretWitness;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::models::{
     blockchain::transaction::primitive_witness::SaltedUtxos,
-    consensus::tasm::program::ConsensusProgram,
+    proof_abstractions::tasm::program::ConsensusProgram,
 };
 
 use crate::models::blockchain::type_scripts::BFieldCodec;
-use crate::models::consensus::tasm::builtins as tasm;
+use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 

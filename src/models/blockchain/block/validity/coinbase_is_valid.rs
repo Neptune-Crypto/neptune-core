@@ -11,7 +11,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::{
     blockchain::block::Block,
-    consensus::{tasm::program::ConsensusProgram, SecretWitness},
+    proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
 };
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]

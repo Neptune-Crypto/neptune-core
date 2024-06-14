@@ -1,7 +1,7 @@
 use crate::{
     models::{
         blockchain::transaction,
-        consensus::{
+        proof_abstractions::{
             mast_hash::MastHash, tasm::program::ConsensusProgram, RawWitness, ValidationLogic,
             ValidityAstType, ValidityTree, WhichProgram, WitnessType,
         },
@@ -23,7 +23,7 @@ use tasm_lib::{
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::{blockchain::transaction::utxo::LockScript, consensus::SecretWitness};
+use crate::models::{blockchain::transaction::utxo::LockScript, proof_abstractions::SecretWitness};
 
 pub struct LockScriptHalts {
     pub program: Program,

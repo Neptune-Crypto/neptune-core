@@ -5,7 +5,7 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+    blockchain::type_scripts::neptune_coins::NeptuneCoins, proof_abstractions::timestamp::Timestamp,
 };
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
@@ -112,7 +112,8 @@ mod test {
     use rand::{thread_rng, Rng, RngCore};
 
     use crate::models::{
-        blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+        blockchain::type_scripts::neptune_coins::NeptuneCoins,
+        proof_abstractions::timestamp::Timestamp,
     };
 
     use super::CoinWithPossibleTimeLock;

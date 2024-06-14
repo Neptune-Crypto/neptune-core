@@ -1,7 +1,7 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;

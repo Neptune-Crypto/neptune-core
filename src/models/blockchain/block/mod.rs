@@ -1,6 +1,6 @@
 use crate::config_models::network::Network;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;

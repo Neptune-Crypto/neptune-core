@@ -1,8 +1,8 @@
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-use crate::models::consensus::mast_hash::HasDiscriminant;
-use crate::models::consensus::mast_hash::MastHash;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;

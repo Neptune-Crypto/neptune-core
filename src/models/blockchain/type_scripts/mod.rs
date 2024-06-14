@@ -1,5 +1,5 @@
 use crate::{
-    models::consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram},
+    models::proof_abstractions::{mast_hash::MastHash, tasm::program::ConsensusProgram},
     Hash,
 };
 use get_size::GetSize;

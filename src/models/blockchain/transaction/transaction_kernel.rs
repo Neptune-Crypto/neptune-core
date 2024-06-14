@@ -1,7 +1,7 @@
 use crate::{
     models::{
         blockchain::type_scripts::neptune_coins::{pseudorandom_amount, NeptuneCoins},
-        consensus::{
+        proof_abstractions::{
             mast_hash::{HasDiscriminant, MastHash},
             timestamp::Timestamp,
         },

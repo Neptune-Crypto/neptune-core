@@ -1,5 +1,5 @@
 use crate::models::{
-    blockchain::transaction::utxo::Coin, consensus::tasm::program::ConsensusProgram,
+    blockchain::transaction::utxo::Coin, proof_abstractions::tasm::program::ConsensusProgram,
 };
 
 use super::native_currency::NativeCurrency;

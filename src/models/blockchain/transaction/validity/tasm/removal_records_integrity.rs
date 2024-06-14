@@ -1,4 +1,4 @@
-use crate::models::consensus::mast_hash::MastHash;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
@@ -351,8 +351,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 mod tests {
     use std::collections::HashMap;
 
-    use super::*;
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
+
+    use super::*;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{memory::encode_to_memory, traits::compiled_program::test_rust_shadow};
     use triton_vm::prelude::{Claim, Stark};
@@ -464,16 +465,15 @@ mod tests {
 mod bench {
     use std::collections::HashMap;
 
-    use crate::{models::consensus::mast_hash::MastHash, prelude::triton_vm};
+    use crate::{models::proof_abstractions::mast_hash::MastHash, prelude::triton_vm};
 
+    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{
         memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
         snippet_bencher::BenchmarkCase,
     };
     use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
-
-    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 
     use super::RemovalRecordsIntegrity;
     use tasm_lib::traits::compiled_program::bench_and_profile_program;

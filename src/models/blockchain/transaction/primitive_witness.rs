@@ -25,8 +25,8 @@ use tracing::{debug, warn};
 use crate::{
     models::{
         blockchain::type_scripts::TypeScript,
-        consensus::{mast_hash::MastHash, timestamp::Timestamp},
         state::wallet::address::generation_address,
+        proof_abstractions::{mast_hash::MastHash, timestamp::Timestamp},
     },
     util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
@@ -35,7 +35,7 @@ use crate::{
 use crate::{
     models::{
         blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-        consensus::tasm::program::ConsensusProgram,
+        proof_abstractions::tasm::program::ConsensusProgram,
     },
     util_types::mutator_set::commit,
 };
@@ -581,7 +581,7 @@ mod test {
     use super::PrimitiveWitness;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::consensus::mast_hash::MastHash;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;

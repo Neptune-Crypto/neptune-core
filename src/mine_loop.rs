@@ -4,7 +4,7 @@ use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::models::state::{GlobalState, GlobalStateLock};
@@ -354,7 +354,7 @@ mod mine_loop_tests {
     use crate::WalletSecret;
     use crate::{
         config_models::network::Network,
-        models::{consensus::timestamp::Timestamp, state::UtxoReceiverData},
+        models::{proof_abstractions::timestamp::Timestamp, state::UtxoReceiverData},
         tests::shared::mock_genesis_global_state,
     };
     use tasm_lib::Digest;

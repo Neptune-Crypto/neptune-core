@@ -1,4 +1,4 @@
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use crate::connect_to_peers::close_peer_connected_callback;

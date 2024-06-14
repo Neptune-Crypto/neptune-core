@@ -3,7 +3,7 @@ use crate::models::{
         transaction,
         type_scripts::{native_currency::NativeCurrencyWitness, TypeScript, TypeScriptWitness},
     },
-    consensus::{ValidationLogic, ValidityAstType, ValidityTree, WitnessType},
+    proof_abstractions::{ValidationLogic, ValidityAstType, ValidityTree, WitnessType},
 };
 
 use itertools::Itertools;

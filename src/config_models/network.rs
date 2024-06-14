@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use strum::EnumIter;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {

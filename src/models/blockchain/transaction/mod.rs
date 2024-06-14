@@ -1,10 +1,11 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::consensus::mast_hash::MastHash;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
+pub mod validity;
 
 use anyhow::{bail, Result};
 use arbitrary::Arbitrary;
@@ -72,7 +73,7 @@ impl TransactionProof {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum TransactionProofError {
+pub enum TransactionProofError {
     CannotUpdateProofVariant,
     CannotUpdatePrimitiveWitness,
     CannotUpdateSingleProof,
@@ -427,7 +428,8 @@ mod transaction_tests {
     use super::*;
     use crate::{
         models::{
-            blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
+            blockchain::type_scripts::neptune_coins::NeptuneCoins,
+            proof_abstractions::timestamp::Timestamp,
         },
         tests::shared::make_mock_transaction,
         util_types::mutator_set::commit,

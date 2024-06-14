@@ -8,9 +8,9 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::models::consensus::SecretWitness;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -33,8 +33,8 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::consensus::tasm::builtins as tasm;
-use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::builtins as tasm;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -564,7 +564,7 @@ mod test {
 
     use crate::models::{
         blockchain::type_scripts::time_lock::TimeLock,
-        consensus::{tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness},
+        proof_abstractions::{tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness},
     };
 
     use super::TimeLockWitness;

@@ -1,9 +1,9 @@
 use crate::models::blockchain::type_scripts::TypeScript;
-use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::transaction::{self};
-use crate::models::consensus::SecretWitness;
+use crate::models::proof_abstractions::SecretWitness;
 
 use get_size::GetSize;
 use itertools::Itertools;

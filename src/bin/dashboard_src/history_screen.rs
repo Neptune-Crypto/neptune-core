@@ -10,7 +10,7 @@ use itertools::Itertools;
 use neptune_core::{
     models::{
         blockchain::{block::block_height::BlockHeight, type_scripts::neptune_coins::NeptuneCoins},
-        consensus::timestamp::Timestamp,
+        proof_abstractions::timestamp::Timestamp,
     },
     rpc_server::RPCClient,
 };
