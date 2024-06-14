@@ -53,16 +53,14 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the input UTXOs
    - divine the salt
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
-   - keep a set of all announced indices and initialize it to the empty set
    - for each input UTXO:
      - compute the removal record index set
      - read the removal record chunks dictionary from memory
      - for each entry in this dictionary, verify that the chunk belongs to the SWBF MMR from the mutator set accumulator (authentication paths are either read from memory or divined in -- to be decided)
      - for all indices in the index set, verify that if it is in the inactive part of the SWBF, then it lives in some dictionary entry (chunk)
-     - add the indices to the set of all announced indices and filter out duplicates
-     - verify that the set of all announced indices has grown
+     - verify that its AOCL leaf index is unique
    - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
-   - output the hash of the salted UTXOs.
+   - output the hash of the salted input UTXOs.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
    - divine the output UTXOs
    - divine the salt

@@ -1,4 +1,5 @@
 use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
@@ -51,7 +52,7 @@ use crate::{
     TasmObject,
 )]
 pub struct RemovalRecordsIntegrityWitness {
-    pub input_utxos: Vec<Utxo>,
+    pub input_utxos: SaltedUtxos,
     pub membership_proofs: Vec<MsMembershipProof>,
     pub aocl: MmrAccumulator<Hash>,
     pub swbfi: MmrAccumulator<Hash>,
@@ -62,7 +63,7 @@ pub struct RemovalRecordsIntegrityWitness {
 impl RemovalRecordsIntegrityWitness {
     pub fn new(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
-            input_utxos: primitive_witness.input_utxos.utxos.clone(),
+            input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
             kernel: primitive_witness.kernel.clone(),
             aocl: primitive_witness.mutator_set_accumulator.aocl.clone(),
@@ -101,17 +102,6 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
     pub witness: RemovalRecordsIntegrityWitness,
-}
-
-impl ConsensusProgram for RemovalRecordsIntegrity {
-    fn source(&self) {
-        todo!()
-    }
-
-    fn code(&self) -> Vec<LabelledInstruction> {
-        let program = <Self as CompiledProgram>::program();
-        program.labelled_instructions()
-    }
 }
 
 impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
@@ -381,13 +371,16 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .collect_vec();
         kernel_index_set_hashes.sort();
 
-        Ok(RemovalRecordsIntegrityWitness {
-            input_utxos,
-            membership_proofs,
-            aocl,
-            swbfi,
-            swbfa_hash,
-            kernel,
-        })
+        let salted_utxos = todo!();
+        todo!()
+
+        // Ok(RemovalRecordsIntegrityWitness {
+        //     salted_utxos,
+        //     membership_proofs,
+        //     aocl,
+        //     swbfi,
+        //     swbfa_hash,
+        //     kernel,
+        // })
     }
 }
