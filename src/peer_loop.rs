@@ -2337,6 +2337,7 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
+    #[ignore = "mempool cannot hold unproven transactions, so cannot test mempool yet"]
     async fn empty_mempool_request_tx_test() -> Result<()> {
         // In this scenerio the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.

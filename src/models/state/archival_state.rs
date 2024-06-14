@@ -1029,12 +1029,6 @@ mod archival_state_tests {
                 )
                 .await
                 .unwrap();
-            let (mut mock_block_2, _, _) = make_mock_block_with_valid_pow(
-                &mock_block_1,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
 
             let mock_block_2 =
                 Block::new_block_from_template(&mock_block_1, sender_tx, Timestamp::now(), None);
@@ -1383,19 +1377,17 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
-        let mut rng = thread_rng();
         let network = Network::RegTest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
 
-        let (cbtx, cb_expected) =
+        let (cbtx, _cb_expected) =
             global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let receiver_data = UtxoReceiverData {
@@ -1407,9 +1399,7 @@ mod archival_state_tests {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
-        let sender_tx = global_state_lock
-            .lock_guard_mut()
-            .await
+        let sender_tx = global_state
             .create_transaction(vec![receiver_data], one_money, now + seven_months)
             .await
             .unwrap();
@@ -1427,8 +1417,6 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
-
-        let mut rng = thread_rng();
         let network = Network::RegTest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;

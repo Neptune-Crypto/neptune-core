@@ -852,7 +852,7 @@ mod wallet_tests {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
-        let mut own_global_state = mock_genesis_global_state(network, 2, own_wallet_secret).await;
+        let own_global_state = mock_genesis_global_state(network, 2, own_wallet_secret).await;
         let own_spending_key = own_global_state
             .lock_guard()
             .await
@@ -911,7 +911,7 @@ mod wallet_tests {
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
-        let mut now = genesis_block.kernel.header.timestamp;
+        let now = genesis_block.kernel.header.timestamp;
         let valid_tx = premine_receiver_global_state
             .create_transaction(
                 receiver_data_to_other.clone(),

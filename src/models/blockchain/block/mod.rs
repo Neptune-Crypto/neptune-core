@@ -763,7 +763,7 @@ mod block_tests {
         pub fn new_block_from_template(
             previous_block: &Block,
             transaction: Transaction,
-            mut block_timestamp: Timestamp,
+            block_timestamp: Timestamp,
             target_block_interval: Option<u64>,
         ) -> Self {
             let (header, body, proof) = Block::make_block_template(

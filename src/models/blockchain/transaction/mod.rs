@@ -349,7 +349,7 @@ impl Transaction {
             mutator_set_hash: self.kernel.mutator_set_hash,
         };
 
-        let merger_proof = todo!();
+        let merger_proof = todo!("transaction merging not implemented yet");
 
         Transaction {
             kernel: merged_kernel,
