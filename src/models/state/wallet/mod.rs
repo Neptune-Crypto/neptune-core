@@ -879,7 +879,6 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let receiver_data_12_to_other = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
@@ -969,8 +968,7 @@ mod wallet_tests {
         own_global_state
             .lock_guard_mut()
             .await
-            .wallet_state
-            .update_wallet_state_with_new_block(&previous_msa, &block_1)
+            .set_new_tip(block_1.clone())
             .await
             .unwrap();
 
@@ -1019,12 +1017,9 @@ mod wallet_tests {
             own_global_state
                 .lock_guard_mut()
                 .await
-                .wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                    &next_block,
-                )
-                .await?;
+                .set_new_tip(next_block.clone())
+                .await
+                .unwrap();
             premine_receiver_global_state
                 .set_new_tip(next_block.clone())
                 .await
@@ -1097,22 +1092,11 @@ mod wallet_tests {
         own_global_state
             .lock_guard_mut()
             .await
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2_b,
-            )
-            .await?;
-        premine_receiver_global_state
             .set_new_tip(block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
-                &block_2_b,
-            )
+            .set_new_tip(block_2_b.clone())
             .await
             .unwrap();
         let monitored_utxos_at_2b: Vec<_> =
