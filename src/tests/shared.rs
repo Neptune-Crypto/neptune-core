@@ -466,8 +466,10 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .collect_vec();
     kernel_index_set_hashes.sort();
 
+    let salted_input_utxos = SaltedUtxos::new(input_utxos);
+
     RemovalRecordsIntegrityWitness {
-        input_utxos,
+        input_utxos: salted_input_utxos,
         membership_proofs,
         aocl,
         swbfi,

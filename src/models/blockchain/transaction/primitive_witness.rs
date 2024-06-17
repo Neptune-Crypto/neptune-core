@@ -25,8 +25,8 @@ use tracing::{debug, warn};
 use crate::{
     models::{
         blockchain::type_scripts::TypeScript,
-        state::wallet::address::generation_address,
         proof_abstractions::{mast_hash::MastHash, timestamp::Timestamp},
+        state::wallet::address::generation_address,
     },
     util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,

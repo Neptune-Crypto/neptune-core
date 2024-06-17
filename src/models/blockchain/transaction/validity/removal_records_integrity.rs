@@ -1,5 +1,5 @@
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
@@ -19,8 +19,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::traits::compiled_program::CompiledProgram;
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -78,13 +76,25 @@ impl RemovalRecordsIntegrityWitness {
 
 impl SecretWitness for RemovalRecordsIntegrityWitness {
     fn nondeterminism(&self) -> NonDeterminism {
+        // set memory
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             self.clone(),
         );
-        NonDeterminism::default().with_ram(memory)
+
+        // set digests
+        let digests = vec![
+            self.kernel
+                .mast_path(TransactionKernelField::MutatorSetHash),
+            self.kernel.mast_path(TransactionKernelField::InputUtxos),
+        ]
+        .concat();
+
+        NonDeterminism::default()
+            .with_ram(memory)
+            .with_digests(digests)
     }
 
     fn standard_input(&self) -> PublicInput {
@@ -92,28 +102,12 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 
     fn program(&self) -> triton_vm::prelude::Program {
-        RemovalRecordsIntegrity {
-            witness: self.clone(),
-        }
-        .program()
+        RemovalRecordsIntegrity {}.program()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
-pub struct RemovalRecordsIntegrity {
-    pub witness: RemovalRecordsIntegrityWitness,
-}
-
-impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
-    fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
-        let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::new(&primitive_witness);
-
-        Self {
-            witness: removal_records_integrity_witness,
-        }
-    }
-}
+pub struct RemovalRecordsIntegrity {}
 
 impl RemovalRecordsIntegrityWitness {
     pub fn pseudorandom_merkle_root_with_authentication_paths(
@@ -371,16 +365,15 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .collect_vec();
         kernel_index_set_hashes.sort();
 
-        let salted_utxos = todo!();
-        todo!()
+        let salted_utxos = SaltedUtxos::new(input_utxos);
 
-        // Ok(RemovalRecordsIntegrityWitness {
-        //     salted_utxos,
-        //     membership_proofs,
-        //     aocl,
-        //     swbfi,
-        //     swbfa_hash,
-        //     kernel,
-        // })
+        Ok(RemovalRecordsIntegrityWitness {
+            input_utxos: salted_utxos,
+            membership_proofs,
+            aocl,
+            swbfi,
+            swbfa_hash,
+            kernel,
+        })
     }
 }

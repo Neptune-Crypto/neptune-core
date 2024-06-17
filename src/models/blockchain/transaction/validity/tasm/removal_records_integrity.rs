@@ -1,65 +1,29 @@
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
-use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
-
-use std::collections::HashSet;
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
-use itertools::Itertools;
 use strum::EnumCount;
-use tasm_lib::data_type::DataType;
-use tasm_lib::library::Library;
-use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::traits::compiled_program::CompiledProgram;
-use tasm_lib::{
-    list::{
-        contiguous_list::get_pointer_list::GetPointerList,
-        higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
-        multiset_equality::MultisetEquality,
-    },
-    mmr::bag_peaks::BagPeaks,
-    DIGEST_LENGTH,
-};
 use triton_vm::instruction::LabelledInstruction;
-use triton_vm::prelude::{triton_asm, BFieldElement, NonDeterminism, PublicInput};
+use triton_vm::prelude::BFieldElement;
 use twenty_first::{
-    math::{bfield_codec::BFieldCodec, tip5::Digest},
+    math::tip5::Digest,
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     },
 };
 
+use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::{
     RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness,
-};
-use crate::{
-    models::blockchain::{
-        shared::Hash,
-        transaction::{
-            transaction_kernel::TransactionKernel,
-            validity::tasm::transaction_kernel_mast_hash::TransactionKernelMastHash,
-        },
-    },
-    util_types::mutator_set::removal_record::AbsoluteIndexSet,
-};
-use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
-
-use super::{
-    compute_canonical_commitment::ComputeCanonicalCommitment, compute_indices::ComputeIndices,
-    hash_index_list::HashIndexList, hash_removal_record_indices::HashRemovalRecordIndices,
-    hash_utxo::HashUtxo, verify_aocl_membership::VerifyAoclMembership,
 };
 
 // impl CompiledProgram for RemovalRecordsIntegrity {
@@ -373,16 +337,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let aocl: MmrAccumulator<Hash> = rriw.aocl;
         let swbfi: MmrAccumulator<Hash> = rriw.swbfi;
 
-        // Assert that the kernel from the witness matches the hash in the
-        // public input. Now we can trust all data in kernel.
-        assert_eq!(
-            txk_digest,
-            rriw.kernel.mast_hash(),
-            "hash of kernel ({})\nwitness kernel ({})",
-            txk_digest,
-            rriw.kernel.mast_hash()
-        );
-
         // authenticate the mutator set accumulator against the txk mast hash
         let aocl_mmr_bagged: Digest = aocl.bag_peaks();
         let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
@@ -395,8 +349,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         tasmlib::tasm_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
-            msah,
-            TransactionKernelField::COUNT.ilog2(),
+            Hash::hash(&msah),
+            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
 
         // iterate over all input UTXOs
@@ -430,8 +384,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             let mut inactive_chunk_indices: Vec<u64> = Vec::new();
             let mut j = 0;
             while j < index_set.len() {
-                let index = index_set[j];
-                let chunk_index: u64 = (index / (BATCH_SIZE as u128)) as u64;
+                let absolute_index = index_set[j];
+                let chunk_index: u64 = (absolute_index / (CHUNK_SIZE as u128)) as u64;
                 if chunk_index < swbfi.count_leaves()
                     && !inactive_chunk_indices.contains(&chunk_index)
                 {
@@ -456,6 +410,15 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             input_index += 1;
         }
 
+        // authenticate computed removal records against txk mast hash
+        let removal_records_digest = Hash::hash(&rriw.kernel.inputs);
+        tasmlib::tasm_hashing_merkle_verify(
+            txk_digest,
+            TransactionKernelField::InputUtxos as u32,
+            removal_records_digest,
+            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+        );
+
         // compute and output hash of salted input UTXOs
         let hash_of_inputs = Hash::hash(salted_input_utxos);
         tasmlib::tasm_io_write_to_stdout___digest(hash_of_inputs);
@@ -468,14 +431,46 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
-    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
+    use crate::models::{
+        blockchain::transaction::primitive_witness::PrimitiveWitness,
+        proof_abstractions::SecretWitness,
+    };
 
     use super::*;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{memory::encode_to_memory, traits::compiled_program::test_rust_shadow};
-    use triton_vm::prelude::{Claim, Stark};
+    use proptest::{
+        arbitrary::Arbitrary, prop_assert, strategy::Strategy, test_runner::TestRunner,
+    };
+    use test_strategy::proptest;
+
+    #[proptest(cases = 5)]
+    fn derived_witness_generates_accepting_program_proptest(
+        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+    ) {
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::new(&primitive_witness);
+        let result = RemovalRecordsIntegrity {}.run(
+            &removal_records_integrity_witness.standard_input(),
+            removal_records_integrity_witness.nondeterminism(),
+        );
+        prop_assert!(result.is_ok());
+    }
+
+    #[test]
+    fn derived_witness_generates_accepting_program_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::new(&primitive_witness);
+        let result = RemovalRecordsIntegrity {}.run(
+            &removal_records_integrity_witness.standard_input(),
+            removal_records_integrity_witness.nondeterminism(),
+        );
+        assert!(result.is_ok());
+    }
 
     // #[test]
     // fn test_validation_logic() {
@@ -548,14 +543,6 @@ mod tests {
     //     }
     // }
 
-    #[test]
-    fn program_is_deterministic() {
-        todo!()
-        // let program = RemovalRecordsIntegrity::program();
-        // let other_program = RemovalRecordsIntegrity::program();
-        // assert_eq!(program, other_program);
-    }
-
     // #[test]
     // fn tasm_matches_rust() {
     //     let mut seed = [0u8; 32];
@@ -584,20 +571,20 @@ mod tests {
 
 #[cfg(test)]
 mod bench {
-    use std::collections::HashMap;
+    // use std::collections::HashMap;
 
-    use crate::{models::proof_abstractions::mast_hash::MastHash, prelude::triton_vm};
+    // use crate::{models::proof_abstractions::mast_hash::MastHash, prelude::triton_vm};
 
-    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{
-        memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
-        snippet_bencher::BenchmarkCase,
-    };
-    use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
+    // use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
+    // use rand::{rngs::StdRng, Rng, SeedableRng};
+    // use tasm_lib::{
+    //     memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
+    //     snippet_bencher::BenchmarkCase,
+    // };
+    // use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
 
-    use super::RemovalRecordsIntegrity;
-    use tasm_lib::traits::compiled_program::bench_and_profile_program;
+    // use super::RemovalRecordsIntegrity;
+    // use tasm_lib::traits::compiled_program::bench_and_profile_program;
 
     // #[test]
     // fn benchmark() {

@@ -280,7 +280,7 @@ pub mod test {
         assert!(
             NativeCurrency
                 .run(
-                    &native_currency_witness.standard_input().individual_tokens,
+                    &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
                 .is_ok(),
@@ -310,7 +310,7 @@ pub mod test {
         assert!(
             NativeCurrency
                 .run(
-                    &native_currency_witness.standard_input().individual_tokens,
+                    &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
                 .is_err(),
@@ -341,7 +341,7 @@ pub mod test {
         assert!(
             NativeCurrency
                 .run(
-                    &native_currency_witness.standard_input().individual_tokens,
+                    &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
                 .is_err(),

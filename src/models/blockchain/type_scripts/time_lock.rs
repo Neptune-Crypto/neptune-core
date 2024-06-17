@@ -564,7 +564,9 @@ mod test {
 
     use crate::models::{
         blockchain::type_scripts::time_lock::TimeLock,
-        proof_abstractions::{tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness},
+        proof_abstractions::{
+            tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
+        },
     };
 
     use super::TimeLockWitness;
@@ -581,7 +583,7 @@ mod test {
         assert!(
             TimeLock {}
                 .run(
-                    &time_lock_witness.standard_input().individual_tokens,
+                    &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )
                 .is_ok(),
@@ -603,7 +605,7 @@ mod test {
         assert!(
             TimeLock {}
                 .run(
-                    &time_lock_witness.standard_input().individual_tokens,
+                    &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )
                 .is_err(),
@@ -625,7 +627,7 @@ mod test {
         assert!(
             TimeLock
                 .run(
-                    &time_lock_witness.standard_input().individual_tokens,
+                    &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )
                 .is_ok(),
