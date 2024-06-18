@@ -9,6 +9,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -19,12 +20,92 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    pub dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,
+    dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,
 }
 
+type AuthenticatedChunk = (MmrMembershipProof<Hash>, Chunk);
+type ChunkIndex = u64;
+
 impl ChunkDictionary {
-    pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>) -> Self {
+    pub fn new(dictionary: HashMap<ChunkIndex, AuthenticatedChunk>) -> Self {
         Self { dictionary }
+    }
+    pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
+        self.dictionary
+            .iter()
+            .map(|(k, (_mp, ch))| (*k, Hash::hash(ch)))
+            .collect_vec()
+    }
+
+    pub fn indices_and_chunks(&self) -> Vec<(ChunkIndex, Chunk)> {
+        self.dictionary
+            .iter()
+            .map(|(k, (_mp, ch))| (*k, ch.clone()))
+            .collect_vec()
+    }
+
+    pub fn membership_proofs_and_leafs(&self) -> Vec<(MmrMembershipProof<Hash>, Digest)> {
+        self.dictionary
+            .iter()
+            .map(|(_k, (mp, ch))| (mp.clone(), Hash::hash(ch)))
+            .collect_vec()
+    }
+
+    pub fn all_chunk_indices(&self) -> Vec<ChunkIndex> {
+        self.dictionary.keys().cloned().collect()
+    }
+
+    pub fn contains_key(&self, key: &ChunkIndex) -> bool {
+        self.dictionary.contains_key(key)
+    }
+
+    pub fn get(&self, key: &ChunkIndex) -> Option<&AuthenticatedChunk> {
+        self.dictionary.get(key)
+    }
+
+    pub fn all<F: FnMut((&ChunkIndex, &AuthenticatedChunk)) -> bool>(&self, f: F) -> bool {
+        self.dictionary.iter().all(f)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.dictionary.is_empty()
+    }
+
+    pub fn iter(&self) -> std::collections::hash_map::Iter<ChunkIndex, AuthenticatedChunk> {
+        self.dictionary.iter()
+    }
+
+    pub fn into_iter(self) -> std::collections::hash_map::IntoIter<ChunkIndex, AuthenticatedChunk> {
+        self.dictionary.into_iter()
+    }
+
+    pub fn iter_mut(
+        &mut self,
+    ) -> std::collections::hash_map::IterMut<ChunkIndex, AuthenticatedChunk> {
+        self.dictionary.iter_mut()
+    }
+
+    pub fn insert(
+        &mut self,
+        index: ChunkIndex,
+        value: AuthenticatedChunk,
+    ) -> Option<AuthenticatedChunk> {
+        self.dictionary.insert(index, value)
+    }
+
+    pub fn get_mut(&mut self, index: &ChunkIndex) -> Option<&mut AuthenticatedChunk> {
+        self.dictionary.get_mut(index)
+    }
+
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&ChunkIndex, &mut AuthenticatedChunk) -> bool,
+    {
+        self.dictionary.retain(f)
+    }
+
+    pub fn remove(&mut self, index: &ChunkIndex) -> Option<AuthenticatedChunk> {
+        self.dictionary.remove(index)
     }
 }
 

@@ -235,14 +235,10 @@ impl RemovalRecord {
         // First insert the new entry into the chunk dictionary for the removal
         // record that need it.
         for i in rrs_for_new_chunk_dictionary_entry.iter() {
-            removal_records
-                .index_mut(*i)
-                .target_chunks
-                .dictionary
-                .insert(
-                    old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk.clone()),
-                );
+            removal_records.index_mut(*i).target_chunks.insert(
+                old_window_start_batch_index,
+                (new_swbf_auth_path.clone(), new_chunk.clone()),
+            );
         }
 
         // Collect those MMR membership proofs for chunks whose authentication
@@ -260,7 +256,7 @@ impl RemovalRecord {
         > = vec![];
         for (i, rr) in removal_records.iter_mut().enumerate() {
             if rrs_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in rr.target_chunks.dictionary.iter_mut() {
+                for (_, (mmr_mp, _chnk)) in rr.target_chunks.iter_mut() {
                     mmr_membership_proofs_for_append.push(mmr_mp);
                 }
             }
@@ -294,7 +290,7 @@ impl RemovalRecord {
         // Collect all the MMR membership proofs from the chunk dictionaries.
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
-            for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
+            for (_, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
             }
         }
@@ -306,37 +302,44 @@ impl RemovalRecord {
         );
     }
 
-    /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
-        let Ok((inactive, _)) = self.absolute_indices.split_by_activity(mutator_set) else {
+    fn has_required_authenticated_chunks(
+        &self,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+    ) -> bool {
+        let Ok((inactive, _)) = self
+            .absolute_indices
+            .split_by_activity(mutator_set_accumulator)
+        else {
             return false;
         };
 
         let required_chunk_indices: HashSet<u64> = inactive.into_keys().collect();
         let proven_chunk_indices: HashSet<u64> =
-            self.target_chunks.dictionary.keys().copied().collect();
-        if required_chunk_indices != proven_chunk_indices {
+            self.target_chunks.all_chunk_indices().into_iter().collect();
+        required_chunk_indices == proven_chunk_indices
+    }
+
+    /// Validates that a removal record is synchronized against the inactive part of the SWBF
+    pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
+        if !self.has_required_authenticated_chunks(mutator_set) {
             return false;
         }
 
         let swbfi_peaks = mutator_set.swbf_inactive.get_peaks();
         let swbfi_leaf_count = mutator_set.swbf_inactive.count_leaves();
-        self.target_chunks
-            .dictionary
-            .iter()
-            .all(|(chunk_index, (mmr_proof, chunk))| {
-                let leaf_digest = Hash::hash(chunk);
+        self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
+            let leaf_digest = Hash::hash(chunk);
 
-                if *chunk_index != mmr_proof.leaf_index {
-                    return false;
-                }
+            if *chunk_index != mmr_proof.leaf_index {
+                return false;
+            }
 
-                // TODO: This in-bounds check can be removed after upstream
-                // dependency twenty-first has been updated with
-                // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
-                let in_bounds = swbfi_leaf_count > mmr_proof.leaf_index;
-                in_bounds && mmr_proof.verify(&swbfi_peaks, leaf_digest, swbfi_leaf_count)
-            })
+            // TODO: This in-bounds check can be removed after upstream
+            // dependency twenty-first has been updated with
+            // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
+            let in_bounds = swbfi_leaf_count > mmr_proof.leaf_index;
+            in_bounds && mmr_proof.verify(&swbfi_peaks, leaf_digest, swbfi_leaf_count)
+        })
     }
 
     /// Returns a hashmap from chunk index to chunk.
@@ -598,7 +601,7 @@ mod removal_record_tests {
             .collect_vec()
             .choose(&mut thread_rng())
             .unwrap();
-        rr.target_chunks.dictionary.remove(&to_remove);
+        rr.target_chunks.remove(&to_remove);
         assert!(!rr.validate(&accumulator));
     }
 

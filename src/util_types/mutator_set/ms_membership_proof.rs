@@ -180,14 +180,10 @@ impl MsMembershipProof {
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
         for i in mps_for_new_chunk_dictionary_entry.iter() {
-            membership_proofs
-                .index_mut(*i)
-                .target_chunks
-                .dictionary
-                .insert(
-                    old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk.clone()),
-                );
+            membership_proofs.index_mut(*i).target_chunks.insert(
+                old_window_start_batch_index,
+                (new_swbf_auth_path.clone(), new_chunk.clone()),
+            );
         }
 
         // Collect those MMR membership proofs for chunks whose authentication
@@ -211,7 +207,7 @@ impl MsMembershipProof {
         let mut mmr_membership_proof_index_to_membership_proof_index: Vec<usize> = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in mp.target_chunks.dictionary.iter_mut() {
+                for (_, (mmr_mp, _chnk)) in mp.target_chunks.iter_mut() {
                     mmr_membership_proofs_for_append.push(mmr_mp);
                     mmr_membership_proof_index_to_membership_proof_index.push(i);
                 }
@@ -304,7 +300,7 @@ impl MsMembershipProof {
             // Update for indices that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.
             if chunk_index < old_window_start_batch_index {
-                let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
+                let mp = match self.target_chunks.get_mut(&chunk_index) {
                     // If this record is not found, the MembershipProof is in a broken
                     // state.
                     None => {
@@ -329,7 +325,7 @@ impl MsMembershipProof {
             if old_window_start_batch_index <= chunk_index
                 && chunk_index < new_window_start_batch_index
             {
-                if self.target_chunks.dictionary.contains_key(&chunk_index) {
+                if self.target_chunks.contains_key(&chunk_index) {
                     return Err(Box::new(MembershipProofError::AlreadyExistingChunk(
                         chunk_index,
                     )));
@@ -337,7 +333,6 @@ impl MsMembershipProof {
 
                 // add dictionary entry
                 self.target_chunks
-                    .dictionary
                     .insert(chunk_index, (new_auth_path.clone(), new_chunk.clone()));
                 swbf_chunk_dictionary_updated = true;
 
@@ -373,12 +368,10 @@ impl MsMembershipProof {
 
         // remove chunks from unslid windows
         let swbfi_leaf_count = previous_mutator_set.swbf_inactive.count_leaves();
-        self.target_chunks
-            .dictionary
-            .retain(|k, _v| *k < swbfi_leaf_count);
+        self.target_chunks.retain(|k, _v| *k < swbfi_leaf_count);
 
         // iterate over all retained chunk authentication paths
-        for (k, (mp, _chnk)) in self.target_chunks.dictionary.iter_mut() {
+        for (k, (mp, _chnk)) in self.target_chunks.iter_mut() {
             // calculate length
             let chunk_discrepancies = swbfi_leaf_count ^ k;
             let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
@@ -414,7 +407,7 @@ impl MsMembershipProof {
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
         let mut mmr_mp_index_to_input_index: Vec<usize> = vec![];
         for (i, chunk_dict) in chunk_dictionaries.iter_mut().enumerate() {
-            for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
+            for (_, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
                 mmr_mp_index_to_input_index.push(i);
             }
@@ -463,7 +456,6 @@ impl MsMembershipProof {
         // since this change would not reduce the amount of hashing needed
         let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
             .target_chunks
-            .dictionary
             .iter_mut()
             .map(|(_, (mmr_mp, _))| mmr_mp)
             .collect();
@@ -502,7 +494,6 @@ impl MsMembershipProof {
         // in the same Merkle tree (under the same MMR peak) changes.
         let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
             .target_chunks
-            .dictionary
             .iter_mut()
             .map(|(_, (mmr_mp, _))| mmr_mp)
             .collect();
@@ -625,10 +616,7 @@ mod ms_proof_tests {
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
         let mut mp_mutated: MsMembershipProof = base_mp.clone();
-        mp_mutated
-            .target_chunks
-            .dictionary
-            .insert(0, (mmr_mp, zero_chunk));
+        mp_mutated.target_chunks.insert(0, (mmr_mp, zero_chunk));
         assert_ne!(mp_mutated, base_mp);
     }
 

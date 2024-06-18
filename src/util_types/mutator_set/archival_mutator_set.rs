@@ -117,7 +117,6 @@ where
             .iter_mut()
             .flat_map(|msmp| {
                 msmp.target_chunks
-                    .dictionary
                     .iter_mut()
                     .map(|(_index, (mmrmp, _chunk))| mmrmp)
             })
@@ -236,9 +235,7 @@ where
             );
             let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
                 self.swbf_inactive.prove_membership_async(chunk_index).await;
-            target_chunks
-                .dictionary
-                .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
+            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
         }
 
         Ok(MsMembershipProof {
@@ -436,12 +433,11 @@ where
             let new_target_chunks_clone = new_target_chunks.clone();
             let count_leaves = self.aocl.count_leaves().await;
             let relevant_chunk = new_target_chunks
-                .dictionary
                 .get_mut(&chunk_index)
                 .unwrap_or_else(|| {
                     panic!(
                         "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
-                        new_target_chunks_clone.dictionary,
+                        new_target_chunks_clone,
                         count_leaves,
                         batch_index,
                         removal_record
@@ -455,24 +451,13 @@ where
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
-        let target_chunk_indices = new_target_chunks.dictionary.keys().cloned().collect_vec();
-        let all_leafs = new_target_chunks
-            .dictionary
-            .values()
-            .map(|(_p, chunk)| Hash::hash(chunk));
-        let mutation_data = target_chunk_indices.into_iter().zip(all_leafs).collect();
-
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data)
+            .batch_mutate_leaf_and_update_mps(&mut [], new_target_chunks.indices_and_leafs())
             .await;
 
-        new_target_chunks
-            .dictionary
-            .into_iter()
-            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
-            .collect()
+        new_target_chunks.indices_and_chunks().into_iter().collect()
     }
 }
 

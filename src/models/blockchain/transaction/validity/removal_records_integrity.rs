@@ -376,7 +376,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // authenticate chunks in dictionary
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
-            for (chunk_index, (mmrmp, chunk)) in &target_chunks.dictionary {
+            for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
                 assert!(mmrmp.verify(&swbfi.get_peaks(), Hash::hash(chunk), swbfi.count_leaves()));
                 visited_chunk_indices.push(*chunk_index);
             }

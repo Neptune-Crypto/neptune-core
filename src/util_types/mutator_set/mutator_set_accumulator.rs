@@ -138,12 +138,11 @@ impl MutatorSetAccumulator {
             // If chunk index is not in the active part, insert the index into the relevant chunk
             let new_target_chunks_clone = new_target_chunks.clone();
             let relevant_chunk = new_target_chunks
-                .dictionary
                 .get_mut(&chunk_index)
                 .unwrap_or_else(|| {
                     panic!(
                         "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
-                        new_target_chunks_clone.dictionary,
+                        new_target_chunks_clone,
                         self.aocl.count_leaves(),
                         batch_index,
                         removal_record
@@ -157,24 +156,14 @@ impl MutatorSetAccumulator {
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
-        let all_mmr_membership_proofs = new_target_chunks
-            .dictionary
-            .values()
-            .map(|(p, _c)| p.to_owned());
-        let all_leafs = new_target_chunks
-            .dictionary
-            .values()
-            .map(|(_p, chunk)| Hash::hash(chunk));
-        let mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
-            all_mmr_membership_proofs.zip(all_leafs).collect();
-
         // If we want to update the membership proof with this removal, we
         // could use the below function.
-        self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
+        self.swbf_inactive.batch_mutate_leaf_and_update_mps(
+            &mut [],
+            new_target_chunks.membership_proofs_and_leafs(),
+        );
 
         new_target_chunks
-            .dictionary
             .into_iter()
             .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
             .collect()
@@ -194,10 +183,8 @@ impl MutatorSetAccumulator {
                 (self.aocl.count_leaves() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
             if inserted_index < active_window_start {
                 let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
-                if let Some((_mmr_mp, chunk)) = removal_record
-                    .target_chunks
-                    .dictionary
-                    .get(&inserted_index_chunkidx)
+                if let Some((_mmr_mp, chunk)) =
+                    removal_record.target_chunks.get(&inserted_index_chunkidx)
                 {
                     let relative_index = (inserted_index % CHUNK_SIZE as u128) as u32;
                     if !chunk.contains(relative_index) {
@@ -293,21 +280,13 @@ impl MutatorSetAccumulator {
         };
 
         for (chunk_index, indices) in indices_in_inactive_swbf {
-            if !membership_proof
-                .target_chunks
-                .dictionary
-                .contains_key(&chunk_index)
-            {
+            if !membership_proof.target_chunks.contains_key(&chunk_index) {
                 entries_in_dictionary = false;
                 break;
             }
 
             let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof<Hash>, Chunk) =
-                membership_proof
-                    .target_chunks
-                    .dictionary
-                    .get(&chunk_index)
-                    .unwrap();
+                membership_proof.target_chunks.get(&chunk_index).unwrap();
             let valid_auth_path = swbf_inactive_mp.verify(
                 &self.swbf_inactive.get_peaks(),
                 Hash::hash(swbf_inactive_chunk),
@@ -414,9 +393,7 @@ impl MutatorSetAccumulator {
             let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<Hash>)> =
                 HashMap::new();
             for removal_record in removal_records.iter_mut() {
-                for (chunk_index, (mmr_mp, chunk)) in
-                    removal_record.target_chunks.dictionary.iter_mut()
-                {
+                for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
                     let chunk_hash = Hash::hash(chunk);
                     let prev_val =
                         mutation_data_preimage.insert(*chunk_index, (chunk, mmr_mp.to_owned()));
@@ -442,7 +419,7 @@ impl MutatorSetAccumulator {
             // This is done by looping over all membership proofs and checking if they contain
             // any of the chunks that are affected by the removal records.
             for mp in preserved_membership_proofs.iter_mut() {
-                for (chunk_index, (_, chunk)) in mp.target_chunks.dictionary.iter_mut() {
+                for (chunk_index, (_, chunk)) in mp.target_chunks.iter_mut() {
                     if mutation_data_preimage.contains_key(chunk_index) {
                         mutation_data_preimage[chunk_index].0.clone_into(chunk);
                     }
@@ -466,7 +443,6 @@ impl MutatorSetAccumulator {
                     .iter_mut()
                     .flat_map(|x| {
                         x.target_chunks
-                            .dictionary
                             .iter_mut()
                             .map(|y| &mut y.1 .0)
                             .collect::<Vec<_>>()

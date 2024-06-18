@@ -384,7 +384,7 @@ mod shared_tests_test {
     #[tokio::test]
     async fn can_call() {
         let rcd = random_chunk_dictionary();
-        assert!(!rcd.dictionary.is_empty());
+        assert!(!rcd.is_empty());
         let _ = random_removal_record();
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
