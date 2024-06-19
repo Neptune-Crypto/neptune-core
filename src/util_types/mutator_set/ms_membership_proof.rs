@@ -368,12 +368,12 @@ impl MsMembershipProof {
 
         // remove chunks from unslid windows
         let swbfi_leaf_count = previous_mutator_set.swbf_inactive.count_leaves();
-        self.target_chunks.retain(|k, _v| *k < swbfi_leaf_count);
+        self.target_chunks.retain(|(k, _v)| *k < swbfi_leaf_count);
 
         // iterate over all retained chunk authentication paths
         for (k, (mp, _chnk)) in self.target_chunks.iter_mut() {
             // calculate length
-            let chunk_discrepancies = swbfi_leaf_count ^ k;
+            let chunk_discrepancies = swbfi_leaf_count ^ *k;
             let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
 
             // trim to length

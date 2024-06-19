@@ -1,42 +1,42 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::{triton_vm, twenty_first};
 
-use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::slice::{Iter, IterMut};
+use std::vec::IntoIter;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
-use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 type AuthenticatedChunk = (MmrMembershipProof<Hash>, Chunk);
 type ChunkIndex = u64;
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary, BFieldCodec,
+)]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,
+    dictionary: Vec<(u64, (MmrMembershipProof<Hash>, Chunk))>,
 }
 
 impl ChunkDictionary {
     pub fn empty() -> Self {
         Self {
-            dictionary: HashMap::new(),
+            dictionary: Vec::new(),
         }
     }
 
-    pub fn new(dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
-        Self {
-            dictionary: dictionary.into_iter().collect(),
-        }
+    pub fn new(mut dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
+        dictionary.sort_by_key(|(k, _v)| *k);
+        Self { dictionary }
     }
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
         self.dictionary
@@ -60,18 +60,24 @@ impl ChunkDictionary {
     }
 
     pub fn all_chunk_indices(&self) -> Vec<ChunkIndex> {
-        self.dictionary.keys().cloned().collect()
+        self.dictionary.iter().map(|(ci, _)| *ci).collect_vec()
     }
 
     pub fn contains_key(&self, key: &ChunkIndex) -> bool {
-        self.dictionary.contains_key(key)
+        self.dictionary
+            .iter()
+            .find(|(chunk_index, _)| *chunk_index == *key)
+            .is_some()
     }
 
     pub fn get(&self, key: &ChunkIndex) -> Option<&AuthenticatedChunk> {
-        self.dictionary.get(key)
+        self.dictionary
+            .iter()
+            .find(|(chunk_index, _)| *chunk_index == *key)
+            .map(|(_, value)| value)
     }
 
-    pub fn all<F: FnMut((&ChunkIndex, &AuthenticatedChunk)) -> bool>(&self, f: F) -> bool {
+    pub fn all<F: FnMut(&(ChunkIndex, AuthenticatedChunk)) -> bool>(&self, f: F) -> bool {
         self.dictionary.iter().all(f)
     }
 
@@ -79,7 +85,7 @@ impl ChunkDictionary {
         self.dictionary.is_empty()
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<ChunkIndex, AuthenticatedChunk> {
+    pub fn iter(&self) -> Iter<(ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter()
     }
 
@@ -87,13 +93,11 @@ impl ChunkDictionary {
         self.dictionary.len()
     }
 
-    pub fn into_iter(self) -> std::collections::hash_map::IntoIter<ChunkIndex, AuthenticatedChunk> {
+    pub fn into_iter(self) -> IntoIter<(ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.into_iter()
     }
 
-    pub fn iter_mut(
-        &mut self,
-    ) -> std::collections::hash_map::IterMut<ChunkIndex, AuthenticatedChunk> {
+    pub fn iter_mut(&mut self) -> IterMut<(ChunkIndex, AuthenticatedChunk)> {
         self.dictionary.iter_mut()
     }
 
@@ -102,87 +106,46 @@ impl ChunkDictionary {
         index: ChunkIndex,
         value: AuthenticatedChunk,
     ) -> Option<AuthenticatedChunk> {
-        self.dictionary.insert(index, value)
+        if let Some((_found_chunk_index, found_authenticated_chunk)) =
+            self.dictionary.iter_mut().find(|(k, _v)| *k == index)
+        {
+            let old_chunk = found_authenticated_chunk.clone();
+            *found_authenticated_chunk = value;
+            Some(old_chunk)
+        } else {
+            let insertion_index = self.dictionary.iter().filter(|(k, _v)| *k < index).count();
+            self.dictionary.insert(insertion_index, (index, value));
+            None
+        }
     }
 
     pub fn get_mut(&mut self, index: &ChunkIndex) -> Option<&mut AuthenticatedChunk> {
-        self.dictionary.get_mut(index)
+        self.dictionary
+            .iter_mut()
+            .find(|(k, _v)| *k == *index)
+            .map(|(_k, v)| v)
     }
 
     pub fn retain<F>(&mut self, f: F)
     where
-        F: FnMut(&ChunkIndex, &mut AuthenticatedChunk) -> bool,
+        F: FnMut(&(ChunkIndex, AuthenticatedChunk)) -> bool,
     {
         self.dictionary.retain(f)
     }
 
     pub fn remove(&mut self, index: &ChunkIndex) -> Option<AuthenticatedChunk> {
-        self.dictionary.remove(index)
-    }
-}
-
-impl BFieldCodec for ChunkDictionary {
-    type Error = anyhow::Error;
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let mut string = vec![BFieldElement::new(self.len() as u64)];
-        let mut all_chunk_indices_sorted = self.all_chunk_indices();
-        all_chunk_indices_sorted.sort();
-        for key in all_chunk_indices_sorted {
-            string.append(&mut key.encode());
-            let mut membership_proof_encoded = self.get(&key).unwrap().0.encode();
-            string.push(BFieldElement::new(membership_proof_encoded.len() as u64));
-            string.append(&mut membership_proof_encoded);
-            let mut chunk_encoded = self.get(&key).unwrap().1.encode();
-            string.push(BFieldElement::new(chunk_encoded.len() as u64));
-            string.append(&mut chunk_encoded);
+        let maybe_position = self
+            .dictionary
+            .iter()
+            .enumerate()
+            .find(|(_i, (k, _v))| *k == *index)
+            .map(|(i, _)| i);
+        if let Some(definite_position) = maybe_position {
+            let (_chunk_index, authenticated_chunk) = self.dictionary.remove(definite_position);
+            return Some(authenticated_chunk);
+        } else {
+            return None;
         }
-        string
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.is_empty() {
-            bail!("Cannot decode empty sequence of BFieldElements as ChunkDictionary");
-        }
-        let num_entries = sequence[0].value() as usize;
-        let mut read_index = 1;
-        let mut dictionary = vec![];
-        for _ in 0..num_entries {
-            // read key
-            let key_length = 2;
-            if sequence.len() < read_index + key_length {
-                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing key");
-            }
-            let key = *u64::decode(&sequence[read_index..read_index + key_length])?;
-            read_index += key_length;
-
-            // read membership proof
-            if sequence.len() <= read_index {
-                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing membership proof");
-            }
-            let memproof_length = sequence[read_index].value() as usize;
-            read_index += 1;
-            let membership_proof =
-                *MmrMembershipProof::decode(&sequence[read_index..read_index + memproof_length])?;
-            read_index += memproof_length;
-
-            // read chunk
-            if sequence.len() <= read_index {
-                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing chunk");
-            }
-            let chunk_length = sequence[read_index].value() as usize;
-            read_index += 1;
-            let chunk = *Chunk::decode(&sequence[read_index..read_index + chunk_length])?;
-            read_index += chunk_length;
-
-            dictionary.push((key, (membership_proof, chunk)));
-        }
-
-        Ok(Box::new(ChunkDictionary::new(dictionary)))
-    }
-
-    fn static_length() -> Option<usize> {
-        None
     }
 }
 
@@ -277,9 +240,7 @@ mod chunk_dict_tests {
 
         // Verify that keys are sorted deterministically when hashing chunk dictionary.
         // This test fails if the hash method does not sort the keys
-        for _ in 0..10 {
-            assert_eq!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_alt));
-        }
+        assert_eq!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_alt));
 
         // Negative: Construct data structure where the keys and values are switched
         let chunkdict3_switched =
