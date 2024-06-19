@@ -202,7 +202,7 @@ impl Arbitrary for MsaAndRecords {
                                                 )
                                             })
                                             .map(|(chunk_index, (membership_proof, chunk))| (*chunk_index, (membership_proof.clone(), chunk.clone())))
-                                            .collect::<HashMap<u64,(MmrMembershipProof<Hash>,Chunk)>>(),
+                                            .collect(),
                                         )
                                     })
                                     .collect_vec();

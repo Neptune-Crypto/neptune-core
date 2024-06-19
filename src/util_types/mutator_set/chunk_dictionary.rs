@@ -17,18 +17,26 @@ use super::chunk::Chunk;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+type AuthenticatedChunk = (MmrMembershipProof<Hash>, Chunk);
+type ChunkIndex = u64;
+
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,
 }
 
-type AuthenticatedChunk = (MmrMembershipProof<Hash>, Chunk);
-type ChunkIndex = u64;
-
 impl ChunkDictionary {
-    pub fn new(dictionary: HashMap<ChunkIndex, AuthenticatedChunk>) -> Self {
-        Self { dictionary }
+    pub fn empty() -> Self {
+        Self {
+            dictionary: HashMap::new(),
+        }
+    }
+
+    pub fn new(dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
+        Self {
+            dictionary: dictionary.into_iter().collect(),
+        }
     }
     pub fn indices_and_leafs(&self) -> Vec<(ChunkIndex, Digest)> {
         self.dictionary
@@ -75,6 +83,10 @@ impl ChunkDictionary {
         self.dictionary.iter()
     }
 
+    pub fn len(&self) -> usize {
+        self.dictionary.len()
+    }
+
     pub fn into_iter(self) -> std::collections::hash_map::IntoIter<ChunkIndex, AuthenticatedChunk> {
         self.dictionary.into_iter()
     }
@@ -113,13 +125,15 @@ impl BFieldCodec for ChunkDictionary {
     type Error = anyhow::Error;
 
     fn encode(&self) -> Vec<BFieldElement> {
-        let mut string = vec![BFieldElement::new(self.dictionary.keys().len() as u64)];
-        for key in self.dictionary.keys().sorted() {
+        let mut string = vec![BFieldElement::new(self.len() as u64)];
+        let mut all_chunk_indices_sorted = self.all_chunk_indices();
+        all_chunk_indices_sorted.sort();
+        for key in all_chunk_indices_sorted {
             string.append(&mut key.encode());
-            let mut membership_proof_encoded = self.dictionary[key].0.encode();
+            let mut membership_proof_encoded = self.get(&key).unwrap().0.encode();
             string.push(BFieldElement::new(membership_proof_encoded.len() as u64));
             string.append(&mut membership_proof_encoded);
-            let mut chunk_encoded = self.dictionary[key].1.encode();
+            let mut chunk_encoded = self.get(&key).unwrap().1.encode();
             string.push(BFieldElement::new(chunk_encoded.len() as u64));
             string.append(&mut chunk_encoded);
         }
@@ -132,7 +146,7 @@ impl BFieldCodec for ChunkDictionary {
         }
         let num_entries = sequence[0].value() as usize;
         let mut read_index = 1;
-        let mut dictionary = HashMap::new();
+        let mut dictionary = vec![];
         for _ in 0..num_entries {
             // read key
             let key_length = 2;
@@ -161,10 +175,10 @@ impl BFieldCodec for ChunkDictionary {
             let chunk = *Chunk::decode(&sequence[read_index..read_index + chunk_length])?;
             read_index += chunk_length;
 
-            dictionary.insert(key, (membership_proof, chunk));
+            dictionary.push((key, (membership_proof, chunk)));
         }
 
-        Ok(Box::new(ChunkDictionary { dictionary }))
+        Ok(Box::new(ChunkDictionary::new(dictionary)))
     }
 
     fn static_length() -> Option<usize> {
@@ -176,13 +190,13 @@ impl BFieldCodec for ChunkDictionary {
 pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
-    let mut dictionary = HashMap::new();
+    let mut dictionary = vec![];
     for _ in 0..37 {
         let key = rng.next_u64();
         let authpath: Vec<Digest> = (0..rng.gen_range(0..6)).map(|_| rng.gen()).collect_vec();
         let chunk: Vec<u32> = (0..rng.gen_range(0..17)).map(|_| rng.gen()).collect_vec();
 
-        dictionary.insert(
+        dictionary.push((
             key,
             (
                 MmrMembershipProof::new(key, authpath),
@@ -190,7 +204,7 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
                     relative_indices: chunk,
                 },
             ),
-        );
+        ));
     }
     ChunkDictionary::new(dictionary)
 }
@@ -229,7 +243,7 @@ mod chunk_dict_tests {
             }
         };
         let value1 = (mp1, chunk1);
-        let chunkdict1 = ChunkDictionary::new(HashMap::from([(key1, value1.clone())]));
+        let chunkdict1 = ChunkDictionary::new(vec![(key1, value1.clone())]);
 
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
@@ -238,17 +252,14 @@ mod chunk_dict_tests {
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
-        let chunkdict2 = ChunkDictionary::new(HashMap::from([
-            (key1, value1.clone()),
-            (key2, value2.clone()),
-        ]));
+        let chunkdict2 = ChunkDictionary::new(vec![(key1, value1.clone()), (key2, value2.clone())]);
 
         let key3: u64 = 89;
-        let chunkdict3 = ChunkDictionary::new(HashMap::from([
+        let chunkdict3 = ChunkDictionary::new(vec![
             (key1, value1.clone()),
             (key2, value2.clone()),
             (key3, value2.clone()),
-        ]));
+        ]);
 
         assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict1));
         assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict2));
@@ -258,11 +269,11 @@ mod chunk_dict_tests {
         assert_ne!(Hash::hash(&chunkdict2), Hash::hash(&chunkdict3));
 
         // Construct similar data structure to `two_elements` but insert key/value pairs in opposite order
-        let chunkdict3_alt = ChunkDictionary::new(HashMap::from([
+        let chunkdict3_alt = ChunkDictionary::new(vec![
             (key3, value2.clone()),
             (key1, value1.clone()),
             (key2, value2.clone()),
-        ]));
+        ]);
 
         // Verify that keys are sorted deterministically when hashing chunk dictionary.
         // This test fails if the hash method does not sort the keys
@@ -271,11 +282,8 @@ mod chunk_dict_tests {
         }
 
         // Negative: Construct data structure where the keys and values are switched
-        let chunkdict3_switched = ChunkDictionary::new(HashMap::from([
-            (key1, value2.clone()),
-            (key2, value1),
-            (key3, value2),
-        ]));
+        let chunkdict3_switched =
+            ChunkDictionary::new(vec![(key1, value2.clone()), (key2, value1), (key3, value2)]);
 
         assert_ne!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_switched));
     }
@@ -286,11 +294,11 @@ mod chunk_dict_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
         type H = Tip5;
-        let s_empty: ChunkDictionary = ChunkDictionary::new(HashMap::new());
+        let s_empty: ChunkDictionary = ChunkDictionary::empty();
         let json = serde_json::to_string(&s_empty).unwrap();
         println!("json = {}", json);
         let s_back = serde_json::from_str::<ChunkDictionary>(&json).unwrap();
-        assert!(s_back.dictionary.is_empty());
+        assert!(s_back.is_empty());
 
         // Build a non-empty chunk dict and verify that it still works
         let key: u64 = 898989;
@@ -301,13 +309,13 @@ mod chunk_dict_tests {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };
 
-        let s_non_empty = ChunkDictionary::new(HashMap::from([(key, (mp.clone(), chunk.clone()))]));
+        let s_non_empty = ChunkDictionary::new(vec![(key, (mp.clone(), chunk.clone()))]);
         let json_non_empty = serde_json::to_string(&s_non_empty).unwrap();
         println!("json_non_empty = {}", json_non_empty);
         let s_back_non_empty = serde_json::from_str::<ChunkDictionary>(&json_non_empty).unwrap();
-        assert!(!s_back_non_empty.dictionary.is_empty());
-        assert!(s_back_non_empty.dictionary.contains_key(&key));
-        assert_eq!((mp, chunk), s_back_non_empty.dictionary[&key]);
+        assert!(!s_back_non_empty.is_empty());
+        assert!(s_back_non_empty.contains_key(&key));
+        assert_eq!((mp, chunk), s_back_non_empty.get(&key).unwrap().clone());
     }
 
     #[test]
