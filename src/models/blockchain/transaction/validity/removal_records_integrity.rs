@@ -516,7 +516,7 @@ mod tests {
     ) {
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::new(&primitive_witness);
-        let result = RemovalRecordsIntegrity {}.run(
+        let result = RemovalRecordsIntegrity.run(
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),
         );
@@ -532,7 +532,7 @@ mod tests {
             .current();
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::new(&primitive_witness);
-        let result = RemovalRecordsIntegrity {}.run(
+        let result = RemovalRecordsIntegrity.run(
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),
         );

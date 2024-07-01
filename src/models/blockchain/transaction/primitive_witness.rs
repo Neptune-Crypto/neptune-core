@@ -523,16 +523,18 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let type_scripts = type_scripts.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
-                        let mut sender_randomnesses_output = output_sender_randomnesses.clone();
-                        let mut receiver_preimages_output = output_receiver_preimages.clone();
+                        let sender_randomnesses_output = output_sender_randomnesses.clone();
+                        let receiver_preimages_output = output_receiver_preimages.clone();
 
                         let output_commitments = output_utxos
                             .iter()
-                            .map(|utxo| {
+                            .zip(&sender_randomnesses_output)
+                            .zip(&receiver_preimages_output)
+                            .map(|((utxo, sender_randomness), receiver_preimage)| {
                                 commit(
                                     Hash::hash(utxo),
-                                    sender_randomnesses_output.pop().unwrap(),
-                                    receiver_preimages_output.pop().unwrap().hash::<Hash>(),
+                                    *sender_randomness,
+                                    Hash::hash(receiver_preimage),
                                 )
                             })
                             .collect_vec();
