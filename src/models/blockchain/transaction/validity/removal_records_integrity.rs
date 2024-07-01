@@ -69,8 +69,8 @@ pub struct RemovalRecordsIntegrityWitness {
     pub kernel: TransactionKernel,
 }
 
-impl RemovalRecordsIntegrityWitness {
-    pub fn new(primitive_witness: &PrimitiveWitness) -> Self {
+impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
+    fn from(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
@@ -515,7 +515,7 @@ mod tests {
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::new(&primitive_witness);
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
         let result = RemovalRecordsIntegrity.run(
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),
@@ -531,7 +531,7 @@ mod tests {
             .unwrap()
             .current();
         let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::new(&primitive_witness);
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
         let result = RemovalRecordsIntegrity.run(
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),

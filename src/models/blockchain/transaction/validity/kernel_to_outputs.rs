@@ -47,8 +47,8 @@ pub struct KernelToOutputsWitness {
     pub kernel: TransactionKernel,
 }
 
-impl KernelToOutputsWitness {
-    pub fn new(primitive_witness: &PrimitiveWitness) -> Self {
+impl From<&PrimitiveWitness> for KernelToOutputsWitness {
+    fn from(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
             output_utxos: primitive_witness.output_utxos.clone(),
             sender_randomnesses: primitive_witness.output_sender_randomnesses.clone(),
@@ -149,7 +149,7 @@ mod test {
     fn derived_witness_generates_accepting_program_proptest(
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
-        let kernel_to_outputs_witness = KernelToOutputsWitness::new(&primitive_witness);
+        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
         let result = KernelToOutputs.run(
             &kernel_to_outputs_witness.standard_input(),
             kernel_to_outputs_witness.nondeterminism(),
