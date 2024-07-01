@@ -727,7 +727,7 @@ mod transaction_tests {
     //     let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
 
     //     // Create a transaction that's valid after the Genesis block
-    //     let receiver_data = vec![UtxoReceiverData {
+    //     let receiver_data = vec![UtxoReceiver {
     //         utxo: Utxo {
     //             lock_script: LockScript(vec![]),
     //             coins: Into::<Amount>::into(5).to_native_coins(),
