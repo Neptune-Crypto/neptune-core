@@ -310,6 +310,16 @@ impl Transaction {
             output_utxos: self_witness
                 .output_utxos
                 .cat(other_witness.output_utxos.clone()),
+            output_sender_randomnesses: [
+                self_witness.output_sender_randomnesses.clone(),
+                other_witness.output_sender_randomnesses.clone(),
+            ]
+            .concat(),
+            output_receiver_digests: [
+                self_witness.output_receiver_digests.clone(),
+                other_witness.output_receiver_digests.clone(),
+            ]
+            .concat(),
             mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
             kernel: merged_kernel.clone(),
         }
@@ -409,6 +419,8 @@ mod witness_tests {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::empty(),
+            output_sender_randomnesses: vec![],
+            output_receiver_digests: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::default(),
             kernel: empty_kernel,
         };

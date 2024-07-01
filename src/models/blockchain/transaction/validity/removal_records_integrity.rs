@@ -113,7 +113,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 
     fn program(&self) -> triton_vm::prelude::Program {
-        RemovalRecordsIntegrity {}.program()
+        RemovalRecordsIntegrity.program()
     }
 }
 
@@ -305,7 +305,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
 
-        let start_address: BFieldElement = BFieldElement::new(0);
+        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let rriw: RemovalRecordsIntegrityWitness = tasmlib::decode_from_memory(start_address);
 
         // divine in the salted input UTXOs with hash

@@ -486,6 +486,8 @@ impl GlobalState {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
+            output_sender_randomnesses: vec![sender_randomness],
+            output_receiver_digests: vec![receiver_digest],
             mutator_set_accumulator,
             kernel: kernel.clone(),
         };
@@ -557,6 +559,8 @@ impl GlobalState {
         spending_key: SpendingKey,
         spendable_utxos_and_mps: &[(Utxo, LockScript, MsMembershipProof)],
         output_utxos: &[Utxo],
+        sender_randomnesses: &[Digest],
+        receiver_digests: &[Digest],
         transaction_kernel: &TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> PrimitiveWitness {
@@ -586,6 +590,8 @@ impl GlobalState {
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: SaltedUtxos::new(output_utxos.to_vec()),
+            output_sender_randomnesses: sender_randomnesses.to_vec(),
+            output_receiver_digests: receiver_digests.to_vec(),
             mutator_set_accumulator,
             kernel: transaction_kernel.clone(),
         }
@@ -607,7 +613,14 @@ impl GlobalState {
         timestamp: Timestamp,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
-        let (inputs, spendable_utxos_and_mps, outputs, output_utxos) = self
+        let (
+            inputs,
+            spendable_utxos_and_mps,
+            outputs,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+        ) = self
             .generate_utxo_data_for_transaction(&receiver_data, fee, timestamp)
             .await?;
 
@@ -623,7 +636,7 @@ impl GlobalState {
             .body
             .mutator_set_accumulator
             .clone();
-        let privacy = self.cli().privacy;
+        let privacy_setting = self.cli().privacy;
 
         // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
         let spending_key = self
@@ -638,11 +651,13 @@ impl GlobalState {
             spendable_utxos_and_mps,
             outputs,
             output_utxos,
+            &sender_randomnesses,
+            &receiver_digests,
             fee,
             public_announcements,
             timestamp,
             mutator_set_accumulator,
-            privacy,
+            privacy_setting,
         )
         .await
     }
@@ -650,7 +665,8 @@ impl GlobalState {
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
     /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary, and
     /// and produce a list of removal records, input UTXOs (with lock scripts and
-    /// membership proofs), addition records, and output UTXOs.
+    /// membership proofs), addition records, output UTXOs, their canonical commitments,
+    /// and the randmnesses used to produce them.
     async fn generate_utxo_data_for_transaction(
         &mut self,
         receiver_data: &[UtxoReceiverData],
@@ -661,6 +677,8 @@ impl GlobalState {
         Vec<(Utxo, LockScript, MsMembershipProof)>,
         Vec<AdditionRecord>,
         Vec<Utxo>,
+        Vec<Digest>,
+        Vec<Digest>,
     )> {
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend: NeptuneCoins = receiver_data
@@ -693,6 +711,16 @@ impl GlobalState {
         let mut outputs = Self::generate_addition_records(receiver_data);
         let mut output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
 
+        // collect commitment randomness for reproducing addition records
+        let sender_randomnesses = receiver_data
+            .iter()
+            .map(|rd| rd.sender_randomness)
+            .collect_vec();
+        let receiver_digests = receiver_data
+            .iter()
+            .map(|rd| rd.receiver_privacy_digest)
+            .collect_vec();
+
         // keep track of change (if any)
         if total_spend < input_amount {
             let change_amount = input_amount.checked_sub(&total_spend).unwrap();
@@ -701,7 +729,14 @@ impl GlobalState {
             output_utxos.push(change_utxo.clone());
         }
 
-        Ok((inputs, spendable_utxos_and_mps, outputs, output_utxos))
+        Ok((
+            inputs,
+            spendable_utxos_and_mps,
+            outputs,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+        ))
     }
 
     /// Assembles a transaction kernel and supporting witness or proof(s) from
@@ -713,12 +748,18 @@ impl GlobalState {
         spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
         outputs: Vec<AdditionRecord>,
         output_utxos: Vec<Utxo>,
+        sender_randomnesses: &[Digest],
+        receiver_digests: &[Digest],
         fee: NeptuneCoins,
         public_announcements: Vec<PublicAnnouncement>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         privacy: bool,
     ) -> Result<Transaction> {
+        // upgrade data to owned so we can spawn a thread that owns it
+        let sender_randomnesses = sender_randomnesses.to_vec();
+        let receiver_digests = receiver_digests.to_vec();
+
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  As such, we use
         //       spawn_blocking() to execute on tokio's blocking
@@ -731,6 +772,8 @@ impl GlobalState {
                 spendable_utxos_and_mps,
                 outputs,
                 output_utxos,
+                sender_randomnesses,
+                receiver_digests,
                 fee,
                 public_announcements,
                 timestamp,
@@ -742,10 +785,10 @@ impl GlobalState {
         Ok(transaction)
     }
 
-    // note: this executes the prover which can take a very
-    //       long time, perhaps minutes. It should never be
-    //       called directly.
-    //       Use create_transaction_from_data() instead.
+    /// Note: this executes the prover which can take a very long time, perhaps
+    /// minutes. It should never be called directly. Use
+    /// [Self::create_transaction_from_data] instead. That function wraps this
+    /// one into a newly spawned thread.
     #[allow(clippy::too_many_arguments)]
     fn create_transaction_from_data_worker(
         spending_key: SpendingKey,
@@ -753,6 +796,8 @@ impl GlobalState {
         spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
         outputs: Vec<AdditionRecord>,
         output_utxos: Vec<Utxo>,
+        sender_randomnesses: Vec<Digest>,
+        receiver_digests: Vec<Digest>,
         fee: NeptuneCoins,
         public_announcements: Vec<PublicAnnouncement>,
         timestamp: Timestamp,
@@ -775,6 +820,8 @@ impl GlobalState {
             spending_key,
             &spendable_utxos_and_mps,
             &output_utxos,
+            &sender_randomnesses,
+            &receiver_digests,
             &kernel,
             mutator_set_accumulator,
         );
@@ -1383,7 +1430,7 @@ mod global_state_tests {
         true
     }
 
-    /// Similar to `GlobalState::create_transaction` but with a given timestamp,
+    /// Similar to [GlobalState::create_transaction] but with a given timestamp,
     /// as opposed to now.
     pub(super) async fn create_transaction_with_timestamp(
         global_state_lock: &GlobalStateLock,
@@ -1392,7 +1439,14 @@ mod global_state_tests {
         timestamp: Timestamp,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
-        let (inputs, spendable_utxos_and_mps, outputs, output_utxos) = global_state_lock
+        let (
+            inputs,
+            spendable_utxos_and_mps,
+            outputs,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+        ) = global_state_lock
             .lock_guard_mut()
             .await
             .generate_utxo_data_for_transaction(receiver_data, fee, timestamp)
@@ -1429,6 +1483,8 @@ mod global_state_tests {
             spendable_utxos_and_mps,
             outputs,
             output_utxos,
+            &sender_randomnesses,
+            &receiver_digests,
             fee,
             public_announcements,
             timestamp,

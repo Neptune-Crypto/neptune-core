@@ -98,6 +98,8 @@ pub struct PrimitiveWitness {
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof>,
     pub output_utxos: SaltedUtxos,
+    pub output_sender_randomnesses: Vec<Digest>,
+    pub output_receiver_digests: Vec<Digest>,
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub kernel: TransactionKernel,
 }
@@ -481,8 +483,8 @@ pub(crate) fn arbitrary_primitive_witness_with(
                 mut sender_randomnesses_input,
                 mut receiver_preimages_input,
                 inputs_salt,
-                sender_randomnesses_output,
-                receiver_preimages_output,
+                output_sender_randomnesses,
+                output_receiver_preimages,
                 outputs_salt,
                 aocl_size,
             )| {
@@ -521,8 +523,8 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let type_scripts = type_scripts.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
-                        let mut sender_randomnesses_output = sender_randomnesses_output.clone();
-                        let mut receiver_preimages_output = receiver_preimages_output.clone();
+                        let mut sender_randomnesses_output = output_sender_randomnesses.clone();
+                        let mut receiver_preimages_output = output_receiver_preimages.clone();
 
                         let output_commitments = output_utxos
                             .iter()
@@ -566,6 +568,11 @@ pub(crate) fn arbitrary_primitive_witness_with(
                                 utxos: output_utxos.clone(),
                                 salt: outputs_salt.clone().try_into().unwrap(),
                             },
+                            output_sender_randomnesses: output_sender_randomnesses.clone(),
+                            output_receiver_digests: output_receiver_preimages
+                                .iter()
+                                .map(Hash::hash)
+                                .collect_vec(),
                             mutator_set_accumulator: mutator_set_accumulator.clone(),
                             kernel,
                         }

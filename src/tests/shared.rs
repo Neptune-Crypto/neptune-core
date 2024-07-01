@@ -702,6 +702,8 @@ pub async fn make_mock_transaction_with_generation_key(
     }
 
     let mut outputs = vec![];
+    let mut output_sender_randomnesses = vec![];
+    let mut output_receiver_digests = vec![];
     for rd in receiver_data.iter() {
         let addition_record = commit(
             Hash::hash(&rd.utxo),
@@ -709,6 +711,8 @@ pub async fn make_mock_transaction_with_generation_key(
             rd.receiver_privacy_digest,
         );
         outputs.push(addition_record);
+        output_sender_randomnesses.push(rd.sender_randomness);
+        output_receiver_digests.push(rd.receiver_privacy_digest);
     }
 
     let public_announcements = receiver_data
@@ -754,6 +758,8 @@ pub async fn make_mock_transaction_with_generation_key(
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos: SaltedUtxos::new(output_utxos),
+        output_sender_randomnesses,
+        output_receiver_digests,
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };
