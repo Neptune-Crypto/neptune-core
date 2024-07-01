@@ -14,6 +14,7 @@ use crate::models::blockchain::shared::Hash;
 
 use super::environment;
 
+#[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
 }
