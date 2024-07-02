@@ -81,11 +81,31 @@ pub fn tasm_io_read_stdin___u128() -> u128 {
 
 #[allow(non_snake_case)]
 pub fn tasm_io_read_stdin___digest() -> Digest {
-    let e4 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let e3 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let e2 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let e1 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let e0 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
+    let e4 = PUB_INPUT.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from stdin -- input not long enough")
+    });
+    let e3 = PUB_INPUT.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from stdin -- input not long enough")
+    });
+    let e2 = PUB_INPUT.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from stdin -- input not long enough")
+    });
+    let e1 = PUB_INPUT.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from stdin -- input not long enough")
+    });
+    let e0 = PUB_INPUT.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from stdin -- input not long enough")
+    });
     Digest::new([e0, e1, e2, e3, e4])
 }
 
