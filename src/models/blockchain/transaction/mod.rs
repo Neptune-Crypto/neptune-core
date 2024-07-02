@@ -99,7 +99,7 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
-    /// Create a new `Transaction`` from a `PrimitiveWitness` (which defines an old
+    /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
     /// `Transaction`) by updating the mutator set records according to a new
     /// `Block`.
     fn new_with_updated_mutator_set_records_given_primitive_witness(
@@ -285,23 +285,18 @@ impl Transaction {
             input_utxos: self_witness
                 .input_utxos
                 .cat(other_witness.input_utxos.clone()),
-            input_lock_scripts: [
-                self_witness.input_lock_scripts.clone(),
-                other_witness.input_lock_scripts.clone(),
+            lock_scripts_and_witnesses: [
+                self_witness.lock_scripts_and_witnesses.clone(),
+                other_witness.lock_scripts_and_witnesses.clone(),
             ]
             .concat(),
-            type_scripts: self_witness
-                .type_scripts
+            type_scripts_and_witnesses: self_witness
+                .type_scripts_and_witnesses
                 .iter()
                 .cloned()
-                .chain(other_witness.type_scripts.iter().cloned())
+                .chain(other_witness.type_scripts_and_witnesses.iter().cloned())
                 .unique()
                 .collect_vec(),
-            lock_script_witnesses: [
-                self_witness.lock_script_witnesses.clone(),
-                other_witness.lock_script_witnesses.clone(),
-            ]
-            .concat(),
             input_membership_proofs: [
                 self_witness.input_membership_proofs.clone(),
                 other_witness.input_membership_proofs.clone(),
@@ -414,9 +409,8 @@ mod witness_tests {
         };
         let primitive_witness = PrimitiveWitness {
             input_utxos: SaltedUtxos::empty(),
-            type_scripts: vec![],
-            input_lock_scripts: vec![],
-            lock_script_witnesses: vec![],
+            type_scripts_and_witnesses: vec![],
+            lock_scripts_and_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::empty(),
             output_sender_randomnesses: vec![],

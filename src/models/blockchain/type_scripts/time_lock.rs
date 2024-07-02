@@ -506,7 +506,7 @@ impl Arbitrary for TimeLockWitness {
                     mut fee,
                 )| {
                     // generate inputs
-                    let (mut input_utxos, input_lock_scripts, input_lock_script_witnesses) =
+                    let (mut input_utxos, input_lock_scripts_and_witnesses) =
                         PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
@@ -539,8 +539,7 @@ impl Arbitrary for TimeLockWitness {
                     // generate primitive transaction witness and time lock witness from there
                     arbitrary_primitive_witness_with(
                         &input_utxos,
-                        &input_lock_scripts,
-                        &input_lock_script_witnesses,
+                        &input_lock_scripts_and_witnesses,
                         &output_utxos,
                         &public_announcements,
                         NeptuneCoins::zero(),

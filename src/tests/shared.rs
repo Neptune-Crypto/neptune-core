@@ -1,10 +1,13 @@
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::utxo::LockScriptAndWitness;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -60,7 +63,7 @@ use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_tra
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
-use crate::models::blockchain::type_scripts::TypeScript;
+use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
@@ -736,7 +739,7 @@ pub async fn make_mock_transaction_with_generation_key(
         .map(|(utxo, _mp, _)| utxo)
         .cloned()
         .collect_vec();
-    let type_scripts = vec![TypeScript::native_currency()];
+    let type_scripts_and_witnesses = vec![TypeScriptAndWitness::new(NativeCurrency.program())];
     let input_membership_proofs = input_utxos_mps_keys
         .iter()
         .map(|(_utxo, mp, _)| mp)
@@ -750,12 +753,16 @@ pub async fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
+    let input_lock_scripts_and_witnesses = input_lock_scripts
+        .into_iter()
+        .zip(spending_key_unlock_keys.into_iter())
+        .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
+        .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),
-        type_scripts,
-        input_lock_scripts,
-        lock_script_witnesses: spending_key_unlock_keys,
+        type_scripts_and_witnesses,
+        lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
         input_membership_proofs,
         output_utxos: SaltedUtxos::new(output_utxos),
         output_sender_randomnesses,

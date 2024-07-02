@@ -150,10 +150,7 @@ mod test {
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert;
-    use proptest::strategy::Strategy;
-    use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
 
     #[proptest(cases = 5)]

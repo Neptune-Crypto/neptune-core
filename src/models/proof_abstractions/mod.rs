@@ -91,20 +91,4 @@ pub trait SecretWitness {
 
     /// The non-determinism for the VM that this witness corresponds to
     fn nondeterminism(&self) -> NonDeterminism;
-
-    // fn verify(&self) -> bool {
-    //     if self.consensus_program().code().is_empty() {
-    //         self.consensus_program()
-    //             .program()
-    //             .run(self.standard_input(), self.nondeterminism())
-    //             .is_ok()
-    //     } else {
-    //         self.consensus_program()
-    //             .run(
-    //                 &self.standard_input().individual_tokens,
-    //                 self.nondeterminism(),
-    //             )
-    //             .is_ok()
-    //     }
-    // }
 }

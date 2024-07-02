@@ -24,7 +24,14 @@ use tracing::{debug, warn};
 
 use crate::{
     models::{
-        blockchain::type_scripts::TypeScript,
+        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
+        proof_abstractions::tasm::program::ConsensusProgram,
+    },
+    util_types::mutator_set::commit,
+};
+use crate::{
+    models::{
+        blockchain::type_scripts::{TypeScript, TypeScriptAndWitness},
         proof_abstractions::{mast_hash::MastHash, timestamp::Timestamp},
         state::wallet::address::generation_address,
     },
@@ -32,18 +39,11 @@ use crate::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
     },
 };
-use crate::{
-    models::{
-        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-        proof_abstractions::tasm::program::ConsensusProgram,
-    },
-    util_types::mutator_set::commit,
-};
 use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
 
 use super::{
     transaction_kernel::TransactionKernel,
-    utxo::{LockScript, Utxo},
+    utxo::{LockScript, LockScriptAndWitness, Utxo},
     PublicAnnouncement,
 };
 
@@ -93,10 +93,9 @@ impl SaltedUtxos {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PrimitiveWitness {
     pub input_utxos: SaltedUtxos,
-    pub input_lock_scripts: Vec<LockScript>,
-    pub type_scripts: Vec<TypeScript>,
-    pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof>,
+    pub lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
+    pub type_scripts_and_witnesses: Vec<TypeScriptAndWitness>,
     pub output_utxos: SaltedUtxos,
     pub output_sender_randomnesses: Vec<Digest>,
     pub output_receiver_digests: Vec<Digest>,
@@ -108,7 +107,7 @@ impl PrimitiveWitness {
     pub fn transaction_inputs_from_address_seeds_and_amounts(
         address_seeds: &[Digest],
         input_amounts: &[NeptuneCoins],
-    ) -> (Vec<Utxo>, Vec<LockScript>, Vec<Vec<BFieldElement>>) {
+    ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
         let input_spending_keys = address_seeds
             .iter()
             .map(|address_seed| generation_address::SpendingKey::derive_from_seed(*address_seed))
@@ -121,13 +120,23 @@ impl PrimitiveWitness {
             .iter()
             .map(|spending_key| spending_key.unlock_key.values().to_vec())
             .collect_vec();
+        let input_lock_scripts_and_witnesses = input_lock_scripts
+            .into_iter()
+            .zip(input_lock_script_witnesses.into_iter())
+            .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
+            .collect_vec();
 
-        let input_utxos = input_lock_scripts
+        let input_utxos = input_lock_scripts_and_witnesses
             .iter()
             .zip(input_amounts)
-            .map(|(lock_script, amount)| Utxo::new(lock_script.clone(), amount.to_native_coins()))
+            .map(|(lock_script_and_witness, amount)| {
+                Utxo::new(
+                    LockScript::from(lock_script_and_witness),
+                    amount.to_native_coins(),
+                )
+            })
             .collect_vec();
-        (input_utxos, input_lock_scripts, input_lock_script_witnesses)
+        (input_utxos, input_lock_scripts_and_witnesses)
     }
 
     /// Obtain a *balanced* set of outputs (and fee) given a fixed total input amount
@@ -192,16 +201,9 @@ impl PrimitiveWitness {
     /// decomposing into subclaims.
     pub async fn validate(&self) -> bool {
         // verify lock scripts
-        for (lock_script, secret_input) in self
-            .input_lock_scripts
-            .iter()
-            .zip(self.lock_script_witnesses.iter())
-        {
-            // We need to clone these fields because they live on `self` and
-            // `self` is dropped before the async code finishes -- so we can't
-            // pass references
-            let lock_script = lock_script.clone();
-            let secret_input = secret_input.clone();
+        for lock_script_and_witness in self.lock_scripts_and_witnesses.iter() {
+            let lock_script = lock_script_and_witness.program.clone();
+            let secret_input = lock_script_and_witness.nondeterminism();
 
             // The lock script is satisfied if it halts gracefully (i.e.,
             // without crashing). We do not care about the output.
@@ -210,10 +212,7 @@ impl PrimitiveWitness {
             // we wrap triton-vm script execution in spawn_blocking as it
             // could be a lengthy CPU intensive call.
             let result = tokio::task::spawn_blocking(move || {
-                lock_script.program.run(
-                    public_input.into(),
-                    NonDeterminism::new(secret_input.to_vec()),
-                )
+                lock_script.run(public_input.into(), secret_input)
             })
             .await;
 
@@ -266,9 +265,10 @@ impl PrimitiveWitness {
             .collect_vec();
 
         // verify that all type script hashes are represented by the witness's type script list
-        let mut type_script_dictionary = HashMap::<Digest, &TypeScript>::new();
-        for ts in self.type_scripts.iter() {
-            type_script_dictionary.insert(ts.hash(), ts);
+        let mut type_script_dictionary = HashMap::<Digest, TypeScript>::new();
+        for tsaw in self.type_scripts_and_witnesses.iter() {
+            let ts = TypeScript::from(tsaw);
+            type_script_dictionary.insert(tsaw.program.hash::<Hash>(), ts);
         }
         if !type_script_hashes
             .clone()
@@ -408,7 +408,7 @@ impl Arbitrary for PrimitiveWitness {
                     mut fee,
                     maybe_coinbase,
                 )| {
-                    let (input_utxos, input_lock_scripts, input_lock_script_witnesses) =
+                    let (input_utxos, input_lock_scripts_and_witnesses) =
                         Self::transaction_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
@@ -431,8 +431,7 @@ impl Arbitrary for PrimitiveWitness {
                         );
                     arbitrary_primitive_witness_with(
                         &input_utxos,
-                        &input_lock_scripts,
-                        &input_lock_script_witnesses,
+                        &input_lock_scripts_and_witnesses,
                         &output_utxos,
                         &public_announcements,
                         fee,
@@ -446,8 +445,7 @@ impl Arbitrary for PrimitiveWitness {
 
 pub(crate) fn arbitrary_primitive_witness_with(
     input_utxos: &[Utxo],
-    input_lock_scripts: &[LockScript],
-    input_lock_script_witnesses: &[Vec<BFieldElement>],
+    input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
     output_utxos: &[Utxo],
     public_announcements: &[PublicAnnouncement],
     fee: NeptuneCoins,
@@ -458,8 +456,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
     let input_utxos = input_utxos.to_vec();
     let output_utxos = output_utxos.to_vec();
     let public_announcements = public_announcements.to_vec();
-    let input_lock_scripts = input_lock_scripts.to_vec();
-    let input_lock_script_witnesses = input_lock_script_witnesses.to_vec();
+    let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
 
     // unwrap:
     //  - sender randomness (input)
@@ -501,8 +498,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
 
                 // prepare to unwrap
                 let input_triples = input_triples.clone();
-                let input_lock_scripts = input_lock_scripts.to_vec();
-                let input_lock_script_witnesses = input_lock_script_witnesses.to_vec();
+                let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.clone();
                 let input_utxos = input_utxos.clone();
                 let output_utxos = output_utxos.clone();
                 let public_announcements = public_announcements.clone();
@@ -514,13 +510,16 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let input_membership_proofs = msa_and_records.membership_proofs;
                         let input_removal_records = msa_and_records.removal_records;
 
-                        let type_scripts = vec![TypeScript::new(NativeCurrency.program())];
+                        let type_scripts_and_witnesses =
+                            vec![TypeScriptAndWitness::new(NativeCurrency.program())];
 
                         // prepare to unwrap
                         let input_utxos = input_utxos.clone();
+                        let input_lock_scripts_and_witnesses =
+                            input_lock_scripts_and_witnesses.clone();
                         let input_removal_records = input_removal_records.clone();
                         let input_membership_proofs = input_membership_proofs.clone();
-                        let type_scripts = type_scripts.clone();
+                        let type_scripts_and_witnesses = type_scripts_and_witnesses.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
                         let sender_randomnesses_output = output_sender_randomnesses.clone();
@@ -543,7 +542,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let input_utxos = input_utxos.clone();
                         let input_removal_records = input_removal_records.clone();
                         let input_membership_proofs = input_membership_proofs.clone();
-                        let type_scripts = type_scripts.clone();
+                        let type_scripts_and_witnesses = type_scripts_and_witnesses.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
 
@@ -558,14 +557,13 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         };
 
                         PrimitiveWitness {
-                            input_lock_scripts: input_lock_scripts.clone(),
+                            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
                             input_utxos: SaltedUtxos {
                                 utxos: input_utxos.clone(),
                                 salt: inputs_salt.clone().try_into().unwrap(),
                             },
                             input_membership_proofs: input_membership_proofs.clone(),
-                            type_scripts: type_scripts.clone(),
-                            lock_script_witnesses: input_lock_script_witnesses.clone(),
+                            type_scripts_and_witnesses: type_scripts_and_witnesses.clone(),
                             output_utxos: SaltedUtxos {
                                 utxos: output_utxos.clone(),
                                 salt: outputs_salt.clone().try_into().unwrap(),
