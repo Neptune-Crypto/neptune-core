@@ -28,6 +28,7 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction;
 use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
+use super::blockchain::transaction::utxo::LockScriptAndWitness;
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::PublicAnnouncement;
 use super::blockchain::transaction::Transaction;
@@ -482,8 +483,7 @@ impl GlobalState {
         let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
             input_utxos: SaltedUtxos::empty(),
             type_scripts: vec![TypeScript::native_currency()],
-            input_lock_scripts: vec![],
-            lock_script_witnesses: vec![],
+            lock_scripts_and_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
             output_sender_randomnesses: vec![sender_randomness],
@@ -564,6 +564,7 @@ impl GlobalState {
         transaction_kernel: &TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> PrimitiveWitness {
+        let secret_input = spending_key.unlock_key.encode();
         let type_scripts = [NativeCurrency.program(), TimeLock.program()]
             .map(TypeScript::new)
             .to_vec();
@@ -571,9 +572,14 @@ impl GlobalState {
             .iter()
             .map(|(utxo, _lock_script, _mp)| utxo.clone())
             .collect_vec();
-        let input_lock_scripts = spendable_utxos_and_mps
+        let input_lock_scripts_and_witnesses = spendable_utxos_and_mps
             .iter()
-            .map(|(_utxo, lock_script, _mp)| lock_script.to_owned())
+            .map(|(_utxo, lock_script, _mp)| {
+                LockScriptAndWitness::new_with_tokens(
+                    lock_script.program.clone(),
+                    secret_input.clone(),
+                )
+            })
             .collect_vec();
         let input_membership_proofs = spendable_utxos_and_mps
             .iter()
@@ -581,13 +587,10 @@ impl GlobalState {
             .cloned()
             .collect_vec();
 
-        let secret_input = spending_key.unlock_key.encode();
-
         PrimitiveWitness {
             input_utxos: SaltedUtxos::new(input_utxos),
-            input_lock_scripts,
+            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
             type_scripts,
-            lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: SaltedUtxos::new(output_utxos.to_vec()),
             output_sender_randomnesses: sender_randomnesses.to_vec(),

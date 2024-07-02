@@ -18,11 +18,11 @@ A transaction is *valid* if (any of):
 
  - ***a)*** it has a valid witness (including spending keys and mutator set membership proofs)
  - ***b)*** it has valid proofs for each subprogram (subprograms establish things like the owners consent to this transaction, there is no inflation, etc.) 
- - ***d)*** it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
- - ***e)*** it has a single valid proof that the transaction originates from merging two valid transactions
- - ***f)*** it has a single valid proof that the transaction belongs to an integral mempool, *i.e.*, one to which only valid transactions were added
- - ***g)*** it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator
- - ***h)*** it has a single valid proof that another single valid proof exists (but possibly with an older version of the proof system or different parameters).
+ - ***c)*** it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
+ - ***d)*** it has a single valid proof that the transaction originates from merging two valid transactions
+ - ***e)*** it has a single valid proof that the transaction belongs to an integral mempool, *i.e.*, one to which only valid transactions were added
+ - ***f)*** it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator
+ - ***g)*** it has a single valid proof that another single valid proof exists (but possibly with an older version of the proof system or different parameters).
 
 For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
 
@@ -45,7 +45,7 @@ A transaction witness consists of the following fields:
 
 Note that a (transaction, valid witness) pair cannot be broadcasted because that would undermine both soundness and privacy.
 
-### B: Decomposition into Subclaims
+### B: Standard Decomposition into Subclaims
 
 The motivation for splitting transaction validity into subclaims is that the induced subprograms can be proved individually, which might be cheaper than proving the whole thing in one go. Also, it is conceivable that components of a transaction are updated and do not invalidate all subproofs but only a subset of them. The subprograms are as follows.
 

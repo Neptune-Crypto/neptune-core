@@ -255,13 +255,12 @@ impl SecretWitness for NativeCurrencyWitness {
 #[cfg(test)]
 pub mod test {
     use crate::models::blockchain::transaction::{
-        primitive_witness::arbitrary_primitive_witness_with,
-        utxo::{LockScript, Utxo},
-        PublicAnnouncement,
+        primitive_witness::arbitrary_primitive_witness_with, utxo::Utxo, PublicAnnouncement,
     };
     use proptest::collection::vec;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+    use transaction::utxo::LockScriptAndWitness;
 
     use self::transaction::primitive_witness::PrimitiveWitness;
 
@@ -294,15 +293,14 @@ pub mod test {
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
-        #[strategy(vec(arb::<LockScript>(), #_num_inputs))] _input_lock_scripts: Vec<LockScript>,
-        #[strategy(vec(vec(arb::<BFieldElement>(), 0..10), #_num_inputs))]
-        _input_lock_script_witnesses: Vec<Vec<BFieldElement>>,
+        #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
+        _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
         #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
         #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
@@ -325,15 +323,14 @@ pub mod test {
         #[strategy(1usize..=3)] _num_public_announcements: usize,
         #[strategy(arb())] _coinbase: NeptuneCoins,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
-        #[strategy(vec(arb::<LockScript>(), #_num_inputs))] _input_lock_scripts: Vec<LockScript>,
-        #[strategy(vec(vec(arb::<BFieldElement>(), 0..10), #_num_inputs))]
-        _input_lock_script_witnesses: Vec<Vec<BFieldElement>>,
+        #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
+        _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
         #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
         #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up

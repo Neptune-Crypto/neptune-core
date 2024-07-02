@@ -1,6 +1,7 @@
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::utxo::LockScriptAndWitness;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
@@ -750,12 +751,16 @@ pub async fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
+    let input_lock_scripts_and_witnesses = input_lock_scripts
+        .into_iter()
+        .zip(spending_key_unlock_keys.into_iter())
+        .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
+        .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),
         type_scripts,
-        input_lock_scripts,
-        lock_script_witnesses: spending_key_unlock_keys,
+        lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
         input_membership_proofs,
         output_utxos: SaltedUtxos::new(output_utxos),
         output_sender_randomnesses,

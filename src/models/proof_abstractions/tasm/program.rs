@@ -3,8 +3,11 @@ use std::panic::{catch_unwind, RefUnwindSafe};
 use itertools::Itertools;
 use tasm_lib::{
     triton_vm::{
+        self,
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program, PublicInput},
+        proof::{Claim, Proof},
+        stark::Stark,
     },
     twenty_first::math::b_field_element::BFieldElement,
     Digest,
@@ -66,5 +69,11 @@ where
             Ok(result) => Result::Ok(result),
             Err(e) => Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e))),
         }
+    }
+
+    /// Run the program and generate a proof for it, assuming running halts
+    /// gracefully.
+    fn prove(&self, claim: &Claim, nondeterminism: NonDeterminism) -> Proof {
+        triton_vm::prove(Stark::default(), &claim, &self.program(), nondeterminism).unwrap()
     }
 }

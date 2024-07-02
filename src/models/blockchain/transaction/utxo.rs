@@ -12,7 +12,9 @@ use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
@@ -256,6 +258,84 @@ impl<'a> Arbitrary<'a> for LockScript {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let program = Program::arbitrary(u)?;
         Ok(LockScript { program })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+pub struct LockScriptAndWitness {
+    pub program: Program,
+    nd_memory: Vec<(BFieldElement, BFieldElement)>,
+    nd_tokens: Vec<BFieldElement>,
+    nd_digests: Vec<Digest>,
+}
+
+impl From<LockScriptAndWitness> for LockScript {
+    fn from(lock_script_and_witness: LockScriptAndWitness) -> Self {
+        Self {
+            program: lock_script_and_witness.program,
+        }
+    }
+}
+
+impl From<&LockScriptAndWitness> for LockScript {
+    fn from(lock_script_and_witness: &LockScriptAndWitness) -> Self {
+        Self {
+            program: lock_script_and_witness.program.clone(),
+        }
+    }
+}
+
+impl LockScriptAndWitness {
+    pub fn new_with_nondeterminism(program: Program, witness: NonDeterminism) -> Self {
+        Self {
+            program,
+            nd_memory: witness.ram.into_iter().collect(),
+            nd_tokens: witness.individual_tokens,
+            nd_digests: witness.digests,
+        }
+    }
+
+    pub fn new(program: Program) -> Self {
+        Self {
+            program,
+            nd_memory: vec![],
+            nd_tokens: vec![],
+            nd_digests: vec![],
+        }
+    }
+
+    pub fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
+        Self {
+            program,
+            nd_memory: vec![],
+            nd_tokens: tokens,
+            nd_digests: vec![],
+        }
+    }
+
+    pub fn nondeterminism(&self) -> NonDeterminism {
+        NonDeterminism::new(self.nd_tokens.clone())
+            .with_digests(self.nd_digests.clone())
+            .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>())
+    }
+
+    pub fn halts_gracefully(&self, public_input: PublicInput) -> bool {
+        self.program
+            .run(
+                public_input,
+                NonDeterminism::new(self.nd_tokens.clone())
+                    .with_digests(self.nd_digests.clone())
+                    .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>()),
+            )
+            .is_ok()
+    }
+}
+
+impl<'a> Arbitrary<'a> for LockScriptAndWitness {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let program = Program::arbitrary(u)?;
+        let tokens = Digest::arbitrary(u)?.reversed().values().to_vec();
+        Ok(LockScriptAndWitness::new_with_tokens(program, tokens))
     }
 }
 
