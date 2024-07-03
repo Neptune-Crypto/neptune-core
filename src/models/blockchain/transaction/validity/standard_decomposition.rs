@@ -7,10 +7,12 @@ use tasm_lib::{
     memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
     structure::tasm_object::TasmObject,
     triton_vm::{
+        self,
         instruction::LabelledInstruction,
         prelude::BFieldCodec,
         program::{NonDeterminism, Program, PublicInput},
-        proof::Proof,
+        proof::{Claim, Proof},
+        stark::Stark,
     },
     twenty_first::util_types::algebraic_hasher::AlgebraicHasher,
     Digest,
@@ -38,13 +40,6 @@ use super::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
-pub struct StandardDecompositionEvidence {
-    kernel_mast_hash: Digest,
-    lock_scripts: Vec<Digest>,
-    type_scripts: Vec<Digest>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
     pub removal_records_integrity: Proof,
     pub collect_lock_scripts: Proof,
@@ -55,6 +50,8 @@ pub struct ProofCollection {
     pub lock_script_hashes: Vec<Digest>,
     pub type_script_hashes: Vec<Digest>,
     pub kernel_mast_hash: Digest,
+    pub salted_inputs_hash: Digest,
+    pub salted_outputs_hash: Digest,
 }
 
 impl ProofCollection {
@@ -148,6 +145,8 @@ impl ProofCollection {
             .collect_vec();
 
         // collect hashes
+        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
         let lock_script_hashes = primitive_witness
             .lock_scripts_and_witnesses
             .iter()
@@ -170,7 +169,107 @@ impl ProofCollection {
             lock_script_hashes,
             type_script_hashes,
             kernel_mast_hash: txk_mast_hash,
+            salted_inputs_hash,
+            salted_outputs_hash,
         }
+    }
+
+    pub fn verify(&self, txk_mast_hash: Digest) -> bool {
+        // make sure we are talking about the same tx
+        if self.kernel_mast_hash != txk_mast_hash {
+            return false;
+        }
+
+        // compile claims
+        let removal_records_integrity_claim = Claim {
+            program_digest: RemovalRecordsIntegrity.program().hash::<Hash>(),
+            input: self.kernel_mast_hash.reversed().values().to_vec(),
+            output: self.salted_inputs_hash.values().to_vec(),
+        };
+        let kernel_to_outputs_claim = Claim {
+            program_digest: KernelToOutputs.program().hash::<Hash>(),
+            input: self.kernel_mast_hash.reversed().values().to_vec(),
+            output: self.salted_outputs_hash.values().to_vec(),
+        };
+        let collect_lock_scripts_claim = Claim {
+            program_digest: CollectLockScripts.program().hash::<Hash>(),
+            input: self.salted_inputs_hash.reversed().values().to_vec(),
+            output: self
+                .lock_script_hashes
+                .iter()
+                .flat_map(|d| d.values())
+                .collect_vec(),
+        };
+        let collect_type_scripts_claim = Claim {
+            program_digest: CollectTypeScripts.program().hash::<Hash>(),
+            input: [self.salted_inputs_hash, self.salted_outputs_hash]
+                .into_iter()
+                .flat_map(|d| d.reversed().values())
+                .collect_vec(),
+            output: self
+                .type_script_hashes
+                .iter()
+                .flat_map(|d| d.reversed().values())
+                .collect_vec(),
+        };
+        let lock_script_claims = self
+            .lock_script_hashes
+            .iter()
+            .map(|lsh| Claim {
+                program_digest: *lsh,
+                input: self.kernel_mast_hash.reversed().values().to_vec(),
+                output: vec![],
+            })
+            .collect_vec();
+        let type_script_claims = self
+            .type_script_hashes
+            .iter()
+            .map(|lsh| Claim {
+                program_digest: *lsh,
+                input: [
+                    self.kernel_mast_hash,
+                    self.salted_inputs_hash,
+                    self.salted_outputs_hash,
+                ]
+                .into_iter()
+                .flat_map(|d| d.reversed().values())
+                .collect_vec(),
+                output: vec![],
+            })
+            .collect_vec();
+
+        // verify
+        let rri = triton_vm::verify(
+            Stark::default(),
+            &removal_records_integrity_claim,
+            &self.removal_records_integrity,
+        );
+        let k2o = triton_vm::verify(
+            Stark::default(),
+            &kernel_to_outputs_claim,
+            &self.kernel_to_outputs,
+        );
+        let cls = triton_vm::verify(
+            Stark::default(),
+            &collect_lock_scripts_claim,
+            &self.collect_lock_scripts,
+        );
+        let cts = triton_vm::verify(
+            Stark::default(),
+            &collect_type_scripts_claim,
+            &self.collect_type_scripts,
+        );
+        let lsh = lock_script_claims
+            .iter()
+            .zip(self.lock_scripts_halt.iter())
+            .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
+        let tsh = type_script_claims
+            .iter()
+            .zip(self.type_scripts_halt.iter())
+            .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
+
+        // and all bits together and return
+        rri && k2o && cls && cts && lsh && tsh
     }
 }
 

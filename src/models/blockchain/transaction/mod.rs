@@ -21,6 +21,7 @@ use tracing::error;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use validity::standard_decomposition::ProofCollection;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -54,9 +55,10 @@ pub enum TransactionProof {
     Invalid,
     Witness(PrimitiveWitness),
     SingleProof(Proof),
-    ProofCollection([(Claim, Proof); NUM_TX_SUBPROGRAMS]),
+    ProofCollection(ProofCollection),
     MultiClaimProof(([Claim; NUM_TX_SUBPROGRAMS], Proof)),
 }
+
 impl TransactionProof {
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
@@ -66,7 +68,9 @@ impl TransactionProof {
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
             TransactionProof::SingleProof(_) => todo!(),
-            TransactionProof::ProofCollection(_) => todo!(),
+            TransactionProof::ProofCollection(proof_collection) => {
+                proof_collection.verify(kernel_mast_hash)
+            }
             TransactionProof::MultiClaimProof(_) => todo!(),
         }
     }
@@ -388,9 +392,9 @@ impl Transaction {
 }
 
 #[cfg(test)]
-mod witness_tests {
+mod tests {
     use tasm_lib::Digest;
-    use witness_tests::primitive_witness::SaltedUtxos;
+    use tests::primitive_witness::SaltedUtxos;
 
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
