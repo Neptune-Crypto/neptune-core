@@ -221,15 +221,12 @@ impl ArchivalState {
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
-        let mut last_rec: LastFileRecord = match self
+        let mut last_rec: LastFileRecord = self
             .block_index_db
             .get(BlockIndexKey::LastFile)
             .await
             .map(|x| x.as_last_file_record())
-        {
-            Some(rec) => rec,
-            None => LastFileRecord::default(),
-        };
+            .unwrap_or_default();
 
         // Open the file that was last used for storing a block
         let mut block_file_path = self.data_dir.block_file_path(last_rec.last_file);
@@ -850,7 +847,6 @@ mod archival_state_tests {
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
-    use crate::models::state::ChangeNotifyMethod;
     use crate::models::state::UtxoReceiver;
     use crate::tests::shared::{
         add_block_to_archival_state, make_mock_block_with_valid_pow, mock_genesis_archival_state,
@@ -1022,22 +1018,21 @@ mod archival_state_tests {
                 own_receiving_address,
                 rng.gen(),
             );
-            let (sender_tx, tx_data) = genesis_receiver_global_state
-                .create_transaction(
+            let (sender_tx, expected_utxos) = genesis_receiver_global_state
+                .create_transaction_test_wrapper(
                     vec![UtxoReceiver::random(Utxo {
                         coins: NeptuneCoins::new(4).to_native_coins(),
                         lock_script_hash: LockScript::anyone_can_spend().hash(),
                     })],
                     NeptuneCoins::new(2),
                     now + seven_months,
-                    ChangeNotifyMethod::default(),
                 )
                 .await
                 .unwrap();
 
             // inform wallet of any expected utxos from this tx.
             genesis_receiver_global_state
-                .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+                .add_expected_utxos_to_wallet(expected_utxos)
                 .await
                 .unwrap();
 
@@ -1149,14 +1144,13 @@ mod archival_state_tests {
                 coins: one_money,
             }),
         ];
-        let (sender_tx, tx_data) = global_state_lock
+        let (sender_tx, expected_utxos) = global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data,
                 NeptuneCoins::new(4),
                 now + seven_months,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1165,7 +1159,7 @@ mod archival_state_tests {
         global_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos)
             .await
             .unwrap();
 
@@ -1280,19 +1274,18 @@ mod archival_state_tests {
                     coins: some_money.clone(),
                 }),
             ];
-            let (sender_tx, tx_data) = global_state
-                .create_transaction(
+            let (sender_tx, expected_utxos) = global_state
+                .create_transaction_test_wrapper(
                     receiver_data,
                     NeptuneCoins::new(4),
                     now + seven_months,
-                    ChangeNotifyMethod::default(),
                 )
                 .await
                 .unwrap();
 
             // inform wallet of any expected utxos from this tx.
             global_state
-                .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+                .add_expected_utxos_to_wallet(expected_utxos)
                 .await
                 .unwrap();
 
@@ -1432,15 +1425,10 @@ mod archival_state_tests {
             coins: one_money.to_native_coins(),
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         });
-        let (sender_tx, tx_data) = global_state_lock
+        let (sender_tx, expected_utxos) = global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
-                vec![receiver_data],
-                one_money,
-                now + seven_months,
-                ChangeNotifyMethod::default(),
-            )
+            .create_transaction_test_wrapper(vec![receiver_data], one_money, now + seven_months)
             .await
             .unwrap();
 
@@ -1448,7 +1436,7 @@ mod archival_state_tests {
         global_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos)
             .await
             .unwrap();
 
@@ -1540,10 +1528,10 @@ mod archival_state_tests {
             ),
         ];
         {
-            let (tx_to_alice_and_bob, tx_data_ab) = genesis_state_lock
+            let (tx_to_alice_and_bob, expected_utxos_ab) = genesis_state_lock
                 .lock_guard()
                 .await
-                .create_transaction(
+                .create_transaction_test_wrapper(
                     [
                         receiver_data_for_alice.clone(),
                         receiver_data_for_bob.clone(),
@@ -1551,7 +1539,6 @@ mod archival_state_tests {
                     .concat(),
                     fee,
                     launch + seven_months,
-                    ChangeNotifyMethod::default(),
                 )
                 .await
                 .unwrap();
@@ -1560,7 +1547,7 @@ mod archival_state_tests {
             genesis_state_lock
                 .lock_guard_mut()
                 .await
-                .add_expected_utxos_to_wallet(tx_data_ab.expected_utxos)
+                .add_expected_utxos_to_wallet(expected_utxos_ab)
                 .await
                 .unwrap();
 
@@ -1686,14 +1673,13 @@ mod archival_state_tests {
                 genesis_spending_key.to_address().privacy_digest,
             ),
         ];
-        let (tx_from_alice, tx_data_alice) = alice_state_lock
+        let (tx_from_alice, expected_utxos_alice) = alice_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data_from_alice.clone(),
                 NeptuneCoins::new(1),
                 launch + seven_months,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1702,7 +1688,7 @@ mod archival_state_tests {
         alice_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data_alice.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos_alice)
             .await
             .unwrap();
 
@@ -1732,14 +1718,13 @@ mod archival_state_tests {
                 genesis_spending_key.to_address().privacy_digest,
             ),
         ];
-        let (tx_from_bob, tx_data_bob) = bob_state_lock
+        let (tx_from_bob, expected_utxos_bob) = bob_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data_from_bob.clone(),
                 NeptuneCoins::new(2),
                 launch + seven_months,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1748,7 +1733,7 @@ mod archival_state_tests {
         bob_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data_bob.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos_bob)
             .await
             .unwrap();
 

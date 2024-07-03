@@ -37,7 +37,6 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::{Hash, VERSION};
 use anyhow::{bail, Result};
 use itertools::Itertools;
-use num_traits::CheckedSub;
 use std::cmp::max;
 use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
@@ -54,21 +53,26 @@ pub mod shared;
 mod utxo_receiver;
 pub mod wallet;
 
-pub use utxo_receiver::ChangeNotifyMethod;
 pub use utxo_receiver::UtxoNotifyMethod;
 pub use utxo_receiver::UtxoReceiver;
+pub use utxo_receiver::UtxoReceiverList;
 
 #[derive(Debug, Clone)]
-pub struct TransactionDetails {
-    pub receiver_data: Vec<UtxoReceiver>,
+struct TransactionDetails {
     pub removal_records: Vec<RemovalRecord>,
     pub addition_records: Vec<AdditionRecord>,
-    pub input_utxos: Vec<(Utxo, LockScript, MsMembershipProof)>,
+    pub input_utxos: Vec<TransactionInput>,
     pub output_utxos: Vec<Utxo>,
     pub public_announcements: Vec<PublicAnnouncement>,
-    pub expected_utxos: Vec<ExpectedUtxo>,
     pub fee: NeptuneCoins,
     pub timestamp: Timestamp,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionInput {
+    pub utxo: Utxo,
+    pub lock_script: LockScript,
+    pub ms_membership_proof: MsMembershipProof,
 }
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -403,15 +407,24 @@ impl GlobalState {
         &self,
         total_spend: NeptuneCoins,
         timestamp: Timestamp,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
+    ) -> Result<Vec<TransactionInput>> {
         // Get the block tip as the transaction is made relative to it
         let block_tip = self.chain.light_state();
 
         // collect spendable inputs
-        let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)> = self
+        let spendable_utxos_and_mps = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(total_spend, block_tip.hash(), timestamp)
-            .await?;
+            .await?
+            .into_iter()
+            .map(
+                |(utxo, lock_script, ms_membership_proof)| TransactionInput {
+                    utxo,
+                    lock_script,
+                    ms_membership_proof,
+                },
+            )
+            .collect_vec();
 
         Ok(spendable_utxos_and_mps)
     }
@@ -419,12 +432,13 @@ impl GlobalState {
     /// Given a list of spendable UTXOs, generate the corresponding removal
     /// recods relative to the current mutator set accumulator.
     pub fn generate_removal_records(
-        spendable_utxos_and_mps: &[(Utxo, LockScript, MsMembershipProof)],
+        transaction_inputs: &[TransactionInput],
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> Vec<RemovalRecord> {
         let mut inputs: Vec<RemovalRecord> = vec![];
-        for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
-            let removal_record = mutator_set_accumulator.drop(Hash::hash(spendable_utxo), mp);
+        for ti in transaction_inputs.iter() {
+            let removal_record =
+                mutator_set_accumulator.drop(Hash::hash(&ti.utxo), &ti.ms_membership_proof);
             inputs.push(removal_record);
         }
         inputs
@@ -445,53 +459,10 @@ impl GlobalState {
             .collect_vec()
     }
 
-    /// Generate a change UTXO and transaction output to ensure that the difference
-    /// in input amount and output amount goes back to us.
-    /// The caller should also notify the wallet to expect the change Utxo
-    /// so that we can synchronize it after it is confirmed.
-    pub async fn add_change(
-        &self,
-        change_amount: NeptuneCoins,
-    ) -> Result<(ExpectedUtxo, PublicAnnouncement)> {
-        // generate utxo
-        let own_spending_key_for_change = self
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
-        let own_receiving_address = own_spending_key_for_change.to_address();
-        let lock_script = own_receiving_address.lock_script();
-        let lock_script_hash = lock_script.hash();
-        let utxo = Utxo {
-            coins: change_amount.to_native_coins(),
-            lock_script_hash,
-        };
-
-        // generate addition record
-        let receiver_digest = own_receiving_address.privacy_digest;
-        let sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
-            self.chain.light_state().kernel.header.height,
-            receiver_digest,
-        );
-
-        let receiver_preimage = own_spending_key_for_change.privacy_preimage;
-
-        let public_announcement =
-            own_receiving_address.generate_public_announcement(&utxo, sender_randomness)?;
-
-        let expected_utxo = ExpectedUtxo::new(
-            utxo,
-            sender_randomness,
-            receiver_preimage,
-            UtxoNotifier::Myself,
-        );
-
-        Ok((expected_utxo, public_announcement))
-    }
-
     /// Generate a primitive witness for a transaction from various disparate witness data.
     pub fn generate_primitive_witness(
         spending_key: SpendingKey,
-        spendable_utxos_and_mps: &[(Utxo, LockScript, MsMembershipProof)],
+        transaction_inputs: &[TransactionInput],
         output_utxos: &[Utxo],
         transaction_kernel: &TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
@@ -499,18 +470,17 @@ impl GlobalState {
         let type_scripts = [NativeCurrency.program(), TimeLock.program()]
             .map(TypeScript::new)
             .to_vec();
-        let input_utxos = spendable_utxos_and_mps
+        let input_utxos = transaction_inputs
             .iter()
-            .map(|(utxo, _lock_script, _mp)| utxo.clone())
+            .map(|ti| ti.utxo.clone())
             .collect_vec();
-        let input_lock_scripts = spendable_utxos_and_mps
+        let input_lock_scripts = transaction_inputs
             .iter()
-            .map(|(_utxo, lock_script, _mp)| lock_script.to_owned())
+            .map(|ti| ti.lock_script.to_owned())
             .collect_vec();
-        let input_membership_proofs = spendable_utxos_and_mps
+        let input_membership_proofs = transaction_inputs
             .iter()
-            .map(|(_utxo, _lock_script, mp)| mp)
-            .cloned()
+            .map(|ti| ti.ms_membership_proof.clone())
             .collect_vec();
 
         let secret_input = spending_key.unlock_key.encode();
@@ -519,7 +489,7 @@ impl GlobalState {
             input_utxos: SaltedUtxos::new(input_utxos),
             input_lock_scripts,
             type_scripts,
-            lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
+            lock_script_witnesses: vec![secret_input; transaction_inputs.len()],
             input_membership_proofs,
             output_utxos: SaltedUtxos::new(output_utxos.to_vec()),
             mutator_set_accumulator,
@@ -527,11 +497,177 @@ impl GlobalState {
         }
     }
 
-    /// Create a transaction that sends coins to the given `recipient_utxos`
-    /// from some selection of owned UTXOs.
-    async fn create_transaction_from_tx_data(
+    /// creates a Transaction.
+    ///
+    /// It is the caller's responsibility to provide inputs and outputs such
+    /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
+    ///
+    /// Note that this means the caller must calculate the change amount if any
+    /// and provide an output for the change.
+    ///
+    /// UtxoReceiver::auto() should normally be used.  This will generate
+    /// OffChain notifications for UTXOs destined for our wallet and
+    /// OnChainPubKey notifications for all other UTXOs.
+    ///
+    /// It is the caller's responsibility to inform the wallet of any expected
+    /// utxos, ie offchain secret notifications, for utxos that match wallet
+    /// keys.
+    ///
+    /// Example:
+    ///
+    /// todo: provide complete example with inputs and change utxo.
+    ///
+    /// ```compile_fail
+    /// let utxo_receivers = UtxoReceiverList::from(vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_privacy_digest)]);
+    /// let transaction = state.create_transaction(utxo_receivers, fee, now).await?;
+    /// state.add_expected_utxos_to_wallet(utxo_receivers.expected_utxos()).await?;
+    /// ```
+    pub async fn create_transaction(
         &self,
-        tx_utxo_data: TransactionDetails,
+        inputs: Vec<TransactionInput>,
+        receiver_data: &UtxoReceiverList,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<Transaction> {
+        // UTXO data: inputs, outputs, and supporting witness data
+        let tx_data = self
+            .generate_tx_data_for_transaction(inputs, receiver_data, fee, timestamp)
+            .await?;
+
+        self.create_transaction_from_data(tx_data).await
+    }
+
+    /// This is a (mostly) backwards compatible wrapper for create_transaction()
+    /// so that tests do not have to be significantly re-written.
+    ///
+    /// Previously create_transaction() would auto-generate a change output.  It
+    /// now requires the caller to provide all outputs and merely validates that
+    /// sum(inputs) == sum(outputs)+fee.  Since the caller now knows all the
+    /// outputs and if they are on of off-chain, there is also no need to return
+    /// Vec<ExpectedUtxo> or anything besides `Transaction`.
+    ///
+    /// So this wrapper adds the change output if necessary, and it also
+    /// returns a Vec<ExpectedUtxo>.
+    #[cfg(test)]
+    pub async fn create_transaction_test_wrapper(
+        &self,
+        utxo_receiver_vec: Vec<UtxoReceiver>,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+        use num_traits::CheckedSub;
+
+        // 1. create/add change output if necessary.
+
+        let mut utxo_receivers = UtxoReceiverList::from(utxo_receiver_vec);
+
+        let total_spend = utxo_receivers.total_native_coins() + fee;
+
+        let transaction_inputs = self
+            .assemble_inputs_for_transaction(total_spend, timestamp)
+            .await?;
+
+        let input_amount = transaction_inputs
+            .iter()
+            .map(|ti| ti.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>()
+            + fee;
+
+        if total_spend < input_amount {
+            // note: for now we use key with index 0 everywhere.
+            let address = self
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key(0)
+                .to_address();
+
+            let amount = input_amount
+                .checked_sub(&total_spend)
+                .ok_or(anyhow::anyhow!(
+                    "checked sub failed. check input/output amounts"
+                ))?;
+
+            let coins = amount.to_native_coins();
+            let utxo = Utxo::new(address.lock_script(), coins);
+
+            let block_height = self.chain.light_state().header().height;
+
+            let sender_randomness = self
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(block_height, address.privacy_digest);
+
+            let utxo_receiver =
+                UtxoReceiver::offchain(utxo, sender_randomness, address.privacy_digest);
+            utxo_receivers.push(utxo_receiver);
+        }
+
+        // 2. call create_transaction()
+        let tx = self
+            .create_transaction(transaction_inputs, &utxo_receivers, fee, timestamp)
+            .await?;
+
+        Ok((tx, utxo_receivers.expected_utxos().into_iter().collect()))
+    }
+
+    /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
+    /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary, and
+    /// and produce a list of removal records, input UTXOs (with lock scripts and
+    /// membership proofs), addition records, and output UTXOs.
+    async fn generate_tx_data_for_transaction(
+        &self,
+        transaction_inputs: Vec<TransactionInput>,
+        receiver_data: &UtxoReceiverList,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<TransactionDetails> {
+        // total amount to be spent -- determines how many and which UTXOs to use
+        let total_spend: NeptuneCoins = receiver_data
+            .iter()
+            .map(|x| x.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>()
+            + fee;
+
+        let input_amount = transaction_inputs
+            .iter()
+            .map(|ti| ti.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>();
+
+        // sanity check: do we even have enough funds?
+        if total_spend > input_amount {
+            bail!("Not enough available funds.");
+        }
+        if total_spend < input_amount {
+            let diff = total_spend - input_amount;
+            bail!("Missing change output in the amount of {}", diff);
+        }
+
+        // create removal records (inputs)
+        let removal_records = Self::generate_removal_records(
+            &transaction_inputs,
+            &self.chain.light_state().kernel.body.mutator_set_accumulator,
+        );
+
+        // create addition records (outputs)
+        let addition_records = Self::generate_addition_records(receiver_data);
+        let output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
+
+        Ok(TransactionDetails {
+            removal_records,
+            addition_records,
+            input_utxos: transaction_inputs,
+            output_utxos,
+            public_announcements: receiver_data.public_announcements().into_iter().collect(),
+            fee,
+            timestamp,
+        })
+    }
+
+    /// Assembles a transaction kernel and supporting witness or proof(s) from
+    /// the given transaction data.
+    async fn create_transaction_from_data(
+        &self,
+        transaction_details: TransactionDetails,
     ) -> Result<Transaction> {
         let mutator_set_accumulator = self
             .chain
@@ -548,168 +684,6 @@ impl GlobalState {
             .wallet_secret
             .nth_generation_spending_key(0);
 
-        // assemble transaction object
-        Self::create_transaction_from_data(
-            spending_key,
-            tx_utxo_data.removal_records,  // inputs
-            tx_utxo_data.input_utxos,      // spendable_utxos_and_mps,
-            tx_utxo_data.addition_records, // outputs,
-            tx_utxo_data.output_utxos,
-            tx_utxo_data.fee,
-            tx_utxo_data.public_announcements,
-            tx_utxo_data.timestamp,
-            mutator_set_accumulator,
-            privacy,
-        )
-        .await
-    }
-
-    /// creates a Transaction.
-    ///
-    /// UtxoReceiver::auto() should normally be used.  This will generate
-    /// OffChain notifications for UTXOs destined for our wallet and
-    /// OnChainPubKey notifications for all other UTXOs.
-    ///
-    /// Likewise ChangeNotifyMethod::default() should be used, which corresponds
-    /// to ChangeNotifyMethod::OffChain.  This controls notification behavior
-    /// for a change UTXO which is automatically generated if needed.
-    ///
-    /// returns TransactionDetails which provides unblinded view of the
-    /// transaction data.
-    ///
-    /// It is the caller's responsibility to inform the wallet of any expected
-    /// utxos, ie offchain secret notifications, for utxos that match wallet
-    /// keys.
-    ///
-    /// Example:
-    ///
-    /// ```compile_fail
-    /// let utxo_receivers = vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_privacy_digest)];
-    /// let (transaction, tx_data) = state.create_transaction(utxo_receivers, fee, now, ChangeNotifyMethod::default()).await?;
-    /// state.add_expected_utxos_to_wallet(tx_data.expected_utxos).await?;
-    /// ```
-    pub async fn create_transaction(
-        &self,
-        receiver_data: Vec<UtxoReceiver>,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-        change_notify_method: ChangeNotifyMethod,
-    ) -> Result<(Transaction, TransactionDetails)> {
-        // UTXO data: inputs, outputs, and supporting witness data
-        let tx_data = self
-            .generate_tx_data_for_transaction(receiver_data, fee, timestamp, change_notify_method)
-            .await?;
-
-        Ok((
-            self.create_transaction_from_tx_data(tx_data.clone())
-                .await?,
-            tx_data,
-        ))
-    }
-
-    /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
-    /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary, and
-    /// and produce a list of removal records, input UTXOs (with lock scripts and
-    /// membership proofs), addition records, and output UTXOs.
-    async fn generate_tx_data_for_transaction(
-        &self,
-        receiver_data: Vec<UtxoReceiver>,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-        change_notify_method: ChangeNotifyMethod,
-    ) -> Result<TransactionDetails> {
-        // total amount to be spent -- determines how many and which UTXOs to use
-        let total_spend: NeptuneCoins = receiver_data
-            .iter()
-            .map(|x| x.utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
-            + fee;
-
-        // collect enough spendable UTXOs
-        let spendable_utxos_and_mps = self
-            .assemble_inputs_for_transaction(total_spend, timestamp)
-            .await?;
-        let input_amount = spendable_utxos_and_mps
-            .iter()
-            .map(|(utxo, _lock_script, _mp)| utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>();
-
-        // sanity check: do we even have enough funds?
-        if total_spend > input_amount {
-            bail!("Not enough available funds.");
-        }
-
-        // create removal records (inputs)
-        let inputs = Self::generate_removal_records(
-            &spendable_utxos_and_mps,
-            &self.chain.light_state().kernel.body.mutator_set_accumulator,
-        );
-
-        // create addition records (outputs)
-        let mut outputs = Self::generate_addition_records(&receiver_data);
-        let mut output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
-
-        let mut public_announcements = receiver_data
-            .iter()
-            .filter_map(|rd| match &rd.utxo_notify_method {
-                UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
-                _ => None,
-            })
-            .collect_vec();
-
-        let mut expected_utxos = receiver_data
-            .iter()
-            .filter_map(|rd| match &rd.utxo_notify_method {
-                UtxoNotifyMethod::OffChain => Some(rd.into()),
-                _ => None,
-            })
-            .collect_vec();
-
-        // keep track of change (if any)
-        if total_spend < input_amount {
-            let change_amount = input_amount.checked_sub(&total_spend).unwrap();
-            let (change_expected_utxo, change_public_announcement) =
-                self.add_change(change_amount).await?;
-            outputs.push(change_expected_utxo.addition_record);
-            output_utxos.push(change_expected_utxo.utxo.clone());
-
-            match change_notify_method {
-                ChangeNotifyMethod::OffChain => expected_utxos.push(change_expected_utxo),
-                ChangeNotifyMethod::OnChainSymmetricKey => unimplemented!(),
-                ChangeNotifyMethod::OnChainPubKey => {
-                    public_announcements.push(change_public_announcement)
-                }
-            }
-        }
-
-        Ok(TransactionDetails {
-            receiver_data,
-            removal_records: inputs,
-            addition_records: outputs,
-            input_utxos: spendable_utxos_and_mps,
-            output_utxos,
-            public_announcements,
-            expected_utxos,
-            fee,
-            timestamp,
-        })
-    }
-
-    /// Assembles a transaction kernel and supporting witness or proof(s) from
-    /// the given transaction data.
-    #[allow(clippy::too_many_arguments)]
-    async fn create_transaction_from_data(
-        spending_key: SpendingKey,
-        inputs: Vec<RemovalRecord>,
-        spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
-        outputs: Vec<AdditionRecord>,
-        output_utxos: Vec<Utxo>,
-        fee: NeptuneCoins,
-        public_announcements: Vec<PublicAnnouncement>,
-        timestamp: Timestamp,
-        mutator_set_accumulator: MutatorSetAccumulator,
-        privacy: bool,
-    ) -> Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  As such, we use
         //       spawn_blocking() to execute on tokio's blocking
@@ -717,14 +691,8 @@ impl GlobalState {
         //       and other async tasks.
         let transaction = tokio::task::spawn_blocking(move || {
             Self::create_transaction_from_data_worker(
+                transaction_details,
                 spending_key,
-                inputs,
-                spendable_utxos_and_mps,
-                outputs,
-                output_utxos,
-                fee,
-                public_announcements,
-                timestamp,
                 mutator_set_accumulator,
                 privacy,
             )
@@ -739,21 +707,26 @@ impl GlobalState {
     //       Use create_transaction_from_data() instead.
     #[allow(clippy::too_many_arguments)]
     fn create_transaction_from_data_worker(
+        transaction_details: TransactionDetails,
         spending_key: SpendingKey,
-        inputs: Vec<RemovalRecord>,
-        spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
-        outputs: Vec<AdditionRecord>,
-        output_utxos: Vec<Utxo>,
-        fee: NeptuneCoins,
-        public_announcements: Vec<PublicAnnouncement>,
-        timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         _privacy: bool,
     ) -> Transaction {
+        let TransactionDetails {
+            input_utxos,
+            output_utxos,
+            removal_records,
+            addition_records,
+            public_announcements,
+            fee,
+            timestamp,
+            ..
+        } = transaction_details;
+
         // complete transaction kernel
         let kernel = TransactionKernel {
-            inputs,
-            outputs,
+            inputs: removal_records,
+            outputs: addition_records,
             public_announcements,
             fee,
             timestamp,
@@ -764,7 +737,7 @@ impl GlobalState {
         // populate witness
         let primitive_witness = Self::generate_primitive_witness(
             spending_key,
-            &spendable_utxos_and_mps,
+            &input_utxos,
             &output_utxos,
             &kernel,
             mutator_set_accumulator,
@@ -1443,11 +1416,10 @@ mod global_state_tests {
         assert!(global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data.clone(),
                 NeptuneCoins::new(1),
                 launch + six_months - one_month,
-                ChangeNotifyMethod::default(),
             )
             .await
             .is_err());
@@ -1456,11 +1428,10 @@ mod global_state_tests {
         let (mut tx, _) = global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data,
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1513,11 +1484,10 @@ mod global_state_tests {
         let (new_tx, _) = global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 other_receiver_data,
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -2028,10 +1998,10 @@ mod global_state_tests {
             ),
         ];
         {
-            let (tx_to_alice_and_bob, tx_data_ab) = genesis_state_lock
+            let (tx_to_alice_and_bob, expected_utxos_ab) = genesis_state_lock
                 .lock_guard()
                 .await
-                .create_transaction(
+                .create_transaction_test_wrapper(
                     [
                         receiver_data_for_alice.clone(),
                         receiver_data_for_bob.clone(),
@@ -2039,7 +2009,6 @@ mod global_state_tests {
                     .concat(),
                     fee,
                     launch + seven_months,
-                    ChangeNotifyMethod::default(),
                 )
                 .await
                 .unwrap();
@@ -2048,7 +2017,7 @@ mod global_state_tests {
             genesis_state_lock
                 .lock_guard_mut()
                 .await
-                .add_expected_utxos_to_wallet(tx_data_ab.expected_utxos)
+                .add_expected_utxos_to_wallet(expected_utxos_ab)
                 .await
                 .unwrap();
 
@@ -2172,14 +2141,13 @@ mod global_state_tests {
             ),
         ];
         let now = genesis_block.kernel.header.timestamp;
-        let (tx_from_alice, tx_data_alice) = alice_state_lock
+        let (tx_from_alice, expected_utxos_alice) = alice_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data_from_alice.clone(),
                 NeptuneCoins::new(1),
                 now,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -2188,7 +2156,7 @@ mod global_state_tests {
         alice_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data_alice.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos_alice)
             .await
             .unwrap();
 
@@ -2218,14 +2186,13 @@ mod global_state_tests {
                 genesis_spending_key.to_address().privacy_digest,
             ),
         ];
-        let (tx_from_bob, tx_data_bob) = bob_state_lock
+        let (tx_from_bob, expected_utxos_bob) = bob_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 receiver_data_from_bob.clone(),
                 NeptuneCoins::new(2),
                 now,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -2234,7 +2201,7 @@ mod global_state_tests {
         bob_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data_bob.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos_bob)
             .await
             .unwrap();
 

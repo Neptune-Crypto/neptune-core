@@ -366,7 +366,7 @@ mod wallet_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
-    use crate::models::state::{ChangeNotifyMethod, UtxoReceiver};
+    use crate::models::state::UtxoReceiver;
     use crate::tests::shared::{
         make_mock_block, make_mock_transaction_with_generation_key, mock_genesis_global_state,
         mock_genesis_wallet_state,
@@ -862,19 +862,18 @@ mod wallet_tests {
         );
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
         let mut now = genesis_block.kernel.header.timestamp;
-        let (valid_tx, tx_data) = premine_receiver_global_state
-            .create_transaction(
+        let (valid_tx, expected_utxos) = premine_receiver_global_state
+            .create_transaction_test_wrapper(
                 receiver_data_to_other.clone(),
                 NeptuneCoins::new(2),
                 now + seven_months,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
         premine_receiver_global_state
-            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos)
             .await
             .unwrap();
 
@@ -1132,19 +1131,18 @@ mod wallet_tests {
             random(),
             own_address.privacy_digest,
         );
-        let (tx_from_preminer, tx_data_preminer) = premine_receiver_global_state
-            .create_transaction(
+        let (tx_from_preminer, expected_utxos_preminer) = premine_receiver_global_state
+            .create_transaction_test_wrapper(
                 vec![receiver_data_six.clone()],
                 NeptuneCoins::new(4),
                 now,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
         premine_receiver_global_state
-            .add_expected_utxos_to_wallet(tx_data_preminer.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos_preminer)
             .await
             .unwrap();
 

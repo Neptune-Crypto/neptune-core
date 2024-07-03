@@ -4,8 +4,11 @@ use super::wallet::wallet_state::WalletState;
 use super::PublicAnnouncement;
 use super::Utxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::models::state::NeptuneCoins;
 use crate::prelude::twenty_first::math::digest::Digest;
 use anyhow::Result;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 /// enumerates how a transaction recipient can be notified
 /// that a Utxo exists which they can claim/spend.
@@ -14,24 +17,6 @@ pub enum UtxoNotifyMethod {
     OnChainPubKey(PublicAnnouncement),
     OnChainSymmetricKey,
     OffChain,
-}
-
-/// enumerates how a transaction recipient can be notified
-/// that a Change Utxo exists which they can claim/spend.
-///
-/// note: This is equivalent to [UtxoNotifyMethod] but does
-/// not carry any data.  Also, it defaults to `OffChain`.
-#[derive(Debug, Clone)]
-pub enum ChangeNotifyMethod {
-    OnChainPubKey,
-    OnChainSymmetricKey,
-    OffChain,
-}
-
-impl Default for ChangeNotifyMethod {
-    fn default() -> Self {
-        Self::OffChain
-    }
 }
 
 /// Contains data that a UTXO recipient needs to be notified
@@ -138,6 +123,61 @@ impl UtxoReceiver {
     #[cfg(test)]
     pub fn random(utxo: Utxo) -> Self {
         Self::fake_announcement(utxo, rand::random(), rand::random())
+    }
+}
+
+/// Represents a list of UtxoReceiver
+#[derive(Debug, Clone, Default)]
+pub struct UtxoReceiverList(Vec<UtxoReceiver>);
+
+impl Deref for UtxoReceiverList {
+    type Target = Vec<UtxoReceiver>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for UtxoReceiverList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<Vec<UtxoReceiver>> for UtxoReceiverList {
+    fn from(v: Vec<UtxoReceiver>) -> Self {
+        Self(v)
+    }
+}
+
+impl From<UtxoReceiverList> for Vec<ExpectedUtxo> {
+    fn from(list: UtxoReceiverList) -> Self {
+        list.expected_utxos().into_iter().collect()
+    }
+}
+
+impl UtxoReceiverList {
+    pub fn total_native_coins(&self) -> NeptuneCoins {
+        self.0
+            .iter()
+            .map(|u| u.utxo.get_native_currency_amount())
+            .sum()
+    }
+
+    /// retrieves public announcements from possible sub-set of the list
+    pub fn public_announcements(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
+        self.0.iter().filter_map(|u| match &u.utxo_notify_method {
+            UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
+            _ => None,
+        })
+    }
+
+    /// retrieves expected_utxos from possible sub-set of the list
+    pub fn expected_utxos(&self) -> impl IntoIterator<Item = ExpectedUtxo> + '_ {
+        self.0.iter().filter_map(|u| match &u.utxo_notify_method {
+            UtxoNotifyMethod::OffChain => Some(u.into()),
+            _ => None,
+        })
     }
 }
 

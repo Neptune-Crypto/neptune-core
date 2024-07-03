@@ -710,7 +710,7 @@ mod block_tests {
     use crate::{
         config_models::network::Network,
         database::{storage::storage_schema::SimpleRustyStorage, NeptuneLevelDb},
-        models::state::{wallet::WalletSecret, ChangeNotifyMethod, UtxoReceiver},
+        models::state::{wallet::WalletSecret, UtxoReceiver},
         tests::shared::{
             make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
         },
@@ -755,14 +755,13 @@ mod block_tests {
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), NeptuneCoins::new(10));
         let reciever_data =
             UtxoReceiver::fake_announcement(new_utxo, random(), other_address.privacy_digest);
-        let (new_tx, tx_data) = global_state_lock
+        let (new_tx, expected_utxos) = global_state_lock
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_test_wrapper(
                 vec![reciever_data],
                 NeptuneCoins::new(1),
                 now + seven_months,
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -772,7 +771,7 @@ mod block_tests {
         global_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos)
             .await
             .unwrap();
 

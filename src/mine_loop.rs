@@ -520,10 +520,7 @@ mod mine_loop_tests {
 
     use crate::{
         config_models::network::Network,
-        models::{
-            consensus::timestamp::Timestamp,
-            state::{ChangeNotifyMethod, UtxoReceiver},
-        },
+        models::{consensus::timestamp::Timestamp, state::UtxoReceiver},
         tests::shared::mock_genesis_global_state,
     };
 
@@ -577,8 +574,8 @@ mod mine_loop_tests {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let (tx_by_preminer, tx_data) = premine_receiver_global_state
-            .create_transaction(
+        let (tx_by_preminer, expected_utxos) = premine_receiver_global_state
+            .create_transaction_test_wrapper(
                 vec![UtxoReceiver::fake_announcement(
                     tx_output,
                     sender_randomness,
@@ -586,14 +583,13 @@ mod mine_loop_tests {
                 )],
                 NeptuneCoins::new(1),
                 now + Timestamp::months(7),
-                ChangeNotifyMethod::default(),
             )
             .await
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
         premine_receiver_global_state
-            .add_expected_utxos_to_wallet(tx_data.expected_utxos)
+            .add_expected_utxos_to_wallet(expected_utxos)
             .await?;
 
         premine_receiver_global_state
