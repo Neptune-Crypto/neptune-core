@@ -115,7 +115,7 @@ mod test {
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
-        let result = CollectLockScripts.run(
+        let result = CollectLockScripts.run_rust(
             &collect_lock_scripts_witness.standard_input(),
             collect_lock_scripts_witness.nondeterminism(),
         );

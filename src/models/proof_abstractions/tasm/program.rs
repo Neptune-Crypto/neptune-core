@@ -2,12 +2,14 @@ use std::panic::{catch_unwind, RefUnwindSafe};
 
 use itertools::Itertools;
 use tasm_lib::{
+    maybe_write_debuggable_program_to_disk,
     triton_vm::{
         self,
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
         stark::Stark,
+        vm::VMState,
     },
     twenty_first::math::b_field_element::BFieldElement,
     Digest,
@@ -20,6 +22,7 @@ use super::environment;
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
+    TritonVMPanic(String),
 }
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
@@ -50,7 +53,7 @@ where
 
     /// Run the source program natively in rust, but with the emulated TritonVM
     /// environment for input, output, nondeterminism, and program digest.
-    fn run(
+    fn run_rust(
         &self,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
@@ -68,6 +71,22 @@ where
         match emulation_result {
             Ok(result) => Result::Ok(result),
             Err(e) => Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e))),
+        }
+    }
+
+    /// Use Triton VM to run the tasm code.
+    fn run_tasm(
+        &self,
+        input: &PublicInput,
+        nondeterminism: NonDeterminism,
+    ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        let program = self.program();
+        let init_vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
+        maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
+        let result = program.run(input.clone(), nondeterminism);
+        match result {
+            Ok(output) => Ok(output),
+            Err(_) => Err(ConsensusError::TritonVMPanic(format!("Triton VM failed."))),
         }
     }
 

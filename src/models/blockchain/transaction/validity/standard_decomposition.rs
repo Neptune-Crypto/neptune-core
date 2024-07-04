@@ -65,28 +65,28 @@ impl ProofCollection {
 
         // verify graceful halts
         let removal_records_integrity_halts = RemovalRecordsIntegrity
-            .run(
+            .run_rust(
                 &removal_records_integrity_witness.standard_input(),
                 removal_records_integrity_witness.nondeterminism(),
             )
             .is_ok();
 
         let collect_lock_scripts_halts = CollectLockScripts
-            .run(
+            .run_rust(
                 &collect_lock_scripts_witness.standard_input(),
                 collect_lock_scripts_witness.nondeterminism(),
             )
             .is_ok();
 
         let kernel_to_outputs_halts = KernelToOutputs
-            .run(
+            .run_rust(
                 &kernel_to_outputs_witness.standard_input(),
                 kernel_to_outputs_witness.nondeterminism(),
             )
             .is_ok();
 
         let collect_type_scripts_halts = CollectTypeScripts
-            .run(
+            .run_rust(
                 &collect_type_scripts_witness.standard_input(),
                 collect_type_scripts_witness.nondeterminism(),
             )

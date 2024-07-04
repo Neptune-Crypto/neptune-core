@@ -581,7 +581,7 @@ mod test {
     ) {
         assert!(
             TimeLock {}
-                .run(
+                .run_rust(
                     &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )
@@ -603,7 +603,7 @@ mod test {
         println!("now: {}", Timestamp::now());
         assert!(
             TimeLock {}
-                .run(
+                .run_rust(
                     &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )
@@ -625,7 +625,7 @@ mod test {
         println!("now: {}", Timestamp::now());
         assert!(
             TimeLock
-                .run(
+                .run_rust(
                     &time_lock_witness.standard_input(),
                     time_lock_witness.nondeterminism(),
                 )

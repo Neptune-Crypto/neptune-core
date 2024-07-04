@@ -278,7 +278,7 @@ pub mod test {
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
             NativeCurrency
-                .run(
+                .run_rust(
                     &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
@@ -307,7 +307,7 @@ pub mod test {
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
             NativeCurrency
-                .run(
+                .run_rust(
                     &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
@@ -337,7 +337,7 @@ pub mod test {
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
             NativeCurrency
-                .run(
+                .run_rust(
                     &native_currency_witness.standard_input(),
                     native_currency_witness.nondeterminism(),
                 )
