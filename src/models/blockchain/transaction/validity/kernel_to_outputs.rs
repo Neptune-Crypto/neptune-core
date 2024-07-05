@@ -178,43 +178,45 @@ impl ConsensusProgram for KernelToOutputs {
             dup 3
             {&field_receiver_digests}       // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests
 
-            call {new_list}                 // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments
+            read_mem 1
+            push {1 + DIGEST_LENGTH} add
+            swap 1
+            dup 0
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N
 
-            dup 1
-            call {len}                      // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments N
+            call {new_list}                 // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N *canonical_commitments
 
-            dup 0 swap 2                    // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests N N *canonical_commitments
-            write_mem 1 swap 1              // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments[0] N
+            write_mem 1                     // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N *canonical_commitments[0]
 
+            swap 1                          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N
 
-            push 0                          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments[0] N 0
+            push 0                          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N 0
 
-            call {main_loop}                // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments[0] N N
-            pop 2                           // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments[N]
+            call {main_loop}                // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
+            pop 1                           // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
 
-            dup 1 read_mem 1 pop 1          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments[N] N
             push {-(DIGEST_LENGTH as isize)} mul push -1 add add
-                                            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments
+                                            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments
 
-            dup 1 read_mem 1 pop 1          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments N
+            dup 0 read_mem 1 pop 1          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments N
             push {DIGEST_LENGTH} mul push 1 add
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests *canonical_commitments (5*N+1)
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments (5*N+1)
 
             call {hash_varlen}
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest]
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
 
             // r h i l
             dup 14 dup 14 dup 14 dup 14 dup 14
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest] [txkmh]
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh]
 
             push {TransactionKernel::MAST_HEIGHT}
             push {TransactionKernelField::OutputUtxos as u32}
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest] [txkmh] h i
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i
             dup 11 dup 11 dup 11 dup 11 dup 11
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest] [txkmh] h i [cc_digest]
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i [cc_digest]
 
             call {merkle_verify}
-            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest]
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest]
 
             pop 5 pop 3
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos
@@ -238,54 +240,57 @@ impl ConsensusProgram for KernelToOutputs {
 
             halt
 
-            // INVARIANT: _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i
+            // INVARIANT: _ *utxos[i]_len *sender_randomnesses *receiver_digests[i]_lw *canonical_commitments[i] N i
             {main_loop}:
-                dup 1 dup 1 eq      // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i (N==i)
+                /* Loop's end-condition: N == i */
+                dup 1 dup 1 eq
                 skiz return
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i]_lw *canonical_commitments[i] N i
 
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i
-
-                dup 3 dup 1 call {get_digest}
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [receiver_digests[i]]
+                dup 3
+                read_mem {DIGEST_LENGTH}
+                push {2 * DIGEST_LENGTH} add
+                swap 9
+                pop 1
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]]
 
                 dup 9 dup 6 call {get_digest}
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]]
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]]
 
                 dup 15
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i]_len
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i]_len
 
                 read_mem 1 push 2 add swap 1
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i] utxos[i]_len
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] *utxos[i] utxos[i]_len
 
                 call {hash_varlen}
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] [item]
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]] [sender_randomnesses[i]] [item]
 
                 call {compute_canonical_commitment}
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i [canonical_commitment]
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [canonical_commitment]
 
                 dup 7 write_mem 5
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i *canonical_commitments[i+1]
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i *canonical_commitments[i+1]
 
                 swap 3 pop 1
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N i
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i
 
                 dup 5
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N i *utxos[i]_len
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i *utxos[i]_len
 
                 read_mem 1
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N i utxos[i]_len (*utxos[i]_len-1)
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i utxos[i]_len (*utxos[i]_len-1)
 
                 push 2 add add
-                // _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N i utxos[i+1]_len
+                // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i utxos[i+1]_len
 
                 swap 6 pop 1
-                // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N i
+                // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N i
 
                 push 1 add
-                // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests *canonical_commitments[i+1] N (i+1)
+                // _ *utxos[i+1]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i+1] N (i+1)
 
                 recurse
-
         };
 
         let dependencies = library.all_imports();
