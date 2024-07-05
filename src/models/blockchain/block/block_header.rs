@@ -6,6 +6,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use strum::EnumCount;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
@@ -62,7 +63,7 @@ impl Display for BlockHeader {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumCount)]
 pub enum BlockHeaderField {
     Version,
     Height,

@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use strum::EnumCount;
 use tasm_lib::twenty_first::{
     math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::{
@@ -18,7 +19,9 @@ pub trait HasDiscriminant: Clone {
 }
 
 pub trait MastHash {
-    type FieldEnum: HasDiscriminant;
+    type FieldEnum: HasDiscriminant + EnumCount;
+
+    const MAST_HEIGHT: usize = Self::FieldEnum::COUNT.next_power_of_two().ilog2() as usize;
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>>;
 

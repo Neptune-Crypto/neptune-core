@@ -128,7 +128,7 @@ impl ConsensusProgram for KernelToOutputs {
             txk_digest,
             TransactionKernelField::OutputUtxos as u32,
             addition_records_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
 
         // output hash of salted output UTXOs
@@ -208,7 +208,7 @@ impl ConsensusProgram for KernelToOutputs {
             dup 14 dup 14 dup 14 dup 14 dup 14
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest] [txkmh]
 
-            push {TransactionKernelField::COUNT}
+            push {TransactionKernel::MAST_HEIGHT}
             push {TransactionKernelField::OutputUtxos as u32}
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests [cc_digest] [txkmh] h i
             dup 11 dup 11 dup 11 dup 11 dup 11

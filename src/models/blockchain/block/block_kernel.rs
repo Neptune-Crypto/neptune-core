@@ -1,5 +1,6 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use strum::EnumCount;
 use tasm_lib::twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use crate::models::proof_abstractions::mast_hash::{HasDiscriminant, MastHash};
@@ -13,7 +14,7 @@ pub struct BlockKernel {
     pub body: BlockBody,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumCount)]
 pub enum BlockKernelField {
     Header,
     Body,
