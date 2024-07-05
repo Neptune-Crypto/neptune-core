@@ -82,8 +82,8 @@ impl SecretWitness for KernelToOutputsWitness {
             self.clone(),
         );
 
-        // set digests
-        let digests = vec![self.kernel.mast_path(TransactionKernelField::OutputUtxos)].concat();
+        // set authentication path digests
+        let digests = self.kernel.mast_path(TransactionKernelField::OutputUtxos);
 
         NonDeterminism::default()
             .with_ram(memory)
@@ -159,7 +159,7 @@ impl ConsensusProgram for KernelToOutputs {
         let field_receiver_digests = field!(KernelToOutputsWitness::receiver_digests);
         let field_utxos = field!(SaltedUtxos::utxos);
 
-        let main_loop = format!("kernel_to_outputs_main_loop");
+        let main_loop = "kernel_to_outputs_main_loop".to_string();
 
         let tasm = triton_asm! {
             read_io 5       // [txkmh]
