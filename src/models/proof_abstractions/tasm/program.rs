@@ -3,6 +3,7 @@ use std::panic::{catch_unwind, RefUnwindSafe};
 use itertools::Itertools;
 use tasm_lib::{
     maybe_write_debuggable_program_to_disk,
+    snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult, NamedBenchmarkResult},
     triton_vm::{
         self,
         instruction::LabelledInstruction,

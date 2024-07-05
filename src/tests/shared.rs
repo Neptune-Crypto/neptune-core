@@ -38,6 +38,12 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use std::{collections::HashMap, env, net::SocketAddr, pin::Pin, str::FromStr};
+use tasm_lib::snippet_bencher::write_benchmarks;
+use tasm_lib::snippet_bencher::BenchmarkCase;
+use tasm_lib::snippet_bencher::BenchmarkResult;
+use tasm_lib::snippet_bencher::NamedBenchmarkResult;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
@@ -985,4 +991,26 @@ pub async fn mock_genesis_archival_state(
     let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams, network).await;
 
     (archival_state, peer_db, data_dir)
+}
+
+/// Benchmark the TASM code fo a consensus program.
+pub fn bench_consensus_program<CP: ConsensusProgram>(
+    cp: CP,
+    input: &PublicInput,
+    nondeterminism: NonDeterminism,
+    name: &str,
+    case: BenchmarkCase,
+) {
+    let program = cp.program();
+    let (aet, _output) = program
+        .trace_execution(input.clone(), nondeterminism.clone())
+        .unwrap();
+    let benchmark_result = BenchmarkResult::new(&aet);
+    let benchmark = NamedBenchmarkResult {
+        name: name.to_owned(),
+        benchmark_result,
+        case,
+    };
+
+    write_benchmarks(vec![benchmark]);
 }

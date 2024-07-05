@@ -305,7 +305,7 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
     use proptest::arbitrary::Arbitrary;
-    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -314,16 +314,27 @@ mod test {
 
     use super::KernelToOutputsWitness;
 
-    #[proptest(cases = 5)]
+    #[proptest(cases = 12)]
     fn derived_witness_generates_accepting_program_proptest(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(0usize..5)] _num_pub_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs,#_num_outputs,#_num_pub_announcements)))]
+        primitive_witness: PrimitiveWitness,
     ) {
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let result = KernelToOutputs.run_rust(
-            &kernel_to_outputs_witness.standard_input(),
-            kernel_to_outputs_witness.nondeterminism(),
+        let result = KernelToOutputs
+            .run_rust(
+                &kernel_to_outputs_witness.standard_input(),
+                kernel_to_outputs_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(
+            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
+                .values()
+                .to_vec(),
+            result
         );
-        prop_assert!(result.is_ok());
     }
 
     #[test]
@@ -346,6 +357,37 @@ mod test {
                 .values()
                 .to_vec(),
             result
+        );
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+    use crate::models::proof_abstractions::SecretWitness;
+    use crate::tests::shared::bench_consensus_program;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
+
+    use super::KernelToOutputsWitness;
+
+    #[test]
+    fn bench_kernel_to_outputs_common() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
+        bench_consensus_program(
+            KernelToOutputs,
+            &kernel_to_outputs_witness.standard_input(),
+            kernel_to_outputs_witness.nondeterminism(),
+            "KernelToOutputs",
+            BenchmarkCase::CommonCase,
         );
     }
 }
