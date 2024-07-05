@@ -4,7 +4,6 @@ use field_count::FieldCount;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::library::Library;
@@ -220,7 +219,23 @@ impl ConsensusProgram for KernelToOutputs {
             pop 5 pop 3
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos
 
-            // todo
+            push -1 add
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos_size
+
+            read_mem 1
+            // [txkmh] *kernel_to_outputs_witness size (*salted_output_utxos_size-1)
+
+            push 2 add
+            // [txkmh] *kernel_to_outputs_witness size *salted_output_utxos
+
+            swap 1
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos size
+
+            call {hash_varlen}
+            // [txkmh] *kernel_to_outputs_witness [salted_outputs_hash]
+
+            write_io {DIGEST_LENGTH}
+
             halt
 
             // INVARIANT: _ *utxos[i]_len *sender_randomnesses *receiver_digests *canonical_commitments[i] N i
@@ -284,6 +299,7 @@ impl ConsensusProgram for KernelToOutputs {
 
 #[cfg(test)]
 mod test {
+    use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -292,6 +308,8 @@ mod test {
     use proptest::prop_assert;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
     use test_strategy::proptest;
 
     use super::KernelToOutputsWitness;
@@ -316,12 +334,18 @@ mod test {
             .unwrap()
             .current();
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let result = KernelToOutputs.run_tasm(
-            &kernel_to_outputs_witness.standard_input(),
-            kernel_to_outputs_witness.nondeterminism(),
-        );
+        let result = KernelToOutputs
+            .run_tasm(
+                &kernel_to_outputs_witness.standard_input(),
+                kernel_to_outputs_witness.nondeterminism(),
+            )
+            .unwrap();
 
-        let program = KernelToOutputs.program();
-        assert!(result.is_ok());
+        assert_eq!(
+            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
+                .values()
+                .to_vec(),
+            result
+        );
     }
 }
