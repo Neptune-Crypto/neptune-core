@@ -1,8 +1,8 @@
-use super::wallet::address::generation_address::ReceivingAddress;
 use super::wallet::utxo_notification_pool::UtxoNotifier;
 use super::wallet::wallet_state::WalletState;
 use super::PublicAnnouncement;
 use super::Utxo;
+use crate::models::state::wallet::address::traits::*;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::models::state::NeptuneCoins;
 use crate::prelude::twenty_first::math::digest::Digest;
@@ -15,7 +15,7 @@ use std::ops::DerefMut;
 #[derive(Debug, Clone)]
 pub enum UtxoNotifyMethod {
     OnChainPubKey(PublicAnnouncement),
-    OnChainSymmetricKey,
+    OnChainSymmetricKey(PublicAnnouncement),
     OffChain,
 }
 
@@ -41,8 +41,8 @@ impl From<&UtxoReceiver> for ExpectedUtxo {
 }
 
 impl UtxoReceiver {
-    /// automatically generates `UtxoReceiver` from a `ReceivingAddress` and
-    /// `Utxo` info.
+    /// automatically generates `UtxoReceiver` from `Utxo` and any type
+    /// implementing `NeptuneAddress`.
     ///
     /// If the `Utxo` can be claimed by our wallet then private OffChain
     /// notification will be used.  Else `OnChain` notification.
@@ -53,7 +53,7 @@ impl UtxoReceiver {
     /// OffChain for `Utxo` that can be claimed by our wallet.
     pub fn auto(
         wallet_state: &WalletState,
-        address: &ReceivingAddress,
+        address: &dyn NeptuneAddress,
         utxo: Utxo,
         sender_randomness: Digest,
     ) -> Result<Self> {
@@ -66,7 +66,7 @@ impl UtxoReceiver {
         Ok(Self {
             utxo,
             sender_randomness,
-            receiver_privacy_digest: address.privacy_digest,
+            receiver_privacy_digest: address.privacy_digest(),
             utxo_notify_method,
         })
     }

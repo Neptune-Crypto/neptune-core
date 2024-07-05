@@ -4,6 +4,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
+use crate::models::state::wallet::address::traits::*;
 use crate::models::state::UtxoNotifyMethod;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;

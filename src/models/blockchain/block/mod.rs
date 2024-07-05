@@ -2,6 +2,7 @@ use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
+use crate::models::state::wallet::address::traits::*;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
