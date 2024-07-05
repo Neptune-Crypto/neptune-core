@@ -26,7 +26,6 @@ use twenty_first::{
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
-use super::traits::NeptuneAddress;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
@@ -286,11 +285,11 @@ impl SpendingKey {
     }
 }
 
-impl NeptuneAddress for ReceivingAddress {
+impl ReceivingAddress {
     /// Generate a public announcement, which is a ciphertext only the
     /// recipient can decrypt, along with a pubscript that reads
     /// some input of that length.
-    fn generate_public_announcement(
+    pub fn generate_public_announcement(
         &self,
         utxo: &Utxo,
         sender_randomness: Digest,
@@ -305,7 +304,7 @@ impl NeptuneAddress for ReceivingAddress {
     /// of this lock script establishes the UTXO owner's assent to
     /// the transaction. The logic contained in here should be
     /// identical to `verify_unlock`.
-    fn lock_script(&self) -> LockScript {
+    pub fn lock_script(&self) -> LockScript {
         let mut push_spending_lock_digest_to_stack = vec![];
         for elem in self.spending_lock.values().iter().rev() {
             push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
@@ -323,12 +322,6 @@ impl NeptuneAddress for ReceivingAddress {
         instructions.into()
     }
 
-    fn privacy_digest(&self) -> Digest {
-        self.privacy_digest
-    }
-}
-
-impl ReceivingAddress {
     pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
         let seed = spending_key.seed;
         let receiver_identifier = derive_receiver_id(seed);

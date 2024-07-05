@@ -2,6 +2,7 @@ use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
 use self::wallet::address::generation_address::SpendingKey;
+use self::wallet::address::Address;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
@@ -25,7 +26,6 @@ use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::models::peer::HandshakeData;
-use crate::models::state::wallet::address::traits::*;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -541,7 +541,7 @@ impl GlobalState {
 
     pub async fn create_transaction(
         &self,
-        outputs: Vec<(impl NeptuneAddress, NeptuneCoins)>,
+        outputs: Vec<(Address, NeptuneCoins)>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, UtxoReceiverList)> {
@@ -642,7 +642,6 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-        use crate::models::state::wallet::address::traits::*;
         use num_traits::CheckedSub;
 
         // 1. create/add change output if necessary.
@@ -1419,7 +1418,6 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
-    use crate::models::state::wallet::address::traits::*;
     use crate::{
         config_models::network::Network,
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},

@@ -1,2 +1,4 @@
 pub mod generation_address;
-pub mod traits;
+mod address_enum;
+
+pub use address_enum::Address;

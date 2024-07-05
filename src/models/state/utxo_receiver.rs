@@ -1,8 +1,8 @@
+use super::wallet::address::Address;
 use super::wallet::utxo_notification_pool::UtxoNotifier;
 use super::wallet::wallet_state::WalletState;
 use super::PublicAnnouncement;
 use super::Utxo;
-use crate::models::state::wallet::address::traits::*;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::models::state::NeptuneCoins;
 use crate::prelude::twenty_first::math::digest::Digest;
@@ -14,8 +14,8 @@ use std::ops::DerefMut;
 /// that a Utxo exists which they can claim/spend.
 #[derive(Debug, Clone)]
 pub enum UtxoNotifyMethod {
-    OnChainPubKey(PublicAnnouncement),
-    OnChainSymmetricKey(PublicAnnouncement),
+    OnChainPubKey,
+    OnChainSymmetricKey,
     OffChain,
 }
 
@@ -26,6 +26,7 @@ pub struct UtxoReceiver {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_privacy_digest: Digest,
+    pub public_announcement: PublicAnnouncement,
     pub utxo_notify_method: UtxoNotifyMethod,
 }
 
@@ -41,8 +42,7 @@ impl From<&UtxoReceiver> for ExpectedUtxo {
 }
 
 impl UtxoReceiver {
-    /// automatically generates `UtxoReceiver` from `Utxo` and any type
-    /// implementing `NeptuneAddress`.
+    /// automatically generates `UtxoReceiver` from `Utxo` and `Address`.
     ///
     /// If the `Utxo` can be claimed by our wallet then private OffChain
     /// notification will be used.  Else `OnChain` notification.
@@ -53,13 +53,14 @@ impl UtxoReceiver {
     /// OffChain for `Utxo` that can be claimed by our wallet.
     pub fn auto(
         wallet_state: &WalletState,
-        address: &dyn NeptuneAddress,
+        address: &Address,
         utxo: Utxo,
         sender_randomness: Digest,
     ) -> Result<Self> {
-        let utxo_notify_method = match wallet_state.is_wallet_utxo(&utxo) {
-            true => UtxoNotifyMethod::OffChain,
-            false => UtxoNotifyMethod::OnChainPubKey(
+        let (utxo_notify_method, public_announcement) = match wallet_state.is_wallet_utxo(&utxo) {
+            true => (UtxoNotifyMethod::OffChain, Default::default()),
+            false => (
+                UtxoNotifyMethod::OnChainPubKey,
                 address.generate_public_announcement(&utxo, sender_randomness)?,
             ),
         };
@@ -67,6 +68,7 @@ impl UtxoReceiver {
             utxo,
             sender_randomness,
             receiver_privacy_digest: address.privacy_digest(),
+            public_announcement,
             utxo_notify_method,
         })
     }
@@ -84,7 +86,8 @@ impl UtxoReceiver {
             utxo,
             sender_randomness,
             receiver_privacy_digest,
-            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey(public_announcement),
+            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey,
+            public_announcement,
         }
     }
 
@@ -101,6 +104,7 @@ impl UtxoReceiver {
             sender_randomness,
             receiver_privacy_digest,
             utxo_notify_method: UtxoNotifyMethod::OffChain,
+            public_announcement: Default::default(),
         }
     }
 
@@ -115,7 +119,8 @@ impl UtxoReceiver {
             utxo,
             sender_randomness,
             receiver_privacy_digest,
-            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey(PublicAnnouncement::default()),
+            utxo_notify_method: UtxoNotifyMethod::OnChainPubKey,
+            public_announcement: Default::default(),
         }
     }
 
@@ -166,10 +171,10 @@ impl UtxoReceiverList {
 
     /// retrieves public announcements from possible sub-set of the list
     pub fn public_announcements(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
-        self.0.iter().filter_map(|u| match &u.utxo_notify_method {
-            UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
-            _ => None,
-        })
+        self.0
+            .iter()
+            .filter(|u| u.public_announcement != Default::default())
+            .map(|u| u.public_announcement.clone())
     }
 
     /// retrieves expected_utxos from possible sub-set of the list
