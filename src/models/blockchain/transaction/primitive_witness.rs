@@ -122,7 +122,7 @@ impl PrimitiveWitness {
             .collect_vec();
         let input_lock_scripts_and_witnesses = input_lock_scripts
             .into_iter()
-            .zip(input_lock_script_witnesses.into_iter())
+            .zip(input_lock_script_witnesses)
             .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
             .collect_vec();
 
