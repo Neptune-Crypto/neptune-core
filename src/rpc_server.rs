@@ -4,7 +4,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
@@ -14,11 +13,10 @@ use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalStateLock, UtxoReceiver, UtxoReceiverList};
+use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use anyhow::Result;
 use get_size::GetSize;
-use num_traits::CheckedSub;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -536,6 +534,10 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
+    // note: we would like to accept any type that impl `NeptuneAddress` but we
+    // cannot because tarpc doesn't support generic parameters.
+    // see: https://github.com/google/tarpc/issues/412
+    // todo: instead we can use an enum to choose from supported Address types.
     async fn send(
         self,
         ctx: context::Context,
@@ -556,94 +558,21 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<(generation_address::ReceivingAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        let span = tracing::debug_span!("Constructing transaction objects");
+        let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
         let now = Timestamp::now();
 
-        let state = self.state.lock_guard().await;
-        let block_height = state.chain.light_state().header().height;
-
-        let mut utxo_receivers = UtxoReceiverList::default();
-
-        // 1. Convert outputs.  [address:amount] --> [UtxoReceiver]
-        for (address, amount) in outputs.into_iter() {
-            let coins = amount.to_native_coins();
-            let utxo = Utxo::new(address.lock_script(), coins);
-
-            let sender_randomness = state
-                .wallet_state
-                .wallet_secret
-                .generate_sender_randomness(block_height, address.privacy_digest);
-
-            // append to receiver data list
-            //
-            // The UtxoNotifyType (Onchain or Offchain) is automatically detected
-            // based on whether the address belongs to our wallet or not.
-            utxo_receivers.push(
-                match UtxoReceiver::auto(&state.wallet_state, &address, utxo, sender_randomness) {
-                    Ok(pa) => pa,
-                    Err(e) => {
-                        tracing::error!("Failed to generate transaction. error was: {:?}", e);
-                        return None;
-                    }
-                },
-            );
-        }
-
-        // 2. create/add change output if necessary.
-
-        let total_spend = utxo_receivers.total_native_coins() + fee;
-
-        let transaction_inputs = match state
-            .assemble_inputs_for_transaction(total_spend, now)
-            .await
-        {
-            Ok(ti) => ti,
-            Err(err) => {
-                tracing::error!("Could not assemble transaction inputs: {}", err);
-                return None;
-            }
-        };
-
-        let input_amount = transaction_inputs
-            .iter()
-            .map(|ti| ti.utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
-            + fee;
-
-        if total_spend < input_amount {
-            // note: for now we use key with index 0 everywhere.
-            let address = state
-                .wallet_state
-                .wallet_secret
-                .nth_generation_spending_key(0)
-                .to_address();
-
-            let amount = input_amount.checked_sub(&total_spend)?;
-
-            let coins = amount.to_native_coins();
-            let utxo = Utxo::new(address.lock_script(), coins);
-
-            let sender_randomness = state
-                .wallet_state
-                .wallet_secret
-                .generate_sender_randomness(block_height, address.privacy_digest);
-
-            // note: for now, change coins are always sent off-chain. In the future it
-            //       it could be an option.
-            let utxo_receiver =
-                UtxoReceiver::offchain(utxo, sender_randomness, address.privacy_digest);
-            utxo_receivers.push(utxo_receiver);
-        }
-
         // Create the transaction
         //
-        // Note that create_transaction() does not modify any state and
-        // does not require acquiring write lock.  This is important
-        // becauce internally it calls prove() which is a very lengthy
-        // operation.
-        let transaction = match state
-            .create_transaction(transaction_inputs, &utxo_receivers, fee, now)
+        // Note that create_transaction() does not modify any state and only
+        // requires acquiring a read-lock which does not block other tasks.
+        // This is important because internally it calls prove() which is a very
+        // lengthy operation.
+        let (transaction, utxo_receivers) = match self
+            .state
+            .lock_guard()
+            .await
+            .create_transaction(outputs, fee, now)
             .await
         {
             Ok(tx) => tx,
@@ -652,7 +581,6 @@ impl RPC for NeptuneRPCServer {
                 return None;
             }
         };
-        drop(state);
 
         // Inform wallet of any expected incoming utxos.
         // note that this (briefly) mutates self.

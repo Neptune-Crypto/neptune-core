@@ -25,6 +25,7 @@ use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::models::peer::HandshakeData;
+use crate::models::state::wallet::address::traits::*;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -37,6 +38,7 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::{Hash, VERSION};
 use anyhow::{bail, Result};
 use itertools::Itertools;
+use num_traits::CheckedSub;
 use std::cmp::max;
 use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
@@ -522,7 +524,7 @@ impl GlobalState {
     /// let transaction = state.create_transaction(utxo_receivers, fee, now).await?;
     /// state.add_expected_utxos_to_wallet(utxo_receivers.expected_utxos()).await?;
     /// ```
-    pub async fn create_transaction(
+    pub async fn create_raw_transaction(
         &self,
         inputs: Vec<TransactionInput>,
         receiver_data: &UtxoReceiverList,
@@ -535,6 +537,91 @@ impl GlobalState {
             .await?;
 
         self.create_transaction_from_data(tx_data).await
+    }
+
+    pub async fn create_transaction(
+        &self,
+        outputs: Vec<(impl NeptuneAddress, NeptuneCoins)>,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<(Transaction, UtxoReceiverList)> {
+        let block_height = self.chain.light_state().header().height;
+
+        let mut utxo_receivers = UtxoReceiverList::default();
+
+        // 1. Convert outputs.  [address:amount] --> [UtxoReceiver]
+        for (address, amount) in outputs.into_iter() {
+            let coins = amount.to_native_coins();
+            let utxo = Utxo::new(address.lock_script(), coins);
+
+            let sender_randomness = self
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(block_height, address.privacy_digest());
+
+            // append to receiver data list
+            //
+            // The UtxoNotifyType (Onchain or Offchain) is automatically detected
+            // based on whether the address belongs to our wallet or not.
+            utxo_receivers.push(UtxoReceiver::auto(
+                &self.wallet_state,
+                &address,
+                utxo,
+                sender_randomness,
+            )?);
+        }
+
+        // 2. create/add change output if necessary.
+        let total_spend = utxo_receivers.total_native_coins() + fee;
+
+        let transaction_inputs = self
+            .assemble_inputs_for_transaction(total_spend, timestamp)
+            .await?;
+
+        let input_amount = transaction_inputs
+            .iter()
+            .map(|ti| ti.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>()
+            + fee;
+
+        if total_spend < input_amount {
+            // note: for now we use key with index 0 everywhere.
+            let address = self
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key(0)
+                .to_address();
+
+            let amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
+                anyhow::anyhow!("underflow subtracting total_spend from input_amount")
+            })?;
+
+            let coins = amount.to_native_coins();
+            let utxo = Utxo::new(address.lock_script(), coins);
+
+            let sender_randomness = self
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(block_height, address.privacy_digest);
+
+            // note: for now, change coins are always sent off-chain. In the future it
+            //       it could be an option.
+            let utxo_receiver =
+                UtxoReceiver::offchain(utxo, sender_randomness, address.privacy_digest);
+            utxo_receivers.push(utxo_receiver);
+        }
+
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and
+        // does not require acquiring write lock.  This is important
+        // becauce internally it calls prove() which is a very lengthy
+        // operation.
+        let transaction = self
+            .create_raw_transaction(transaction_inputs, &utxo_receivers, fee, timestamp)
+            .await?;
+
+        Ok((transaction, utxo_receivers))
     }
 
     /// This is a (mostly) backwards compatible wrapper for create_transaction()
@@ -555,6 +642,7 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+        use crate::models::state::wallet::address::traits::*;
         use num_traits::CheckedSub;
 
         // 1. create/add change output if necessary.
@@ -604,7 +692,7 @@ impl GlobalState {
 
         // 2. call create_transaction()
         let tx = self
-            .create_transaction(transaction_inputs, &utxo_receivers, fee, timestamp)
+            .create_raw_transaction(transaction_inputs, &utxo_receivers, fee, timestamp)
             .await?;
 
         Ok((tx, utxo_receivers.expected_utxos().into_iter().collect()))
@@ -1331,6 +1419,7 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
+    use crate::models::state::wallet::address::traits::*;
     use crate::{
         config_models::network::Network,
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},

@@ -18,6 +18,7 @@ use tasm_lib::{
     Digest,
 };
 
+use crate::models::state::wallet::address::traits::*;
 use crate::{
     models::{
         blockchain::type_scripts::TypeScript, consensus::timestamp::Timestamp,

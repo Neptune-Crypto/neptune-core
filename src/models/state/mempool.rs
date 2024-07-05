@@ -440,6 +440,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::state::wallet::address::traits::*;
     use crate::{
         config_models::network::Network,
         models::{

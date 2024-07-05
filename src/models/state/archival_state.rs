@@ -1,7 +1,17 @@
+use super::shared::new_block_file_is_needed;
+use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
-use crate::prelude::twenty_first;
-
 use crate::database::storage::storage_schema::traits::*;
+use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::database::{
+    BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
+};
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
@@ -12,18 +22,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tracing::{debug, warn};
 use twenty_first::math::digest::Digest;
-
-use super::shared::new_block_file_is_needed;
-use crate::config_models::data_directory::DataDirectory;
-use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::database::{
-    BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
-};
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -845,6 +843,7 @@ mod archival_state_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
+    use crate::models::state::wallet::address::traits::*;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiver;

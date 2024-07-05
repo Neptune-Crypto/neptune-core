@@ -26,6 +26,7 @@ use twenty_first::{
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
+use super::traits::NeptuneAddress;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
@@ -285,6 +286,48 @@ impl SpendingKey {
     }
 }
 
+impl NeptuneAddress for ReceivingAddress {
+    /// Generate a public announcement, which is a ciphertext only the
+    /// recipient can decrypt, along with a pubscript that reads
+    /// some input of that length.
+    fn generate_public_announcement(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: Digest,
+    ) -> Result<PublicAnnouncement> {
+        let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
+        ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
+
+        Ok(PublicAnnouncement::new(ciphertext))
+    }
+
+    /// Generate a lock script from the spending lock. Satisfaction
+    /// of this lock script establishes the UTXO owner's assent to
+    /// the transaction. The logic contained in here should be
+    /// identical to `verify_unlock`.
+    fn lock_script(&self) -> LockScript {
+        let mut push_spending_lock_digest_to_stack = vec![];
+        for elem in self.spending_lock.values().iter().rev() {
+            push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
+        }
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            {&push_spending_lock_digest_to_stack}
+            assert_vector
+            read_io 5
+            halt
+        );
+
+        instructions.into()
+    }
+
+    fn privacy_digest(&self) -> Digest {
+        self.privacy_digest
+    }
+}
+
 impl ReceivingAddress {
     pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
         let seed = spending_key.seed;
@@ -344,42 +387,6 @@ impl ReceivingAddress {
             ciphertext_bfes,
         ]
         .concat())
-    }
-
-    /// Generate a public announcement, which is a ciphertext only the
-    /// recipient can decrypt, along with a pubscript that reads
-    /// some input of that length.
-    pub fn generate_public_announcement(
-        &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
-    ) -> Result<PublicAnnouncement> {
-        let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
-        ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
-
-        Ok(PublicAnnouncement::new(ciphertext))
-    }
-
-    /// Generate a lock script from the spending lock. Satisfaction
-    /// of this lock script establishes the UTXO owner's assent to
-    /// the transaction. The logic contained in here should be
-    /// identical to `verify_unlock`.
-    pub fn lock_script(&self) -> LockScript {
-        let mut push_spending_lock_digest_to_stack = vec![];
-        for elem in self.spending_lock.values().iter().rev() {
-            push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
-        }
-
-        let instructions = triton_asm!(
-            divine 5
-            hash
-            {&push_spending_lock_digest_to_stack}
-            assert_vector
-            read_io 5
-            halt
-        );
-
-        instructions.into()
     }
 
     fn get_hrp(network: Network) -> String {
