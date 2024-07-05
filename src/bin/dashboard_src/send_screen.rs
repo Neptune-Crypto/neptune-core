@@ -133,7 +133,7 @@ impl SendScreen {
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
         let send_result = rpc_client
-            .send(send_ctx, valid_amount, valid_address, fee)
+            .send(send_ctx, valid_amount, valid_address.into(), fee)
             .await
             .unwrap();
 

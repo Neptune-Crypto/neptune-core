@@ -14,7 +14,6 @@ use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::*;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::wallet::address::traits::*;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::{GlobalState, GlobalStateLock};

@@ -11,6 +11,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::Address;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
@@ -146,13 +147,13 @@ pub trait RPC {
     /// Send coins to a single recipient.
     async fn send(
         amount: NeptuneCoins,
-        address: generation_address::ReceivingAddress,
+        address: Address,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
-        outputs: Vec<(generation_address::ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(Address, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -534,15 +535,11 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
-    // note: we would like to accept any type that impl `NeptuneAddress` but we
-    // cannot because tarpc doesn't support generic parameters.
-    // see: https://github.com/google/tarpc/issues/412
-    // todo: instead we can use an enum to choose from supported Address types.
     async fn send(
         self,
         ctx: context::Context,
         amount: NeptuneCoins,
-        address: generation_address::ReceivingAddress,
+        address: Address,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         self.send_to_many(ctx, vec![(address, amount)], fee).await
@@ -555,7 +552,7 @@ impl RPC for NeptuneRPCServer {
     async fn send_to_many(
         self,
         _ctx: context::Context,
-        outputs: Vec<(generation_address::ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(Address, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
