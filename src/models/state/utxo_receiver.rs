@@ -1,4 +1,4 @@
-use super::wallet::address::Address;
+use super::wallet::address::AbstractAddress;
 use super::wallet::utxo_notification_pool::UtxoNotifier;
 use super::wallet::wallet_state::WalletState;
 use super::PublicAnnouncement;
@@ -50,17 +50,6 @@ impl From<ExpectedUtxo> for UtxoReceiver {
     }
 }
 
-impl TryFrom<&UtxoReceiver> for ExpectedUtxo {
-    type Error = anyhow::Error;
-
-    fn try_from(d: &UtxoReceiver) -> Result<Self> {
-        match &d.utxo_notification {
-            UtxoNotification::OffChain(eu) => Ok(eu.clone()),
-            _ => Err(anyhow::anyhow!("utxo_notification is not offchain.")),
-        }
-    }
-}
-
 impl UtxoReceiver {
     /// automatically generates `UtxoReceiver` from address and amount.
     ///
@@ -73,7 +62,7 @@ impl UtxoReceiver {
     /// OffChain for `Utxo` that can be claimed by our wallet.
     pub fn auto(
         wallet_state: &WalletState,
-        address: &Address,
+        address: &AbstractAddress,
         amount: NeptuneCoins,
         sender_randomness: Digest,
     ) -> Result<Self> {

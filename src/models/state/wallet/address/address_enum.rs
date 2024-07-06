@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Digest;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Address {
+pub enum AbstractAddress {
     Generation(generation_address::ReceivingAddress),
 }
 
-impl From<generation_address::ReceivingAddress> for Address {
+impl From<generation_address::ReceivingAddress> for AbstractAddress {
     fn from(a: generation_address::ReceivingAddress) -> Self {
         Self::Generation(a)
     }
 }
 
-impl Address {
+impl AbstractAddress {
     pub fn generate_public_announcement(
         &self,
         utxo: &Utxo,
@@ -43,4 +43,37 @@ impl Address {
             Self::Generation(a) => a.privacy_digest,
         }
     }
+}
+
+
+#[derive(Debug, Clone, Copy)]
+pub enum AbstractSpendingKey {
+    Generation(generation_address::SpendingKey),
+}
+
+impl From<generation_address::SpendingKey> for AbstractSpendingKey {
+    fn from(key: generation_address::SpendingKey) -> Self {
+        Self::Generation(key)
+    }
+}
+
+impl AbstractSpendingKey {
+    pub fn to_address(&self) -> AbstractAddress {
+        match self {
+            Self::Generation(k) => k.to_address().into(),
+        }
+    }
+
+    pub fn privacy_preimage(&self) -> Digest {
+        match self {
+            Self::Generation(k) => k.privacy_preimage,
+        }
+    }
+
+    pub fn unlock_key(&self) -> Digest {
+        match self {
+            Self::Generation(k) => k.unlock_key,
+        }
+    }
+
 }

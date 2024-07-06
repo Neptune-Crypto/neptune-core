@@ -6,7 +6,7 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::generation_address;
-use neptune_core::models::state::wallet::address::Address;
+use neptune_core::models::state::wallet::address::AbstractAddress;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
@@ -437,7 +437,7 @@ async fn main() -> Result<()> {
                 .into_iter()
                 .map(|o| {
                     generation_address::ReceivingAddress::from_bech32m(o.address, args.network)
-                        .map(|v| (Address::from(v), o.amount))
+                        .map(|v| (AbstractAddress::from(v), o.amount))
                 })
                 .collect::<Result<Vec<_>>>()?;
 
