@@ -556,9 +556,6 @@ impl GlobalState {
 
         // Convert outputs.  [address:amount] --> [UtxoReceiver]
         for (address, amount) in outputs.into_iter() {
-            let coins = amount.to_native_coins();
-            let utxo = Utxo::new(address.lock_script(), coins);
-
             let sender_randomness = self
                 .wallet_state
                 .wallet_secret
@@ -571,7 +568,7 @@ impl GlobalState {
             utxo_receivers.push(UtxoReceiver::auto(
                 &self.wallet_state,
                 &address,
-                utxo,
+                amount,
                 sender_randomness,
             )?);
         }
@@ -582,7 +579,7 @@ impl GlobalState {
     pub async fn create_transaction(
         &self,
         utxo_receivers: &mut UtxoReceiverList,
-        change_address: Address,
+        change_spending_key: SpendingKey,
         change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
@@ -601,18 +598,18 @@ impl GlobalState {
 
         if total_spend < input_amount {
             let block_height = self.chain.light_state().header().height;
+            let change_address = change_spending_key.to_address();
 
             let amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
                 anyhow::anyhow!("underflow subtracting total_spend from input_amount")
             })?;
 
-            let coins = amount.to_native_coins();
-            let utxo = Utxo::new(change_address.lock_script(), coins);
+            let utxo = Utxo::new_native_coin(change_address.lock_script(), amount);
 
             let sender_randomness = self
                 .wallet_state
                 .wallet_secret
-                .generate_sender_randomness(block_height, change_address.privacy_digest());
+                .generate_sender_randomness(block_height, change_address.privacy_digest);
 
             let utxo_receiver = match change_utxo_notify_method {
                 UtxoNotifyMethod::OnChainPubKey => {
@@ -621,14 +618,16 @@ impl GlobalState {
                     UtxoReceiver::onchain_pubkey(
                         utxo,
                         sender_randomness,
-                        change_address.privacy_digest(),
+                        change_address.privacy_digest,
                         public_announcement,
                     )
                 }
                 UtxoNotifyMethod::OnChainSymmetricKey => unimplemented!(),
-                UtxoNotifyMethod::OffChain => {
-                    UtxoReceiver::offchain(utxo, sender_randomness, change_address.privacy_digest())
-                }
+                UtxoNotifyMethod::OffChain => UtxoReceiver::offchain(
+                    utxo,
+                    sender_randomness,
+                    change_spending_key.privacy_preimage,
+                ),
             };
 
             utxo_receivers.push(utxo_receiver);
@@ -655,16 +654,16 @@ impl GlobalState {
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
         let mut utxo_receivers = UtxoReceiverList::from(utxo_receiver_vec);
-        let change_address = self
+        let change_spending_key = self
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address();
+            .nth_generation_spending_key(0);
+
         let len = utxo_receivers.len();
         let transaction = self
             .create_transaction(
                 &mut utxo_receivers,
-                change_address.into(),
+                change_spending_key,
                 UtxoNotifyMethod::OffChain,
                 fee,
                 timestamp,
