@@ -557,14 +557,13 @@ impl RPC for NeptuneRPCServer {
         let now = Timestamp::now();
 
         // we obtain a change_address first, as it requires modifying wallet state.
-        let change_address = self
+        let change_spending_key = self
             .state
             .lock_guard_mut()
             .await
             .wallet_state
             .wallet_secret
-            .next_unused_generation_spending_key()
-            .to_address();
+            .next_unused_generation_spending_key();
 
         // write state to disk, as create_transaction() may take a long time.
         self.state.flush_databases().await.expect("flushed DBs");
@@ -587,7 +586,7 @@ impl RPC for NeptuneRPCServer {
         let transaction = match state
             .create_transaction(
                 &mut utxo_receivers,
-                change_address.into(),
+                change_spending_key,
                 UtxoNotifyMethod::OffChain,
                 fee,
                 now,
