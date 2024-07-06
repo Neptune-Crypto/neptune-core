@@ -170,6 +170,11 @@ impl UtxoReceiverList {
     }
 
     /// retrieves public announcements from possible sub-set of the list
+    pub fn utxos(&self) -> impl IntoIterator<Item = Utxo> + '_ {
+        self.0.iter().map(|u| u.utxo.clone())
+    }
+
+    /// retrieves public announcements from possible sub-set of the list
     pub fn public_announcements(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
         self.0
             .iter()
@@ -191,6 +196,7 @@ mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::state::wallet::address::generation_address::ReceivingAddress;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
     use rand::Rng;
@@ -217,14 +223,14 @@ mod tests {
 
         let utxo_receiver = UtxoReceiver::auto(
             &state.wallet_state,
-            &address,
+            &address.into(),
             utxo.clone(),
             sender_randomness,
         )?;
 
         assert!(matches!(
             utxo_receiver.utxo_notify_method,
-            UtxoNotifyMethod::OnChainPubKey(_)
+            UtxoNotifyMethod::OnChainPubKey
         ));
         assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
         assert_eq!(
@@ -244,7 +250,10 @@ mod tests {
         let block_height = state.chain.light_state().header().height;
 
         // obtain a receiving address from our wallet.
-        let spending_key = state.wallet_state.get_known_spending_keys()[0];
+        let spending_key = state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
         let address = spending_key.to_address();
 
         let utxo = Utxo::new(address.lock_script(), NeptuneCoins::one().to_native_coins());
@@ -256,7 +265,7 @@ mod tests {
 
         let utxo_receiver = UtxoReceiver::auto(
             &state.wallet_state,
-            &address,
+            &address.into(),
             utxo.clone(),
             sender_randomness,
         )?;

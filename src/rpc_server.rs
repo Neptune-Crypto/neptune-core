@@ -15,6 +15,7 @@ use crate::models::state::wallet::address::Address;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
+use crate::models::state::UtxoNotifyMethod;
 use crate::prelude::twenty_first;
 use anyhow::Result;
 use get_size::GetSize;
@@ -145,11 +146,7 @@ pub trait RPC {
     async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Send coins to a single recipient.
-    async fn send(
-        amount: NeptuneCoins,
-        address: Address,
-        fee: NeptuneCoins,
-    ) -> Option<Digest>;
+    async fn send(amount: NeptuneCoins, address: Address, fee: NeptuneCoins) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
@@ -559,17 +556,42 @@ impl RPC for NeptuneRPCServer {
         let _enter = span.enter();
         let now = Timestamp::now();
 
+        // we obtain a change_address first, as it requires modifying wallet state.
+        let change_address = self
+            .state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .wallet_secret
+            .next_unused_generation_spending_key()
+            .to_address();
+
+        // write state to disk, as create_transaction() may take a long time.
+        self.state.flush_databases().await.expect("flushed DBs");
+
+        let state = self.state.lock_guard().await;
+        let mut utxo_receivers = match state.generate_utxo_receivers(outputs) {
+            Ok(u) => u,
+            Err(err) => {
+                tracing::error!("Could not generate utxo receivers: {}", err);
+                return None;
+            }
+        };
+
         // Create the transaction
         //
         // Note that create_transaction() does not modify any state and only
         // requires acquiring a read-lock which does not block other tasks.
         // This is important because internally it calls prove() which is a very
         // lengthy operation.
-        let (transaction, utxo_receivers) = match self
-            .state
-            .lock_guard()
-            .await
-            .create_transaction(outputs, fee, now)
+        let transaction = match state
+            .create_transaction(
+                &mut utxo_receivers,
+                change_address.into(),
+                UtxoNotifyMethod::OffChain,
+                fee,
+                now,
+            )
             .await
         {
             Ok(tx) => tx,
@@ -578,6 +600,7 @@ impl RPC for NeptuneRPCServer {
                 return None;
             }
         };
+        drop(state);
 
         // Inform wallet of any expected incoming utxos.
         // note that this (briefly) mutates self.
@@ -794,7 +817,7 @@ mod rpc_server_tests {
             .send(
                 ctx,
                 NeptuneCoins::one(),
-                own_receiving_address,
+                own_receiving_address.into(),
                 NeptuneCoins::one(),
             )
             .await;
@@ -802,7 +825,7 @@ mod rpc_server_tests {
             .clone()
             .send_to_many(
                 ctx,
-                vec![(own_receiving_address, NeptuneCoins::one())],
+                vec![(own_receiving_address.into(), NeptuneCoins::one())],
                 NeptuneCoins::one(),
             )
             .await;
@@ -1311,7 +1334,7 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (
-            ReceivingAddress::derive_from_seed(rng.gen()),
+            Address::from(ReceivingAddress::derive_from_seed(rng.gen())),
             NeptuneCoins::new(5),
         );
 
@@ -1322,7 +1345,10 @@ mod rpc_server_tests {
                 .await
                 .wallet_state
                 .get_known_spending_keys()[0];
-            (spending_key.to_address(), NeptuneCoins::new(25))
+            (
+                Address::from(spending_key.to_address()),
+                NeptuneCoins::new(25),
+            )
         };
 
         // --- Setup. assemble outputs and fee ---

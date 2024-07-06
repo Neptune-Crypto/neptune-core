@@ -427,7 +427,9 @@ async fn main() -> Result<()> {
             let receiving_address =
                 generation_address::ReceivingAddress::from_bech32m(address.clone(), args.network)?;
 
-            client.send(ctx, amount, receiving_address.into(), fee).await?;
+            client
+                .send(ctx, amount, receiving_address.into(), fee)
+                .await?;
             println!("Send completed.");
         }
         Command::SendToMany { outputs, fee } => {

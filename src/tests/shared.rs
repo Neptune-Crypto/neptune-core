@@ -4,7 +4,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
-use crate::models::state::UtxoNotifyMethod;
+use crate::models::state::UtxoReceiverList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
@@ -711,12 +711,10 @@ pub async fn make_mock_transaction_with_generation_key(
         outputs.push(addition_record);
     }
 
-    let public_announcements = receiver_data
-        .iter()
-        .filter_map(|x| match &x.utxo_notify_method {
-            UtxoNotifyMethod::OnChainPubKey(pa) => Some(pa.clone()),
-            _ => None,
-        })
+    let utxo_receivers = UtxoReceiverList::from(receiver_data);
+    let public_announcements = utxo_receivers
+        .public_announcements()
+        .into_iter()
         .collect_vec();
     let timestamp = Timestamp::now();
 
@@ -749,7 +747,7 @@ pub async fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
-    let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
+    let output_utxos = utxo_receivers.utxos().into_iter().collect_vec();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),
         type_scripts,

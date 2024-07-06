@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(vector.get_many(&[3]).await, vec![vector.get(3).await]);
 
         // We allow `get_many` to take repeated indices.
-        assert_eq!(vector.get_many(&[3; 0]).await, vec![vector.get(3).await; 0]);
+        assert_eq!(vector.get_many(&[3; 0]).await, vec![]);
         assert_eq!(vector.get_many(&[3; 1]).await, vec![vector.get(3).await; 1]);
         assert_eq!(vector.get_many(&[3; 2]).await, vec![vector.get(3).await; 2]);
         assert_eq!(vector.get_many(&[3; 3]).await, vec![vector.get(3).await; 3]);
@@ -351,10 +351,7 @@ mod tests {
         );
 
         // We allow `get_many` to take repeated indices.
-        assert_eq!(
-            new_vector.get_many(&[3; 0]).await,
-            vec![new_vector.get(3).await; 0]
-        );
+        assert_eq!(new_vector.get_many(&[3; 0]).await, vec![]);
         assert_eq!(
             new_vector.get_many(&[3; 1]).await,
             vec![new_vector.get(3).await; 1]
