@@ -11,7 +11,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::Address;
+use crate::models::state::wallet::address::AbstractAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
@@ -146,11 +146,11 @@ pub trait RPC {
     async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Send coins to a single recipient.
-    async fn send(amount: NeptuneCoins, address: Address, fee: NeptuneCoins) -> Option<Digest>;
+    async fn send(amount: NeptuneCoins, address: AbstractAddress, fee: NeptuneCoins) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
-        outputs: Vec<(Address, NeptuneCoins)>,
+        outputs: Vec<(AbstractAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -536,7 +536,7 @@ impl RPC for NeptuneRPCServer {
         self,
         ctx: context::Context,
         amount: NeptuneCoins,
-        address: Address,
+        address: AbstractAddress,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         self.send_to_many(ctx, vec![(address, amount)], fee).await
@@ -549,7 +549,7 @@ impl RPC for NeptuneRPCServer {
     async fn send_to_many(
         self,
         _ctx: context::Context,
-        outputs: Vec<(Address, NeptuneCoins)>,
+        outputs: Vec<(AbstractAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
@@ -586,7 +586,7 @@ impl RPC for NeptuneRPCServer {
         let transaction = match state
             .create_transaction(
                 &mut utxo_receivers,
-                change_spending_key,
+                change_spending_key.into(),
                 UtxoNotifyMethod::OffChain,
                 fee,
                 now,
@@ -1333,7 +1333,7 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (
-            Address::from(ReceivingAddress::derive_from_seed(rng.gen())),
+            AbstractAddress::from(ReceivingAddress::derive_from_seed(rng.gen())),
             NeptuneCoins::new(5),
         );
 
@@ -1345,7 +1345,7 @@ mod rpc_server_tests {
                 .wallet_state
                 .get_known_spending_keys()[0];
             (
-                Address::from(spending_key.to_address()),
+                AbstractAddress::from(spending_key.to_address()),
                 NeptuneCoins::new(25),
             )
         };

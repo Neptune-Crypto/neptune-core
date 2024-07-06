@@ -1,8 +1,8 @@
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
-use self::wallet::address::generation_address::SpendingKey;
-use self::wallet::address::Address;
+use self::wallet::address::AbstractAddress;
+use self::wallet::address::AbstractSpendingKey;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
@@ -71,9 +71,7 @@ struct TransactionDetails {
 
 #[derive(Debug, Clone)]
 pub struct TransactionInput {
-    // todo: make an enum for SpendingKey, to abstract over key/address type
-    // and to match Address enum.
-    pub spending_key: SpendingKey,
+    pub spending_key: AbstractSpendingKey,
     pub utxo: Utxo,
     pub lock_script: LockScript,
     pub ms_membership_proof: MsMembershipProof,
@@ -423,7 +421,7 @@ impl GlobalState {
             .into_iter()
             .map(
                 |(utxo, lock_script, ms_membership_proof, spending_key)| TransactionInput {
-                    spending_key,
+                    spending_key: spending_key.into(),
                     utxo,
                     lock_script,
                     ms_membership_proof,
@@ -490,7 +488,7 @@ impl GlobalState {
             .collect_vec();
         let lock_script_witnesses = transaction_inputs
             .iter()
-            .map(|ti| ti.spending_key.unlock_key.values().to_vec())
+            .map(|ti| ti.spending_key.unlock_key().values().to_vec())
             .collect_vec();
 
         // let secret_input = spending_key.unlock_key.encode();
@@ -549,7 +547,7 @@ impl GlobalState {
 
     pub fn generate_utxo_receivers(
         &self,
-        outputs: Vec<(Address, NeptuneCoins)>,
+        outputs: Vec<(AbstractAddress, NeptuneCoins)>,
     ) -> Result<UtxoReceiverList> {
         let mut utxo_receivers = UtxoReceiverList::default();
         let block_height = self.chain.light_state().header().height;
@@ -579,7 +577,7 @@ impl GlobalState {
     pub async fn create_transaction(
         &self,
         utxo_receivers: &mut UtxoReceiverList,
-        change_spending_key: SpendingKey,
+        change_spending_key: AbstractSpendingKey,
         change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
@@ -609,7 +607,7 @@ impl GlobalState {
             let sender_randomness = self
                 .wallet_state
                 .wallet_secret
-                .generate_sender_randomness(block_height, change_address.privacy_digest);
+                .generate_sender_randomness(block_height, change_address.privacy_digest());
 
             let utxo_receiver = match change_utxo_notify_method {
                 UtxoNotifyMethod::OnChainPubKey => {
@@ -618,7 +616,7 @@ impl GlobalState {
                     UtxoReceiver::onchain_pubkey(
                         utxo,
                         sender_randomness,
-                        change_address.privacy_digest,
+                        change_address.privacy_digest(),
                         public_announcement,
                     )
                 }
@@ -626,7 +624,7 @@ impl GlobalState {
                 UtxoNotifyMethod::OffChain => UtxoReceiver::offchain(
                     utxo,
                     sender_randomness,
-                    change_spending_key.privacy_preimage,
+                    change_spending_key.privacy_preimage(),
                 ),
             };
 
@@ -663,7 +661,7 @@ impl GlobalState {
         let transaction = self
             .create_transaction(
                 &mut utxo_receivers,
-                change_spending_key,
+                change_spending_key.into(),
                 UtxoNotifyMethod::OffChain,
                 fee,
                 timestamp,
