@@ -186,6 +186,14 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
+    /// Get the next unused spending key.
+    ///
+    /// For now, this always returns key at index 0.
+    /// In the future it will return key at present counter, and increment the counter.
+    pub fn next_unused_generation_spending_key(&mut self) -> generation_address::SpendingKey {
+        self.nth_generation_spending_key(0)
+    }
+
     pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
         assert!(
             counter.is_zero(),
@@ -764,7 +772,7 @@ mod wallet_tests {
         )];
         let input_utxos_mps_keys = two_utxos
             .into_iter()
-            .map(|(utxo, _lock_script, mp)| (utxo, mp, own_spending_key))
+            .map(|(utxo, _lock_script, mp, spending_key)| (utxo, mp, spending_key))
             .collect_vec();
         let tx = make_mock_transaction_with_generation_key(
             input_utxos_mps_keys,

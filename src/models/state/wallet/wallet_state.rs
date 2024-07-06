@@ -294,6 +294,15 @@ impl WalletState {
             .any(|h| h == utxo.lock_script_hash)
     }
 
+    // returns SpendingKey if the utxo can be unlocked by one of the
+    // known wallet keys.
+    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
+        self.get_known_spending_keys()
+            .iter()
+            .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
+            .cloned()
+    }
+
     // TODO: These spending keys should probably be derived dynamically from some
     // state in the wallet. And we should allow for other types than just generation
     // addresses.
@@ -710,8 +719,7 @@ impl WalletState {
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
         timestamp: Timestamp,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
-        // TODO: Should return the correct spending keys associated with the UTXOs
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)>> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
@@ -730,24 +738,33 @@ impl WalletState {
                 tip_digest);
         }
 
-        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof)> = vec![];
+        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)> = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
 
-        // Todo: what about other spending keys?
-        let lock_script = self
-            .wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address()
-            .lock_script();
         while allocated_amount < requested_amount {
             let (wallet_status_element, membership_proof) =
                 wallet_status.synced_unspent[ret.len()].clone();
+
+            // find spending key for this utxo.
+            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
+                Some(k) => k,
+                None => {
+                    warn!(
+                        "spending key not found for utxo: {:?}",
+                        wallet_status_element.utxo
+                    );
+                    continue;
+                }
+            };
+            let lock_script = spending_key.to_address().lock_script();
+
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
             ret.push((
                 wallet_status_element.utxo,
                 lock_script.clone(),
                 membership_proof,
+                spending_key,
             ));
         }
 
@@ -761,7 +778,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)>> {
         let now = Timestamp::now();
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await

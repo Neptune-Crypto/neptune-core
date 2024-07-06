@@ -1,8 +1,11 @@
+use super::generation_address;
+use crate::models::blockchain::transaction::{
+    utxo::{LockScript, Utxo},
+    PublicAnnouncement,
+};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Digest;
-use crate::models::blockchain::transaction::{utxo::{LockScript, Utxo}, PublicAnnouncement};
-use super::generation_address;
-use anyhow::Result;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Address {
