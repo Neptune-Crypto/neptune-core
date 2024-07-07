@@ -429,8 +429,6 @@ impl GlobalState {
             )
             .collect_vec();
 
-        // println!("tx inputs: {:#?}", transaction_inputs);
-
         Ok(transaction_inputs)
     }
 
@@ -491,8 +489,6 @@ impl GlobalState {
             .map(|ti| ti.spending_key.unlock_key().values().to_vec())
             .collect_vec();
 
-        // let secret_input = spending_key.unlock_key.encode();
-
         PrimitiveWitness {
             input_utxos: SaltedUtxos::new(input_utxos),
             input_lock_scripts,
@@ -505,46 +501,17 @@ impl GlobalState {
         }
     }
 
-    /// creates a Transaction.
+    /// generates `UtxoReceiverList` from a list of address:amount pairs (outputs).
     ///
-    /// It is the caller's responsibility to provide inputs and outputs such
-    /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
+    /// This is a helper method for generating the `UtxoReceiverList` that
+    /// is required by create_transaction() and create_raw_transaction().
     ///
-    /// Note that this means the caller must calculate the change amount if any
-    /// and provide an output for the change.
+    /// For each output, if a wallet key exists for the address then OffChain
+    /// notification will be used via `ExpectedUtxo`.  Otherwise OnChainPubKey
+    /// notification will be used via `PublicAnnouncement`.
     ///
-    /// UtxoReceiver::auto() should normally be used.  This will generate
-    /// OffChain notifications for UTXOs destined for our wallet and
-    /// OnChainPubKey notifications for all other UTXOs.
-    ///
-    /// It is the caller's responsibility to inform the wallet of any expected
-    /// utxos, ie offchain secret notifications, for utxos that match wallet
-    /// keys.
-    ///
-    /// Example:
-    ///
-    /// todo: provide complete example with inputs and change utxo.
-    ///
-    /// ```compile_fail
-    /// let utxo_receivers = UtxoReceiverList::from(vec![UtxoReceiver::auto(&wallet_state, &address, utxo, sender_randomness, receiver_privacy_digest)]);
-    /// let transaction = state.create_transaction(utxo_receivers, fee, now).await?;
-    /// state.add_expected_utxos_to_wallet(utxo_receivers.expected_utxos()).await?;
-    /// ```
-    pub async fn create_raw_transaction(
-        &self,
-        inputs: Vec<TransactionInput>,
-        receiver_data: &UtxoReceiverList,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-    ) -> Result<Transaction> {
-        // UTXO data: inputs, outputs, and supporting witness data
-        let tx_data = self
-            .generate_tx_data_for_transaction(inputs, receiver_data, fee, timestamp)
-            .await?;
-
-        self.create_transaction_from_data(tx_data).await
-    }
-
+    /// If a different behavior is desired, the UtxoReceiverList can be
+    /// constructed manually.
     pub fn generate_utxo_receivers(
         &self,
         outputs: Vec<(AbstractAddress, NeptuneCoins)>,
@@ -574,6 +541,70 @@ impl GlobalState {
         Ok(utxo_receivers)
     }
 
+    /// creates a Transaction.
+    ///
+    /// This API provides a simple-to-use interface for creating a transaction.
+    /// Utxo inputs are automatically chosen and a change output is
+    /// automatically created, such that:
+    ///
+    ///   change = sum(inputs) - sum(outputs) - fee.
+    ///
+    /// When finer control is required, [Self::create_raw_transaction()]
+    /// can be used instead.
+    ///
+    /// The `utxo_receivers` parameter should normally be generated with
+    /// [Self::generate_utxo_receivers].  This will generate OffChain
+    /// notifications for UTXOs destined for our wallet and OnChainPubKey
+    /// notifications for all other UTXOs.
+    ///
+    /// It is the caller's responsibility to inform the wallet of any expected
+    /// utxos, ie offchain secret notifications, for utxos that match wallet
+    /// keys.
+    ///
+    /// This function will modify the `utxo_receivers` parameter by
+    /// appending an element representing the change output, if change is
+    /// needed.  Expected utxos, including change can then be retrieved
+    /// with [UtxoReceiverList::expected_utxos()].
+    ///
+    /// Note that `create_transaction()` does not modify any state and does not
+    /// require acquiring write lock.  This is important becauce internally it
+    /// calls prove() which is a very lengthy operation.
+    ///
+    /// Example:
+    ///
+    /// ```compile_fail
+    ///
+    /// // we obtain a change_address first, as it requires modifying wallet state.
+    /// let change_spending_key = global_state_lock
+    ///     .lock_guard_mut()
+    ///     .await
+    ///     .wallet_state
+    ///     .wallet_secret
+    ///     .next_unused_generation_spending_key();
+    ///
+    /// // obtain read lock
+    /// let state = self.state.lock_guard().await;
+    /// let mut utxo_receivers = state.generate_utxo_receivers(outputs)?;
+    ///
+    /// // Create the transaction
+    /// let transaction = state
+    ///     .create_transaction(
+    ///         &mut utxo_receivers,
+    ///         change_spending_key.into(),
+    ///         UtxoNotifyMethod::OffChain,   // notify change utxo offchain
+    ///         NeptuneCoins::new(2),         // fee
+    ///         Timestamp::now(),
+    ///     )
+    ///     .await?;
+    /// drop(state);
+    ///
+    /// // Inform wallet of any expected incoming utxos.
+    /// state
+    ///     .lock_guard_mut()
+    ///     .await
+    ///     .add_expected_utxos_to_wallet(utxo_receivers.expected_utxos())
+    ///     .await?;
+    /// ```
     pub async fn create_transaction(
         &self,
         utxo_receivers: &mut UtxoReceiverList,
@@ -631,12 +662,7 @@ impl GlobalState {
             utxo_receivers.push(utxo_receiver);
         }
 
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and
-        // does not require acquiring write lock.  This is important
-        // becauce internally it calls prove() which is a very lengthy
-        // operation.
+        // 2. Create the transaction
         let transaction = self
             .create_raw_transaction(transaction_inputs, utxo_receivers, fee, timestamp)
             .await?;
@@ -644,6 +670,51 @@ impl GlobalState {
         Ok(transaction)
     }
 
+    /// creates a Transaction.
+    ///
+    /// This API provides the caller complete control over selection of inputs
+    /// and outputs.  When fine grained control is not required,
+    /// [Self::create_transaction()] is easier to use and should be preferred.
+    ///
+    /// It is the caller's responsibility to provide inputs and outputs such
+    /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
+    ///
+    /// Note that this means the caller must calculate the change amount if any
+    /// and provide an output for the change.
+    ///
+    /// The `utxo_receivers` parameter should normally be generated with
+    /// [Self::generate_utxo_receivers()].  This will generate OffChain
+    /// notifications for UTXOs destined for our wallet and OnChainPubKey
+    /// notifications for all other UTXOs.
+    ///
+    /// It is the caller's responsibility to inform the wallet of any expected
+    /// utxos, ie offchain secret notifications, for utxos that match wallet
+    /// keys.
+    ///
+    /// Note that `create_raw_transaction()` does not modify any state and does
+    /// not require acquiring write lock.  This is important becauce internally
+    /// it calls prove() which is a very lengthy operation.
+    ///
+    /// Example:
+    ///
+    /// See the implementation of [Self::create_transaction()].
+    pub async fn create_raw_transaction(
+        &self,
+        inputs: Vec<TransactionInput>,
+        utxo_receivers: &UtxoReceiverList,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<Transaction> {
+        // UTXO data: inputs, outputs, and supporting witness data
+        let tx_data = self
+            .generate_tx_data_for_transaction(inputs, utxo_receivers, fee, timestamp)
+            .await?;
+
+        self.create_transaction_from_data(tx_data).await
+    }
+
+    /// This is a simple wrapper around create_transaction
+    /// for compatibility with existing tests.
     #[cfg(test)]
     pub async fn create_transaction_test_wrapper(
         &self,
@@ -652,6 +723,9 @@ impl GlobalState {
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
         let mut utxo_receivers = UtxoReceiverList::from(utxo_receiver_vec);
+
+        // note: should use next_unused_generation_spending_key()
+        // but that requires &mut self.
         let change_spending_key = self
             .wallet_state
             .wallet_secret
@@ -671,10 +745,7 @@ impl GlobalState {
             "receivers len before: {len}, after: {}",
             utxo_receivers.len()
         );
-        Ok((
-            transaction,
-            utxo_receivers.expected_utxos().into_iter().collect(),
-        ))
+        Ok((transaction, (&utxo_receivers).into()))
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
@@ -766,6 +837,8 @@ impl GlobalState {
     //       long time, perhaps minutes. It should never be
     //       called directly.
     //       Use create_transaction_from_data() instead.
+    //
+    // fixme: why is _privacy param unused?
     #[allow(clippy::too_many_arguments)]
     fn create_transaction_from_data_worker(
         transaction_details: TransactionDetails,

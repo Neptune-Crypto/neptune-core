@@ -712,16 +712,12 @@ pub async fn make_mock_transaction_with_generation_key(
     }
 
     let utxo_receivers = UtxoReceiverList::from(receiver_data);
-    let public_announcements = utxo_receivers
-        .public_announcements()
-        .into_iter()
-        .collect_vec();
     let timestamp = Timestamp::now();
 
     let kernel = TransactionKernel {
         inputs,
         outputs,
-        public_announcements,
+        public_announcements: (&utxo_receivers).into(),
         fee,
         timestamp,
         coinbase: None,
@@ -747,7 +743,7 @@ pub async fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
-    let output_utxos = utxo_receivers.utxos().into_iter().collect_vec();
+    let output_utxos = (&utxo_receivers).into();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),
         type_scripts,

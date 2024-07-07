@@ -7,6 +7,11 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::Digest;
 
+/// Represents any type of Neptune receiving Address.
+///
+/// This enum provides an abstraction API for Address types, so that
+/// a method or struct may simply accept an AbstractAddress and be
+/// forward-compatible with new types of Address as they are implemented.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AbstractAddress {
     Generation(generation_address::ReceivingAddress),
@@ -45,7 +50,11 @@ impl AbstractAddress {
     }
 }
 
-
+/// Represents any type of Neptune spending key.
+///
+/// This enum provides an abstraction API for spending key types, so that a
+/// method or struct may simply accept an AbstractSpendingKey and be
+/// forward-compatible with new types of spending key as they are implemented.
 #[derive(Debug, Clone, Copy)]
 pub enum AbstractSpendingKey {
     Generation(generation_address::SpendingKey),
@@ -75,5 +84,4 @@ impl AbstractSpendingKey {
             Self::Generation(k) => k.unlock_key,
         }
     }
-
 }
