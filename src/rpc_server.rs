@@ -146,7 +146,11 @@ pub trait RPC {
     async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Send coins to a single recipient.
-    async fn send(amount: NeptuneCoins, address: AbstractAddress, fee: NeptuneCoins) -> Option<Digest>;
+    async fn send(
+        amount: NeptuneCoins,
+        address: AbstractAddress,
+        fee: NeptuneCoins,
+    ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
@@ -583,6 +587,8 @@ impl RPC for NeptuneRPCServer {
         // requires acquiring a read-lock which does not block other tasks.
         // This is important because internally it calls prove() which is a very
         // lengthy operation.
+        //
+        // note: A change output will be added to utxo_receivers if needed.
         let transaction = match state
             .create_transaction(
                 &mut utxo_receivers,

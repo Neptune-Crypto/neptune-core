@@ -188,8 +188,16 @@ impl WalletSecret {
 
     /// Get the next unused spending key.
     ///
-    /// For now, this always returns key at index 0.
-    /// In the future it will return key at present counter, and increment the counter.
+    /// For now, this always returns key at index 0.  In the future it will
+    /// return key at present counter, and increment the counter.
+    ///
+    /// Note that incrementing the counter request &mut self.  Many areas of the
+    /// code presently take a shortcut and use nth_generation_spending_key(0)
+    /// which takes &self.  This will likely require a significant refactor in
+    /// the future to resolve.
+    ///
+    /// Whenever possible, it should be preferred to use this method over
+    /// nth_generation_spending_key(0), to lesson future refactoring headaches.
     pub fn next_unused_generation_spending_key(&mut self) -> generation_address::SpendingKey {
         self.nth_generation_spending_key(0)
     }

@@ -294,8 +294,8 @@ impl WalletState {
             .any(|h| h == utxo.lock_script_hash)
     }
 
-    // returns SpendingKey if the utxo can be unlocked by one of the
-    // known wallet keys.
+    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
+    // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_known_spending_keys()
             .iter()

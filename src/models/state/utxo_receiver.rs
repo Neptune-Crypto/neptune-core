@@ -13,6 +13,8 @@ use std::ops::DerefMut;
 
 /// enumerates how a transaction recipient should be notified
 /// that a Utxo exists which they can claim/spend.
+///
+/// see also: [UtxoNotification]
 #[derive(Debug, Clone)]
 pub enum UtxoNotifyMethod {
     OnChainPubKey,
@@ -20,13 +22,15 @@ pub enum UtxoNotifyMethod {
     OffChain,
 }
 
-/// enumerates transaction notifications
-/// like `UtxoNotifyMethod` but holds notification data.
+/// enumerates transaction notifications.
+///
+/// This mirrors variants in [`UtxoNotifyMethod`] but also holds notification
+/// data.
 #[derive(Debug, Clone)]
 pub enum UtxoNotification {
     OnChainPubKey(PublicAnnouncement),
     OnChainSymmetricKey(PublicAnnouncement),
-    OffChain(ExpectedUtxo),
+    OffChain(Box<ExpectedUtxo>),
 }
 
 /// Contains data that a UTXO recipient needs to be notified
@@ -45,7 +49,7 @@ impl From<ExpectedUtxo> for UtxoReceiver {
             utxo: expected_utxo.utxo.clone(),
             sender_randomness: expected_utxo.sender_randomness,
             receiver_privacy_digest: expected_utxo.receiver_preimage.hash::<Hash>(),
-            utxo_notification: UtxoNotification::OffChain(expected_utxo),
+            utxo_notification: UtxoNotification::OffChain(Box::new(expected_utxo)),
         }
     }
 }
@@ -174,9 +178,21 @@ impl From<Vec<UtxoReceiver>> for UtxoReceiverList {
     }
 }
 
-impl From<UtxoReceiverList> for Vec<ExpectedUtxo> {
-    fn from(list: UtxoReceiverList) -> Self {
+impl From<&UtxoReceiverList> for Vec<Utxo> {
+    fn from(list: &UtxoReceiverList) -> Self {
+        list.utxos().into_iter().collect()
+    }
+}
+
+impl From<&UtxoReceiverList> for Vec<ExpectedUtxo> {
+    fn from(list: &UtxoReceiverList) -> Self {
         list.expected_utxos().into_iter().collect()
+    }
+}
+
+impl From<&UtxoReceiverList> for Vec<PublicAnnouncement> {
+    fn from(list: &UtxoReceiverList) -> Self {
+        list.public_announcements().into_iter().collect()
     }
 }
 
@@ -205,7 +221,7 @@ impl UtxoReceiverList {
     /// retrieves expected_utxos from possible sub-set of the list
     pub fn expected_utxos(&self) -> impl IntoIterator<Item = ExpectedUtxo> + '_ {
         self.0.iter().filter_map(|u| match &u.utxo_notification {
-            UtxoNotification::OffChain(expected_utxo) => Some(expected_utxo.clone()),
+            UtxoNotification::OffChain(eu) => Some(*eu.clone()),
             _ => None,
         })
     }
