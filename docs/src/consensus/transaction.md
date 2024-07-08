@@ -35,9 +35,8 @@ A transaction witness is defined to be valid if, after deriving from it a set of
 A transaction witness consists of the following fields:
 
  - `input_utxos: SaltedUtxos` A wrapper object wrapping together a list of input `Utxo`s and a salt, which is 3 `BFieldElement`s.
- - `input_lock_scripts: Vec<LockScript>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
- - `type_scripts: Vec<TypeScript>` The scripts that authenticate the correct evolution of all token types involved.
- - `lock_script_witnesses: Vec<Vec<BFieldElement>>` Witness data to the lock scripts.
+ - `input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
+ - `type_scripts_and_witnesses: Vec<TypeScriptAndWitness>` The scripts that authenticate the correct evolution of all token types involved.
  - `input_membership_proofs: Vec<MsMembershipProof>` Membership proofs in the mutator set for the input UTXOs.
  - `output_utxos: SaltedUtxos` A wrapper object wrapping together a list of output `Utxo`s and a salt, which is 3 `BFieldElement`s.
  - `mutator_set_accumulator: MutatorSetAccumulator` The mutator set accumulator, which is the anonymous accumulator.
@@ -54,6 +53,10 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the salt
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
    - for each input UTXO:
+     - divine the receiver preimage
+     - divine the sender randomness 
+     - compute the canonical commitment
+     - verify the membership of the canonical commitment to the AOCL
      - compute the removal record index set
      - read the removal record chunks dictionary from memory
      - for each entry in this dictionary, verify that the chunk belongs to the SWBF MMR from the mutator set accumulator (authentication paths are either read from memory or divined in -- to be decided)
@@ -89,7 +92,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
      - collect the type script hash
    - filter out duplicates
    - output the unique type script hashes
- - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
+ - `TypeScript :: (transaction_kernel_mast_hash : Digest) × (salted_input_utxos_hash : Digest) × (salted_output_utxos_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
 
 Diagram 1 shows how the explicit inputs and outputs of all the subprograms relate to each other. Single arrows denote inputs or outputs. Double lines indicate that the program(s) on the one end hash to the digest(s) on the other.
 
