@@ -14,6 +14,7 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
 use tasm_lib::triton_vm::proof::{Claim, Proof};
 use tasm_lib::triton_vm::stark::Stark;
@@ -26,14 +27,16 @@ use twenty_first::math::tip5::Digest;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary,
+)]
 
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
