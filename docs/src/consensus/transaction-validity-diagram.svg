@@ -24,14 +24,15 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      inkscape:zoom="0.72693603"
-     inkscape:cx="454.64799"
-     inkscape:cy="436.07689"
+     inkscape:cx="473.9069"
+     inkscape:cy="291.63501"
      inkscape:window-width="1850"
      inkscape:window-height="1016"
      inkscape:window-x="70"
      inkscape:window-y="27"
      inkscape:window-maximized="1"
-     inkscape:current-layer="layer1" />
+     inkscape:current-layer="layer1"
+     showgrid="false" />
   <defs
      id="defs1">
     <marker
@@ -362,8 +363,9 @@
     </g>
     <path
        style="fill:none;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Triangle)"
-       d="M 31.762131,54.098938 V 190.57825 h 52.502614"
-       id="path25" />
+       d="M 31.762131,54.098938 V 191.35896 H 84.15778"
+       id="path25"
+       sodipodi:nodetypes="ccc" />
     <path
        style="fill:none;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Triangle)"
        d="M 31.772161,142.62311 H 47.506792"
@@ -386,8 +388,9 @@
        id="path30" />
     <path
        style="fill:none;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Triangle)"
-       d="M 159.05811,84.206862 H 188.7244 V 155.5564 h -87.00037 v 5.64188"
-       id="path31" />
+       d="M 159.05811,84.206862 H 188.7244 V 154.4028 h -87.00037 v 5.64188"
+       id="path31"
+       sodipodi:nodetypes="ccccc" />
     <path
        style="color:#000000;fill:none;stroke:#000000;stroke-width:0.2;stroke-dasharray:none;stroke-opacity:1"
        d="m 156.79297,101.68555 -1,0.043 c 0.0537,1.23853 -0.30751,2.21425 -1.31445,3.06836 -1.00695,0.8541 -2.7125,1.56117 -5.31055,2.01367 -5.21576,0.90841 -13.67108,1.07956 -21.19531,1.18164 -7.54064,0.1023 -15.28331,0.50134 -19.73438,2.11328 -2.20373,0.79807 -3.35171,1.64834 -3.92969,2.59375 -0.57797,0.94541 -0.51894,1.90055 -0.50586,2.68555 l 1,-0.0176 c -0.0135,-0.81372 -0.0497,-1.48051 0.35743,-2.14649 0.40714,-0.66597 1.32416,-1.41751 3.41797,-2.17578 4.144,-1.50074 11.89581,-1.95081 19.4082,-2.05273 7.52879,-0.10214 15.97855,-0.26147 21.35156,-1.19727 2.69634,-0.46961 4.57011,-1.20239 5.78906,-2.23633 1.21895,-1.03393 1.73005,-2.39603 1.66602,-3.87304 z"
@@ -396,5 +399,21 @@
        style="color:#000000;fill:none;stroke:#000000;stroke-width:0.2;stroke-dasharray:none;stroke-opacity:1"
        d="m 155.37829,171.89916 -1,0.043 c 0.0537,1.23853 -0.30751,2.21425 -1.31445,3.06836 -1.00695,0.8541 -2.7125,1.56117 -5.31055,2.01367 -5.21576,0.90841 -13.67108,1.07956 -21.19531,1.18164 -7.54064,0.1023 -15.28331,0.50134 -19.73438,2.11328 -2.20373,0.79807 -3.35171,1.64834 -3.92969,2.59375 -0.57797,0.94541 -0.51894,1.90055 -0.50586,2.68555 l 1,-0.0176 c -0.0135,-0.81372 -0.0497,-1.48051 0.35743,-2.14649 0.40714,-0.66597 1.32416,-1.41751 3.41797,-2.17578 4.144,-1.50074 11.89581,-1.95081 19.4082,-2.05273 7.52879,-0.10214 15.97855,-0.26147 21.35156,-1.19727 2.69634,-0.46961 4.57011,-1.20239 5.78906,-2.23633 1.21895,-1.03393 1.73005,-2.39603 1.66602,-3.87304 z"
        id="path32-2" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.265;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Triangle)"
+       d="M 84.15778,189.8281 H 33.206831 l 0.0055,-37.17931 53.169175,0.0367"
+       id="path1"
+       sodipodi:nodetypes="cccc" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Triangle)"
+       d="M 101.6038,154.3992 H 87.701167 c -0.887499,1.06176 -1.900325,1.08327 -2.778549,0 H 34.651532 v 33.89804 H 59.404656 84.15778"
+       id="path2"
+       sodipodi:nodetypes="ccccccc" />
+    <circle
+       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0.264999;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"
+       id="path3"
+       cx="86.336411"
+       cy="152.66463"
+       r="0.3151052" />
   </g>
 </svg>
