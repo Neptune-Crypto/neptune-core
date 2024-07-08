@@ -429,7 +429,7 @@ impl Arbitrary for PrimitiveWitness {
                             &output_amounts,
                             &output_address_seeds,
                         );
-                    arbitrary_primitive_witness_with(
+                    Self::arbitrary_primitive_witness_with(
                         &input_utxos,
                         &input_lock_scripts_and_witnesses,
                         &output_utxos,
@@ -443,144 +443,144 @@ impl Arbitrary for PrimitiveWitness {
     }
 }
 
-pub(crate) fn arbitrary_primitive_witness_with(
-    input_utxos: &[Utxo],
-    input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
-    output_utxos: &[Utxo],
-    public_announcements: &[PublicAnnouncement],
-    fee: NeptuneCoins,
-    coinbase: Option<NeptuneCoins>,
-) -> BoxedStrategy<PrimitiveWitness> {
-    let num_inputs = input_utxos.len();
-    let num_outputs = output_utxos.len();
-    let input_utxos = input_utxos.to_vec();
-    let output_utxos = output_utxos.to_vec();
-    let public_announcements = public_announcements.to_vec();
-    let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
+impl PrimitiveWitness {
+    pub fn arbitrary_primitive_witness_with(
+        input_utxos: &[Utxo],
+        input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
+        output_utxos: &[Utxo],
+        public_announcements: &[PublicAnnouncement],
+        fee: NeptuneCoins,
+        coinbase: Option<NeptuneCoins>,
+    ) -> BoxedStrategy<PrimitiveWitness> {
+        let num_inputs = input_utxos.len();
+        let num_outputs = output_utxos.len();
+        let input_utxos = input_utxos.to_vec();
+        let output_utxos = output_utxos.to_vec();
+        let public_announcements = public_announcements.to_vec();
+        let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
 
-    // unwrap:
-    //  - sender randomness (input)
-    //  - receiver preimage (input)
-    //  - salt (input)
-    //  - sender randomness (output)
-    //  - receiver preimage (output)
-    //  - salt (output)
-    //  - aocl size
-    (
-        vec(arb::<Digest>(), num_inputs),
-        vec(arb::<Digest>(), num_inputs),
-        vec(arb::<BFieldElement>(), 3),
-        vec(arb::<Digest>(), num_outputs),
-        vec(arb::<Digest>(), num_outputs),
-        vec(arb::<BFieldElement>(), 3),
-        0u64..=u64::MAX,
-    )
-        .prop_flat_map(
-            move |(
-                mut sender_randomnesses_input,
-                mut receiver_preimages_input,
-                inputs_salt,
-                output_sender_randomnesses,
-                output_receiver_preimages,
-                outputs_salt,
-                aocl_size,
-            )| {
-                let input_triples = input_utxos
-                    .iter()
-                    .map(|utxo| {
-                        (
-                            Hash::hash(utxo),
-                            sender_randomnesses_input.pop().unwrap(),
-                            receiver_preimages_input.pop().unwrap(),
-                        )
-                    })
-                    .collect_vec();
-
-                // prepare to unwrap
-                let input_triples = input_triples.clone();
-                let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.clone();
-                let input_utxos = input_utxos.clone();
-                let output_utxos = output_utxos.clone();
-                let public_announcements = public_announcements.clone();
-
-                // unwrap random mutator set accumulator with membership proofs and removal records
-                MsaAndRecords::arbitrary_with((input_triples, aocl_size))
-                    .prop_map(move |msa_and_records| {
-                        let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
-                        let input_membership_proofs = msa_and_records.membership_proofs;
-                        let input_removal_records = msa_and_records.removal_records;
-
-                        let type_scripts_and_witnesses =
-                            vec![TypeScriptAndWitness::new(NativeCurrency.program())];
-
-                        // prepare to unwrap
-                        let input_utxos = input_utxos.clone();
-                        let input_lock_scripts_and_witnesses =
-                            input_lock_scripts_and_witnesses.clone();
-                        let input_removal_records = input_removal_records.clone();
-                        let input_membership_proofs = input_membership_proofs.clone();
-                        let type_scripts_and_witnesses = type_scripts_and_witnesses.clone();
-                        let output_utxos = output_utxos.clone();
-                        let public_announcements = public_announcements.clone();
-                        let sender_randomnesses_output = output_sender_randomnesses.clone();
-                        let receiver_preimages_output = output_receiver_preimages.clone();
-
-                        let output_commitments = output_utxos
-                            .iter()
-                            .zip(&sender_randomnesses_output)
-                            .zip(&receiver_preimages_output)
-                            .map(|((utxo, sender_randomness), receiver_preimage)| {
-                                commit(
-                                    Hash::hash(utxo),
-                                    *sender_randomness,
-                                    Hash::hash(receiver_preimage),
-                                )
-                            })
-                            .collect_vec();
-
-                        // prepare to unwrap
-                        let input_utxos = input_utxos.clone();
-                        let input_removal_records = input_removal_records.clone();
-                        let input_membership_proofs = input_membership_proofs.clone();
-                        let type_scripts_and_witnesses = type_scripts_and_witnesses.clone();
-                        let output_utxos = output_utxos.clone();
-                        let public_announcements = public_announcements.clone();
-
-                        let kernel = TransactionKernel {
-                            inputs: input_removal_records.clone(),
-                            outputs: output_commitments.clone(),
-                            public_announcements: public_announcements.to_vec(),
-                            fee,
-                            coinbase,
-                            timestamp: Timestamp::now(),
-                            mutator_set_hash: mutator_set_accumulator.hash(),
-                        };
-
-                        PrimitiveWitness {
-                            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
-                            input_utxos: SaltedUtxos {
-                                utxos: input_utxos.clone(),
-                                salt: inputs_salt.clone().try_into().unwrap(),
-                            },
-                            input_membership_proofs: input_membership_proofs.clone(),
-                            type_scripts_and_witnesses: type_scripts_and_witnesses.clone(),
-                            output_utxos: SaltedUtxos {
-                                utxos: output_utxos.clone(),
-                                salt: outputs_salt.clone().try_into().unwrap(),
-                            },
-                            output_sender_randomnesses: output_sender_randomnesses.clone(),
-                            output_receiver_digests: output_receiver_preimages
-                                .iter()
-                                .map(Hash::hash)
-                                .collect_vec(),
-                            mutator_set_accumulator: mutator_set_accumulator.clone(),
-                            kernel,
-                        }
-                    })
-                    .boxed()
-            },
+        // unwrap:
+        //  - sender randomness (input)
+        //  - receiver preimage (input)
+        //  - salt (input)
+        //  - sender randomness (output)
+        //  - receiver preimage (output)
+        //  - salt (output)
+        //  - aocl size
+        (
+            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<BFieldElement>(), 3),
+            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<BFieldElement>(), 3),
+            0u64..=u64::MAX,
         )
-        .boxed()
+            .prop_flat_map(
+                move |(
+                    mut sender_randomnesses_input,
+                    mut receiver_preimages_input,
+                    inputs_salt,
+                    output_sender_randomnesses,
+                    output_receiver_preimages,
+                    outputs_salt,
+                    aocl_size,
+                )| {
+                    let input_triples = input_utxos
+                        .iter()
+                        .map(|utxo| {
+                            (
+                                Hash::hash(utxo),
+                                sender_randomnesses_input.pop().unwrap(),
+                                receiver_preimages_input.pop().unwrap(),
+                            )
+                        })
+                        .collect_vec();
+
+                    // prepare to unwrap
+                    let input_triples = input_triples.clone();
+                    let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.clone();
+                    let input_utxos = input_utxos.clone();
+                    let output_utxos = output_utxos.clone();
+                    let public_announcements = public_announcements.clone();
+
+                    // unwrap random mutator set accumulator with membership proofs and removal records
+                    MsaAndRecords::arbitrary_with((input_triples, aocl_size))
+                        .prop_map(move |msa_and_records| {
+                            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
+                            let input_membership_proofs = msa_and_records.membership_proofs;
+                            let input_removal_records = msa_and_records.removal_records;
+
+                            // prepare to unwrap
+                            let input_utxos = input_utxos.clone();
+                            let input_lock_scripts_and_witnesses =
+                                input_lock_scripts_and_witnesses.clone();
+                            let input_removal_records = input_removal_records.clone();
+                            let input_membership_proofs = input_membership_proofs.clone();
+                            let output_utxos = output_utxos.clone();
+                            let public_announcements = public_announcements.clone();
+                            let sender_randomnesses_output = output_sender_randomnesses.clone();
+                            let receiver_preimages_output = output_receiver_preimages.clone();
+
+                            let output_commitments = output_utxos
+                                .iter()
+                                .zip(&sender_randomnesses_output)
+                                .zip(&receiver_preimages_output)
+                                .map(|((utxo, sender_randomness), receiver_preimage)| {
+                                    commit(
+                                        Hash::hash(utxo),
+                                        *sender_randomness,
+                                        Hash::hash(receiver_preimage),
+                                    )
+                                })
+                                .collect_vec();
+
+                            // prepare to unwrap
+                            let input_utxos = input_utxos.clone();
+                            let input_removal_records = input_removal_records.clone();
+                            let input_membership_proofs = input_membership_proofs.clone();
+                            let output_utxos = output_utxos.clone();
+                            let public_announcements = public_announcements.clone();
+
+                            let kernel = TransactionKernel {
+                                inputs: input_removal_records.clone(),
+                                outputs: output_commitments.clone(),
+                                public_announcements: public_announcements.to_vec(),
+                                fee,
+                                coinbase,
+                                timestamp: Timestamp::now(),
+                                mutator_set_hash: mutator_set_accumulator.hash(),
+                            };
+
+                            let type_scripts_and_witnesses =
+                                vec![TypeScriptAndWitness::new(NativeCurrency.program())];
+
+                            PrimitiveWitness {
+                                lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
+                                input_utxos: SaltedUtxos {
+                                    utxos: input_utxos.clone(),
+                                    salt: inputs_salt.clone().try_into().unwrap(),
+                                },
+                                input_membership_proofs: input_membership_proofs.clone(),
+                                type_scripts_and_witnesses,
+                                output_utxos: SaltedUtxos {
+                                    utxos: output_utxos.clone(),
+                                    salt: outputs_salt.clone().try_into().unwrap(),
+                                },
+                                output_sender_randomnesses: output_sender_randomnesses.clone(),
+                                output_receiver_digests: output_receiver_preimages
+                                    .iter()
+                                    .map(Hash::hash)
+                                    .collect_vec(),
+                                mutator_set_accumulator: mutator_set_accumulator.clone(),
+                                kernel,
+                            }
+                        })
+                        .boxed()
+                },
+            )
+            .boxed()
+    }
 }
 
 #[cfg(test)]

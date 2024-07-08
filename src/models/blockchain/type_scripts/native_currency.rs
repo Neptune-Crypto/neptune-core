@@ -254,9 +254,7 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
-    use crate::models::blockchain::transaction::{
-        primitive_witness::arbitrary_primitive_witness_with, utxo::Utxo, PublicAnnouncement,
-    };
+    use crate::models::blockchain::transaction::{utxo::Utxo, PublicAnnouncement};
     use proptest::collection::vec;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
@@ -300,7 +298,7 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
@@ -330,7 +328,7 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
