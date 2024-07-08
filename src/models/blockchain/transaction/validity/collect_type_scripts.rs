@@ -157,8 +157,10 @@ impl ConsensusProgram for CollectTypeScripts {
         }));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let eq_digest = library.import(Box::new(EqDigest));
-        let collect_type_script_hashes =
-            format!("neptune_consensus_transaction_collect_type_script_hashes");
+        let collect_type_script_hashes_from_utxos =
+            format!("neptune_consensus_transaction_collect_type_script_hashes_from_utxo");
+        let collect_type_script_hashes_from_coins =
+            format!("neptune_consensus_transaction_collect_type_script_hashes_from_coin");
         let push_digest_to_list = format!("neptune_consensus_transaction_push_digest_to_list");
         let write_all_digests = format!("netpune_consensus_transaction_write_all_digests");
         let authenticate_salted_utxos_and_collect_hashes = triton_asm! {
@@ -186,7 +188,7 @@ impl ConsensusProgram for CollectTypeScripts {
             push 0 swap 1
             // _ *ctsw *type_script_hashes N 0 *utxos[0]_si
 
-            call {collect_type_script_hashes}
+            call {collect_type_script_hashes_from_utxos}
             // _ *ctsw *type_script_hashes N N *
 
             pop 3
@@ -227,32 +229,26 @@ impl ConsensusProgram for CollectTypeScripts {
             halt
 
             // INVARIANT: _ *type_script_hashes N i *utxos[i]_si
-            {collect_type_script_hashes}:
+            {collect_type_script_hashes_from_utxos}:
                 dup 2 dup 2 eq
                 // _ *type_script_hashes N i *utxos[i]_si (N==i)
 
                 skiz return
                 // _ *type_script_hashes N i *utxos[i]_si
 
-                dup 0 push 1 add {&field_type_script_hash}
-                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash
+                dup 0 push 1 add {&field_coin}
+                // _ *type_script_hashes N i *utxos[i]_si *coin
 
-                dup 0 dup 5 swap 1
-                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash *type_script_hashes *type_script_hash
+                read_mem 1 push 2 add
+                // _ *type_script_hashes N i *utxos[i]_si len *coin[0]_si
 
-                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
-                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash *type_script_hashes [type_script_hash]
+                push 0 swap 1
+                // _ *type_script_hashes N i *utxos[i]_si len 0 *coin[0]_si
 
-                call {contains}
-                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash (type_script_hashes.contains([type_script_hash]))
+                call {collect_type_script_hashes_from_coins}
+                // _ *type_script_hashes N i *utxos[i]_si len len *coin[len]_si
 
-                push 0 eq
-                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash (!type_script_hashes.contains([type_script_hash]))
-
-                skiz call {push_digest_to_list}
-                // _ *type_script_hashes N i *utxos[i]_si *
-
-                pop 1
+                pop 3
                 // _ *type_script_hashes N i *utxos[i]_si
 
                 read_mem 1 push 2 add
@@ -266,22 +262,53 @@ impl ConsensusProgram for CollectTypeScripts {
 
                 recurse
 
-            // BEFORE: _ *list * * * *hash
-            // AFTER: _ *list * * * anything
+            // INVARIANT: _ *type_script_hashes * * * len j *coin[j]_si
+            {collect_type_script_hashes_from_coins}:
+                dup 2 dup 2 eq
+                // _ *type_script_hashes * * * len j *coin[j]_si (len==j)
+
+                skiz return
+                // _ *type_script_hashes * * * len j *coin[j]_si
+
+                read_mem 1 push 2 add
+                // _ *type_script_hashes * * * len j size *coin[j]
+
+                dup 7 dup 0 dup 2 {&field_type_script_hash}
+                // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes *digest
+
+                push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH} pop 1
+                // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes [digest]
+
+                call {contains}
+                // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes ([digest] in type_script_hashes)
+
+                skiz call {push_digest_to_list}
+                // _ *type_script_hashes * * * len j size *coin[j] *
+
+                pop 1 add
+                // _ *type_script_hashes * * * len j *coin[j+1]_si
+
+                swap 1 push 1 add swap 1
+                // _ *type_script_hashes * * * len (j+1) *coin[j+1]_si
+
+                recurse
+
+            // BEFORE: _ *coin[j] *type_script_hashes
+            // AFTER: _ *coin[j] *
             {push_digest_to_list}:
-                // _ *list * * * *hash
-
-                dup 4
-                // _ *list * * * *hash *list
-
                 dup 1
-                // _ *list * * * *hash *list *hash
+                // _ *coin[j] *type_script_hashes *coin[j]
+
+                {&field_type_script_hash}
+                // _ *coin[j] *type_script_hashes *digest
 
                 push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
-                // _ *list * * * *hash *list [hash]
+                // _ *coin[j] *type_script_hashes [digest]
 
                 call {push_digest}
-                // _ *list * * * *hash
+                // _ *coin[j]
+
+                push {0x2b00b5}
 
                 return
 
@@ -324,14 +351,18 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 
 #[cfg(test)]
 mod test {
+    use crate::models::blockchain::transaction::primitive_witness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
     use itertools::Itertools;
+    use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
+    use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
+    use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
@@ -367,5 +398,17 @@ mod test {
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
+    }
+
+    #[test]
+    fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
+        let mut test_runner = TestRunner::deterministic();
+        for num_inputs in 0..5 {
+            let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            prop(primitive_witness).expect("");
+        }
     }
 }
