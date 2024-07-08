@@ -10,12 +10,20 @@ use crate::prelude::{triton_vm, twenty_first};
 use crate::models::proof_abstractions::SecretWitness;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use tasm_lib::data_type::DataType;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::eq_digest::EqDigest;
+use tasm_lib::library::Library;
+use tasm_lib::list::contains::Contains;
+use tasm_lib::list::new::New;
+use tasm_lib::list::push::Push;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+use tasm_lib::{field, field_with_size, Digest, DIGEST_LENGTH};
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -130,7 +138,178 @@ impl ConsensusProgram for CollectTypeScripts {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
+        let mut library = Library::new();
+        let field_with_size_salted_input_utxos =
+            field_with_size!(CollectTypeScriptsWitness::salted_input_utxos);
+        let field_with_size_salted_output_utxos =
+            field_with_size!(CollectTypeScriptsWitness::salted_input_utxos);
+        let field_utxos = field!(SaltedUtxos::utxos);
+        let field_coin = field!(Utxo::coins);
+        let field_type_script_hash = field!(Coin::type_script_hash);
+        let contains = library.import(Box::new(Contains {
+            element_type: DataType::Digest,
+        }));
+        let new_list = library.import(Box::new(New {
+            element_type: DataType::Digest,
+        }));
+        let push_digest = library.import(Box::new(Push {
+            element_type: DataType::Digest,
+        }));
+        let hash_varlen = library.import(Box::new(HashVarlen));
+        let eq_digest = library.import(Box::new(EqDigest));
+        let collect_type_script_hashes =
+            format!("neptune_consensus_transaction_collect_type_script_hashes");
+        let push_digest_to_list = format!("neptune_consensus_transaction_push_digest_to_list");
+        let write_all_digests = format!("netpune_consensus_transaction_write_all_digests");
+        let authenticate_salted_utxos_and_collect_hashes = triton_asm! {
+            // BEFORE:
+            // _ *ctsw *type_script_hashes *salted_utxos size
+
+            dup 1 swap 1
+            // _ *ctsw *type_script_hashes *salted_utxos *salted_utxos size
+
+            call {hash_varlen}
+            // _ *ctsw *type_script_hashes *salted_utxos [salted_utxos_hash]
+
+            read_io 5
+            // _ *ctsw *type_script_hashes *salted_utxos [salted_utxos_hash] [sud]
+
+            call {eq_digest} assert
+            // _ *ctsw *type_script_hashes *salted_utxos
+
+            {&field_utxos}
+            // _ *ctsw *type_script_hashes *utxos_li
+
+            read_mem 1 push 2 add
+            // _ *ctsw *type_script_hashes N *utxos[0]_si
+
+            push 0 swap 1
+            // _ *ctsw *type_script_hashes N 0 *utxos[0]_si
+
+            call {collect_type_script_hashes}
+            // _ *ctsw *type_script_hashes N N *
+
+            pop 3
+            // _ *ctsw *type_script_hashes
+        };
+        let payload = triton_asm! {
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _ *ctsw
+
+            call {new_list}
+            // _ *ctsw *type_script_hashes
+
+            dup 1 {&field_with_size_salted_input_utxos}
+            // _ *ctsw *type_script_hashes *salted_input_utxos size
+
+            {&authenticate_salted_utxos_and_collect_hashes}
+            // _ *ctsw *type_script_hashes
+
+            dup 1 {&field_with_size_salted_output_utxos}
+            // _ *ctsw *type_script_hashes *salted_output_utxos size
+
+            {&authenticate_salted_utxos_and_collect_hashes}
+            // _ *ctsw *type_script_hashes
+
+            read_mem 1 push 2 add swap 1
+            // _ *ctsw *type_script_hashes[0] len
+
+            push {DIGEST_LENGTH} mul
+            // _ *ctsw *type_script_hashes[0] size
+
+            dup 1 add
+            // _ *ctsw *type_script_hashes[0] *type_script_hashes[N+1]
+
+            call {write_all_digests}
+            // _ *ctsw *type_script_hashes[N+1] *type_script_hashes[N+1]
+
+            halt
+
+            // INVARIANT: _ *type_script_hashes N i *utxos[i]_si
+            {collect_type_script_hashes}:
+                dup 2 dup 2 eq
+                // _ *type_script_hashes N i *utxos[i]_si (N==i)
+
+                skiz return
+                // _ *type_script_hashes N i *utxos[i]_si
+
+                dup 0 push 1 add {&field_type_script_hash}
+                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash
+
+                dup 0 dup 5 swap 1
+                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash *type_script_hashes *type_script_hash
+
+                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash *type_script_hashes [type_script_hash]
+
+                call {contains}
+                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash (type_script_hashes.contains([type_script_hash]))
+
+                push 0 eq
+                // _ *type_script_hashes N i *utxos[i]_si *type_script_hash (!type_script_hashes.contains([type_script_hash]))
+
+                skiz call {push_digest_to_list}
+                // _ *type_script_hashes N i *utxos[i]_si *
+
+                pop 1
+                // _ *type_script_hashes N i *utxos[i]_si
+
+                read_mem 1 push 2 add
+                // _ *type_script_hashes N i size *utxos[i]
+
+                add
+                // _ *type_script_hashes N i *utxos[i+1]_si
+
+                swap 1 push 1 add swap 1
+                // _ *type_script_hashes N (i+1) *utxos[i+1]_si
+
+                recurse
+
+            // BEFORE: _ *list * * * *hash
+            // AFTER: _ *list * * * anything
+            {push_digest_to_list}:
+                // _ *list * * * *hash
+
+                dup 4
+                // _ *list * * * *hash *list
+
+                dup 1
+                // _ *list * * * *hash *list *hash
+
+                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                // _ *list * * * *hash *list [hash]
+
+                call {push_digest}
+                // _ *list * * * *hash
+
+                return
+
+            // INVARIANT: _ *type_script_hashes[i] *type_script_hashes[N+1]
+            {write_all_digests}:
+
+                dup 1 dup 1 eq
+                // _ *type_script_hashes[i] *type_script_hashes[N+1] (i==N+1)
+
+                skiz return
+                // _ *type_script_hashes[i] *type_script_hashes[N+1]
+
+                dup 1 push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH}
+                // _ *type_script_hashes[i] *type_script_hashes[N+1] [type_script_hashes[i]] (*type_script_hashes[i]-1)
+
+                push {DIGEST_LENGTH+1} add swap 7 pop 1
+                // _ *type_script_hashes[i+1] *type_script_hashes[N+1] [type_script_hashes[i]]
+
+                write_io 5
+                // _ *type_script_hashes[i+1] *type_script_hashes[N+1]
+
+                return
+
+        };
+        triton_asm! {
+            {&payload}
+            {&library.all_imports()}
+        }
     }
 }
 
@@ -150,18 +329,43 @@ mod test {
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use proptest::prop_assert;
+    use itertools::Itertools;
+    use proptest::prop_assert_eq;
+    use proptest::test_runner::TestCaseError;
     use test_strategy::proptest;
+
+    fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
+        let collect_lock_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
+        let expected_lock_script_hashes = collect_lock_scripts_witness
+            .salted_input_utxos
+            .utxos
+            .iter()
+            .flat_map(|utxo| utxo.lock_script_hash.values())
+            .collect_vec();
+
+        let rust_result = CollectTypeScripts
+            .run_rust(
+                &collect_lock_scripts_witness.standard_input(),
+                collect_lock_scripts_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(expected_lock_script_hashes, rust_result.clone());
+
+        let tasm_result = CollectTypeScripts
+            .run_tasm(
+                &collect_lock_scripts_witness.standard_input(),
+                collect_lock_scripts_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(rust_result, tasm_result);
+
+        Ok(())
+    }
 
     #[proptest(cases = 5)]
     fn derived_witness_generates_accepting_program_proptest(
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
-        let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        let result = CollectTypeScripts.run_rust(
-            &collect_type_scripts_witness.standard_input(),
-            collect_type_scripts_witness.nondeterminism(),
-        );
-        prop_assert!(result.is_ok());
+        prop(primitive_witness)?;
     }
 }
