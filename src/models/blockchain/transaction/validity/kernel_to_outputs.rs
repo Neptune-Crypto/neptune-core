@@ -329,18 +329,26 @@ mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let result = KernelToOutputs
+        let expected_salted_outputs_digest =
+            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
+                .values()
+                .to_vec();
+
+        let rust_result = KernelToOutputs
             .run_rust(
                 &kernel_to_outputs_witness.standard_input(),
                 kernel_to_outputs_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(
-            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
-                .values()
-                .to_vec(),
-            result
-        );
+        prop_assert_eq!(expected_salted_outputs_digest, rust_result.clone());
+
+        let tasm_result = KernelToOutputs
+            .run_tasm(
+                &kernel_to_outputs_witness.standard_input(),
+                kernel_to_outputs_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(rust_result, tasm_result);
     }
 
     #[test]
@@ -351,7 +359,7 @@ mod test {
             .unwrap()
             .current();
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let result = KernelToOutputs
+        let tasm_result = KernelToOutputs
             .run_tasm(
                 &kernel_to_outputs_witness.standard_input(),
                 kernel_to_outputs_witness.nondeterminism(),
@@ -362,7 +370,7 @@ mod test {
             Hash::hash_varlen(&primitive_witness.output_utxos.encode())
                 .values()
                 .to_vec(),
-            result
+            tasm_result
         );
     }
 }
