@@ -119,5 +119,5 @@ name = "archival_mmr"
 harness = false
 
 [patch.crates-io]
-# 36f3929 is tip of branch: master as of 2024-07-05
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "36f3929" }
+# 0ab8978 is tip of branch: master as of 2024-07-08
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "0ab8978" }

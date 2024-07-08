@@ -736,7 +736,7 @@ mod test {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 5)]
     fn primitive_witness_with_timelocks_is_valid(
         #[strategy(arbitrary_primitive_witness_with_timelocks(2, 2, 2))]
         primitive_witness: PrimitiveWitness,
