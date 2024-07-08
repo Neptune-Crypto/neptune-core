@@ -336,14 +336,27 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let mut all_aocl_indices: Vec<u64> = Vec::new();
         let mut input_index: usize = 0;
         while input_index < input_utxos.len() {
+            let utxo: &Utxo = &input_utxos[input_index];
+            let utxo_hash = Hash::hash(utxo);
+            let msmp: &MsMembershipProof = &rriw.membership_proofs[input_index];
             let removal_record: &RemovalRecord = &rriw.kernel.inputs[input_index];
 
+            // verify AOCL membership
+            let addition_record: AdditionRecord = commit(
+                utxo_hash,
+                msmp.sender_randomness,
+                msmp.receiver_preimage.hash::<Hash>(),
+            );
+            assert!(msmp.auth_path_aocl.verify(
+                &aocl.get_peaks(),
+                addition_record.canonical_commitment,
+                aocl.count_leaves(),
+            ));
+
             // calculate absolute index set
-            let utxo: &Utxo = &input_utxos[input_index];
-            let msmp: &MsMembershipProof = &rriw.membership_proofs[input_index];
             let aocl_leaf_index = msmp.auth_path_aocl.leaf_index;
             let index_set = get_swbf_indices(
-                Hash::hash(utxo),
+                utxo_hash,
                 msmp.sender_randomness,
                 msmp.receiver_preimage,
                 aocl_leaf_index,
