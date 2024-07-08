@@ -1,10 +1,10 @@
-mod address_enum;
+mod address_type;
 pub mod generation_address;
 
-/// AbstractAddress abstracts over address type and should be used wherever
-/// possible.
-pub use address_enum::AbstractAddress;
-
-/// AbstractSpendingKey abstracts over spending key type and should be used
+/// ReceivingAddressType abstracts over any address type and should be used
 /// wherever possible.
-pub use address_enum::AbstractSpendingKey;
+pub use address_type::ReceivingAddressType;
+
+/// SpendingKeyType abstracts over any spending key type and should be used
+/// wherever possible.
+pub use address_type::SpendingKeyType;

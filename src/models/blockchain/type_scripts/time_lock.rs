@@ -525,7 +525,7 @@ impl Arbitrary for TimeLockWitness {
                 )| {
                     // generate inputs
                     let (mut input_utxos, input_lock_scripts, input_lock_script_witnesses) =
-                        PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                        PrimitiveWitness::tx_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
                         );
@@ -549,7 +549,7 @@ impl Arbitrary for TimeLockWitness {
 
                     // generate output UTXOs
                     let output_utxos =
-                        PrimitiveWitness::valid_transaction_outputs_from_amounts_and_address_seeds(
+                        PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                             &output_amounts,
                             &output_address_seeds,
                         );

@@ -4,18 +4,17 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::UtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
-use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::AbstractAddress;
+use crate::models::state::wallet::address::ReceivingAddressType;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
-use crate::models::state::UtxoNotifyMethod;
 use crate::prelude::twenty_first;
 use anyhow::Result;
 use get_size::GetSize;
@@ -110,7 +109,7 @@ pub trait RPC {
     async fn wallet_status() -> WalletStatus;
 
     /// Return an address that this client can receive funds on
-    async fn own_receiving_address() -> generation_address::ReceivingAddress;
+    async fn next_receiving_address() -> ReceivingAddressType;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -122,10 +121,7 @@ pub trait RPC {
     async fn dashboard_overview_data() -> DashBoardOverviewDataFromClient;
 
     /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(
-        address: String,
-        network: Network,
-    ) -> Option<generation_address::ReceivingAddress>;
+    async fn validate_address(address: String, network: Network) -> Option<ReceivingAddressType>;
 
     /// Determine whether the user-supplied string is a valid amount
     async fn validate_amount(amount: String) -> Option<NeptuneCoins>;
@@ -148,13 +144,13 @@ pub trait RPC {
     /// Send coins to a single recipient.
     async fn send(
         amount: NeptuneCoins,
-        address: AbstractAddress,
+        address: ReceivingAddressType,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
-        outputs: Vec<(AbstractAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -341,9 +337,9 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         address_string: String,
         network: Network,
-    ) -> Option<generation_address::ReceivingAddress> {
+    ) -> Option<ReceivingAddressType> {
         let ret = if let Ok(address) =
-            generation_address::ReceivingAddress::from_bech32m(address_string.clone(), network)
+            ReceivingAddressType::from_bech32m(address_string.clone(), network)
         {
             Some(address)
         } else {
@@ -417,17 +413,21 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    async fn own_receiving_address(
+    // future: this should perhaps take a param indicating what type
+    //         of receiving address.  for now we just use/assume
+    //         a Generation address.
+    async fn next_receiving_address(
         self,
         _context: tarpc::context::Context,
-    ) -> generation_address::ReceivingAddress {
+    ) -> ReceivingAddressType {
         self.state
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0)
+            .next_unused_generation_spending_key()
             .to_address()
+            .into()
     }
 
     async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
@@ -540,7 +540,7 @@ impl RPC for NeptuneRPCServer {
         self,
         ctx: context::Context,
         amount: NeptuneCoins,
-        address: AbstractAddress,
+        address: ReceivingAddressType,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         self.send_to_many(ctx, vec![(address, amount)], fee).await
@@ -553,7 +553,7 @@ impl RPC for NeptuneRPCServer {
     async fn send_to_many(
         self,
         _ctx: context::Context,
-        outputs: Vec<(AbstractAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
@@ -573,10 +573,10 @@ impl RPC for NeptuneRPCServer {
         self.state.flush_databases().await.expect("flushed DBs");
 
         let state = self.state.lock_guard().await;
-        let mut utxo_receivers = match state.generate_utxo_receivers(outputs) {
+        let mut tx_outputs = match state.generate_tx_outputs(outputs) {
             Ok(u) => u,
             Err(err) => {
-                tracing::error!("Could not generate utxo receivers: {}", err);
+                tracing::error!("Could not generate tx outputs: {}", err);
                 return None;
             }
         };
@@ -588,10 +588,10 @@ impl RPC for NeptuneRPCServer {
         // This is important because internally it calls prove() which is a very
         // lengthy operation.
         //
-        // note: A change output will be added to utxo_receivers if needed.
+        // note: A change output will be added to tx_outputs if needed.
         let transaction = match state
             .create_transaction(
-                &mut utxo_receivers,
+                &mut tx_outputs,
                 change_spending_key.into(),
                 UtxoNotifyMethod::OffChain,
                 fee,
@@ -613,7 +613,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(utxo_receivers.expected_utxos())
+            .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
             .await
         {
             tracing::error!("Could not add expected utxos to wallet: {}", e);
@@ -718,6 +718,7 @@ impl RPC for NeptuneRPCServer {
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
+    use crate::models::state::wallet::address::generation_address::ReceivingAddress;
     use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::Block;
@@ -729,12 +730,12 @@ mod rpc_server_tests {
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
-    use generation_address::ReceivingAddress;
     use num_traits::{One, Zero};
     use rand::Rng;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
+    use ReceivingAddressType;
 
     async fn test_rpc_server(
         network: Network,
@@ -804,7 +805,7 @@ mod rpc_server_tests {
         let _ = rpc_server.clone().synced_balance(ctx).await;
         let _ = rpc_server.clone().history(ctx).await;
         let _ = rpc_server.clone().wallet_status(ctx).await;
-        let own_receiving_address = rpc_server.clone().own_receiving_address(ctx).await;
+        let own_receiving_address = rpc_server.clone().next_receiving_address(ctx).await;
         let _ = rpc_server.clone().mempool_tx_count(ctx).await;
         let _ = rpc_server.clone().mempool_size(ctx).await;
         let _ = rpc_server.clone().dashboard_overview_data(ctx).await;
@@ -822,7 +823,7 @@ mod rpc_server_tests {
             .send(
                 ctx,
                 NeptuneCoins::one(),
-                own_receiving_address.into(),
+                own_receiving_address,
                 NeptuneCoins::one(),
             )
             .await;
@@ -830,7 +831,7 @@ mod rpc_server_tests {
             .clone()
             .send_to_many(
                 ctx,
-                vec![(own_receiving_address.into(), NeptuneCoins::one())],
+                vec![(own_receiving_address, NeptuneCoins::one())],
                 NeptuneCoins::one(),
             )
             .await;
@@ -1312,7 +1313,7 @@ mod rpc_server_tests {
             .lock_guard()
             .await
             .wallet_state
-            .get_known_spending_keys()[0];
+            .get_known_generation_spending_keys()[0];
 
         // --- Init.  generate a block, with coinbase going to our wallet ---
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
@@ -1339,7 +1340,7 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (
-            AbstractAddress::from(ReceivingAddress::derive_from_seed(rng.gen())),
+            ReceivingAddressType::from(ReceivingAddress::derive_from_seed(rng.gen())),
             NeptuneCoins::new(5),
         );
 
@@ -1349,9 +1350,9 @@ mod rpc_server_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .get_known_spending_keys()[0];
+                .get_known_generation_spending_keys()[0];
             (
-                AbstractAddress::from(spending_key.to_address()),
+                ReceivingAddressType::from(spending_key.to_address()),
                 NeptuneCoins::new(25),
             )
         };

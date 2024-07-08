@@ -1,10 +1,11 @@
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::TxInputList;
+use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
-use crate::models::state::UtxoReceiverList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
@@ -73,12 +74,10 @@ use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
-use crate::models::state::UtxoReceiver;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
 use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -689,68 +688,38 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
 pub async fn make_mock_transaction_with_generation_key(
-    input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
-    receiver_data: Vec<UtxoReceiver>,
+    tx_inputs: TxInputList,
+    tx_outputs: TxOutputList,
     fee: NeptuneCoins,
     tip_msa: MutatorSetAccumulator,
 ) -> Transaction {
-    // Generate removal records
-    let mut inputs = vec![];
-    for (input_utxo, input_mp, _) in input_utxos_mps_keys.iter() {
-        let removal_record = tip_msa.drop(Hash::hash(input_utxo), input_mp);
-        inputs.push(removal_record);
-    }
-
-    let mut outputs = vec![];
-    for rd in receiver_data.iter() {
-        let addition_record = commit(
-            Hash::hash(&rd.utxo),
-            rd.sender_randomness,
-            rd.receiver_privacy_digest,
-        );
-        outputs.push(addition_record);
-    }
-
-    let utxo_receivers = UtxoReceiverList::from(receiver_data);
     let timestamp = Timestamp::now();
 
     let kernel = TransactionKernel {
-        inputs,
-        outputs,
-        public_announcements: (&utxo_receivers).into(),
+        inputs: tx_inputs.removal_records(&tip_msa),
+        outputs: tx_outputs.addition_records(),
+        public_announcements: tx_outputs.public_announcements(),
         fee,
         timestamp,
         coinbase: None,
         mutator_set_hash: tip_msa.hash(),
     };
 
-    let input_utxos = input_utxos_mps_keys
-        .iter()
-        .map(|(utxo, _mp, _)| utxo)
-        .cloned()
-        .collect_vec();
     let type_scripts = vec![TypeScript::native_currency()];
-    let input_membership_proofs = input_utxos_mps_keys
-        .iter()
-        .map(|(_utxo, mp, _)| mp)
-        .cloned()
+
+    let spending_key_unlock_keys = tx_inputs
+        .spending_keys_iter()
+        .into_iter()
+        .map(|k| k.unlock_key().encode())
         .collect_vec();
-    let spending_key_unlock_keys = input_utxos_mps_keys
-        .iter()
-        .map(|(_utxo, _mp, sk)| sk.unlock_key.encode())
-        .collect_vec();
-    let input_lock_scripts = input_utxos_mps_keys
-        .iter()
-        .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
-        .collect_vec();
-    let output_utxos = (&utxo_receivers).into();
+
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
-        input_utxos: SaltedUtxos::new(input_utxos),
+        input_utxos: SaltedUtxos::new(tx_inputs.utxos()),
         type_scripts,
-        input_lock_scripts,
+        input_lock_scripts: tx_inputs.lock_scripts(),
         lock_script_witnesses: spending_key_unlock_keys,
-        input_membership_proofs,
-        output_utxos: SaltedUtxos::new(output_utxos),
+        input_membership_proofs: tx_inputs.ms_membership_proofs(),
+        output_utxos: SaltedUtxos::new(tx_outputs.utxos()),
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };

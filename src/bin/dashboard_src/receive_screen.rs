@@ -65,7 +65,7 @@ impl ReceiveScreen {
             tokio::spawn(async move {
                 // TODO: change to receive most recent wallet
                 let receiving_address = rpc_client
-                    .own_receiving_address(context::current())
+                    .next_receiving_address(context::current())
                     .await
                     .unwrap();
                 *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
@@ -85,7 +85,7 @@ impl ReceiveScreen {
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
             let receiving_address = rpc_client
-                .own_receiving_address(context::current())
+                .next_receiving_address(context::current())
                 .await
                 .unwrap();
             *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());

@@ -15,7 +15,7 @@ use neptune_core::{
     config_models::network::Network,
     models::{
         blockchain::type_scripts::neptune_coins::NeptuneCoins,
-        state::wallet::address::generation_address,
+        state::wallet::address::ReceivingAddressType,
     },
     rpc_server::RPCClient,
 };
@@ -83,7 +83,7 @@ impl SendScreen {
     ) {
         *focus_arc.lock().await = SendScreenWidget::Notice;
         *notice_arc.lock().await = "Validating input ...".to_string();
-        let maybe_valid_address: Option<generation_address::ReceivingAddress> = rpc_client
+        let maybe_valid_address: Option<ReceivingAddressType> = rpc_client
             .validate_address(context::current(), address, network)
             .await
             .unwrap();
@@ -133,7 +133,7 @@ impl SendScreen {
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
         let send_result = rpc_client
-            .send(send_ctx, valid_amount, valid_address.into(), fee)
+            .send(send_ctx, valid_amount, valid_address, fee)
             .await
             .unwrap();
 

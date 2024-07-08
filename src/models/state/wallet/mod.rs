@@ -364,7 +364,7 @@ impl WalletSecret {
 mod wallet_tests {
 
     use crate::database::storage::storage_vec::traits::*;
-    use itertools::Itertools;
+    use crate::models::blockchain::transaction::TxOutput;
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
@@ -382,7 +382,6 @@ mod wallet_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
-    use crate::models::state::UtxoReceiver;
     use crate::tests::shared::{
         make_mock_block, make_mock_transaction_with_generation_key, mock_genesis_global_state,
         mock_genesis_wallet_state,
@@ -739,13 +738,13 @@ mod wallet_tests {
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
-        let two_utxos = own_wallet_state
+        let tx_inputs_two_utxos = own_wallet_state
             .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash())
             .await
             .unwrap();
         assert_eq!(
             2,
-            two_utxos.len(),
+            tx_inputs_two_utxos.len(),
             "Must use two UTXOs when sending 2 x mining reward"
         );
 
@@ -770,21 +769,19 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
 
-        let receiver_data = vec![UtxoReceiver::fake_announcement(
+        let tx_outputs = vec![TxOutput::fake_announcement(
             Utxo {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
                 coins: NeptuneCoins::new(200).to_native_coins(),
             },
             random(),
             other_wallet_recipient_address.privacy_digest,
-        )];
-        let input_utxos_mps_keys = two_utxos
-            .into_iter()
-            .map(|(utxo, _lock_script, mp, spending_key)| (utxo, mp, spending_key))
-            .collect_vec();
+        )]
+        .into();
+
         let tx = make_mock_transaction_with_generation_key(
-            input_utxos_mps_keys,
-            receiver_data,
+            tx_inputs_two_utxos,
+            tx_outputs,
             NeptuneCoins::zero(),
             msa_tip_previous.clone(),
         )
@@ -848,7 +845,7 @@ mod wallet_tests {
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen());
 
-        let receiver_data_12_to_other = UtxoReceiver::fake_announcement(
+        let tx_outputs_12_to_other = TxOutput::fake_announcement(
             Utxo {
                 coins: NeptuneCoins::new(12).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -862,7 +859,7 @@ mod wallet_tests {
                 ),
             own_address.privacy_digest,
         );
-        let receiver_data_one_to_other = UtxoReceiver::fake_announcement(
+        let tx_outputs_one_to_other = TxOutput::fake_announcement(
             Utxo {
                 coins: NeptuneCoins::new(1).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -876,11 +873,11 @@ mod wallet_tests {
                 ),
             own_address.privacy_digest,
         );
-        let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
+        let tx_outputs_to_other = vec![tx_outputs_12_to_other, tx_outputs_one_to_other];
         let mut now = genesis_block.kernel.header.timestamp;
         let (valid_tx, expected_utxos) = premine_receiver_global_state
             .create_transaction_test_wrapper(
-                receiver_data_to_other.clone(),
+                tx_outputs_to_other.clone(),
                 NeptuneCoins::new(2),
                 now + seven_months,
             )
@@ -908,7 +905,7 @@ mod wallet_tests {
         );
 
         // Expect the UTXO outputs
-        for receive_data in receiver_data_to_other {
+        for receive_data in tx_outputs_to_other {
             own_wallet_state
                 .expected_utxos
                 .add_expected_utxo(
@@ -1139,7 +1136,7 @@ mod wallet_tests {
             "Block must be valid before merging txs"
         );
 
-        let receiver_data_six = UtxoReceiver::fake_announcement(
+        let tx_outputs_six = TxOutput::fake_announcement(
             Utxo {
                 coins: NeptuneCoins::new(4).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -1149,7 +1146,7 @@ mod wallet_tests {
         );
         let (tx_from_preminer, expected_utxos_preminer) = premine_receiver_global_state
             .create_transaction_test_wrapper(
-                vec![receiver_data_six.clone()],
+                vec![tx_outputs_six.clone()],
                 NeptuneCoins::new(4),
                 now,
             )
@@ -1184,8 +1181,8 @@ mod wallet_tests {
         own_wallet_state
             .expected_utxos
             .add_expected_utxo(
-                receiver_data_six.utxo,
-                receiver_data_six.sender_randomness,
+                tx_outputs_six.utxo,
+                tx_outputs_six.sender_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::Cli,
             )

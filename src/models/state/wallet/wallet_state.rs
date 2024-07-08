@@ -1,4 +1,5 @@
 use super::address::generation_address::SpendingKey;
+use super::address::SpendingKeyType;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
@@ -10,8 +11,8 @@ use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::{Transaction, TxInput, TxInputList};
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
@@ -266,7 +267,7 @@ impl WalletState {
         // TODO: These spending keys should probably be derived dynamically from some
         // state in the wallet. And we should allow for other types than just generation
         // addresses.
-        let spending_keys = self.get_known_spending_keys();
+        let spending_keys = self.get_known_generation_spending_keys();
 
         // get recognized UTXOs
         let recognized_utxos = spending_keys
@@ -288,19 +289,19 @@ impl WalletState {
     // returns true if the utxo can be unlocked by one of the
     // known wallet keys.
     pub fn is_wallet_utxo(&self, utxo: &Utxo) -> bool {
-        self.get_known_spending_keys()
+        self.get_known_generation_spending_keys()
             .iter()
             .map(|k| k.to_address().lock_script().hash())
             .any(|h| h == utxo.lock_script_hash)
     }
 
-    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
+    // returns Some(SpendingKeyType) if the utxo can be unlocked by one of the known
     // wallet keys.
-    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
-        self.get_known_spending_keys()
+    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKeyType> {
+        self.get_known_generation_spending_keys()
             .iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
-            .cloned()
+            .map(|k| (*k).into())
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
@@ -312,8 +313,8 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    pub fn get_known_spending_keys(&self) -> Vec<SpendingKey> {
-        // for we always return just the 1st key.
+    pub fn get_known_generation_spending_keys(&self) -> Vec<SpendingKey> {
+        // for now we always return just the 1st key.
         vec![self.wallet_secret.nth_generation_spending_key(0)]
     }
 
@@ -719,7 +720,7 @@ impl WalletState {
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
         timestamp: Timestamp,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)>> {
+    ) -> Result<TxInputList> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
@@ -738,7 +739,7 @@ impl WalletState {
                 tip_digest);
         }
 
-        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)> = vec![];
+        let mut ret = TxInputList::default();
         let mut allocated_amount = NeptuneCoins::zero();
 
         while allocated_amount < requested_amount {
@@ -760,12 +761,12 @@ impl WalletState {
 
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
-            ret.push((
-                wallet_status_element.utxo,
-                lock_script.clone(),
-                membership_proof,
+            ret.push(TxInput {
+                utxo: wallet_status_element.utxo,
+                lock_script: lock_script.clone(),
+                ms_membership_proof: membership_proof,
                 spending_key,
-            ));
+            });
         }
 
         Ok(ret)
@@ -778,7 +779,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof, SpendingKey)>> {
+    ) -> Result<TxInputList> {
         let now = Timestamp::now();
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await
