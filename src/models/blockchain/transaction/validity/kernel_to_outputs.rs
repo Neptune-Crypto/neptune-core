@@ -144,9 +144,6 @@ impl ConsensusProgram for KernelToOutputs {
         let get_digest = library.import(Box::new(list::get::Get {
             element_type: DataType::Digest,
         }));
-        let len = library.import(Box::new(list::length::Length {
-            element_type: DataType::Digest,
-        }));
         let compute_canonical_commitment =
             library.import(Box::new(tasm_lib::neptune::mutator_set::commit::Commit));
         let hash_varlen = library.import(Box::new(
@@ -159,7 +156,8 @@ impl ConsensusProgram for KernelToOutputs {
         let field_receiver_digests = field!(KernelToOutputsWitness::receiver_digests);
         let field_utxos = field!(SaltedUtxos::utxos);
 
-        let main_loop = "kernel_to_outputs_main_loop".to_string();
+        let calculate_canonical_commitments =
+            "kernel_to_outputs_calculate_canonical_commitments".to_string();
 
         let tasm = triton_asm! {
             read_io 5       // [txkmh]
@@ -192,8 +190,11 @@ impl ConsensusProgram for KernelToOutputs {
 
             push 0                          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw *canonical_commitments[0] N 0
 
-            call {main_loop}                // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
-            pop 1                           // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
+            call {calculate_canonical_commitments}
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[0] N N
+
+            pop 1
+            // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
 
             push {-(DIGEST_LENGTH as isize)} mul push -1 add add
                                             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments
@@ -241,7 +242,7 @@ impl ConsensusProgram for KernelToOutputs {
             halt
 
             // INVARIANT: _ *utxos[i]_len *sender_randomnesses *receiver_digests[i]_lw *canonical_commitments[i] N i
-            {main_loop}:
+            {calculate_canonical_commitments}:
                 /* Loop's end-condition: N == i */
                 dup 1 dup 1 eq
                 skiz return
