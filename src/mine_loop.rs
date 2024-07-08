@@ -519,8 +519,7 @@ mod mine_loop_tests {
     use tracing_test::traced_test;
 
     use crate::{
-        config_models::network::Network,
-        models::{consensus::timestamp::Timestamp, state::UtxoReceiver},
+        config_models::network::Network, models::consensus::timestamp::Timestamp,
         tests::shared::mock_genesis_global_state,
     };
 
@@ -576,7 +575,7 @@ mod mine_loop_tests {
         };
         let (tx_by_preminer, expected_utxos) = premine_receiver_global_state
             .create_transaction_test_wrapper(
-                vec![UtxoReceiver::fake_announcement(
+                vec![TxOutput::fake_announcement(
                     tx_output,
                     sender_randomness,
                     receiver_privacy_digest,

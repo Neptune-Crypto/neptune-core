@@ -1,12 +1,15 @@
-use super::wallet::address::AbstractAddress;
-use super::wallet::utxo_notification_pool::UtxoNotifier;
-use super::wallet::wallet_state::WalletState;
-use super::PublicAnnouncement;
-use super::Utxo;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::state::wallet::address::ReceivingAddressType;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-use crate::models::state::NeptuneCoins;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
+use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use anyhow::Result;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -33,17 +36,20 @@ pub enum UtxoNotification {
     OffChain(Box<ExpectedUtxo>),
 }
 
-/// Contains data that a UTXO recipient needs to be notified
-/// about and claim a given UTXO
+/// represents a transaction output, as accepted by
+/// `GlobalState::create_transaction()`
+///
+/// Contains data that a UTXO recipient requires in order to be notified about
+/// and claim a given UTXO
 #[derive(Debug, Clone)]
-pub struct UtxoReceiver {
+pub struct TxOutput {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_privacy_digest: Digest,
     pub utxo_notification: UtxoNotification,
 }
 
-impl From<ExpectedUtxo> for UtxoReceiver {
+impl From<ExpectedUtxo> for TxOutput {
     fn from(expected_utxo: ExpectedUtxo) -> Self {
         Self {
             utxo: expected_utxo.utxo.clone(),
@@ -54,7 +60,18 @@ impl From<ExpectedUtxo> for UtxoReceiver {
     }
 }
 
-impl UtxoReceiver {
+impl From<&TxOutput> for AdditionRecord {
+    /// retrieves public announcements from possible sub-set of the list
+    fn from(ur: &TxOutput) -> Self {
+        commit(
+            Hash::hash(&ur.utxo),
+            ur.sender_randomness,
+            ur.receiver_privacy_digest,
+        )
+    }
+}
+
+impl TxOutput {
     /// automatically generates `UtxoReceiver` from address and amount.
     ///
     /// If the `Utxo` can be claimed by our wallet then private OffChain
@@ -66,14 +83,14 @@ impl UtxoReceiver {
     /// OffChain for `Utxo` that can be claimed by our wallet.
     pub fn auto(
         wallet_state: &WalletState,
-        address: &AbstractAddress,
+        address: &ReceivingAddressType,
         amount: NeptuneCoins,
         sender_randomness: Digest,
     ) -> Result<Self> {
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);
 
         Ok(match wallet_state.find_spending_key_for_utxo(&utxo) {
-            Some(key) => Self::offchain(utxo, sender_randomness, key.privacy_preimage),
+            Some(key) => Self::offchain(utxo, sender_randomness, key.privacy_preimage()),
             None => {
                 let pub_ann = address.generate_public_announcement(&utxo, sender_randomness)?;
                 Self::onchain_pubkey(utxo, sender_randomness, address.privacy_digest(), pub_ann)
@@ -154,49 +171,55 @@ impl UtxoReceiver {
     }
 }
 
-/// Represents a list of UtxoReceiver
+/// Represents a list of [TxOutput]
 #[derive(Debug, Clone, Default)]
-pub struct UtxoReceiverList(Vec<UtxoReceiver>);
+pub struct TxOutputList(Vec<TxOutput>);
 
-impl Deref for UtxoReceiverList {
-    type Target = Vec<UtxoReceiver>;
+impl Deref for TxOutputList {
+    type Target = Vec<TxOutput>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for UtxoReceiverList {
+impl DerefMut for TxOutputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<Vec<UtxoReceiver>> for UtxoReceiverList {
-    fn from(v: Vec<UtxoReceiver>) -> Self {
+impl From<Vec<TxOutput>> for TxOutputList {
+    fn from(v: Vec<TxOutput>) -> Self {
         Self(v)
     }
 }
 
-impl From<&UtxoReceiverList> for Vec<Utxo> {
-    fn from(list: &UtxoReceiverList) -> Self {
-        list.utxos().into_iter().collect()
+impl From<&TxOutputList> for Vec<AdditionRecord> {
+    fn from(list: &TxOutputList) -> Self {
+        list.addition_records_iter().into_iter().collect()
     }
 }
 
-impl From<&UtxoReceiverList> for Vec<ExpectedUtxo> {
-    fn from(list: &UtxoReceiverList) -> Self {
-        list.expected_utxos().into_iter().collect()
+impl From<&TxOutputList> for Vec<Utxo> {
+    fn from(list: &TxOutputList) -> Self {
+        list.utxos_iter().into_iter().collect()
     }
 }
 
-impl From<&UtxoReceiverList> for Vec<PublicAnnouncement> {
-    fn from(list: &UtxoReceiverList) -> Self {
-        list.public_announcements().into_iter().collect()
+impl From<&TxOutputList> for Vec<ExpectedUtxo> {
+    fn from(list: &TxOutputList) -> Self {
+        list.expected_utxos_iter().into_iter().collect()
     }
 }
 
-impl UtxoReceiverList {
+impl From<&TxOutputList> for Vec<PublicAnnouncement> {
+    fn from(list: &TxOutputList) -> Self {
+        list.public_announcements_iter().into_iter().collect()
+    }
+}
+
+impl TxOutputList {
     pub fn total_native_coins(&self) -> NeptuneCoins {
         self.0
             .iter()
@@ -204,13 +227,28 @@ impl UtxoReceiverList {
             .sum()
     }
 
-    /// retrieves public announcements from possible sub-set of the list
-    pub fn utxos(&self) -> impl IntoIterator<Item = Utxo> + '_ {
+    /// retrieves utxos
+    pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
         self.0.iter().map(|u| u.utxo.clone())
     }
 
+    /// retrieves utxos
+    pub fn utxos(&self) -> Vec<Utxo> {
+        self.utxos_iter().into_iter().collect()
+    }
+
+    /// retrieves addition_records
+    pub fn addition_records_iter(&self) -> impl IntoIterator<Item = AdditionRecord> + '_ {
+        self.0.iter().map(|u| u.into())
+    }
+
+    /// retrieves addition_records
+    pub fn addition_records(&self) -> Vec<AdditionRecord> {
+        self.addition_records_iter().into_iter().collect()
+    }
+
     /// retrieves public announcements from possible sub-set of the list
-    pub fn public_announcements(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
+    pub fn public_announcements_iter(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
         self.0.iter().filter_map(|u| match &u.utxo_notification {
             UtxoNotification::OnChainPubKey(pa) => Some(pa.clone()),
             UtxoNotification::OnChainSymmetricKey(pa) => Some(pa.clone()),
@@ -218,12 +256,22 @@ impl UtxoReceiverList {
         })
     }
 
+    /// retrieves public announcements from possible sub-set of the list
+    pub fn public_announcements(&self) -> Vec<PublicAnnouncement> {
+        self.public_announcements_iter().into_iter().collect()
+    }
+
     /// retrieves expected_utxos from possible sub-set of the list
-    pub fn expected_utxos(&self) -> impl IntoIterator<Item = ExpectedUtxo> + '_ {
+    pub fn expected_utxos_iter(&self) -> impl IntoIterator<Item = ExpectedUtxo> + '_ {
         self.0.iter().filter_map(|u| match &u.utxo_notification {
             UtxoNotification::OffChain(eu) => Some(*eu.clone()),
             _ => None,
         })
+    }
+
+    /// retrieves expected_utxos from possible sub-set of the list
+    pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
+        self.expected_utxos_iter().into_iter().collect()
     }
 }
 
@@ -258,7 +306,7 @@ mod tests {
             .wallet_secret
             .generate_sender_randomness(block_height, address.privacy_digest);
 
-        let utxo_receiver = UtxoReceiver::auto(
+        let utxo_receiver = TxOutput::auto(
             &state.wallet_state,
             &address.into(),
             amount,
@@ -283,15 +331,17 @@ mod tests {
         let global_state_lock =
             mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
 
-        let state = global_state_lock.lock_guard().await;
-        let block_height = state.chain.light_state().header().height;
-
-        // obtain a receiving address from our wallet.
-        let spending_key = state
+        // obtain next unused receiving address from our wallet.
+        let spending_key = global_state_lock
+            .lock_guard_mut()
+            .await
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .next_unused_generation_spending_key();
         let address = spending_key.to_address();
+
+        let state = global_state_lock.lock_guard().await;
+        let block_height = state.chain.light_state().header().height;
 
         let amount = NeptuneCoins::one();
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);
@@ -301,7 +351,7 @@ mod tests {
             .wallet_secret
             .generate_sender_randomness(block_height, address.privacy_digest);
 
-        let utxo_receiver = UtxoReceiver::auto(
+        let utxo_receiver = TxOutput::auto(
             &state.wallet_state,
             &address.into(),
             amount,

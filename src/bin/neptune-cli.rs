@@ -5,8 +5,7 @@ use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use neptune_core::models::state::wallet::address::generation_address;
-use neptune_core::models::state::wallet::address::AbstractAddress;
+use neptune_core::models::state::wallet::address::ReceivingAddressType;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
@@ -391,8 +390,7 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
         Command::OwnReceivingAddress => {
-            let rec_addr: generation_address::ReceivingAddress =
-                client.own_receiving_address(ctx).await?;
+            let rec_addr = client.next_receiving_address(ctx).await?;
             println!("{}", rec_addr.to_bech32m(args.network).unwrap())
         }
         Command::MempoolTxCount => {
@@ -425,19 +423,17 @@ async fn main() -> Result<()> {
         } => {
             // Parse on client
             let receiving_address =
-                generation_address::ReceivingAddress::from_bech32m(address.clone(), args.network)?;
+                ReceivingAddressType::from_bech32m(address.clone(), args.network)?;
 
-            client
-                .send(ctx, amount, receiving_address.into(), fee)
-                .await?;
+            client.send(ctx, amount, receiving_address, fee).await?;
             println!("Send completed.");
         }
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
                 .into_iter()
                 .map(|o| {
-                    generation_address::ReceivingAddress::from_bech32m(o.address, args.network)
-                        .map(|v| (AbstractAddress::from(v), o.amount))
+                    ReceivingAddressType::from_bech32m(o.address, args.network)
+                        .map(|a| (a, o.amount))
                 })
                 .collect::<Result<Vec<_>>>()?;
 

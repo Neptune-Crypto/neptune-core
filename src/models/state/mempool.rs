@@ -445,14 +445,11 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{utxo::Utxo, Transaction},
+                transaction::{utxo::Utxo, Transaction, TxOutput},
                 type_scripts::neptune_coins::NeptuneCoins,
             },
             shared::SIZE_20MB_IN_BYTES,
-            state::{
-                wallet::{utxo_notification_pool::UtxoNotifier, WalletSecret},
-                UtxoReceiver,
-            },
+            state::wallet::{utxo_notification_pool::UtxoNotifier, WalletSecret},
         },
         tests::shared::{
             make_mock_block, make_mock_transaction_with_wallet, mock_genesis_global_state,
@@ -660,7 +657,7 @@ mod tests {
             .unwrap();
 
         // Create a transaction that's valid to be included in block 2
-        let mut output_utxos_generated_by_me: Vec<UtxoReceiver> = vec![];
+        let mut output_utxos_generated_by_me: Vec<TxOutput> = vec![];
         for i in 0..7 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
             let new_utxo = Utxo {
@@ -668,7 +665,7 @@ mod tests {
                 lock_script_hash: premine_receiver_address.lock_script().hash(),
             };
 
-            output_utxos_generated_by_me.push(UtxoReceiver::fake_announcement(
+            output_utxos_generated_by_me.push(TxOutput::fake_announcement(
                 new_utxo,
                 random(),
                 premine_receiver_address.privacy_digest,
@@ -700,7 +697,7 @@ mod tests {
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let output_utxo_data_by_miner = vec![UtxoReceiver::fake_announcement(
+        let output_utxo_data_by_miner = vec![TxOutput::fake_announcement(
             Utxo {
                 coins: NeptuneCoins::new(68).to_native_coins(),
                 lock_script_hash: other_receiver_address.lock_script().hash(),
@@ -847,8 +844,8 @@ mod tests {
             premine_address.lock_script(),
             NeptuneCoins::new(1).to_native_coins(),
         );
-        let tx_receiver_data =
-            UtxoReceiver::fake_announcement(utxo, random(), premine_address.privacy_digest);
+        let tx_tx_outputs =
+            TxOutput::fake_announcement(utxo, random(), premine_address.privacy_digest);
 
         let genesis_block = premine_receiver_global_state
             .chain
@@ -859,7 +856,7 @@ mod tests {
         let in_seven_years = now + Timestamp::months(7 * 12);
         let (unmined_tx, expected_utxos_premine) = premine_receiver_global_state
             .create_transaction_test_wrapper(
-                vec![tx_receiver_data],
+                vec![tx_tx_outputs],
                 NeptuneCoins::new(1),
                 in_seven_years,
             )
@@ -977,11 +974,11 @@ mod tests {
             coins: NeptuneCoins::new(1).to_native_coins(),
             lock_script_hash: premine_address.lock_script().hash(),
         };
-        let receiver_data =
-            UtxoReceiver::fake_announcement(utxo, random(), premine_address.privacy_digest);
+        let tx_outputs =
+            TxOutput::fake_announcement(utxo, random(), premine_address.privacy_digest);
         let (tx_by_preminer_low_fee, expected_utxos_low_fee) = preminer_state
             .create_transaction_test_wrapper(
-                vec![receiver_data.clone()],
+                vec![tx_outputs.clone()],
                 NeptuneCoins::new(1),
                 now + seven_months,
             )
@@ -1009,7 +1006,7 @@ mod tests {
         // Verify that this replaces the previous transaction.
         let (tx_by_preminer_high_fee, expected_utxos_high_fee) = preminer_state
             .create_transaction_test_wrapper(
-                vec![receiver_data.clone()],
+                vec![tx_outputs.clone()],
                 NeptuneCoins::new(10),
                 now + seven_months,
             )
@@ -1035,7 +1032,7 @@ mod tests {
         // does *not* replace the existing transaction.
         let (tx_by_preminer_medium_fee, expected_utxos_med_fee) = preminer_state
             .create_transaction_test_wrapper(
-                vec![receiver_data],
+                vec![tx_outputs],
                 NeptuneCoins::new(4),
                 now + seven_months,
             )

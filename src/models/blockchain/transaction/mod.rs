@@ -8,6 +8,9 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
+mod transaction_input;
+mod transaction_output;
+
 use anyhow::{bail, Result};
 use arbitrary::Arbitrary;
 use get_size::GetSize;
@@ -35,6 +38,13 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+pub use transaction_input::TxInput;
+pub use transaction_input::TxInputList;
+pub use transaction_output::TxOutput;
+pub use transaction_output::TxOutputList;
+pub use transaction_output::UtxoNotification;
+pub use transaction_output::UtxoNotifyMethod;
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, Arbitrary,
@@ -727,7 +737,7 @@ mod transaction_tests {
     //     let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
 
     //     // Create a transaction that's valid after the Genesis block
-    //     let receiver_data = vec![UtxoReceiver {
+    //     let tx_outputs = vec![UtxoReceiver {
     //         utxo: Utxo {
     //             lock_script: LockScript(vec![]),
     //             coins: Into::<Amount>::into(5).to_native_coins(),
@@ -738,7 +748,7 @@ mod transaction_tests {
     //         pubscript_input: vec![],
     //     }];
     //     let mut transaction = global_state
-    //         .create_transaction(receiver_data, Amount::one())
+    //         .create_transaction(tx_outputs, Amount::one())
     //         .await
     //         .unwrap();
 

@@ -98,7 +98,7 @@ pub struct PrimitiveWitness {
 }
 
 impl PrimitiveWitness {
-    pub fn transaction_inputs_from_address_seeds_and_amounts(
+    pub fn tx_inputs_from_address_seeds_and_amounts(
         address_seeds: &[Digest],
         input_amounts: &[NeptuneCoins],
     ) -> (Vec<Utxo>, Vec<LockScript>, Vec<Vec<BFieldElement>>) {
@@ -163,7 +163,7 @@ impl PrimitiveWitness {
     }
 
     /// Generate valid output UTXOs from the amounts and seeds for the addresses
-    pub fn valid_transaction_outputs_from_amounts_and_address_seeds(
+    pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
         address_seeds: &[Digest],
     ) -> Vec<Utxo> {
@@ -217,7 +217,7 @@ impl Arbitrary for PrimitiveWitness {
                     maybe_coinbase,
                 )| {
                     let (input_utxos, input_lock_scripts, input_lock_script_witnesses) =
-                        Self::transaction_inputs_from_address_seeds_and_amounts(
+                        Self::tx_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
                         );
@@ -232,11 +232,10 @@ impl Arbitrary for PrimitiveWitness {
                         total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
                         output_amounts.iter().cloned().sum::<NeptuneCoins>() + fee
                     );
-                    let output_utxos =
-                        Self::valid_transaction_outputs_from_amounts_and_address_seeds(
-                            &output_amounts,
-                            &output_address_seeds,
-                        );
+                    let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
+                        &output_amounts,
+                        &output_address_seeds,
+                    );
                     arbitrary_primitive_witness_with(
                         &input_utxos,
                         &input_lock_scripts,
