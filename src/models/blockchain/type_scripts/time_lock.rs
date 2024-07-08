@@ -555,6 +555,87 @@ impl Arbitrary for TimeLockWitness {
     }
 }
 
+pub fn arbitrary_primitive_witness_with_timelocks(
+    num_inputs: usize,
+    num_outputs: usize,
+    num_announcements: usize,
+) -> BoxedStrategy<PrimitiveWitness> {
+    // unwrap:
+    //  - lock script preimages (inputs)
+    //  - amounts (inputs)
+    //  - lock script preimages (outputs)
+    //  - amounts (outputs)
+    //  - public announcements
+    //  - fee
+    //  - coinbase (option)
+    //  - lock times
+    (
+        vec(arb::<Digest>(), num_inputs),
+        vec(arb::<NeptuneCoins>(), num_inputs),
+        vec(arb::<Digest>(), num_outputs),
+        vec(arb::<NeptuneCoins>(), num_outputs),
+        vec(arb::<PublicAnnouncement>(), num_announcements),
+        arb::<NeptuneCoins>(),
+        arb::<Option<NeptuneCoins>>(),
+        vec(
+            Timestamp::arbitrary_between(Timestamp::now(), Timestamp::now() + Timestamp::months(6)),
+            num_inputs + num_outputs,
+        ),
+    )
+        .prop_flat_map(
+            |(
+                input_address_seeds,
+                input_amounts,
+                output_address_seeds,
+                mut output_amounts,
+                public_announcements,
+                mut fee,
+                maybe_coinbase,
+                lock_times,
+            )| {
+                let (mut input_utxos, input_lock_scripts_and_witnesses) =
+                    PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                        &input_address_seeds,
+                        &input_amounts,
+                    );
+                let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                PrimitiveWitness::find_balanced_output_amounts_and_fee(
+                    total_inputs,
+                    maybe_coinbase,
+                    &mut output_amounts,
+                    &mut fee,
+                );
+                assert_eq!(
+                    total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
+                    output_amounts.iter().cloned().sum::<NeptuneCoins>() + fee
+                );
+                let mut output_utxos =
+                    PrimitiveWitness::valid_transaction_outputs_from_amounts_and_address_seeds(
+                        &output_amounts,
+                        &output_address_seeds,
+                    );
+                let mut counter = 0usize;
+                for utxo in input_utxos.iter_mut() {
+                    utxo.coins.push(TimeLock::until(lock_times[counter + 1]));
+                    counter += 1;
+                }
+                for utxo in output_utxos.iter_mut() {
+                    utxo.coins.push(TimeLock::until(lock_times[counter + 1]));
+                    counter += 1;
+                }
+                arbitrary_primitive_witness_with(
+                    &input_utxos,
+                    &input_lock_scripts_and_witnesses,
+                    &output_utxos,
+                    &public_announcements,
+                    fee,
+                    maybe_coinbase,
+                )
+            },
+        )
+        .boxed()
+}
+
 #[cfg(test)]
 mod test {
     use num_traits::Zero;
