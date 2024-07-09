@@ -559,7 +559,7 @@ impl GlobalState {
                 .wallet_secret
                 .generate_sender_randomness(block_height, change_address.privacy_digest());
 
-            let utxo_receiver = match change_utxo_notify_method {
+            let tx_output = match change_utxo_notify_method {
                 UtxoNotifyMethod::OnChainPubKey => {
                     let public_announcement =
                         change_address.generate_public_announcement(&utxo, sender_randomness)?;
@@ -578,7 +578,7 @@ impl GlobalState {
                 ),
             };
 
-            tx_outputs.push(utxo_receiver);
+            tx_outputs.push(tx_output);
         }
 
         // 2. Create the transaction
