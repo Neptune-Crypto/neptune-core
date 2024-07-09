@@ -552,8 +552,11 @@ impl PrimitiveWitness {
                                 mutator_set_hash: mutator_set_accumulator.hash(),
                             };
 
-                            let type_scripts_and_witnesses =
-                                vec![TypeScriptAndWitness::new(NativeCurrency.program())];
+                            let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
+                                vec![TypeScriptAndWitness::new(NativeCurrency.program())]
+                            } else {
+                                vec![]
+                            };
 
                             PrimitiveWitness {
                                 lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,

@@ -142,7 +142,7 @@ impl ConsensusProgram for CollectTypeScripts {
         let field_with_size_salted_input_utxos =
             field_with_size!(CollectTypeScriptsWitness::salted_input_utxos);
         let field_with_size_salted_output_utxos =
-            field_with_size!(CollectTypeScriptsWitness::salted_input_utxos);
+            field_with_size!(CollectTypeScriptsWitness::salted_output_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
         let field_coin = field!(Utxo::coins);
         let field_type_script_hash = field!(Coin::type_script_hash);
@@ -276,11 +276,14 @@ impl ConsensusProgram for CollectTypeScripts {
                 dup 7 dup 0 dup 2 {&field_type_script_hash}
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes *digest
 
-                push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH} pop 1
+                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes [digest]
 
                 call {contains}
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes ([digest] in type_script_hashes)
+
+                push 0 eq
+                // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes ([digest] not in type_script_hashes)
 
                 skiz call {push_digest_to_list}
                 // _ *type_script_hashes * * * len j size *coin[j] *
@@ -321,7 +324,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes[i] *type_script_hashes[N+1]
 
-                dup 1 push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH}
+                dup 1 push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH}
                 // _ *type_script_hashes[i] *type_script_hashes[N+1] [type_script_hashes[i]] (*type_script_hashes[i]-1)
 
                 push {DIGEST_LENGTH+1} add swap 7 pop 1
@@ -362,19 +365,10 @@ mod test {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
-    use tasm_lib::triton_vm::prelude::BFieldElement;
     use test_strategy::proptest;
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        println!(
-            "salted input utxos: {:?}",
-            collect_type_scripts_witness.salted_input_utxos
-        );
-        println!(
-            "salted output utxos: {:?}",
-            collect_type_scripts_witness.salted_input_utxos
-        );
         let expected_type_script_hashes = collect_type_scripts_witness
             .salted_input_utxos
             .utxos
@@ -389,7 +383,6 @@ mod test {
             .unique()
             .flat_map(|d| d.values().to_vec())
             .collect_vec();
-        assert_ne!(Vec::<BFieldElement>::new(), expected_type_script_hashes);
 
         let rust_result = CollectTypeScripts
             .run_rust(
@@ -410,9 +403,12 @@ mod test {
         Ok(())
     }
 
-    #[proptest(cases = 5)]
+    #[proptest(cases = 8)]
     fn derived_witness_generates_accepting_program_proptest(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs,#_num_outputs,2)))]
+        primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
     }
@@ -420,12 +416,10 @@ mod test {
     #[test]
     fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
         let mut test_runner = TestRunner::deterministic();
-        for num_inputs in 0..5 {
-            let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            prop(primitive_witness).expect("");
-        }
+        let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        prop(primitive_witness).expect("");
     }
 }

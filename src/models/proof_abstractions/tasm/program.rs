@@ -87,10 +87,13 @@ where
         let result = program.run(input.clone(), nondeterminism);
         match result {
             Ok(output) => Ok(output),
-            Err(vmstate) => Err(ConsensusError::TritonVMPanic(format!(
-                "Triton VM failed.\nVMState:\n{}",
-                vmstate
-            ))),
+            Err(vmstate) => {
+                println!("VM State:\n{}\n\n", vmstate);
+                Err(ConsensusError::TritonVMPanic(format!(
+                    "Triton VM failed.\nVMState:\n{}",
+                    vmstate
+                )))
+            }
         }
     }
 
