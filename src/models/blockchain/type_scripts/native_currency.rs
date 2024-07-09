@@ -17,6 +17,7 @@ use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
+use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
@@ -66,8 +67,8 @@ impl ConsensusProgram for NativeCurrency {
             tasm::decode_from_memory(start_address);
         let coinbase: Option<NeptuneCoins> = native_currency_witness.kernel.coinbase;
         let fee: NeptuneCoins = native_currency_witness.kernel.fee;
-        let input_salted_utxos: SaltedUtxos = native_currency_witness.input_salted_utxos;
-        let output_salted_utxos: SaltedUtxos = native_currency_witness.output_salted_utxos;
+        let input_salted_utxos: SaltedUtxos = native_currency_witness.salted_input_utxos;
+        let output_salted_utxos: SaltedUtxos = native_currency_witness.salted_output_utxos;
 
         // authenticate coinbase against kernel mast hash
         let coinbase_leaf_index: u32 = 4;
@@ -167,6 +168,10 @@ impl ConsensusProgram for NativeCurrency {
         let field_kernel = field!(NativeCurrencyWitness::kernel);
         let field_with_size_coinbase = field_with_size!(TransactionKernel::coinbase);
         let field_fee = field!(TransactionKernel::fee);
+        let field_with_size_salted_input_utxos =
+            field_with_size!(NativeCurrencyWitness::salted_input_utxos);
+        let field_with_size_salted_output_utxos =
+            field_with_size!(NativeCurrencyWitness::salted_output_utxos);
 
         let hash_varlen = library.import(Box::new(HashVarlen));
         let merkle_verify =
@@ -207,6 +212,24 @@ impl ConsensusProgram for NativeCurrency {
             assert
             // _ coinbase_size
         );
+
+        let eq_digest = DataType::Digest.compare();
+        let authenticate_salted_utxos = triton_asm! {
+            // BEFORE:
+            // _ *salted_utxos size
+
+            dup 1 swap 1
+            // _ *salted_utxos *salted_utxos size
+
+            call {hash_varlen}
+            // _ *salted_utxos [salted_utxos_hash]
+
+            read_io 5
+            // _ *salted_utxos [salted_utxos_hash] [sud]
+
+            {&eq_digest} assert
+            // _ *salted_utxos
+        };
 
         let main_code = triton_asm!(
             // _
@@ -287,6 +310,30 @@ impl ConsensusProgram for NativeCurrency {
             call {merkle_verify}
             // _ [txkmh] *ncw *kernel *coinbase *fee
 
+
+            /* Divine and authenticate salted input and output UTXOs */
+
+            dup 3 {&field_with_size_salted_input_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_input_utxos size
+
+            {&authenticate_salted_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_input_utxos
+
+            dup 4 {&field_with_size_salted_output_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_input_utxos *salted_output_utxos size
+
+            {&authenticate_salted_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_input_utxos *salted_output_utxos
+
+
+            /* Compute left-hand side: sum inputs + (optional coinbase) */
+
+            swap 3
+            // _ [txkmh] *ncw *kernel *salted_output_utxos *fee *salted_input_utxos *coinbase
+
+            call {coinbase_pointer_to_amount}
+            // _ [txkmh] *ncw *kernel *salted_output_utxos *fee *salted_input_utxos [coinbase]
+
             halt
         );
 
@@ -301,8 +348,8 @@ impl ConsensusProgram for NativeCurrency {
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq, TasmObject)]
 pub struct NativeCurrencyWitness {
-    pub input_salted_utxos: SaltedUtxos,
-    pub output_salted_utxos: SaltedUtxos,
+    pub salted_input_utxos: SaltedUtxos,
+    pub salted_output_utxos: SaltedUtxos,
     pub kernel: TransactionKernel,
 }
 
@@ -312,19 +359,19 @@ impl TypeScriptWitness for NativeCurrencyWitness {
     }
 
     fn salted_input_utxos(&self) -> SaltedUtxos {
-        self.input_salted_utxos.clone()
+        self.salted_input_utxos.clone()
     }
 
     fn salted_output_utxos(&self) -> SaltedUtxos {
-        self.output_salted_utxos.clone()
+        self.salted_output_utxos.clone()
     }
 }
 
 impl From<transaction::primitive_witness::PrimitiveWitness> for NativeCurrencyWitness {
     fn from(primitive_witness: transaction::primitive_witness::PrimitiveWitness) -> Self {
         Self {
-            input_salted_utxos: primitive_witness.input_utxos.clone(),
-            output_salted_utxos: primitive_witness.output_utxos.clone(),
+            salted_input_utxos: primitive_witness.input_utxos.clone(),
+            salted_output_utxos: primitive_witness.output_utxos.clone(),
             kernel: primitive_witness.kernel.clone(),
         }
     }
