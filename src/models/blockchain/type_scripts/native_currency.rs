@@ -24,6 +24,7 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
 use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::{field, field_with_size, DIGEST_LENGTH};
 use tasm_lib::{twenty_first::math::b_field_element::BFieldElement, Digest};
@@ -168,6 +169,21 @@ impl ConsensusProgram for NativeCurrency {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
+        let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
+        let own_program_digest_ptr_read =
+            own_program_digest_ptr_write + bfe!(DIGEST_LENGTH as u32 - 1);
+
+        let store_own_program_digest = triton_asm!(
+            // _
+
+            dup 15 dup 15 dup 15 dup 15 dup 15
+            // _ [own_program_digest]
+
+            push {own_program_digest_ptr_write}
+            write_mem {DIGEST_LENGTH}
+            pop 1
+            // _
+        );
 
         let assert_coinbase_size = triton_asm!(
             // _ coinbase_size
@@ -188,6 +204,11 @@ impl ConsensusProgram for NativeCurrency {
         );
 
         let main_code = triton_asm!(
+            // _
+
+            {&store_own_program_digest}
+            // _
+
             read_io {DIGEST_LENGTH}
             hint txkmh: Digest = stack[0..5]
             // _ [txkmh]
