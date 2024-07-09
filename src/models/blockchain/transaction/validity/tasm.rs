@@ -1,3 +1,4 @@
+pub(super) mod coinbase_amount;
 mod compute_canonical_commitment;
 mod compute_indices;
 mod hash_index_list;
