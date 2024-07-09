@@ -12,6 +12,8 @@ use crate::models::{
     proof_abstractions::tasm::program::ConsensusProgram,
 };
 
+use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
@@ -164,6 +166,7 @@ impl ConsensusProgram for NativeCurrency {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
+        let coin_size = NeptuneCoins::static_length().unwrap();
         let mut library = Library::new();
         let field_kernel = field!(NativeCurrencyWitness::kernel);
         let field_with_size_coinbase = field_with_size!(TransactionKernel::coinbase);
@@ -172,16 +175,27 @@ impl ConsensusProgram for NativeCurrency {
             field_with_size!(NativeCurrencyWitness::salted_input_utxos);
         let field_with_size_salted_output_utxos =
             field_with_size!(NativeCurrencyWitness::salted_output_utxos);
+        let field_utxos = field!(SaltedUtxos::utxos);
+        let field_coins = field!(Utxo::coins);
+        let field_type_script_hash = field!(Coin::type_script_hash);
+        let field_state = field!(Coin::state);
 
         let hash_varlen = library.import(Box::new(HashVarlen));
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
-        let hash_fee = library.import(Box::new(HashStaticSize {
-            size: <NeptuneCoins as BFieldCodec>::static_length().unwrap(),
-        }));
+        let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
+        let u128_safe_add = library.import(Box::new(tasm_lib::arithmetic::u128::add_u128::AddU128));
+
         let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
         let own_program_digest_ptr_read =
             own_program_digest_ptr_write + bfe!(DIGEST_LENGTH as u32 - 1);
+
+        let loop_utxos_add_amounts =
+            "neptune_consensus_transaction_type_script_loop_utxos_add_amounts".to_string();
+        let loop_coins_add_amounts =
+            "neptune_consensus_transaction_type_script_loop_coins_add_amounts".to_string();
+        let read_and_add_amount =
+            "neptune_consensus_transaction_type_script_read_and_add_amount".to_string();
 
         let store_own_program_digest = triton_asm!(
             // _
@@ -194,6 +208,15 @@ impl ConsensusProgram for NativeCurrency {
             pop 1
             // _
         );
+
+        let load_own_program_digest = triton_asm! {
+            // _
+
+            push {own_program_digest_ptr_read}
+            read_mem {DIGEST_LENGTH}
+            pop 1
+            // _ [own_program_digest]
+        };
 
         let assert_coinbase_size = triton_asm!(
             // _ coinbase_size
@@ -213,7 +236,9 @@ impl ConsensusProgram for NativeCurrency {
             // _ coinbase_size
         );
 
-        let eq_digest = DataType::Digest.compare();
+        let digest_eq = DataType::Digest.compare();
+        let u128_eq = DataType::U128.compare();
+
         let authenticate_salted_utxos = triton_asm! {
             // BEFORE:
             // _ *salted_utxos size
@@ -227,7 +252,7 @@ impl ConsensusProgram for NativeCurrency {
             read_io 5
             // _ *salted_utxos [salted_utxos_hash] [sud]
 
-            {&eq_digest} assert
+            {&digest_eq} assert
             // _ *salted_utxos
         };
 
@@ -328,13 +353,170 @@ impl ConsensusProgram for NativeCurrency {
 
             /* Compute left-hand side: sum inputs + (optional coinbase) */
 
-            swap 3
-            // _ [txkmh] *ncw *kernel *salted_output_utxos *fee *salted_input_utxos *coinbase
+            swap 1 {&field_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos *input_utxos
 
-            call {coinbase_pointer_to_amount}
-            // _ [txkmh] *ncw *kernel *salted_output_utxos *fee *salted_input_utxos [coinbase]
+            read_mem 1 push 2 add
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N *input_utxos[0]_si
+
+            push 0 swap 1
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si
+
+            push 0 push 0 push 0
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0
+
+            dup 8
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0 *coinbase
+
+            // call {coinbase_pointer_to_amount}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0 [coinbase]
+
+            call {loop_utxos_add_amounts}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input]
+
+
+            /* Compute right-hand side: fee + sum outputs */
+
+            dup 11 dup 11
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee *salted_output_utxos
+
+            {&field_utxos}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee *output_utxos
+
+            read_mem push 2 add
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N *output_utxos[0]_si
+
+            push 0 swap 1
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si
+
+            push 0 push 0 push 0
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0
+
+            dup 6
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 *fee
+
+            push {coin_size - 1} add
+            read_mem {coin_size} pop 1
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [fee]
+
+            call {loop_utxos_add_amounts}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output]
+
+            swap 7 pop 1
+            swap 7 pop 1
+            swap 7 pop 1
+            swap 7 pop 1
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] [total_output] * * *
+
+            pop 3
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] [total_output]
+
+            {&u128_eq}
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * (total_input == total_output)
+
+            assert
 
             halt
+
+            // INVARIANT: _ N i *utxos[i]_si * * * [amount]
+            {loop_utxos_add_amounts}:
+                dup 6 dup 6 eq
+                // _ N i *utxos[i]_si * * * [amount] (N == i)
+
+                skiz return
+                // _ N i *utxos[i]_si * * * [amount]
+
+                dup 7 push 1 add
+                // _ N i *utxos[i]_si * * * [amount] *utxos[i]
+
+                {&field_coins}
+                // _ N i *utxos[i]_si * * * [amount] *coins
+
+                read_mem 1 push 2 add
+                // _ N i *utxos[i]_si * * * [amount] M *coins[0]_si
+
+                swap 6 pop 1
+                // _ N i *utxos[i]_si * * *coins[0]_si [amount] M
+
+                swap 7 pop 1
+                // _ N i *utxos[i]_si M * *coins[0]_si [amount]
+
+                push 0 swap 6 pop 1
+                // _ N i *utxos[i]_si M 0 *coins[0]_si [amount]
+
+                call {loop_coins_add_amounts}
+                // _ N i *utxos[i]_si M M *coins[M]_si [amount]
+
+                dup 8 push 1 add
+                // _ N i *utxos[i]_si M M *coins[M]_si [amount] (i+1)
+
+                swap 9 pop 1
+                // _ N (i+1) *utxos[i]_si M M *coins[M]_si [amount]
+
+                dup 7 read_mem 1 push 2 add
+                // _ N (i+1) *utxos[i]_si M M *coins[M]_si [amount] size(utxos[i]) *utxos[i]
+
+                add swap 8 pop 1
+                // _ N (i+1) *utxos[i+1]_si M M *coins[M]_si [amount]
+
+                recurse
+
+            // INVARIANT: _ M j *coins[j]_si [amount]
+            {loop_coins_add_amounts}:
+                dup 6 dup 6 eq
+                // _ M j *coins[j]_si [amount] (M == j)
+
+                skiz return
+                // _ M j *coins[j]_si [amount]
+
+                dup 4 push 1 add
+                // _ M j *coins[j]_si [amount] *coins[j]
+
+                {&field_type_script_hash}
+                // _ M j *coins[j]_si [amount] *type_script_hash
+
+                push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH} pop 1
+                // _ M j *coins[j]_si [amount] [type_script_hash]
+
+                {&load_own_program_digest}
+                // _ M j *coins[j]_si [amount] [type_script_hash] [own_program_digest]
+
+                {&digest_eq}
+                // _ M j *coins[j]_si [amount] (type_script_hash == own_program_digest)
+
+                skiz call {read_and_add_amount}
+                // _ M j *coins[j]_si [amount']
+
+                dup 5 push 1 add swap 6 pop 1
+                // _ M (j+1) *coins[j]_si [amount']
+
+                dup 4 read_mem 1 push 2 add
+                // _ M (j+1) *coins[j]_si [amount'] size(coins[j]) *coins[j]
+
+                add
+                // _ M (j+1) *coins[j]_si [amount'] *coins[j+1]_si
+
+                swap 5 pop 1
+                // _ M (j+1) *coins[j+1]_si [amount']
+
+                recurse
+
+                // BEFORE: _ *coins[j]_si [amount]
+                // AFTER: _ *coins[j]_si [amount']
+                {read_and_add_amount}:
+                    dup 4 push 1 add
+                    // _ *coins[j]_si [amount] *coins[j]
+
+                    {&field_state}
+                    // _ *coins[j]_si [amount] *state
+
+                    push {coin_size -1} read_mem {coin_size} pop 1
+                    // _ *coins[j]_si [amount] [coin_amount]
+
+                    call {u128_safe_add}
+                    // _ *coins[j]_si [amount']
+
+                    return
         );
 
         let subroutines = library.all_imports();
