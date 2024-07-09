@@ -5,7 +5,7 @@ use tasm_lib::triton_vm::prelude::*;
 
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
-pub(super) struct CoinbaseAmount;
+pub(crate) struct CoinbaseAmount;
 
 impl BasicSnippet for CoinbaseAmount {
     fn inputs(&self) -> Vec<(DataType, String)> {

@@ -14,6 +14,7 @@ use crate::models::{
 
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::validity::tasm::coinbase_amount::CoinbaseAmount;
 use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
@@ -185,6 +186,7 @@ impl ConsensusProgram for NativeCurrency {
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
         let u128_safe_add = library.import(Box::new(tasm_lib::arithmetic::u128::add_u128::AddU128));
+        let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
 
         let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
         let own_program_digest_ptr_read =
@@ -368,7 +370,7 @@ impl ConsensusProgram for NativeCurrency {
             dup 8
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0 *coinbase
 
-            // call {coinbase_pointer_to_amount}
+            call {coinbase_pointer_to_amount}
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0 [coinbase]
 
             call {loop_utxos_add_amounts}
@@ -383,7 +385,7 @@ impl ConsensusProgram for NativeCurrency {
             {&field_utxos}
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee *output_utxos
 
-            read_mem push 2 add
+            read_mem 1 push 2 add
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N *output_utxos[0]_si
 
             push 0 swap 1
