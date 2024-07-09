@@ -351,7 +351,6 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::transaction::primitive_witness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
@@ -363,29 +362,47 @@ mod test {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
     use test_strategy::proptest;
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
-        let collect_lock_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        let expected_lock_script_hashes = collect_lock_scripts_witness
+        let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
+        println!(
+            "salted input utxos: {:?}",
+            collect_type_scripts_witness.salted_input_utxos
+        );
+        println!(
+            "salted output utxos: {:?}",
+            collect_type_scripts_witness.salted_input_utxos
+        );
+        let expected_type_script_hashes = collect_type_scripts_witness
             .salted_input_utxos
             .utxos
             .iter()
-            .flat_map(|utxo| utxo.lock_script_hash.values())
+            .chain(
+                collect_type_scripts_witness
+                    .salted_output_utxos
+                    .utxos
+                    .iter(),
+            )
+            .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec())
+            .unique()
+            .flat_map(|d| d.values().to_vec())
             .collect_vec();
+        assert_ne!(Vec::<BFieldElement>::new(), expected_type_script_hashes);
 
         let rust_result = CollectTypeScripts
             .run_rust(
-                &collect_lock_scripts_witness.standard_input(),
-                collect_lock_scripts_witness.nondeterminism(),
+                &collect_type_scripts_witness.standard_input(),
+                collect_type_scripts_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(expected_lock_script_hashes, rust_result.clone());
+        prop_assert_eq!(expected_type_script_hashes, rust_result.clone());
 
         let tasm_result = CollectTypeScripts
             .run_tasm(
-                &collect_lock_scripts_witness.standard_input(),
-                collect_lock_scripts_witness.nondeterminism(),
+                &collect_type_scripts_witness.standard_input(),
+                collect_type_scripts_witness.nondeterminism(),
             )
             .unwrap();
         prop_assert_eq!(rust_result, tasm_result);
