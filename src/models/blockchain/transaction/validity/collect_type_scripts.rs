@@ -333,7 +333,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 write_io 5
                 // _ *type_script_hashes[i+1] *type_script_hashes[N+1]
 
-                return
+                recurse
 
         };
         triton_asm! {
@@ -357,6 +357,7 @@ mod test {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
     use itertools::Itertools;
@@ -369,7 +370,7 @@ mod test {
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        let expected_type_script_hashes = collect_type_scripts_witness
+        let all_type_script_hashes = collect_type_scripts_witness
             .salted_input_utxos
             .utxos
             .iter()
@@ -381,6 +382,13 @@ mod test {
             )
             .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec())
             .unique()
+            .collect_vec();
+        println!(
+            "all type script hashes: {}",
+            all_type_script_hashes.iter().join(" / ")
+        );
+        let expected_output = all_type_script_hashes
+            .into_iter()
             .flat_map(|d| d.values().to_vec())
             .collect_vec();
 
@@ -390,7 +398,7 @@ mod test {
                 collect_type_scripts_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(expected_type_script_hashes, rust_result.clone());
+        prop_assert_eq!(expected_output, rust_result.clone());
 
         let tasm_result = CollectTypeScripts
             .run_tasm(
@@ -413,10 +421,30 @@ mod test {
         prop(primitive_witness)?;
     }
 
+    #[proptest(cases = 8)]
+    fn derived_witness_with_timelocks_generates_accepting_program_proptest(
+        #[strategy(0usize..5)] _num_outputs: usize,
+        #[strategy(0usize..5)] _num_inputs: usize,
+        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs,#_num_outputs,2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        prop(primitive_witness)?;
+    }
+
     #[test]
     fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        prop(primitive_witness).expect("");
+    }
+
+    #[test]
+    fn derived_edge_case_witnesses_with_timelock_generate_accepting_programs_unit() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(1, 1, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
