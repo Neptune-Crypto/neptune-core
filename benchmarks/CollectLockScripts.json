@@ -1,0 +1,13 @@
+[
+  {
+    "name": "CollectLockScripts",
+    "benchmark_result": {
+      "clock_cycle_count": 298,
+      "hash_table_height": 205,
+      "u32_table_height": 12,
+      "op_stack_table_height": 249,
+      "ram_table_height": 62
+    },
+    "case": "CommonCase"
+  }
+]
