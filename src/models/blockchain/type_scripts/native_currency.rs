@@ -17,6 +17,7 @@ use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
+use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
@@ -165,10 +166,14 @@ impl ConsensusProgram for NativeCurrency {
         let mut library = Library::new();
         let field_kernel = field!(NativeCurrencyWitness::kernel);
         let field_with_size_coinbase = field_with_size!(TransactionKernel::coinbase);
+        let field_fee = field!(TransactionKernel::fee);
 
         let hash_varlen = library.import(Box::new(HashVarlen));
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
+        let hash_fee = library.import(Box::new(HashStaticSize {
+            size: <NeptuneCoins as BFieldCodec>::static_length().unwrap(),
+        }));
         let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
         let own_program_digest_ptr_read =
             own_program_digest_ptr_write + bfe!(DIGEST_LENGTH as u32 - 1);
@@ -249,8 +254,38 @@ impl ConsensusProgram for NativeCurrency {
             call {merkle_verify}
             // _ [txkmh] *ncw *kernel *coinbase coinbase_size
 
+            pop 1
+            // _ [txkmh] *ncw *kernel *coinbase
+
 
             /* Divine and authenticate fee field */
+
+            dup 1
+            // _ [txkmh] *ncw *kernel *coinbase *kernel
+
+            {&field_fee}
+            // _ [txkmh] *ncw *kernel *coinbase *fee
+            hint fee_ptr = stack[0]
+
+            dup 8
+            dup 8
+            dup 8
+            dup 8
+            dup 8
+            // _ [txkmh] *ncw *kernel *coinbase *fee [txkmh]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            push {TransactionKernelField::Fee as u32}
+            // _ [txkmh] *ncw *kernel *coinbase *fee [txkmh] h i
+
+            dup 7
+            // _ [txkmh] *ncw *kernel *coinbase *fee [txkmh] h i *fee
+
+            call {hash_fee} pop 1
+            // _ [txkmh] *ncw *kernel *coinbase *fee [txkmh] h i [fee_digest]
+
+            call {merkle_verify}
+            // _ [txkmh] *ncw *kernel *coinbase *fee
 
             halt
         );
