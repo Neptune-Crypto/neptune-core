@@ -390,39 +390,83 @@ impl Arbitrary for PrimitiveWitness {
         //  - fee
         //  - coinbase (option)
         (
-            vec(arb::<Digest>(), num_inputs),
-            vec(arb::<NeptuneCoins>(), num_inputs),
-            vec(arb::<Digest>(), num_outputs),
-            vec(arb::<NeptuneCoins>(), num_outputs),
-            vec(arb::<PublicAnnouncement>(), num_public_announcements),
             arb::<NeptuneCoins>(),
-            arb::<Option<NeptuneCoins>>(),
+            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<u64>(), num_inputs),
+            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<u64>(), num_outputs),
+            vec(arb::<PublicAnnouncement>(), num_public_announcements),
+            arb::<u64>(),
+            arb::<Option<u64>>(),
         )
             .prop_flat_map(
                 |(
+                    total_amount,
                     input_address_seeds,
-                    input_amounts,
+                    input_dist,
                     output_address_seeds,
-                    mut output_amounts,
+                    output_dist,
                     public_announcements,
-                    mut fee,
-                    maybe_coinbase,
+                    fee_dist,
+                    maybe_coinbase_dist,
                 )| {
+                    // distribute total amount across inputs (+ coinbase)
+                    let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
+                    if let Some(d) = maybe_coinbase_dist {
+                        input_denominator += d as f64;
+                    }
+                    let input_weights = input_dist
+                        .into_iter()
+                        .map(|u| (u as f64) / input_denominator)
+                        .collect_vec();
+                    let mut input_amounts = input_weights
+                        .into_iter()
+                        .map(|w| total_amount.to_nau_f64() * w)
+                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .collect_vec();
+                    let maybe_coinbase = if maybe_coinbase_dist.is_some() {
+                        Some(
+                            total_amount
+                                .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
+                                .unwrap(),
+                        )
+                    } else {
+                        let sum_of_all_but_last = input_amounts
+                            .iter()
+                            .rev()
+                            .skip(1)
+                            .cloned()
+                            .sum::<NeptuneCoins>();
+                        *input_amounts.last_mut().unwrap() =
+                            total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                        None
+                    };
+
+                    // distribute total amount across outputs
+                    let output_denominator =
+                        output_dist.iter().map(|u| *u as f64).sum::<f64>() + (fee_dist as f64);
+                    let output_weights = output_dist
+                        .into_iter()
+                        .map(|u| (u as f64) / output_denominator)
+                        .collect_vec();
+                    let output_amounts = output_weights
+                        .into_iter()
+                        .map(|w| total_amount.to_nau_f64() * w)
+                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .collect_vec();
+                    let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+                    let fee = total_amount.checked_sub(&total_outputs).unwrap();
+
                     let (input_utxos, input_lock_scripts_and_witnesses) =
                         Self::transaction_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
                         );
                     let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
-                    Self::find_balanced_output_amounts_and_fee(
-                        total_inputs,
-                        maybe_coinbase,
-                        &mut output_amounts,
-                        &mut fee,
-                    );
+
                     assert_eq!(
                         total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
-                        output_amounts.iter().cloned().sum::<NeptuneCoins>() + fee
+                        total_outputs + fee
                     );
                     let output_utxos =
                         Self::valid_transaction_outputs_from_amounts_and_address_seeds(
@@ -592,6 +636,8 @@ mod test {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use itertools::Itertools;
+    use num_bigint::BigInt;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
@@ -658,5 +704,30 @@ mod test {
                     .safe_add(fee)
                     .unwrap()
         );
+    }
+
+    #[proptest(cases = 5)]
+    fn total_amount_is_valid(
+        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+    ) {
+        println!("generated primitive witness.");
+        let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {
+            amount
+        } else {
+            NeptuneCoins::new(0)
+        };
+        for input in primitive_witness.input_utxos.utxos {
+            let u32s = input.coins[0]
+                .state
+                .iter()
+                .map(|b| b.value() as u32)
+                .collect_vec();
+            let amount = u32s[0] as u128
+                | ((u32s[1] as u128) << 32)
+                | ((u32s[2] as u128) << 64)
+                | ((u32s[3] as u128) << 96);
+            total = total + NeptuneCoins::from_nau(BigInt::from(amount)).unwrap();
+        }
+        prop_assert!(total <= NeptuneCoins::new(42000000));
     }
 }

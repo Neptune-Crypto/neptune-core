@@ -241,6 +241,38 @@ impl Zero for NeptuneCoins {
     }
 }
 
+#[derive(Debug)]
+pub enum FloatConversionError {
+    NaN,
+    Infinity,
+    Negative,
+    Overflow,
+    InvalidAmount,
+}
+
+impl TryFrom<f64> for NeptuneCoins {
+    type Error = FloatConversionError;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        let u = if value.is_nan() {
+            Err(FloatConversionError::NaN)
+        } else if value.is_infinite() {
+            Err(FloatConversionError::Infinity)
+        } else if value < 0.0 {
+            Err(FloatConversionError::Negative)
+        } else if value > u128::MAX as f64 {
+            Err(FloatConversionError::Overflow)
+        } else {
+            Ok(value as u128)
+        }?;
+        let bi = BigInt::from(u);
+        match Self::from_nau(bi) {
+            Some(nc) => Ok(nc),
+            None => Err(FloatConversionError::InvalidAmount),
+        }
+    }
+}
+
 impl FromStr for NeptuneCoins {
     type Err = anyhow::Error;
 
