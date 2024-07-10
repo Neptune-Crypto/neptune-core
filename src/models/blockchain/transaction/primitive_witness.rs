@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -57,6 +58,20 @@ pub struct SaltedUtxos {
     pub salt: [BFieldElement; 3],
 }
 
+impl Display for SaltedUtxos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.utxos
+                .iter()
+                .enumerate()
+                .map(|(i, utxo)| format!("\nutxo {i}: {utxo}"))
+                .join("")
+        )
+    }
+}
+
 impl SaltedUtxos {
     /// Takes a Vec of UTXOs and returns a `SaltedUtxos` object. The salt comes from
     /// `thread_rng`.
@@ -101,6 +116,20 @@ pub struct PrimitiveWitness {
     pub output_receiver_digests: Vec<Digest>,
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub kernel: TransactionKernel,
+}
+
+impl Display for PrimitiveWitness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let coinbase_str = match self.kernel.coinbase {
+            Some(cb) => format!("Yes: {cb}"),
+            None => "No".to_owned(),
+        };
+        write!(
+            f,
+            "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}",
+            self.input_utxos, self.output_utxos, coinbase_str, self.kernel.fee
+        )
+    }
 }
 
 impl PrimitiveWitness {

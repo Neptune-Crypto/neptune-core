@@ -695,6 +695,20 @@ pub mod test {
     }
 
     #[test]
+    fn native_currency_derived_witness_generates_accepting_tasm_program_empty_tx() {
+        let mut test_runner = TestRunner::deterministic();
+
+        // Generate a tx with coinbase input, no outputs, fee-size is the same
+        // as the coinbase, so tx is valid.
+        let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 0))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        prop_positive(native_currency_witness).unwrap();
+    }
+
+    #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_unittest() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
@@ -720,10 +734,12 @@ pub mod test {
 
     #[proptest(cases = 10)]
     fn native_currency_is_valid_for_primitive_witness_with_timelock(
-        #[strategy(arbitrary_primitive_witness_with_timelocks(2, 2, 2))]
+        #[strategy(0usize..=3)] _num_inputs: usize,
+        #[strategy(0usize..=3)] _num_outputs: usize,
+        #[strategy(0usize..=1)] _num_public_announcements: usize,
+        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements))]
         primitive_witness: PrimitiveWitness,
     ) {
-        println!("hi from test");
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_positive(native_currency_witness)?;
     }

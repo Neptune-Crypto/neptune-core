@@ -8,11 +8,13 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
+use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
@@ -36,10 +38,53 @@ pub struct Coin {
     pub state: Vec<BFieldElement>,
 }
 
+impl Display for Coin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = if self.type_script_hash == NativeCurrency.hash() {
+            let amount = match NeptuneCoins::decode(&self.state) {
+                Ok(boxed_amount) => boxed_amount.to_string(),
+                Err(_) => "Error: Unable to decode amount".to_owned(),
+            };
+            format!("Native currency: {amount}")
+        } else if self.type_script_hash == TimeLock.hash() {
+            let release_date = self.release_date().unwrap();
+            format!("Timelock until: {release_date}")
+        } else {
+            "Unknown type script hash".to_owned()
+        };
+
+        write!(f, "{}", output)
+    }
+}
+
+impl Coin {
+    pub fn release_date(&self) -> Option<Timestamp> {
+        if self.type_script_hash == TimeLock.hash() {
+            Some(Timestamp(BFieldElement::new(self.state[0].value())))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
+}
+
+impl Display for Utxo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.coins
+                .iter()
+                .enumerate()
+                .map(|(i, coin)| format!("coin {i}: {coin}"))
+                .join("; ")
+        )
+    }
 }
 
 impl GetSize for Utxo {
@@ -110,14 +155,9 @@ impl Utxo {
     /// this UTXO.
     pub fn has_known_type_scripts(&self) -> bool {
         let known_type_script_hashes = [NativeCurrency.hash(), TimeLock.hash()];
-        if !self
-            .coins
+        self.coins
             .iter()
             .all(|c| known_type_script_hashes.contains(&c.type_script_hash))
-        {
-            return false;
-        }
-        true
     }
 
     /// Determine if the UTXO can be spent at a given date in the future,
