@@ -258,7 +258,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ *salted_utxos
         };
 
-        let main_code = triton_asm!(
+        let main_code = triton_asm! {
             // _
 
             {&store_own_program_digest}
@@ -373,8 +373,14 @@ impl ConsensusProgram for NativeCurrency {
             call {coinbase_pointer_to_amount}
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N 0 *input_utxos[0]_si 0 0 0 [coinbase]
 
+            hint enn = stack[9]
+            hint i = stack[8]
+            hint utxos_i = stack[7]
+
             call {loop_utxos_add_amounts}
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input]
+
+            hint total_input : u128 = stack[0..4]
 
 
             /* Compute right-hand side: fee + sum outputs */
@@ -401,8 +407,14 @@ impl ConsensusProgram for NativeCurrency {
             read_mem {coin_size} pop 1
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [fee]
 
+            hint utxos_i_si = stack[7]
+            hint i = stack[8]
+            hint enn = stack[9]
+
             call {loop_utxos_add_amounts}
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output]
+
+            hint total_output : u128 = stack[0..4]
 
             swap 7 pop 1
             swap 7 pop 1
@@ -419,10 +431,14 @@ impl ConsensusProgram for NativeCurrency {
             assert
 
             halt
+        };
+
+        let subroutines = triton_asm! {
 
             // INVARIANT: _ N i *utxos[i]_si * * * [amount]
             {loop_utxos_add_amounts}:
-                dup 6 dup 6 eq
+
+                dup 9 dup 9 eq
                 // _ N i *utxos[i]_si * * * [amount] (N == i)
 
                 skiz return
@@ -446,6 +462,11 @@ impl ConsensusProgram for NativeCurrency {
                 push 0 swap 6 pop 1
                 // _ N i *utxos[i]_si M 0 *coins[0]_si [amount]
 
+                hint coins_j_si = stack[4]
+                hint j = stack[5]
+                hint emm = stack[6]
+                break
+
                 call {loop_coins_add_amounts}
                 // _ N i *utxos[i]_si M M *coins[M]_si [amount]
 
@@ -465,6 +486,7 @@ impl ConsensusProgram for NativeCurrency {
 
             // INVARIANT: _ M j *coins[j]_si [amount]
             {loop_coins_add_amounts}:
+
                 dup 6 dup 6 eq
                 // _ M j *coins[j]_si [amount] (M == j)
 
@@ -473,18 +495,23 @@ impl ConsensusProgram for NativeCurrency {
 
                 dup 4 push 1 add
                 // _ M j *coins[j]_si [amount] *coins[j]
+                hint coins_j = stack[0]
 
                 {&field_type_script_hash}
                 // _ M j *coins[j]_si [amount] *type_script_hash
+                hint type_script_hash_ptr = stack[0]
 
-                push {DIGEST_LENGTH-1} read_mem {DIGEST_LENGTH} pop 1
+                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
                 // _ M j *coins[j]_si [amount] [type_script_hash]
+                hint type_script_hash : Digest = stack[0..5]
 
                 {&load_own_program_digest}
                 // _ M j *coins[j]_si [amount] [type_script_hash] [own_program_digest]
+                hint own_program_digest = stack[0..5]
 
                 {&digest_eq}
                 // _ M j *coins[j]_si [amount] (type_script_hash == own_program_digest)
+                hint digests_are_equal = stack[0]
 
                 skiz call {read_and_add_amount}
                 // _ M j *coins[j]_si [amount']
@@ -512,20 +539,27 @@ impl ConsensusProgram for NativeCurrency {
                     {&field_state}
                     // _ *coins[j]_si [amount] *state
 
-                    push {coin_size -1} read_mem {coin_size} pop 1
+                    read_mem 1 push {coin_size+1} add
+                    // _ *coins[j]_si [amount] state_size *state[last]
+
+                    swap 1 push {coin_size} eq assert
+                    // _ *coins[j]_si [amount] *state[last]
+
+                    read_mem {coin_size} pop 1
                     // _ *coins[j]_si [amount] [coin_amount]
 
                     call {u128_safe_add}
                     // _ *coins[j]_si [amount']
 
                     return
-        );
+        };
 
-        let subroutines = library.all_imports();
+        let imports = library.all_imports();
 
         triton_asm!(
             {&main_code}
             {&subroutines}
+            {&imports}
         )
     }
 }
