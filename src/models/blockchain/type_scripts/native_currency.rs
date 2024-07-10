@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
@@ -494,24 +495,24 @@ impl ConsensusProgram for NativeCurrency {
                 // _ M j *coins[j]_si [amount]
 
                 dup 4 push 1 add
-                // _ M j *coins[j]_si [amount] *coins[j]
                 hint coins_j = stack[0]
+                // _ M j *coins[j]_si [amount] *coins[j]
 
                 {&field_type_script_hash}
-                // _ M j *coins[j]_si [amount] *type_script_hash
                 hint type_script_hash_ptr = stack[0]
+                // _ M j *coins[j]_si [amount] *type_script_hash
 
                 push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
-                // _ M j *coins[j]_si [amount] [type_script_hash]
                 hint type_script_hash : Digest = stack[0..5]
+                // _ M j *coins[j]_si [amount] [type_script_hash]
 
                 {&load_own_program_digest}
-                // _ M j *coins[j]_si [amount] [type_script_hash] [own_program_digest]
                 hint own_program_digest = stack[0..5]
+                // _ M j *coins[j]_si [amount] [type_script_hash] [own_program_digest]
 
                 {&digest_eq}
-                // _ M j *coins[j]_si [amount] (type_script_hash == own_program_digest)
                 hint digests_are_equal = stack[0]
+                // _ M j *coins[j]_si [amount] (type_script_hash == own_program_digest)
 
                 skiz call {read_and_add_amount}
                 // _ M j *coins[j]_si [amount']
@@ -585,8 +586,8 @@ impl TypeScriptWitness for NativeCurrencyWitness {
     }
 }
 
-impl From<transaction::primitive_witness::PrimitiveWitness> for NativeCurrencyWitness {
-    fn from(primitive_witness: transaction::primitive_witness::PrimitiveWitness) -> Self {
+impl From<PrimitiveWitness> for NativeCurrencyWitness {
+    fn from(primitive_witness: PrimitiveWitness) -> Self {
         Self {
             salted_input_utxos: primitive_witness.input_utxos.clone(),
             salted_output_utxos: primitive_witness.output_utxos.clone(),
@@ -791,5 +792,47 @@ pub mod test {
             native_currency_witness,
             &[InstructionError::AssertionFailed],
         )?;
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
+    use crate::models::proof_abstractions::SecretWitness;
+    use crate::tests::shared::bench_consensus_program;
+    use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
+
+    use super::*;
+
+    #[test]
+    fn bench_native_currency() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(2, 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let nc_witness = NativeCurrencyWitness::from(primitive_witness);
+        bench_consensus_program(
+            NativeCurrency,
+            &nc_witness.standard_input(),
+            nc_witness.nondeterminism(),
+            "NativeCurrency-2in-2out",
+            BenchmarkCase::CommonCase,
+        );
+
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(4, 4, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let nc_witness = NativeCurrencyWitness::from(primitive_witness);
+        bench_consensus_program(
+            NativeCurrency,
+            &nc_witness.standard_input(),
+            nc_witness.nondeterminism(),
+            "NativeCurrency-4in-4out",
+            BenchmarkCase::CommonCase,
+        );
     }
 }
