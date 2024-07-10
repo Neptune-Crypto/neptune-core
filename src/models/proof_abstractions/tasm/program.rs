@@ -6,6 +6,7 @@ use tasm_lib::{
     snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult, NamedBenchmarkResult},
     triton_vm::{
         self,
+        error::InstructionError,
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
@@ -23,7 +24,7 @@ use super::environment;
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
-    TritonVMPanic(String),
+    TritonVMPanic(String, InstructionError),
 }
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
@@ -87,12 +88,12 @@ where
         let result = program.run(input.clone(), nondeterminism);
         match result {
             Ok(output) => Ok(output),
-            Err(vmstate) => {
-                println!("VM State:\n{}\n\n", vmstate);
-                Err(ConsensusError::TritonVMPanic(format!(
-                    "Triton VM failed.\nVMState:\n{}",
-                    vmstate
-                )))
+            Err(error) => {
+                println!("VM State:\n{}\n\n", error);
+                Err(ConsensusError::TritonVMPanic(
+                    format!("Triton VM failed.\nVMState:\n{}", error),
+                    error.source,
+                ))
             }
         }
     }

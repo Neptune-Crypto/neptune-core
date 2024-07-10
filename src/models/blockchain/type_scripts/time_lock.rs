@@ -14,6 +14,7 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
@@ -560,23 +561,15 @@ pub fn arbitrary_primitive_witness_with_timelocks(
     num_outputs: usize,
     num_announcements: usize,
 ) -> BoxedStrategy<PrimitiveWitness> {
-    // unwrap:
-    //  - lock script preimages (inputs)
-    //  - amounts (inputs)
-    //  - lock script preimages (outputs)
-    //  - amounts (outputs)
-    //  - public announcements
-    //  - fee
-    //  - coinbase (option)
-    //  - lock times
     (
-        vec(arb::<Digest>(), num_inputs),
-        vec(arb::<NeptuneCoins>(), num_inputs),
-        vec(arb::<Digest>(), num_outputs),
-        vec(arb::<NeptuneCoins>(), num_outputs),
-        vec(arb::<PublicAnnouncement>(), num_announcements),
         arb::<NeptuneCoins>(),
-        arb::<Option<NeptuneCoins>>(),
+        vec(arb::<Digest>(), num_inputs),
+        vec(arb::<u64>(), num_inputs),
+        vec(arb::<Digest>(), num_outputs),
+        vec(arb::<u64>(), num_outputs),
+        vec(arb::<PublicAnnouncement>(), num_announcements),
+        arb::<u64>(),
+        arb::<Option<u64>>(),
         vec(
             Timestamp::arbitrary_between(Timestamp::now(), Timestamp::now() + Timestamp::months(6)),
             num_inputs + num_outputs,
@@ -584,30 +577,73 @@ pub fn arbitrary_primitive_witness_with_timelocks(
     )
         .prop_flat_map(
             |(
+                total_amount,
                 input_address_seeds,
-                input_amounts,
+                input_dist,
                 output_address_seeds,
-                mut output_amounts,
+                output_dist,
                 public_announcements,
-                mut fee,
-                maybe_coinbase,
+                fee_dist,
+                maybe_coinbase_dist,
                 lock_times,
             )| {
+                // distribute total amount across inputs (+ coinbase)
+                let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
+                if let Some(d) = maybe_coinbase_dist {
+                    input_denominator += d as f64;
+                }
+                let input_weights = input_dist
+                    .into_iter()
+                    .map(|u| (u as f64) / input_denominator)
+                    .collect_vec();
+                let mut input_amounts = input_weights
+                    .into_iter()
+                    .map(|w| total_amount.to_nau_f64() * w)
+                    .map(|f| NeptuneCoins::try_from(f).unwrap())
+                    .collect_vec();
+                let maybe_coinbase = if maybe_coinbase_dist.is_some() || input_amounts.is_empty() {
+                    Some(
+                        total_amount
+                            .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
+                            .unwrap(),
+                    )
+                } else {
+                    let sum_of_all_but_last = input_amounts
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .cloned()
+                        .sum::<NeptuneCoins>();
+                    *input_amounts.last_mut().unwrap() =
+                        total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                    None
+                };
+
+                // distribute total amount across outputs
+                let output_denominator =
+                    output_dist.iter().map(|u| *u as f64).sum::<f64>() + (fee_dist as f64);
+                let output_weights = output_dist
+                    .into_iter()
+                    .map(|u| (u as f64) / output_denominator)
+                    .collect_vec();
+                let output_amounts = output_weights
+                    .into_iter()
+                    .map(|w| total_amount.to_nau_f64() * w)
+                    .map(|f| NeptuneCoins::try_from(f).unwrap())
+                    .collect_vec();
+                let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+                let fee = total_amount.checked_sub(&total_outputs).unwrap();
+
                 let (mut input_utxos, input_lock_scripts_and_witnesses) =
                     PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
                         &input_address_seeds,
                         &input_amounts,
                     );
                 let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
-                PrimitiveWitness::find_balanced_output_amounts_and_fee(
-                    total_inputs,
-                    maybe_coinbase,
-                    &mut output_amounts,
-                    &mut fee,
-                );
+
                 assert_eq!(
                     total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
-                    output_amounts.iter().cloned().sum::<NeptuneCoins>() + fee
+                    total_outputs + fee
                 );
                 let mut output_utxos =
                     PrimitiveWitness::valid_transaction_outputs_from_amounts_and_address_seeds(

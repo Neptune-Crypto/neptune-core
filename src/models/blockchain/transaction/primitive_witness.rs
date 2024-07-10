@@ -424,7 +424,9 @@ impl Arbitrary for PrimitiveWitness {
                         .map(|w| total_amount.to_nau_f64() * w)
                         .map(|f| NeptuneCoins::try_from(f).unwrap())
                         .collect_vec();
-                    let maybe_coinbase = if maybe_coinbase_dist.is_some() {
+                    let maybe_coinbase = if maybe_coinbase_dist.is_some()
+                        || input_amounts.is_empty()
+                    {
                         Some(
                             total_amount
                                 .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
