@@ -1,10 +1,6 @@
-# Consensus
+## Consensus
 
-Neptune achieves succinctness by requiring STARK proofs to certify most of the consensus-critical logic. As a consequence, verifying and even running a full node is cheap. The tradeoff is that someone has to produce these STARK proofs, and this burden ultimately falls on the miner.
-
-The particular proof system that Neptune uses is [Triton VM](https://triton-vm.org/). The particular computations that are proven (and verified) as part of consensus logic are documented here.
-
-Consensus is the feature of a network whose nodes overwhelmingly agree on the current contents of a database, typically a blockchain. This database is append-only. While reorganizations can happen they are expected to be rare and shallow. Every once in a while, a new block is added. The block contains, among other things, a transaction. [Block](./consensus/block.md)s and [Transaction](./consensus/transaction.md)s are the key data objects that consensus pertains to. The *consensus logic* determines which blocks and transactions are *valid* and *confirmable*.
+Consensus is the feature of a network whose nodes overwhelmingly agree on the current contents of a database, typically a blockchain. This database is append-only. While reorganizations can happen they are expected to be rare and shallow. Every once in a while, a new block is added. The block contains, among other things, a transaction. [Block](./consensus/block.md)s, [Transaction](./consensus/transaction.md)s, and [UTXO](./consensus/utxo.md)s are the key data objects that consensus pertains to. The *consensus logic* determines which blocks and transactions are *valid* and *confirmable*.
 
 Note that there is a distinction between *valid* and *confirmable*. Validity refers to the internal consistency of a data object. Confirmable refers to its current relation to the rest of the blockchain. For example, having insufficient proof-of-work or including a double-spending transaction makes a block invalid. But a block can be both valid and unconfirmable, for instance if its timestamp is too far into the future. STARK proofs are capable of establishing validity but not confirmability.
 
