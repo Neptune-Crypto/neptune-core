@@ -15,10 +15,10 @@ Note that while addition records and removal records are both commitments to UTX
 ## Validity
 
 Transaction validity is designed to check four conditions:
-1. All involved lockscripts halt gracefully
+1. The lock scripts of all input UTXOs halt gracefully
 2. All involved typescripts halt gracefully
-3. All input UTXOs (except for an optional coinbase) are present in the append-only commitment list
-4. All input UTXOs are *not* present in the sliding-window Bloom filter.
+3. All input UTXOs are present in the mutator set's append-only commitment list
+4. All input UTXOs are *not* present in the mutator set's sliding-window Bloom filter.
 
 A transaction is *valid* if (any of):
 
