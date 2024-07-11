@@ -1,3 +1,4 @@
+use crate::triton_vm::triton_asm;
 use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size::GetSize;
@@ -7,10 +8,17 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum::EnumCount;
+use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
+use tasm_lib::library::Library;
+use tasm_lib::list::new::New;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
+use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::DIGEST_LENGTH;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::prelude::NonDeterminism;
@@ -66,7 +74,7 @@ pub struct RemovalRecordsIntegrityWitness {
     pub aocl: MmrAccumulator<Hash>,
     pub swbfi: MmrAccumulator<Hash>,
     pub swbfa_hash: Digest,
-    pub kernel: TransactionKernel,
+    pub removal_records: Vec<RemovalRecord>,
 }
 
 impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
@@ -74,7 +82,7 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
-            kernel: primitive_witness.kernel.clone(),
+            removal_records: primitive_witness.kernel.inputs,
             aocl: primitive_witness.mutator_set_accumulator.aocl.clone(),
             swbfi: primitive_witness
                 .mutator_set_accumulator
@@ -417,7 +425,171 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
+        let mut library = Library::new();
+
+        let bag_peaks = library.import(Box::new(BagPeaks));
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let new_list_u64 = library.import(Box::new(New {
+            element_type: DataType::U64,
+        }));
+        let hash_varlen = library.import(Box::new(HashVarlen));
+
+        let field_aocl = field!(RemovalRecordsIntegrityWitness::aocl);
+        let field_swbfi = field!(RemovalRecordsIntegrityWitness::swbf_inactive);
+        let field_swbfa_hash = field!(RemovalRecordsIntegrityWitness::swbfa_hash);
+        let field_input_utxos = field!(RemovalRecordsIntegrityWitness::input_utxos);
+        let field_utxos = field!(SaltedUtxos::utxos);
+        let field_with_size_removal_records =
+            field_with_size!(RemovalRecordsIntegrityWitness::removal_records);
+        let field_with_size_input_utxos =
+            field_with_size!(RemovalRecordsIntegrityWitness::input_utxos);
+
+        let outer_loop = "for_all_utxos".to_string();
+
+        let payload = triton_asm! {
+            /* read txkmh */
+            read_io 5
+            // _ [txk_mast_hash]
+
+            /* point to witness */
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _ [txk_mast_hash] *witness
+
+
+            /* authenticate mutator set accumulator */
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            // _ [txk_mast_hash] *witness [txk_mast_hash]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h
+
+            push {TransactionKernelField::MutatorSetHash as usize}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
+
+            dup 7 {&field_aocl}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *aocl
+
+            call {bag_peaks}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash]
+
+            dup 12 {&field_swbfi}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash] *swbfi
+
+            call {bag_peaks}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash] [swbfi_hash]
+
+            hash
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs]
+
+            dup 12 {&field_swbfa_hash}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] *swbfa_hash
+
+            push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] [swbfa_hash]
+
+            push 0
+            push 0
+            push 0
+            push 0
+            push 0
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] [swbfa_hash] [default_hash]
+
+            hash
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [left] [right]
+
+            hash
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [msa_hash]
+
+            call {merkle_verify}
+            // _ [txk_mast_hash] *witness
+
+
+            /* iterate over all input UTXOs */
+            call {new_list_u64}
+            // _ [txk_mast_hash] *witness *all_aocl_indices
+
+            dup 1 {&field_input_utxos} {&field_utxos}
+            // _ [txk_mast_hash] *witness *all_aocl_indices *utxos
+
+            read_mem 1 push 2 add push 0 swap 1
+            // _ [txk_mast_hash] *witness *all_aocl_indices num_utxos 0 *utxos[0]
+
+            call {outer_loop}
+            // _ [txk_mast_hash] *witness *all_aocl_indices num_utxos num_utxos *utxos[num_utxos]
+
+            pop 4
+            // _ [txk_mast_hash] *witness
+
+
+            /* authenticate computed removal records against txk mast hash */
+
+            dup 6
+            dup 6
+            dup 6
+            dup 6
+            dup 6
+            // _ [txk_mast_hash] *witness [txk_mast_hash]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            push {TransactionKernelField::InputUtxos as u32}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
+
+            dup 7 {&field_with_size_removal_records};
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *removal_records size
+
+            call {hash_varlen}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [removal_records_hash]
+
+            call {merkle_verify}
+            // _ [txk_mast_hash] *witness
+
+
+            /* compute and output hash of salted input UTXOs */
+
+            {&field_with_size_input_utxos}
+            // _ [txk_mast_hash] *salted_input_utxos size
+
+            call {hash_varlen}
+            // _ [txk_mast_hash] [salted_input_utxos_hash]
+
+            write_io 5
+            // _ [txk_mast_hash]
+
+            halt
+        };
+
+        let subroutine_outer_loop = triton_asm! {
+            // INVARIANT: _ *witness *all_aocl_indices num_utxos i *utxos[i]
+            {outer_loop}:
+
+                dup 2 dup 2 eq
+                // _ *witness *all_aocl_indices num_utxos i *utxos[i] (num_utxos == i)
+
+                skiz return
+                // _ *witness *all_aocl_indices num_utxos i *utxos[i]
+
+                // ...
+
+                read_mem 1 push 2 add add
+                // _ *witness *all_aocl_indices num_utxos i *utxos[i+1]
+
+                swap 1 push 1 add swap 1
+                // _ *witness *all_aocl_indices num_utxos (i+1) *utxos[i+1]
+
+                recurse
+        };
+
+        let imports = library.all_imports();
+
+        triton_asm!(
+            {&payload}
+            {&subroutine_outer_loop}
+            {&imports}
+        )
     }
 }
 
