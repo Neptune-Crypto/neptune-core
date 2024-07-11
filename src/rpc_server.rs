@@ -338,8 +338,7 @@ impl RPC for NeptuneRPCServer {
         address_string: String,
         network: Network,
     ) -> Option<ReceivingAddressType> {
-        let ret = if let Ok(address) =
-            ReceivingAddressType::from_bech32m(address_string.clone(), network)
+        let ret = if let Ok(address) = ReceivingAddressType::from_bech32m(&address_string, network)
         {
             Some(address)
         } else {

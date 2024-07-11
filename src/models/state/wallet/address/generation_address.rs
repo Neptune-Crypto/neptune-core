@@ -233,7 +233,7 @@ impl SpendingKey {
         let receiving_address = spending_key.to_address();
         let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
         let decoded_address =
-            ReceivingAddress::from_bech32m(encoded_address, Network::Alpha).unwrap();
+            ReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
         assert_eq!(
             receiving_address, decoded_address,
             "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
@@ -404,8 +404,8 @@ impl ReceivingAddress {
         }
     }
 
-    pub fn from_bech32m(encoded: String, network: Network) -> Result<Self> {
-        let (hrp, data, variant) = bech32::decode(&encoded)?;
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
 
         if variant != Variant::Bech32m {
             bail!("Can only decode bech32m addresses.");
@@ -542,7 +542,7 @@ mod test_generation_addresses {
             let receiving_address = ReceivingAddress::derive_from_seed(seed);
             let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
             let receiving_address_again =
-                ReceivingAddress::from_bech32m(encoded, Network::Testnet).unwrap();
+                ReceivingAddress::from_bech32m(&encoded, Network::Testnet).unwrap();
 
             assert_eq!(receiving_address, receiving_address_again);
         }
