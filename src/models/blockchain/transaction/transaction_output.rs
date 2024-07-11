@@ -72,12 +72,12 @@ impl From<&TxOutput> for AdditionRecord {
 }
 
 impl TxOutput {
-    /// automatically generates `UtxoReceiver` from address and amount.
+    /// automatically generates `TxOutput` from address and amount.
     ///
     /// If the `Utxo` can be claimed by our wallet then private OffChain
     /// notification will be used.  Else `OnChain` notification.
     ///
-    /// This method should normally be used when instantiating `UtxoReceiver`
+    /// This method should normally be used when instantiating `TxOutput`
     ///
     /// note: in the future, OnChainSymmetric may be preferred instead of
     /// OffChain for `Utxo` that can be claimed by our wallet.
@@ -98,7 +98,7 @@ impl TxOutput {
         })
     }
 
-    /// instantiates `UtxoReceiver` using OnChainPubKey notification method.
+    /// instantiates `TxOutput` using OnChainPubKey notification method.
     ///
     /// For normal situations, auto() should be used instead.
     pub fn onchain_pubkey(
@@ -115,7 +115,7 @@ impl TxOutput {
         }
     }
 
-    /// instantiates `UtxoReceiver` using OnChainSymmetricKey notification method.
+    /// instantiates `TxOutput` using OnChainSymmetricKey notification method.
     ///
     /// For normal situations, auto() should be used instead.
     pub fn onchain_symkey(
@@ -132,7 +132,7 @@ impl TxOutput {
         }
     }
 
-    /// instantiates `UtxoReceiver` using OffChain notification method.
+    /// instantiates `TxOutput` using OffChain notification method.
     ///
     /// For normal situations, auto() should be used instead.
     pub fn offchain(
