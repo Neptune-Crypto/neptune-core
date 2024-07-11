@@ -288,7 +288,7 @@ impl WalletState {
 
     // returns true if the utxo can be unlocked by one of the
     // known wallet keys.
-    pub fn is_wallet_utxo(&self, utxo: &Utxo) -> bool {
+    pub fn can_unlock(&self, utxo: &Utxo) -> bool {
         self.get_known_generation_spending_keys()
             .iter()
             .map(|k| k.to_address().lock_script().hash())
