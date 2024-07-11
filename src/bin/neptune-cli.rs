@@ -43,6 +43,18 @@ impl FromStr for TransactionOutput {
     }
 }
 
+impl TransactionOutput {
+    pub fn to_receiving_address_amount_tuple(
+        &self,
+        network: Network,
+    ) -> Result<(ReceivingAddressType, NeptuneCoins)> {
+        Ok((
+            ReceivingAddressType::from_bech32m(&self.address, network)?,
+            self.amount,
+        ))
+    }
+}
+
 #[derive(Debug, Parser)]
 enum Command {
     /// Dump shell completions.
@@ -422,8 +434,7 @@ async fn main() -> Result<()> {
             fee,
         } => {
             // Parse on client
-            let receiving_address =
-                ReceivingAddressType::from_bech32m(address.clone(), args.network)?;
+            let receiving_address = ReceivingAddressType::from_bech32m(&address, args.network)?;
 
             client.send(ctx, amount, receiving_address, fee).await?;
             println!("Send completed.");
@@ -431,10 +442,7 @@ async fn main() -> Result<()> {
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
                 .into_iter()
-                .map(|o| {
-                    ReceivingAddressType::from_bech32m(o.address, args.network)
-                        .map(|a| (a, o.amount))
-                })
+                .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
             client.send_to_many(ctx, parsed_outputs, fee).await?;

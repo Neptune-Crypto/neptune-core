@@ -63,7 +63,7 @@ impl ReceivingAddressType {
     }
 
     /// parses an address from its bech32m encoding
-    pub fn from_bech32m(encoded: String, network: Network) -> Result<Self> {
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
         let addr = generation_address::ReceivingAddress::from_bech32m(encoded, network)?;
         Ok(Self::Generation(addr))
 
