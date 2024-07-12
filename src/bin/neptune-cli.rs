@@ -25,10 +25,26 @@ struct TransactionOutput {
     amount: NeptuneCoins,
 }
 
+/// We impl FromStr deserialization so that clap can parse the --outputs arg of
+/// send-to-many command.
+///
+/// We do not bother with serialization via `impl Display` because that is
+/// not presently needed and would just be unused code.
 impl FromStr for TransactionOutput {
     type Err = anyhow::Error;
 
-    // parses address:amount into TransactionOutput{address, amount}
+    /// parses address:amount into TransactionOutput{address, amount}
+    ///
+    /// This is used by the outputs arg of send-to-many command.
+    /// Usage looks like:
+    ///
+    ///     <OUTPUTS>...  format: address:amount address:amount ...
+    ///
+    /// So each output is space delimited and the two fields are
+    /// colon delimted.
+    ///
+    /// This format was chosen because it should be simple for humans
+    /// to generate on the command-line.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts = s.split(':').collect::<Vec<_>>();
 
