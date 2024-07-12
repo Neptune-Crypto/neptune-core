@@ -161,7 +161,7 @@ impl Function for ComputeIndices {
             sequence.push(*memory.get(&BFieldElement::new(2u64 + i)).unwrap());
         }
         let msmp = *MsMembershipProof::decode(&sequence).unwrap();
-        let leaf_index = msmp.auth_path_aocl.leaf_index;
+        let leaf_index = msmp.aocl_leaf_index;
         let leaf_index_hi = leaf_index >> 32;
         let leaf_index_lo = leaf_index & (u32::MAX as u64);
         let receiver_preimage = msmp.receiver_preimage;
@@ -201,7 +201,8 @@ impl Function for ComputeIndices {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         let mut msmp = pseudorandom_mutator_set_membership_proof(rand::Rng::gen(&mut rng));
-        msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
+        msmp.aocl_leaf_index = rng.next_u32() as u64;
+        msmp.auth_path_aocl.leaf_index = msmp.aocl_leaf_index; // TODO: REMOVE on new upstream
 
         let msmp_encoded = twenty_first::math::bfield_codec::BFieldCodec::encode(&msmp);
 
@@ -396,7 +397,7 @@ mod tests {
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
-                    mp.auth_path_aocl.leaf_index,
+                    mp.aocl_leaf_index,
                 )
                 .to_vec()
             })

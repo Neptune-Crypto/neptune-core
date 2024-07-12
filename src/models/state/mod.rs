@@ -897,7 +897,7 @@ impl GlobalState {
 
                         // If UTXO matches, then check if the AOCL index is also a match.
                         // If it is, then the UTXO is already in the wallet database.
-                        if msmp.auth_path_aocl.leaf_index == incoming_utxo.aocl_index {
+                        if msmp.aocl_leaf_index == incoming_utxo.aocl_index {
                             continue '_outer;
                         }
                     }

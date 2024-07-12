@@ -388,7 +388,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             ));
 
             // calculate absolute index set
-            let aocl_leaf_index = msmp.auth_path_aocl.leaf_index;
+            let aocl_leaf_index = msmp.aocl_leaf_index;
             let index_set = get_swbf_indices(
                 utxo_hash,
                 msmp.sender_randomness,
@@ -794,7 +794,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
                     Hash::hash(utxo),
                     msmp.sender_randomness,
                     msmp.receiver_preimage,
-                    msmp.auth_path_aocl.leaf_index,
+                    msmp.aocl_leaf_index,
                 )
             })
             .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))

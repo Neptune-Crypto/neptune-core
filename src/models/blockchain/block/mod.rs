@@ -938,7 +938,9 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let membership_proof = ammr.prove_membership_async(index as u64).await;
+
+        let leaf_index = index as u64;
+        let membership_proof = ammr.prove_membership_async(leaf_index).await;
         let v = membership_proof.verify(
             &last_block_mmra.get_peaks(),
             block_digest,
@@ -946,14 +948,13 @@ mod block_tests {
         );
         assert!(
             v,
-            "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
+            "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {}",
             last_block_mmra.get_peaks().iter().join(","),
             last_block_mmra.get_peaks().len(),
             last_block_mmra.count_leaves(),
-            membership_proof.leaf_index,
+            leaf_index,
             membership_proof.authentication_path.iter().join(","),
             blocks.len(),
-            membership_proof.leaf_index
         );
         assert_eq!(last_block_mmra.count_leaves(), blocks.len() as u64 - 1);
     }

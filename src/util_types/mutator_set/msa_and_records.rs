@@ -98,27 +98,28 @@ impl Arbitrary for MsaAndRecords {
             .prop_flat_map(move |aocl_mmra_and_membership_proofs| {
                 let aocl_mmra = aocl_mmra_and_membership_proofs.mmra;
                 let aocl_membership_proofs = aocl_mmra_and_membership_proofs.membership_proofs;
+                let aocl_leaf_indices = aocl_mmra_and_membership_proofs.leaf_indices;
 
                 // assemble all indices of all removal records
                 let all_index_sets = removables
                     .iter()
-                    .zip(aocl_membership_proofs.iter())
+                    .zip(aocl_leaf_indices.iter())
                     .map(
-                        |((item, sender_randomness, receiver_preimage), membership_proof)| {
+                        |((item, sender_randomness, receiver_preimage), aocl_leaf_index)| {
                             get_swbf_indices(
                                 *item,
                                 *sender_randomness,
                                 *receiver_preimage,
-                                membership_proof.leaf_index,
+                                *aocl_leaf_index,
                             )
                         },
                     )
                     .collect_vec();
-                let mut all_indices = all_index_sets.iter().flatten().cloned().collect_vec();
-                all_indices.sort();
+                let mut all_bloom_indices = all_index_sets.iter().flatten().cloned().collect_vec();
+                all_bloom_indices.sort();
 
                 // assemble all chunk indices
-                let mut all_chunk_indices = all_indices
+                let mut all_chunk_indices = all_bloom_indices
                     .iter()
                     .map(|index| *index / (CHUNK_SIZE as u128))
                     .map(|index| index as u64)
@@ -157,6 +158,7 @@ impl Arbitrary for MsaAndRecords {
                         let aocl_membership_proofs = aocl_membership_proofs.clone();
                         let removables = removables.clone();
                         let swbf_mmr_leaf_count = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                        let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                         // unwrap random swbf mmra and membership proofs
                         MmraAndMembershipProofs::arbitrary_with((
@@ -211,21 +213,23 @@ impl Arbitrary for MsaAndRecords {
                                     .iter()
                                     .zip(aocl_membership_proofs.iter())
                                     .zip(personalized_chunk_dictionaries.iter())
-                                    .map(|(((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)| {
+                                    .zip(aocl_leaf_indices.iter())
+                                    .map(|((((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks), aocl_leaf_index)| {
                                         let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
                                         assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()));
-                                        (((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)
+                                        (sender_randomness, receiver_preimage, aocl_auth_path, target_chunks, aocl_leaf_index)
                                     })
                                     .map(
-                                        |(
-                                            ((_item, sender_randomness, receiver_preimage), aocl_auth_path),
-                                            target_chunks,
-                                        )| {
+                                        |
+                                            (sender_randomness, receiver_preimage, aocl_auth_path,
+                                            target_chunks, aocl_leaf_index)
+                                        | {
                                             MsMembershipProof {
                                                 sender_randomness: *sender_randomness,
                                                 receiver_preimage: *receiver_preimage,
                                                 auth_path_aocl: aocl_auth_path.clone(),
                                                 target_chunks: target_chunks.clone(),
+                                                aocl_leaf_index: *aocl_leaf_index,
                                             }
                                         },
                                     )

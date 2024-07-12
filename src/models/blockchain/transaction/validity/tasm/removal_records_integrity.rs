@@ -78,7 +78,7 @@
 //                     item,
 //                     msmp.sender_randomness,
 //                     msmp.receiver_preimage,
-//                     msmp.auth_path_aocl.leaf_index,
+//                     msmp.aocl_leaf_index,
 //                 ))
 //                 .encode()
 //             })

@@ -353,7 +353,7 @@ impl WalletState {
                         debug!("Found valid mp for UTXO");
                         let replacement_success = valid_membership_proofs_and_own_utxo_count
                             .insert(
-                                StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
+                                StrongUtxoKey::new(utxo_digest, ms_mp.aocl_leaf_index),
                                 (ms_mp, i),
                             );
                         assert!(
@@ -451,17 +451,14 @@ impl WalletState {
                     utxo: utxo.clone(),
                     sender_randomness,
                     receiver_preimage,
-                    aocl_index: new_own_membership_proof.auth_path_aocl.leaf_index,
+                    aocl_index: new_own_membership_proof.aocl_leaf_index,
                 };
                 incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
 
                 let mutxos_len = monitored_utxos.len().await;
 
                 valid_membership_proofs_and_own_utxo_count.insert(
-                    StrongUtxoKey::new(
-                        utxo_digest,
-                        new_own_membership_proof.auth_path_aocl.leaf_index,
-                    ),
+                    StrongUtxoKey::new(utxo_digest, new_own_membership_proof.aocl_leaf_index),
                     (new_own_membership_proof, mutxos_len),
                 );
 
@@ -653,25 +650,19 @@ impl WalletState {
             let spent = mutxo.spent_in_block.is_some();
             if let Some(mp) = mutxo.get_membership_proof_for_block(tip_digest) {
                 if spent {
-                    synced_spent.push(WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo));
+                    synced_spent.push(WalletStatusElement::new(mp.aocl_leaf_index, utxo));
                 } else {
                     synced_unspent.push((
-                        WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo),
+                        WalletStatusElement::new(mp.aocl_leaf_index, utxo),
                         mp.clone(),
                     ));
                 }
             } else {
                 let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
                 if spent {
-                    unsynced_spent.push(WalletStatusElement::new(
-                        any_mp.auth_path_aocl.leaf_index,
-                        utxo,
-                    ));
+                    unsynced_spent.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
                 } else {
-                    unsynced_unspent.push(WalletStatusElement::new(
-                        any_mp.auth_path_aocl.leaf_index,
-                        utxo,
-                    ));
+                    unsynced_unspent.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
                 }
             }
         }

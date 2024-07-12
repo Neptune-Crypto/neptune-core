@@ -206,14 +206,15 @@ where
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
-        aocl_index: u64,
+        aocl_leaf_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
         if self.aocl.is_empty().await {
             return Err(Box::new(MutatorSetError::MutatorSetIsEmpty));
         }
 
-        let auth_path_aocl = self.get_aocl_authentication_path(aocl_index).await?;
-        let swbf_indices = get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_index);
+        let auth_path_aocl = self.get_aocl_authentication_path(aocl_leaf_index).await?;
+        let swbf_indices =
+            get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
 
         let batch_index = self.get_batch_index_async().await;
         let window_start = batch_index * CHUNK_SIZE as u128;
@@ -243,6 +244,7 @@ where
             sender_randomness: sender_randomness.to_owned(),
             receiver_preimage: receiver_preimage.to_owned(),
             target_chunks,
+            aocl_leaf_index,
         })
     }
 
@@ -884,7 +886,7 @@ mod archival_mutator_set_tests {
                     item,
                     expired_membership_proof.sender_randomness,
                     expired_membership_proof.receiver_preimage,
-                    expired_membership_proof.auth_path_aocl.leaf_index,
+                    expired_membership_proof.aocl_leaf_index,
                 )
                 .await
                 .unwrap();

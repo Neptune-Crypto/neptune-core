@@ -54,6 +54,7 @@ pub struct MsMembershipProof {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
     pub auth_path_aocl: MmrMembershipProof<Hash>,
+    pub aocl_leaf_index: u64,
     pub target_chunks: ChunkDictionary,
 }
 
@@ -72,7 +73,7 @@ impl MsMembershipProof {
             item,
             self.sender_randomness,
             self.receiver_preimage,
-            self.auth_path_aocl.leaf_index,
+            self.aocl_leaf_index,
         ))
     }
 
@@ -87,10 +88,10 @@ impl MsMembershipProof {
         assert!(
             membership_proofs
                 .iter()
-                .all(|mp| mp.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves()),
+                .all(|mp| mp.aocl_leaf_index < mutator_set.aocl.count_leaves()),
             "No AOCL data index can point outside of provided mutator set. aocl leaf count: {}; mp leaf indices: {}",
             mutator_set.aocl.count_leaves(),
-            membership_proofs.iter().map(|x| x.auth_path_aocl.leaf_index.to_string()).join(",")
+            membership_proofs.iter().map(|x| x.aocl_leaf_index.to_string()).join(",")
         );
         assert_eq!(
             membership_proofs.len(),
@@ -144,7 +145,7 @@ impl MsMembershipProof {
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
-                    mp.auth_path_aocl.leaf_index,
+                    mp.aocl_leaf_index,
                 ));
                 let chunks_set: HashSet<u64> = indices
                     .to_array()
@@ -250,7 +251,7 @@ impl MsMembershipProof {
         mutator_set: &MutatorSetAccumulator,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
-        assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
+        assert!(self.aocl_leaf_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // Update AOCL MMR membership proof
@@ -274,7 +275,7 @@ impl MsMembershipProof {
             own_item,
             self.sender_randomness,
             self.receiver_preimage,
-            self.auth_path_aocl.leaf_index,
+            self.aocl_leaf_index,
         );
         let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
@@ -355,10 +356,10 @@ impl MsMembershipProof {
         // calculate AOCL MMR MP length
         let previous_leaf_count = previous_mutator_set.aocl.count_leaves();
         assert!(
-            previous_leaf_count > self.auth_path_aocl.leaf_index,
+            previous_leaf_count > self.aocl_leaf_index,
             "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
-        let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
+        let aocl_discrepancies = self.aocl_leaf_index ^ previous_leaf_count;
         let aocl_mt_height = (aocl_discrepancies as u128).ilog2();
 
         // trim to length
@@ -519,6 +520,7 @@ pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembership
     MsMembershipProof {
         sender_randomness,
         receiver_preimage,
+        aocl_leaf_index: auth_path_aocl.leaf_index,
         auth_path_aocl,
         target_chunks,
     }
@@ -566,6 +568,7 @@ mod ms_proof_tests {
             sender_randomness,
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 
@@ -573,6 +576,7 @@ mod ms_proof_tests {
             sender_randomness,
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<Hash>::new(100073, vec![]),
+            aocl_leaf_index: 100073,
             target_chunks: ChunkDictionary::default(),
         };
 
@@ -580,6 +584,7 @@ mod ms_proof_tests {
             sender_randomness: rng.gen(),
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 
@@ -587,6 +592,7 @@ mod ms_proof_tests {
             receiver_preimage: rng.gen(),
             sender_randomness,
             auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 

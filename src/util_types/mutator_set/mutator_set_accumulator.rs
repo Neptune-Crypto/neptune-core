@@ -218,6 +218,7 @@ impl MutatorSetAccumulator {
         let item_commitment = Hash::hash_pair(item, sender_randomness);
 
         // simulate adding to commitment list
+        let aocl_leaf_index = self.aocl.count_leaves();
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
         let target_chunks: ChunkDictionary = ChunkDictionary::default();
 
@@ -227,6 +228,7 @@ impl MutatorSetAccumulator {
             receiver_preimage: receiver_preimage.to_owned(),
             auth_path_aocl,
             target_chunks,
+            aocl_leaf_index,
         }
     }
 
@@ -236,7 +238,7 @@ impl MutatorSetAccumulator {
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
         let aocl_leaf_count = self.aocl.count_leaves();
-        if aocl_leaf_count <= membership_proof.auth_path_aocl.leaf_index {
+        if aocl_leaf_count <= membership_proof.aocl_leaf_index {
             return false;
         }
 
@@ -270,7 +272,7 @@ impl MutatorSetAccumulator {
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
-            membership_proof.auth_path_aocl.leaf_index,
+            membership_proof.aocl_leaf_index,
         ));
 
         let Ok((indices_in_inactive_swbf, indices_in_active_swbf)) =
@@ -322,7 +324,7 @@ impl MutatorSetAccumulator {
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
-            membership_proof.auth_path_aocl.leaf_index,
+            membership_proof.aocl_leaf_index,
         ));
 
         RemovalRecord {
@@ -680,7 +682,7 @@ mod ms_accumulator_tests {
                                 !accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.leaf_index,
+                                previous_mps[j].aocl_leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -689,7 +691,7 @@ mod ms_accumulator_tests {
                                 accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.leaf_index,
+                                previous_mps[j].aocl_leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -818,7 +820,7 @@ mod ms_accumulator_tests {
                             item,
                             sender_randomness,
                             receiver_preimage,
-                            mp_batch.auth_path_aocl.leaf_index,
+                            mp_batch.aocl_leaf_index,
                         )
                         .await
                         .unwrap();

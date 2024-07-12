@@ -19,6 +19,7 @@ use super::root_and_paths::RootAndPaths;
 pub struct MmraAndMembershipProofs {
     pub mmra: MmrAccumulator<Hash>,
     pub membership_proofs: Vec<MmrMembershipProof<Hash>>,
+    pub leaf_indices: Vec<u64>,
 }
 
 impl Arbitrary for MmraAndMembershipProofs {
@@ -109,6 +110,7 @@ impl Arbitrary for MmraAndMembershipProofs {
                     };
                     num_paths as usize
                 ];
+                let mut leaf_indices = vec![0; num_paths as usize];
 
                 // loop over all leaf indices and look up membership proof
                 for (root_and_paths, indices_and_leafs_) in roots_and_pathses
@@ -121,19 +123,25 @@ impl Arbitrary for MmraAndMembershipProofs {
                     {
                         membership_proofs[enumeration_index].authentication_path = path;
                         membership_proofs[enumeration_index].leaf_index = mmr_index;
+                        leaf_indices[enumeration_index] = mmr_index;
                     }
                 }
 
                 // sanity check
-                for (mmr_mp, leaf) in membership_proofs.iter().zip(leafs.iter()) {
+                for ((mmr_mp, leaf), leaf_index) in membership_proofs
+                    .iter()
+                    .zip(leafs.iter())
+                    .zip(leaf_indices.iter())
+                {
                     let (_mti, _pi) =
-                        leaf_index_to_mt_index_and_peak_index(mmr_mp.leaf_index, total_leaf_count);
+                        leaf_index_to_mt_index_and_peak_index(*leaf_index, total_leaf_count);
                     assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count));
                 }
 
                 MmraAndMembershipProofs {
                     mmra: MmrAccumulator::init(peaks, total_leaf_count),
                     membership_proofs,
+                    leaf_indices,
                 }
             })
             .boxed()

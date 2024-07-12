@@ -175,7 +175,7 @@ mod tests {
                 mp_encoding.push(*memory.get(&(mp_ptr + BFieldElement::new(i))).unwrap());
             }
             let memproof = *MsMembershipProof::decode(&mp_encoding).unwrap();
-            println!("memproof li: {}", memproof.auth_path_aocl.leaf_index);
+            println!("memproof li: {}", memproof.aocl_leaf_index);
             println!(
                 "memproof ap: {}",
                 memproof.auth_path_aocl.authentication_path.iter().join(",")
