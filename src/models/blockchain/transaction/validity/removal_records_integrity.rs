@@ -24,12 +24,10 @@ use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::{
     math::tip5::Digest,
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-    },
+    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr},
 };
 
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -336,17 +334,32 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         // authenticate the mutator set accumulator against the txk mast hash
         let aocl_mmr_bagged: Digest = aocl.bag_peaks();
+        println!("aocl bagged: {}", aocl_mmr_bagged);
         let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
-        let active_swbf_bagged: Digest = rriw.swbfa_hash;
+        println!("swbfi bagged: {}", inactive_swbf_bagged);
+        let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
+        println!("left: {}", left);
+        let active_swbf_digest: Digest = rriw.swbfa_hash;
+        println!("swbfa digest: {}", active_swbf_digest);
         let default = Digest::default();
-        let msah: Digest = Hash::hash_pair(
-            Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
-            Hash::hash_pair(active_swbf_bagged, default),
-        );
+        let right = Hash::hash_pair(active_swbf_digest, default);
+        println!("right: {}", right);
+        let msah: Digest = Hash::hash_pair(left, right);
+        println!("msah: {}", msah);
+        println!("leaf: {}", Hash::hash(&msah));
         tasmlib::tasm_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&msah),
+            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+        );
+
+        // authenticate divined removal records against txk mast hash
+        let removal_records_digest = Hash::hash(&rriw.removal_records);
+        tasmlib::tasm_hashing_merkle_verify(
+            txk_digest,
+            TransactionKernelField::Inputs as u32,
+            removal_records_digest,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
 
@@ -420,15 +433,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             input_index += 1;
         }
 
-        // authenticate computed removal records against txk mast hash
-        let removal_records_digest = Hash::hash(&rriw.removal_records);
-        tasmlib::tasm_hashing_merkle_verify(
-            txk_digest,
-            TransactionKernelField::Inputs as u32,
-            removal_records_digest,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
         // compute and output hash of salted input UTXOs
         let hash_of_inputs = Hash::hash(salted_input_utxos);
         tasmlib::tasm_io_write_to_stdout___digest(hash_of_inputs);
@@ -445,7 +449,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let hash_varlen = library.import(Box::new(HashVarlen));
 
         let field_aocl = field!(RemovalRecordsIntegrityWitness::aocl);
-        let field_swbfi = field!(RemovalRecordsIntegrityWitness::swbf_inactive);
+        let field_swbfi = field!(RemovalRecordsIntegrityWitness::swbfi);
+        type MmrAccumulatorTip5 = MmrAccumulator<Hash>;
+        let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_swbfa_hash = field!(RemovalRecordsIntegrityWitness::swbfa_hash);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitness::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
@@ -477,42 +483,91 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             push {TransactionKernel::MAST_HEIGHT}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h
 
-            push {TransactionKernelField::MutatorSetHash as usize}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
+            dup 6
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness
 
-            dup 7 {&field_aocl}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *aocl
+            push 0
+            push 0
+            push 0
+            push 0
+            push 1
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default]
 
-            call {bag_peaks}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash]
+            push 0
+            push 0
+            push 0
+            push 0
+            push 0
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default]
 
-            dup 12 {&field_swbfi}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash] *swbfi
-
-            call {bag_peaks}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [aocl_hash] [swbfi_hash]
-
-            hash
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs]
-
-            dup 12 {&field_swbfa_hash}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] *swbfa_hash
+            dup 10 {&field_swbfa_hash}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] *swbfa_hash
 
             push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] [swbfa_hash]
-
-            push 0
-            push 0
-            push 0
-            push 0
-            push 0
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [mmrs] [swbfa_hash] [default_hash]
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] [swbfa_hash]
 
             hash
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [left] [right]
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right]
+
+            dup 10 {&field_swbfi}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] *swbfi
+
+            {&field_peaks} call {bag_peaks}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash]
+
+            dup 15 {&field_aocl}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash] *aocl
+
+            {&field_peaks} call {bag_peaks}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [swbfi_hash] [aocl_hash]
 
             hash
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [right] [left]
+
+            hash
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [msa_hash]
+
+            sponge_init sponge_absorb
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness
+
+            sponge_squeeze
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [garbage] [msa_hash_as_leaf]
+
+            swap 5 pop 1
+            swap 5 pop 1
+            swap 5 pop 1
+            swap 5 pop 1
+            swap 5 pop 1
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [msa_hash_as_leaf]
+
+            push {TransactionKernelField::MutatorSetHash as u32}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [msa_hash] i
+
+            swap 6 pop 1
             // _ [txk_mast_hash] *witness [txk_mast_hash] h i [msa_hash]
+
+            call {merkle_verify}
+            // _ [txk_mast_hash] *witness
+
+
+            /* authenticate computed removal records against txk mast hash */
+
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            // _ [txk_mast_hash] *witness [txk_mast_hash]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            push {TransactionKernelField::Inputs as u32}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
+
+            dup 7 {&field_with_size_removal_records}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *removal_records size
+
+            call {hash_varlen}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [removal_records_hash]
 
             call {merkle_verify}
             // _ [txk_mast_hash] *witness
@@ -532,29 +587,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness *all_aocl_indices num_utxos num_utxos *utxos[num_utxos]
 
             pop 4
-            // _ [txk_mast_hash] *witness
-
-
-            /* authenticate computed removal records against txk mast hash */
-
-            dup 6
-            dup 6
-            dup 6
-            dup 6
-            dup 6
-            // _ [txk_mast_hash] *witness [txk_mast_hash]
-
-            push {TransactionKernel::MAST_HEIGHT}
-            push {TransactionKernelField::Inputs as u32}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
-
-            dup 7 {&field_with_size_removal_records}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *removal_records size
-
-            call {hash_varlen}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [removal_records_hash]
-
-            call {merkle_verify}
             // _ [txk_mast_hash] *witness
 
 
@@ -697,9 +729,37 @@ mod tests {
 
     use super::*;
     use proptest::{
-        arbitrary::Arbitrary, prop_assert, strategy::Strategy, test_runner::TestRunner,
+        arbitrary::Arbitrary,
+        prop_assert_eq,
+        strategy::Strategy,
+        test_runner::{TestCaseError, TestRunner},
     };
     use test_strategy::proptest;
+
+    fn prop(
+        removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
+    ) -> Result<(), TestCaseError> {
+        let salted_inputs_utxos_hash = Hash::hash(&removal_records_integrity_witness.input_utxos)
+            .values()
+            .to_vec();
+        let rust_result = RemovalRecordsIntegrity
+            .run_rust(
+                &removal_records_integrity_witness.standard_input(),
+                removal_records_integrity_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(salted_inputs_utxos_hash, rust_result.clone());
+
+        let tasm_result = RemovalRecordsIntegrity
+            .run_tasm(
+                &removal_records_integrity_witness.standard_input(),
+                removal_records_integrity_witness.nondeterminism(),
+            )
+            .unwrap();
+        prop_assert_eq!(rust_result, tasm_result);
+
+        Ok(())
+    }
 
     #[proptest(cases = 5)]
     fn derived_witness_generates_accepting_program_proptest(
@@ -707,172 +767,19 @@ mod tests {
     ) {
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        let result = RemovalRecordsIntegrity.run_rust(
-            &removal_records_integrity_witness.standard_input(),
-            removal_records_integrity_witness.nondeterminism(),
-        );
-        prop_assert!(result.is_ok());
+        prop(removal_records_integrity_witness)?;
     }
 
     #[test]
-    fn derived_witness_generates_accepting_program_deterministic() {
+    fn removal_records_integrity_witness_unit_test() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        println!("primitive_witness: {primitive_witness}");
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        let result = RemovalRecordsIntegrity.run_rust(
-            &removal_records_integrity_witness.standard_input(),
-            removal_records_integrity_witness.nondeterminism(),
-        );
-        assert!(result.is_ok());
+        assert!(prop(removal_records_integrity_witness).is_ok());
     }
-
-    // #[test]
-    // fn test_validation_logic() {
-    //     let mut rng = thread_rng();
-    //     let tx_kernel = &pseudorandom_transaction_kernel(rng.gen(), 2, 2, 2);
-    //     let prrriw =
-    //         pseudorandom_removal_record_integrity_witness(rng.gen());
-    //     let input_utxos = prrriw.input_utxos;
-    //     let input_lock_scripts = prrriw.input_utxos.iter().map(|x| x.)
-
-    //     // pub struct PrimitiveWitness {
-    //     // pub input_utxos: Vec<Utxo>,
-    //     // pub input_lock_scripts: Vec<LockScript>,
-    //     // pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    //     // pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
-    //     // pub output_utxos: Vec<Utxo>,
-    //     // pub pubscripts: Vec<PubScript>,
-    //     // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
-    //     // }
-
-    //     // let primitive_witness = pseudorandom_pri
-    //     let rriw = RemovalRecordsIntegrity::new_from_witness(primitive_witness, tx_kernel);
-    // }
-
-    // #[test]
-    // fn test_graceful_halt() {
-    //     let mut seed = [0u8; 32];
-    //     seed[0] = 0xa0;
-    //     seed[1] = 0xf1;
-    //     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    //     let removal_record_integrity_witness =
-    //         pseudorandom_removal_record_integrity_witness(rng.gen());
-
-    //     let stdin: Vec<BFieldElement> = removal_record_integrity_witness
-    //         .kernel
-    //         .mast_hash()
-    //         .reversed()
-    //         .values()
-    //         .to_vec();
-
-    //     let mut memory = HashMap::default();
-    //     encode_to_memory(
-    //         &mut memory,
-    //         FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-    //         removal_record_integrity_witness,
-    //     );
-    //     let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
-    //     // let program = RemovalRecordsIntegrity::program();
-    //     let program = todo!();
-    //     let run_res = program.run(PublicInput::new(stdin.clone()), nondeterminism.clone());
-    //     match run_res {
-    //         Ok(_) => println!("Run successful."),
-    //         Err(err) => panic!("Failed:\n last state was:\n{err}"),
-    //     };
-
-    //     if std::env::var("DYING_TO_PROVE").is_ok() {
-    //         let claim: Claim = Claim {
-    //             program_digest: program.hash::<Hash>(),
-    //             input: stdin,
-    //             output: vec![],
-    //         };
-    //         let maybe_proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism);
-    //         assert!(maybe_proof.is_ok());
-
-    //         assert!(triton_vm::verify(
-    //             Stark::default(),
-    //             &claim,
-    //             &maybe_proof.unwrap()
-    //         ));
-    //     }
-    // }
-
-    // #[test]
-    // fn tasm_matches_rust() {
-    //     let mut seed = [0u8; 32];
-    //     seed[0] = 0xa0;
-    //     seed[1] = 0xf1;
-    //     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    //     let removal_record_integrity_witness =
-    //         pseudorandom_removal_record_integrity_witness(rng.gen());
-    //     let mut memory = HashMap::default();
-    //     encode_to_memory(
-    //         &mut memory,
-    //         FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-    //         removal_record_integrity_witness.clone(),
-    //     );
-    //     let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
-    //     let kernel_hash = removal_record_integrity_witness
-    //         .kernel
-    //         .mast_hash()
-    //         .reversed()
-    //         .values();
-    //     let public_input = PublicInput::new(kernel_hash.to_vec());
-
-    //     test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &nondeterminism);
-    // }
-}
-
-#[cfg(test)]
-mod bench {
-    // use std::collections::HashMap;
-
-    // use crate::{models::proof_abstractions::mast_hash::MastHash, prelude::triton_vm};
-
-    // use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
-    // use rand::{rngs::StdRng, Rng, SeedableRng};
-    // use tasm_lib::{
-    //     memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
-    //     snippet_bencher::BenchmarkCase,
-    // };
-    // use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
-
-    // use super::RemovalRecordsIntegrity;
-    // use tasm_lib::traits::compiled_program::bench_and_profile_program;
-
-    // #[test]
-    // fn benchmark() {
-    //     let mut seed = [0u8; 32];
-    //     seed[0] = 0xa7;
-    //     seed[1] = 0xf7;
-    //     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    //     let removal_record_integrity_witness =
-    //         pseudorandom_removal_record_integrity_witness(rng.gen());
-
-    //     let stdin: Vec<BFieldElement> = removal_record_integrity_witness
-    //         .kernel
-    //         .mast_hash()
-    //         .reversed()
-    //         .values()
-    //         .to_vec();
-    //     let public_input = PublicInput::new(stdin);
-    //     let mut memory = HashMap::default();
-    //     encode_to_memory(
-    //         &mut memory,
-    //         FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-    //         removal_record_integrity_witness,
-    //     );
-    //     let nondeterminism = NonDeterminism::default().with_ram(memory);
-
-    //     bench_and_profile_program::<RemovalRecordsIntegrity>(
-    //         "tasm_neptune_transaction_removal_records_integrity",
-    //         BenchmarkCase::CommonCase,
-    //         &public_input,
-    //         &nondeterminism,
-    //     );
-    // }
 }
