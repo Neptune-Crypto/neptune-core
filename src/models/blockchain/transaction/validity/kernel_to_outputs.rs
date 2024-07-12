@@ -83,7 +83,7 @@ impl SecretWitness for KernelToOutputsWitness {
         );
 
         // set authentication path digests
-        let digests = self.kernel.mast_path(TransactionKernelField::OutputUtxos);
+        let digests = self.kernel.mast_path(TransactionKernelField::Outputs);
 
         NonDeterminism::default()
             .with_ram(memory)
@@ -125,7 +125,7 @@ impl ConsensusProgram for KernelToOutputs {
         let addition_records_hash: Digest = Hash::hash(&addition_records);
         tasmlib::tasm_hashing_merkle_verify(
             txk_digest,
-            TransactionKernelField::OutputUtxos as u32,
+            TransactionKernelField::Outputs as u32,
             addition_records_hash,
             TransactionKernel::MAST_HEIGHT as u32,
         );
@@ -211,7 +211,7 @@ impl ConsensusProgram for KernelToOutputs {
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh]
 
             push {TransactionKernel::MAST_HEIGHT}
-            push {TransactionKernelField::OutputUtxos as u32}
+            push {TransactionKernelField::Outputs as u32}
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i
             dup 11 dup 11 dup 11 dup 11 dup 11
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] [cc_digest] [txkmh] h i [cc_digest]

@@ -56,8 +56,8 @@ impl From<PrimitiveWitness> for TransactionKernel {
 
 #[derive(Debug, Clone, EnumCount)]
 pub enum TransactionKernelField {
-    InputUtxos,
-    OutputUtxos,
+    Inputs,
+    Outputs,
     PublicAnnouncements,
     Fee,
     Coinbase,

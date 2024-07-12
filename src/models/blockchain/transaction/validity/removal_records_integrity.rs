@@ -9,7 +9,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum::EnumCount;
 use tasm_lib::data_type::DataType;
-use tasm_lib::field;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
 use tasm_lib::list::new::New;
@@ -19,6 +19,7 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::DIGEST_LENGTH;
+use tasm_lib::{field, field_with_size};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::prelude::NonDeterminism;
@@ -69,12 +70,15 @@ use crate::models::proof_abstractions::SecretWitness;
     TasmObject,
 )]
 pub struct RemovalRecordsIntegrityWitness {
-    pub input_utxos: SaltedUtxos,
-    pub membership_proofs: Vec<MsMembershipProof>,
-    pub aocl: MmrAccumulator<Hash>,
-    pub swbfi: MmrAccumulator<Hash>,
-    pub swbfa_hash: Digest,
-    pub removal_records: Vec<RemovalRecord>,
+    input_utxos: SaltedUtxos,
+    membership_proofs: Vec<MsMembershipProof>,
+    aocl: MmrAccumulator<Hash>,
+    swbfi: MmrAccumulator<Hash>,
+    swbfa_hash: Digest,
+    removal_records: Vec<RemovalRecord>,
+    mast_path_mutator_set: Vec<Digest>,
+    mast_path_inputs: Vec<Digest>,
+    mast_root: Digest,
 }
 
 impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
@@ -82,13 +86,20 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
-            removal_records: primitive_witness.kernel.inputs,
+            removal_records: primitive_witness.kernel.inputs.clone(),
             aocl: primitive_witness.mutator_set_accumulator.aocl.clone(),
             swbfi: primitive_witness
                 .mutator_set_accumulator
                 .swbf_inactive
                 .clone(),
             swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.swbf_active),
+            mast_path_mutator_set: primitive_witness
+                .kernel
+                .mast_path(TransactionKernelField::MutatorSetHash),
+            mast_path_inputs: primitive_witness
+                .kernel
+                .mast_path(TransactionKernelField::Inputs),
+            mast_root: primitive_witness.kernel.mast_hash(),
         }
     }
 }
@@ -105,9 +116,8 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
 
         // set digests
         let digests = vec![
-            self.kernel
-                .mast_path(TransactionKernelField::MutatorSetHash),
-            self.kernel.mast_path(TransactionKernelField::InputUtxos),
+            self.mast_path_mutator_set.clone(),
+            self.mast_path_inputs.clone(),
         ]
         .concat();
 
@@ -117,7 +127,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.kernel.mast_hash().reversed().values().to_vec())
+        PublicInput::new(self.mast_root.reversed().values().to_vec())
     }
 
     fn program(&self) -> triton_vm::prelude::Program {
@@ -347,7 +357,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             let utxo: &Utxo = &input_utxos[input_index];
             let utxo_hash = Hash::hash(utxo);
             let msmp: &MsMembershipProof = &rriw.membership_proofs[input_index];
-            let removal_record: &RemovalRecord = &rriw.kernel.inputs[input_index];
+            let removal_record: &RemovalRecord = &rriw.removal_records[input_index];
 
             // verify AOCL membership
             let addition_record: AdditionRecord = commit(
@@ -411,10 +421,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         }
 
         // authenticate computed removal records against txk mast hash
-        let removal_records_digest = Hash::hash(&rriw.kernel.inputs);
+        let removal_records_digest = Hash::hash(&rriw.removal_records);
         tasmlib::tasm_hashing_merkle_verify(
             txk_digest,
-            TransactionKernelField::InputUtxos as u32,
+            TransactionKernelField::Inputs as u32,
             removal_records_digest,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
@@ -535,10 +545,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness [txk_mast_hash]
 
             push {TransactionKernel::MAST_HEIGHT}
-            push {TransactionKernelField::InputUtxos as u32}
+            push {TransactionKernelField::Inputs as u32}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h i
 
-            dup 7 {&field_with_size_removal_records};
+            dup 7 {&field_with_size_removal_records}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h i *removal_records size
 
             call {hash_varlen}
@@ -661,13 +671,6 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .rev()
             .collect_vec();
 
-        let mut kernel_index_set_hashes = kernel
-            .inputs
-            .iter()
-            .map(|rr| Hash::hash(&rr.absolute_indices))
-            .collect_vec();
-        kernel_index_set_hashes.sort();
-
         let salted_utxos = SaltedUtxos::new(input_utxos);
 
         Ok(RemovalRecordsIntegrityWitness {
@@ -676,7 +679,10 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             aocl,
             swbfi,
             swbfa_hash,
-            kernel,
+            removal_records: kernel.inputs.clone(),
+            mast_path_mutator_set: kernel.mast_path(TransactionKernelField::MutatorSetHash),
+            mast_path_inputs: kernel.mast_path(TransactionKernelField::Inputs),
+            mast_root: kernel.mast_hash(),
         })
     }
 }
