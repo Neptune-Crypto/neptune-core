@@ -186,7 +186,8 @@ impl ConsensusProgram for NativeCurrency {
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
-        let u128_safe_add = library.import(Box::new(tasm_lib::arithmetic::u128::add_u128::AddU128));
+        let u128_safe_add =
+            library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAddU128));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
 
         let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
