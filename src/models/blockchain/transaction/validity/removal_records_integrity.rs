@@ -15,6 +15,7 @@ use tasm_lib::library::Library;
 use tasm_lib::list::new::New;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::mmr::bag_peaks::BagPeaks;
+use tasm_lib::neptune::mutator_set;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -604,23 +605,96 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             halt
         };
 
+        let field_receiver_preimage = field!(MsMembershipProof::receiver_preimage);
+        let field_sender_randomness = field!(MsMembershipProof::sender_randomness);
+        let field_mmr_num_leafs = field!(MmrAccumulatorTip5::leaf_count);
+        let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
         let subroutine_outer_loop = triton_asm! {
-            // INVARIANT: _ *witness *all_aocl_indices num_utxos i *utxos[i]
+            // INVARIANT: _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si
             {outer_loop}:
 
-                dup 2 dup 2 eq
-                // _ *witness *all_aocl_indices num_utxos i *utxos[i] (num_utxos == i)
+                dup 3 dup 3 eq
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si (num_utxos == i)
 
                 skiz return
-                // _ *witness *all_aocl_indices num_utxos i *utxos[i]
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si
 
                 // ...
+                /* Calculate and authenticate addition records against AOCL */
+                dup 5
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl
+
+                {&field_peaks}
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks
+
+                /* Goal: _ [receiver_digest] [sender_randomness] [utxo_hash] */
+                /* 1. Get `receiver_digest` */
+                /* 2. Get `sender_randomness` */
+                /* 3. Calculate UTXO hash */
+                /* 4. Calculate the canonical commitment, the leaf of the AOCL MMR */
+                /* 5. Authenticate the canonical commitment against the AOCL MMR */
+
+                // pub struct RemovalRecordsIntegrityWitness {
+                //     input_utxos: SaltedUtxos,
+                //     membership_proofs: Vec<MsMembershipProof>,
+                //     aocl: MmrAccumulator<Hash>,
+                //     swbfi: MmrAccumulator<Hash>,
+                //     swbfa_hash: Digest,
+                //     removal_records: Vec<RemovalRecord>,
+                //     mast_path_mutator_set: Vec<Digest>,
+                //     mast_path_inputs: Vec<Digest>,
+                //     mast_root: Digest,
+                // }
+
+
+
+                /* 1. */
+                dup 0
+                push 1
+                add
+                {&field_receiver_preimage}
+                // _ *witness*aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks *receiver_preimage
+
+                push {DIGEST_LENGTH - 1}
+                add
+                read_mem {DIGEST_LENGTH}
+                pop 1
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [receiver_preimage]
+
+                /* 2. */
+                dup 5
+                push 1
+                add
+                {&field_sender_randomness}
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [receiver_preimage] *sender_randomness
+
+                push {DIGEST_LENGTH - 1}
+                add
+                read_mem {DIGEST_LENGTH}
+                pop 1
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [receiver_preimage] [sender_randomness]
+
+                /* 3. */
+                dup 11 read_mem 1 push 2 add swap 1
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [receiver_preimage] [sender_randomness] *utxos[i] utxos[i]_size
+
+                call {hash_varlen}
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [receiver_preimage] [sender_randomness] [utxo_digest]
+
+                /* 4. */
+                call {ms_commit}
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [canonical_commitment]
+
+                /* 5. */
+                dup 11
+                {&field_mmr_num_leafs} push 1 add read_mem 2 pop 1
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i]_si *msmp[i]_si *aocl_peaks [canonical_commitment] [num_leafs]
 
                 read_mem 1 push 2 add add
-                // _ *witness *all_aocl_indices num_utxos i *utxos[i+1]
+                // _ *witness *aocl *all_aocl_indices num_utxos i *utxos[i+1]_si
 
                 swap 1 push 1 add swap 1
-                // _ *witness *all_aocl_indices num_utxos (i+1) *utxos[i+1]
+                // _ *witness *aocl *all_aocl_indices num_utxos (i+1) *utxos[i+1]_si
 
                 recurse
         };
