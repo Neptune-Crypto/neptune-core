@@ -480,12 +480,14 @@ impl Arbitrary for TimeLockWitness {
     ///    coin is absent.
     ///  - num_outputs : usize Number of outputs.
     ///  - num_public_announcements : usize Number of public announcements.
-    type Parameters = (Vec<Timestamp>, usize, usize);
+    ///  - transaction_timestamp: Timestamp determining when the transaction takes place.
+    type Parameters = (Vec<Timestamp>, usize, usize, Timestamp);
 
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-        let (release_dates, num_outputs, num_public_announcements) = parameters;
+        let (release_dates, num_outputs, num_public_announcements, transaction_timestamp) =
+            parameters;
         let num_inputs = release_dates.len();
         (
             vec(arb::<Digest>(), num_inputs),
@@ -546,7 +548,8 @@ impl Arbitrary for TimeLockWitness {
                         NeptuneCoins::zero(),
                         maybe_coinbase,
                     )
-                    .prop_map(move |transaction_primitive_witness| {
+                    .prop_map(move |mut transaction_primitive_witness| {
+                        transaction_primitive_witness.kernel.timestamp = transaction_timestamp;
                         TimeLockWitness::from(transaction_primitive_witness)
                     })
                     .boxed()
@@ -714,10 +717,12 @@ mod test {
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
         #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().min().unwrap()))]
+        _transaction_timestamp: Timestamp,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_transaction_timestamp)))]
         time_lock_witness: TimeLockWitness,
     ) {
-        assert!(
+        prop_assert!(
             TimeLock {}
                 .run_rust(
                     &time_lock_witness.standard_input(),
@@ -733,13 +738,15 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()+Timestamp::days(1),Timestamp::now()+Timestamp::days(7)), #_num_inputs))]
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
         _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
+        _tx_timestamp: Timestamp,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp)))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
-        assert!(
+        prop_assert!(
             TimeLock {}
                 .run_rust(
                     &time_lock_witness.standard_input(),
@@ -757,7 +764,9 @@ mod test {
         #[strategy(1usize..=3)] _num_public_announcements: usize,
         #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
         _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
+        _tx_timestamp: Timestamp,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp + Timestamp::days(1))))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());

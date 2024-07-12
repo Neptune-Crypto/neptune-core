@@ -126,8 +126,12 @@ impl Display for PrimitiveWitness {
         };
         write!(
             f,
-            "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}",
-            self.input_utxos, self.output_utxos, coinbase_str, self.kernel.fee
+            "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}\ntxk mast hash: {}",
+            self.input_utxos,
+            self.output_utxos,
+            coinbase_str,
+            self.kernel.fee,
+            self.kernel.mast_hash()
         )
     }
 }
@@ -542,6 +546,7 @@ impl PrimitiveWitness {
         //  - receiver preimage (output)
         //  - salt (output)
         //  - aocl size
+        //  - timestamp
         (
             vec(arb::<Digest>(), num_inputs),
             vec(arb::<Digest>(), num_inputs),
@@ -550,6 +555,7 @@ impl PrimitiveWitness {
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<BFieldElement>(), 3),
             0u64..=u64::MAX,
+            arb::<Timestamp>(),
         )
             .prop_flat_map(
                 move |(
@@ -560,6 +566,7 @@ impl PrimitiveWitness {
                     output_receiver_preimages,
                     outputs_salt,
                     aocl_size,
+                    timestamp,
                 )| {
                     let input_triples = input_utxos
                         .iter()
@@ -623,7 +630,7 @@ impl PrimitiveWitness {
                                 public_announcements: public_announcements.to_vec(),
                                 fee,
                                 coinbase,
-                                timestamp: Timestamp::now(),
+                                timestamp,
                                 mutator_set_hash: mutator_set_accumulator.hash(),
                             };
 
