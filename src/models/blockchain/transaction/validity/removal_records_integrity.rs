@@ -9,13 +9,19 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum::EnumCount;
+use tasm_lib::arithmetic::u128::shift_right_static_u128::ShiftRightStaticU128;
+use tasm_lib::arithmetic::u64::lt_u64::LtStandardU64;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
+use tasm_lib::list::contains::Contains;
+use tasm_lib::list::multiset_equality::MultisetEquality;
 use tasm_lib::list::new::New;
+use tasm_lib::list::push::Push;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::mmr::bag_peaks::BagPeaks;
+use tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory;
 use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
 use tasm_lib::neptune::mutator_set;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -35,6 +41,7 @@ use twenty_first::{
 
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::hash_index_list::HashIndexList;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -46,7 +53,7 @@ use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 
@@ -463,6 +470,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_with_size_input_utxos =
             field_with_size!(RemovalRecordsIntegrityWitness::input_utxos);
         let field_ms_membership_proofs = field!(RemovalRecordsIntegrityWitness::membership_proofs);
+        let field_removal_records = field!(RemovalRecordsIntegrityWitness::removal_records);
 
         let outer_loop = "for_all_utxos".to_string();
 
@@ -591,11 +599,17 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness *all_aocl_indices *aocl num_utxos 0 *utxos[0]_si
 
             dup 5 {&field_ms_membership_proofs} push 1 add
-            // _ [txk_mast_hash] *witness *all_aocl_indices *aocl num_utxos 0 *utxos[0]_si *msmp[i]_si
+            // _ [txk_mast_hash] *witness *all_aocl_indices *aocl num_utxos 0 *utxos[0]_si *msmp[0]_si
 
-            // INVARIANT: _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si
+            dup 6 {&field_removal_records} push 1 add
+            // _ [txk_mast_hash] *witness *all_aocl_indices *aocl num_utxos 0 *utxos[0]_si *msmp[0]_si *removal_records[0]_si
+
+            swap 5
+            // _ [txk_mast_hash] *witness *all_aocl_indices *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0]_si *aocl
+
+            // INVARIANT: _ *witness *all_aocl_indices *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0]_si *aocl
             call {outer_loop}
-            // _ [txk_mast_hash] *witness *all_aocl_indices *aocl num_utxos num_utxos *utxos[num_utxos]_si *msmp[num_utxos]_si
+            // _ [txk_mast_hash] *witness *all_aocl_indices *removal_records[0]_si num_utxos num_utxos *utxos[num_utxos]_si *msmp[num_utxos]_si *aocl
 
             pop 4
             // _ [txk_mast_hash] *witness
@@ -618,60 +632,73 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_receiver_preimage = field!(MsMembershipProof::receiver_preimage);
         let field_sender_randomness = field!(MsMembershipProof::sender_randomness);
         let field_mmr_num_leafs = field!(MmrAccumulatorTip5::leaf_count);
-        let field_aocl_index = field!(MsMembershipProof::aocl_leaf_index);
+        let field_aocl_leaf_index = field!(MsMembershipProof::aocl_leaf_index);
+        let field_indices = field!(RemovalRecord::absolute_indices);
+        let field_target_chunks = field!(RemovalRecord::target_chunks);
 
         let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
         let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
         let compute_indices = library.import(Box::new(ComputeIndices));
+        let hash_index_list = library.import(Box::new(HashIndexList));
+        let contains_u64 = library.import(Box::new(Contains {
+            element_type: DataType::U64,
+        }));
+        let push_u64 = library.import(Box::new(Push {
+            element_type: DataType::U64,
+        }));
+        let multiset_equality = library.import(Box::new(MultisetEquality));
+
+        let collect_aocl_index = "collect_aocl_index".to_string();
+        let for_all_absolute_indices = "for_all_absolute_indices".to_string();
+        let visit_all_chunks = "visit_all_chunks".to_string();
 
         let subroutine_outer_loop = triton_asm! {
-            // INVARIANT: _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si
+            // INVARIANT: _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl
             {outer_loop}:
 
-                dup 3 dup 3 eq
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si (num_utxos == i)
+                dup 4 dup 4 eq
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl(num_utxos == i)
 
                 skiz return
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl
 
 
                 /* calculate UTXO hash */
-                dup 1 read_mem 1 swap 1 call {hash_varlen}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash]
+                dup 2 read_mem 1 swap 1 call {hash_varlen}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash]
 
-                dup 9
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *aocl
+                dup 5
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *aocl
 
 
                 /* put peaks on stack */
                 {&field_peaks}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks
 
                 /* get `receiver_digest` */
-                dup 7
-                push 1
-                add
+                dup 8
+                push 1 add
                 {&field_receiver_preimage}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks *receiver_preimage
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks *receiver_preimage
 
                 push {DIGEST_LENGTH - 1}
                 add
                 read_mem {DIGEST_LENGTH}
                 pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [receiver_preimage]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage]
 
                 /* get `sender_randomness` */
-                dup 12
+                dup 13
                 push 1
                 add
                 {&field_sender_randomness}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [receiver_preimage] *sender_randomness
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] *sender_randomness
 
                 push {DIGEST_LENGTH - 1}
                 add
                 read_mem {DIGEST_LENGTH}
                 pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [receiver_preimage] [sender_randomness]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] [sender_randomness]
 
                 /* duplicate utxo hash to top */
                 dup 15
@@ -679,50 +706,322 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 15
                 dup 15
                 dup 15
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [receiver_preimage] [sender_randomness] [utxo_hash]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] [sender_randomness] [utxo_hash]
 
                 /* calculate canonical commitment */
                 call {ms_commit}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [canonical_commitment]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment]
 
                 /* authenticate commitment against aocl */
-                dup 15
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [canonical_commitment] *aocl
+                dup 11
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment] *aocl
 
                 {&field_mmr_num_leafs} push 1 add read_mem 2 pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [canonical_commitment] [num_leafs]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment] [num_leafs]
 
-                dup 8 push 1 add {&field_aocl_index}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [canonical_commitment] [num_leafs] *index
+                dup 14 push 1 add {&field_aocl_leaf_index}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment] [num_leafs] *index
 
                 push 1 add read_mem 2 pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *peaks [canonical_commitment] [num_leafs] [leaf_index]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment] [num_leafs] [leaf_index]
 
                 call {mmr_verify}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash]
 
 
                 /* calculate the absolute index set */
-                dup 5 push 1 add
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si [utxo_hash] *msmp[i]
+
+                dup 6 push 1 add
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *msmp[i]
 
                 call {compute_indices}
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si *bloom_indices
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
 
 
-                // ...
+                /* assert equality with the absolute index set from the removal record */
+
+                dup 6 push 1 add
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *removal_records[i]
+
+                {&field_indices}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *present_bloom_indices
+
+                call {hash_index_list}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices]
+
+                dup 5 call {hash_index_list}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices] [computed_bloom_indices]
+
+                assert_vector pop 5
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+
+
+                /* ensure that the AOCL leaf index is unique */
+
+                dup 7 dup 3 push 1 add {&field_aocl_leaf_index}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices *aocl_index
+
+                push 1 read_mem 2 pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices [aocl_index]
+
+                call {contains_u64}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (aocl_index in all_aocl_indices)
+
+                push 0 eq
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (aocl_index not in all_aocl_indices)
+
+                dup 0 assert
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (aocl_index not in all_aocl_indices)
+
+                skiz call {collect_aocl_index}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+
+
+                /* derive inactive chunk indices from absolute index set */
+
+                dup 8
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *witness
+
+                {&field_swbfi}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *swbfi
+
+                {&field_mmr_num_leafs}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *swbfi_num_leafs
+
+                push 1 read_mem 2 pop
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs]
+
+                call {new_list_u64}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices
+
+                push {NUM_TRIALS} push 0
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices NUM_TRIALS 0
+
+                dup 5 push 1 add
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices NUM_TRIALS 0 *bloom_index[0]
+
+                call {for_all_absolute_indices}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices NUM_TRIALS NUM_TRIALS *bloom_index[NUM_TRIALS]
+
+                pop 3
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices
+
+
+                /* authenticate chunks in dictionary */
+
+                call {new_list_u64}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices
+
+                dup 12 {&field_swbfi}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi
+
+                dup 9 push 1 add {&field_target_chunks}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks
+
+                dup 0 read_mem 1 pop
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N
+
+                push 0 dup 2 push 1 add
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N 0 *target_chunks[0]_si
+
+                call {visit_all_chunks}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N N *target_chunks[N]_si
+
+                pop 4
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices
+
+
+                /* equate chunk index lists as sets */
+                call {multiset_equality}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] ({inactive_chunk_indices} == {visited_chunk_indices})
+
+                assert
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs]
 
 
                 /* clear stack and prepare to reiterate */
-                pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i]_si *msmp[i]_si
 
-                swap 1 read_mem 1 push 2 add add
-                swap 1 read_mem 1 push 2 add add
-                // _ *witness *all_aocl_indices *aocl num_utxos i *utxos[i+1]_si *msmp[i+1]_si
+                pop 3
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl
 
-                dup 2 push 1 add swap 3 pop 1
-                // _ *witness *all_aocl_indices *aocl num_utxos (i+1) *utxos[i+1]_si *msmp[i+1]_si
+                swap 1 read_mem 1 push 2 add add swap 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i+1] *aocl
+                swap 2 read_mem 1 push 2 add add swap 2
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i+1]_si *msmp[i+1] *aocl
+                swap 5 read_mem 1 push 2 add add swap 5
+                // _ *witness *all_aocl_indices *removal_records[i+1]_si num_utxos i *utxos[i+1]_si *msmp[i+1] *aocl
+
+                swap 3 push 1 add swap 3
+                // _ *witness *all_aocl_indices *removal_records[i+1]_si num_utxos (i+1) *utxos[i+1]_si *msmp[i+1] *aocl
+
+                recurse
+        };
+
+        let subroutine_collect_aocl_index = triton_asm! {
+            // BEFORE: _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+            // AFTER: _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+            {collect_aocl_index}:
+                dup 7
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices
+
+                dup 4 push 1 add {&field_aocl_leaf_index}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices *aocl_leaf_index
+
+                push 1 add read_mem 2 pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices [aocl_leaf_index]
+
+                call {push_u64}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+
+                return
+        };
+
+        let collect_inactive_chunk_index = "collect_inactive_chunk_index".to_string();
+        const LOG2_CHUNK_SIZE: u8 = 12;
+        assert_eq!(CHUNK_SIZE, 1 << LOG2_CHUNK_SIZE);
+        let shift_right_log2_chunk_size =
+            library.import(Box::new(ShiftRightStaticU128::<LOG2_CHUNK_SIZE>));
+        let lt_u64 = library.import(Box::new(LtStandardU64));
+
+        let subroutine_for_all_absolute_indices = triton_asm! {
+            // INVARIANT: _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS 0 *bloom_index[0]
+            {for_all_absolute_indices}:
+                dup 2 dup 2 eq
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] (NUM_TRIALS==i)
+
+                skiz return
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i]
+
+
+                /* compute chunk index */
+
+                dup 0 push 3 add read_mem 4 pop
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i]]
+
+                call {shift_right_log2_chunk_size}
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i] / chunk_size]
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] 0 0 [chunk_index]
+
+                swap 2 pop
+                swap 2 pop
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+
+
+                /* test activity */
+
+                dup 7 dup 7
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] [swbf_num_leafs]
+
+                dup 3 dup 3
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] [swbf_num_leafs] [chunk_index]
+
+                call {lt_u64}
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] (chunk_index < swbf_num_leafs)
+
+
+                /* filter out duplicates */
+
+                dup 6 dup 3 dup 3
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] (chunk_index < swbf_num_leafs) *inactive_indices [chunk_index]
+
+                call {contains_u64}
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] (chunk_index < swbf_num_leafs) (chunk_index in inactive_indices)
+
+                push 0 eq
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] (chunk_index < swbf_num_leafs) (chunk_index not in inactive_indices)
+
+                mul
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] (chunk_index < swbf_num_leafs && chunk_index not in inactive_indices)
+
+                skiz call {collect_inactive_chunk_index}
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+
+                pop 2
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i]
+
+
+                /* prepare next iteration */
+
+                swap 1 push 1 add swap 1
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS (i+1) *bloom_index[i]
+
+                push 4 add
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS (i+1) *bloom_index[i+1]
+
+                recurse
+        };
+
+        let subroutine_collect_inactive_chunk_index = triton_asm! {
+            // BEFORE: _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+            // AFTER: _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+            {collect_inactive_chunk_index}:
+
+                dup 5 dup 3 dup 3
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] *inactive_chunk_indices [chunk_index]
+
+                call {push_u64}
+                // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+
+                return
+        };
+
+        let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
+
+        let field_chunk_index = triton_asm!(
+            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
+            read_mem push 1 add add
+        );
+        let field_chunk = triton_asm!(
+            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
+            push 2 add
+        );
+        let field_auth_path = triton_asm!(
+            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
+            push 1 add
+            read_mem 1
+            push 2 add add
+        );
+
+        let subroutine_visit_all_chunks = triton_asm! {
+            // INVARIANT: _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
+            {visit_all_chunks}:
+                dup 2 dup 2 eq
+                // _  *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si (N == i)
+
+                skiz return
+                // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
+
+                read_mem 1 push 2 add
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+
+                /* prepare to call mmr verify from memory
+                   For this call to work, the stack needs to look like this:
+                   _ *peaks leaf_count_hi leaf_count_lo leaf_index_hi leaf_index_lo [digest (leaf_digest)] *auth_path
+                */
+
+                dup 5 {&field_peaks}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks
+
+                dup 6 {&field_mmr_num_leafs} push 1 read_mem 2 pop 1
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs]
+
+                dup 3 {&field_chunk_index} push 1 read_mem 2 pop 1
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index]
+
+                dup 5 {&field_chunk} read_mem 1 push 2 add swap 1 call {hash_varlen}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest]
+
+                dup 10 {&field_auth_path}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest] *auth_path
+
+                call {mmr_verify_from_memory} assert
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+
+                add
+                // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i+1]_si
+
+                swap 1 push 1 add swap 1
+                // _ *visited_chunk_indices *swbfi *target_chunks N (i+1) *target_chunks[i+1]_si
 
                 recurse
         };
@@ -732,6 +1031,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         triton_asm!(
             {&payload}
             {&subroutine_outer_loop}
+            {&subroutine_collect_aocl_index}
+            {&subroutine_for_all_absolute_indices}
+            {&subroutine_collect_inactive_chunk_index}
+            {&subroutine_visit_all_chunks}
             {&imports}
         )
     }
