@@ -5,7 +5,13 @@ use tasm_lib::{
             b_field_element::BFieldElement, bfield_codec::BFieldCodec,
             x_field_element::XFieldElement,
         },
-        util_types::merkle_tree::MerkleTreeInclusionProof,
+        util_types::{
+            merkle_tree::MerkleTreeInclusionProof,
+            mmr::{
+                shared_advanced::get_peak_heights,
+                shared_basic::leaf_index_to_mt_index_and_peak_index,
+            },
+        },
     },
     Digest,
 };
@@ -169,6 +175,39 @@ pub fn tasm_hashing_merkle_verify(root: Digest, leaf_index: u32, leaf: Digest, t
     };
 
     assert!(mt_inclusion_proof.verify(root));
+}
+
+pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
+    peaks: &[Digest],
+    num_leafs: u64,
+    leaf_index: u64,
+    leaf: Digest,
+) -> bool {
+    let (merkle_node_index, peak_index) =
+        leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
+    let peak_index = peak_index as usize;
+    let peak_heights = get_peak_heights(num_leafs);
+
+    let root = peaks[peak_index];
+    let tree_height = peak_heights[peak_index];
+    let merkle_leaf_index = merkle_node_index ^ (1 << tree_height);
+
+    let mut path: Vec<Digest> = vec![];
+
+    ND_DIGESTS.with_borrow_mut(|nd_digests| {
+        for _ in 0..tree_height {
+            path.push(nd_digests.pop().unwrap());
+        }
+    });
+
+    let mt_inclusion_proof = MerkleTreeInclusionProof::<Hash> {
+        tree_height: tree_height as usize,
+        indexed_leaves: vec![(merkle_leaf_index as usize, leaf)],
+        authentication_structure: path,
+        _hasher: std::marker::PhantomData,
+    };
+
+    mt_inclusion_proof.verify(root)
 }
 
 /// Test whether two lists of digests are equal, up to order.

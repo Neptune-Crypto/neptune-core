@@ -126,6 +126,10 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         let digests = vec![
             self.mast_path_mutator_set.clone(),
             self.mast_path_inputs.clone(),
+            self.membership_proofs
+                .iter()
+                .flat_map(|msmp| msmp.auth_path_aocl.authentication_path.clone())
+                .collect_vec(),
         ]
         .concat();
 
@@ -388,11 +392,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 msmp.sender_randomness,
                 msmp.receiver_preimage.hash::<Hash>(),
             );
-            assert!(msmp.auth_path_aocl.verify(
+            tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
                 &aocl.get_peaks(),
-                addition_record.canonical_commitment,
                 aocl.count_leaves(),
-            ));
+                msmp.aocl_leaf_index,
+                addition_record.canonical_commitment,
+            );
 
             // calculate absolute index set
             let aocl_leaf_index = msmp.aocl_leaf_index;
@@ -478,10 +483,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             /* read txkmh */
             read_io 5
             // _ [txk_mast_hash]
+            hint txk_mast_hash = stack[0..5]
 
             /* point to witness */
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // _ [txk_mast_hash] *witness
+            hint witness = stack[0]
 
 
             /* authenticate mutator set accumulator */
@@ -606,6 +613,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
             swap 5
             // _ [txk_mast_hash] *witness *all_aocl_indices *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0]_si *aocl
+            hint aocl = stack[0]
+            hint msmp_i_si = stack[1]
+            hint utxos_i_si = stack[2]
+            hint i = stack[3]
+            hint removal_records_i_si = stack[4]
+            hint all_aocl_indices = stack[5]
 
             // INVARIANT: _ *witness *all_aocl_indices *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0]_si *aocl
             call {outer_loop}
