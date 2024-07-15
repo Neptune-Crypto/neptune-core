@@ -788,7 +788,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&field_mmr_num_leafs}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *swbfi_num_leafs
 
-                push 1 read_mem 2 pop
+                push 1 read_mem 2 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs]
 
                 call {new_list_u64}
@@ -818,7 +818,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 9 push 1 add {&field_target_chunks}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks
 
-                dup 0 read_mem 1 pop
+                dup 0 read_mem 1 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N
 
                 push 0 dup 2 push 1 add
@@ -895,15 +895,15 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 /* compute chunk index */
 
-                dup 0 push 3 add read_mem 4 pop
+                dup 0 push 3 add read_mem 4 pop 1
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i]]
 
                 call {shift_right_log2_chunk_size}
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i] / chunk_size]
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] 0 0 [chunk_index]
 
-                swap 2 pop
-                swap 2 pop
+                swap 2 pop 1
+                swap 2 pop 1
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
 
 
@@ -969,7 +969,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let field_chunk_index = triton_asm!(
             // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
-            read_mem push 1 add add
+            read_mem 1 push 1 add add
         );
         let field_chunk = triton_asm!(
             // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
