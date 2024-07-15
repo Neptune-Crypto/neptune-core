@@ -12,6 +12,7 @@ use strum::EnumCount;
 use tasm_lib::arithmetic::u128::shift_right_static_u128::ShiftRightStaticU128;
 use tasm_lib::arithmetic::u64::lt_u64::LtStandardU64;
 use tasm_lib::data_type::DataType;
+use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
@@ -41,7 +42,6 @@ use twenty_first::{
 
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::validity::tasm::hash_index_list::HashIndexList;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -649,7 +649,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
         let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
         let compute_indices = library.import(Box::new(ComputeIndices));
-        let hash_index_list = library.import(Box::new(HashIndexList));
+        let hash_index_list = library.import(Box::new(HashStaticSize {
+            size: NUM_TRIALS as usize * 4,
+        }));
         let contains_u64 = library.import(Box::new(Contains {
             element_type: DataType::U64,
         }));
@@ -661,6 +663,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let collect_aocl_index = "collect_aocl_index".to_string();
         let for_all_absolute_indices = "for_all_absolute_indices".to_string();
         let visit_all_chunks = "visit_all_chunks".to_string();
+
+        let compare_sextuplets = DataType::Tuple([DataType::Xfe, DataType::Xfe].to_vec()).compare();
 
         let subroutine_outer_loop = triton_asm! {
             // INVARIANT: _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl
@@ -758,27 +762,38 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 dup 6 push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *msmp[i]
+                hint msmp_i = stack[0]
 
                 call {compute_indices}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+                hint computed_bloom_indices = stack[0]
 
 
                 /* assert equality with the absolute index set from the removal record */
 
                 dup 6 push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *removal_records[i]
+                hint removal_record_i = stack[0]
 
                 {&field_indices}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *present_bloom_indices
+                hint present_bloom_indices = stack[0]
 
-                call {hash_index_list}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices]
+                push 1337 assert
+                push 1 add call {hash_index_list}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (*present_bloom_indices+181) [present_bloom_indices]
 
-                dup 5 call {hash_index_list}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices] [computed_bloom_indices]
+                push 0 swap 6 pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices]
 
-                assert_vector pop 5
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
+                dup 6 push 1 add call {hash_index_list}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices] (*computed_bloom_indices+181) [computed_bloom_indices]
+
+                push 0 swap 6 pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices] 0 [computed_bloom_indices]
+
+                {&compare_sextuplets}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (present == computed)
 
 
                 /* ensure that the AOCL leaf index is unique */
