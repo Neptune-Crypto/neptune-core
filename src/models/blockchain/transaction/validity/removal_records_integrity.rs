@@ -348,19 +348,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         // authenticate the mutator set accumulator against the txk mast hash
         let aocl_mmr_bagged: Digest = aocl.bag_peaks();
-        println!("aocl bagged: {}", aocl_mmr_bagged);
         let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
-        println!("swbfi bagged: {}", inactive_swbf_bagged);
         let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
-        println!("left: {}", left);
         let active_swbf_digest: Digest = rriw.swbfa_hash;
-        println!("swbfa digest: {}", active_swbf_digest);
         let default = Digest::default();
         let right = Hash::hash_pair(active_swbf_digest, default);
-        println!("right: {}", right);
         let msah: Digest = Hash::hash_pair(left, right);
-        println!("msah: {}", msah);
-        println!("leaf: {}", Hash::hash(&msah));
         tasmlib::tasm_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
@@ -392,6 +385,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 msmp.sender_randomness,
                 msmp.receiver_preimage.hash::<Hash>(),
             );
+            println!("addition record: {}", addition_record.canonical_commitment);
             tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
                 &aocl.get_peaks(),
                 aocl.count_leaves(),
@@ -595,9 +589,11 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             /* iterate over all input UTXOs */
             call {new_list_u64}
             // _ [txk_mast_hash] *witness *all_aocl_indices
+            hint all_aocl_indices = stack[0]
 
             dup 1 {&field_aocl}
             // _ [txk_mast_hash] *witness *all_aocl_indices *aocl
+            hint aocl = stack[0]
 
             dup 2 {&field_input_utxos} {&field_utxos}
             // _ [txk_mast_hash] *witness *all_aocl_indices *aocl *utxos
@@ -617,8 +613,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             hint msmp_i_si = stack[1]
             hint utxos_i_si = stack[2]
             hint i = stack[3]
-            hint removal_records_i_si = stack[4]
-            hint all_aocl_indices = stack[5]
+            hint num_utxos = stack[4]
+            hint removal_records_i_si = stack[5]
+            hint all_aocl_indices = stack[6]
 
             // INVARIANT: _ *witness *all_aocl_indices *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0]_si *aocl
             call {outer_loop}
@@ -677,8 +674,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 
                 /* calculate UTXO hash */
-                dup 2 read_mem 1 swap 1 call {hash_varlen}
+                dup 2 read_mem 1 push 2 add swap 1 call {hash_varlen}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash]
+                hint utxo_hash = stack[0..5]
 
                 dup 5
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *aocl
@@ -689,19 +687,31 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks
 
                 /* get `receiver_digest` */
-                dup 8
+                push 0
+                push 0
+                push 0
+                push 0
+                push 0
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [default]
+
+                dup 12
                 push 1 add
                 {&field_receiver_preimage}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks *receiver_preimage
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [default] *receiver_preimage
 
                 push {DIGEST_LENGTH - 1}
                 add
                 read_mem {DIGEST_LENGTH}
                 pop 1
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage]
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [default] [receiver_preimage]
+                hint receiver_preimage = stack[0..5]
+
+                hash
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_digest]
+                hint receiver_digest = stack[0..5]
 
                 /* get `sender_randomness` */
-                dup 13
+                dup 12
                 push 1
                 add
                 {&field_sender_randomness}
@@ -712,6 +722,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 read_mem {DIGEST_LENGTH}
                 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] [sender_randomness]
+                hint sender_randomness = stack[0..5]
 
                 /* duplicate utxo hash to top */
                 dup 15
@@ -724,6 +735,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 /* calculate canonical commitment */
                 call {ms_commit}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [canonical_commitment]
+                hint canonical_commitment = stack[0..5]
 
                 /* authenticate commitment against aocl */
                 dup 11
