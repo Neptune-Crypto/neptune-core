@@ -430,6 +430,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
             for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
+                println!("chunk digest: {}", Hash::hash(chunk));
+                println!("num leafs: {}", swbfi.count_leaves());
+                println!("leaf index: {}", mmrmp.leaf_index);
+                println!("chunk index: {}", chunk_index);
                 assert!(mmrmp.verify(&swbfi.get_peaks(), Hash::hash(chunk), swbfi.count_leaves()));
                 visited_chunk_indices.push(*chunk_index);
             }
@@ -1024,7 +1028,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         // *chunk_dictionary_entry : (chunk_index, (mmr_mp, chunk))
         // serialized as: size(chunk+mmr_mp), size(chunk), len(chunk), [indices], size(mmr_mp), [mmr_mp], [chunk index]
         let field_chunk_index = triton_asm!(
-            read_mem 1 push 1 add add
+            read_mem 1 push 2 add add
         );
         let field_with_size_chunk = triton_asm!(
             push 1 add
@@ -1056,8 +1060,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 skiz return
                 // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
 
-                break
-
                 read_mem 1 push 2 add
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
                 hint target_chunks_j = stack[0]
@@ -1071,8 +1073,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 5 {&field_peaks}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks
                 hint peaks = stack[0]
-
-                break
 
                 dup 6 {&field_mmr_num_leafs}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks *mmr_num_leafs
