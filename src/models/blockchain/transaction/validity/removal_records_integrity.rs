@@ -664,7 +664,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let for_all_absolute_indices = "for_all_absolute_indices".to_string();
         let visit_all_chunks = "visit_all_chunks".to_string();
 
-        let compare_sextuplets = DataType::Tuple([DataType::Xfe, DataType::Xfe].to_vec()).compare();
+        let compare_digests = DataType::Digest.compare();
 
         let subroutine_outer_loop = triton_asm! {
             // INVARIANT: _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl
@@ -765,6 +765,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 hint msmp_i = stack[0]
 
                 call {compute_indices}
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices_li
+
+                push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
                 hint computed_bloom_indices = stack[0]
 
@@ -779,29 +782,25 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *present_bloom_indices
                 hint present_bloom_indices = stack[0]
 
-                push 1337 assert
-                push 1 add call {hash_index_list}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (*present_bloom_indices+181) [present_bloom_indices]
+                call {hash_index_list} pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices]
+                hint present_bloom_indices = stack[0..5]
 
-                push 0 swap 6 pop 1
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices]
+                dup 5 call {hash_index_list} pop 1
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices] [computed_bloom_indices]
+                hint computed_bloom_indices = stack[0..5]
 
-                dup 6 push 1 add call {hash_index_list}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices] (*computed_bloom_indices+181) [computed_bloom_indices]
-
-                push 0 swap 6 pop 1
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices 0 [present_bloom_indices] 0 [computed_bloom_indices]
-
-                {&compare_sextuplets}
+                {&compare_digests}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (present == computed)
 
 
                 /* ensure that the AOCL leaf index is unique */
 
-                dup 7 dup 3 push 1 add {&field_aocl_leaf_index}
+                dup 8 dup 3 push 1 add {&field_aocl_leaf_index}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices *aocl_index
+                hint aocl_leaf_index = stack[0]
 
-                push 1 read_mem 2 pop 1
+                push 1 add read_mem 2 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices [aocl_index]
 
                 call {contains_u64}
