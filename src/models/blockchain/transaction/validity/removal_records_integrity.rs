@@ -793,15 +793,18 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&compare_digests}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (present == computed)
 
+                assert
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
 
                 /* ensure that the AOCL leaf index is unique */
 
-                dup 8 dup 3 push 1 add {&field_aocl_leaf_index}
+                dup 7 dup 3 push 1 add {&field_aocl_leaf_index}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices *aocl_index
-                hint aocl_leaf_index = stack[0]
+                hint aocl_leaf_index_ptr = stack[0]
 
                 push 1 add read_mem 2 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *all_aocl_indices [aocl_index]
+                hint aocl_leaf_index = stack[0..2]
 
                 call {contains_u64}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices (aocl_index in all_aocl_indices)
@@ -827,7 +830,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&field_mmr_num_leafs}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices *swbfi_num_leafs
 
-                push 1 read_mem 2 pop 1
+                push 1 add read_mem 2 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs]
 
                 call {new_list_u64}
@@ -838,6 +841,11 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 dup 5 push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices NUM_TRIALS 0 *bloom_index[0]
+                hint bloom_index_i = stack[0]
+                hint i = stack[1]
+                hint num_trials = stack[2]
+                hint inactive_chunk_indices = stack[3]
+                hint swbfi_num_leafs = stack[4..6]
 
                 call {for_all_absolute_indices}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices NUM_TRIALS NUM_TRIALS *bloom_index[NUM_TRIALS]
@@ -850,18 +858,24 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 call {new_list_u64}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices
+                hint visited_chunk_indices = stack[0]
 
                 dup 12 {&field_swbfi}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi
+                hint swbfi = stack[0]
 
-                dup 9 push 1 add {&field_target_chunks}
+                dup 7 push 1 add {&field_target_chunks}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks
 
-                dup 0 read_mem 1 pop 1
+                dup 0 push 1 add read_mem 1 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N
 
                 push 0 dup 2 push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N 0 *target_chunks[0]_si
+                hint target_chunks_j = stack[0]
+                hint j = stack[1]
+                hint num_chunks = stack[2]
+                hint target_chunks = stack[3]
 
                 call {visit_all_chunks}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N N *target_chunks[N]_si
@@ -1006,16 +1020,23 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
 
+        // field getters for chunk dictionary entry
+        // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
+        // serialized as: size(ap+chunk), size(chunk), len(chunk), [indices], size(ap), len(ap), [auth path], [chunk index]
         let field_chunk_index = triton_asm!(
-            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
             read_mem 1 push 1 add add
         );
-        let field_chunk = triton_asm!(
-            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
+        let field_with_size_chunk = triton_asm!(
+            push 1 add
+            hint chunk_si = stack[0]
+            read_mem 1
+            hint size = stack[1]
+            hint garbage = stack[0]
             push 2 add
+            hint chunk = stack[0]
+            swap 1
         );
         let field_auth_path = triton_asm!(
-            // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
             push 1 add
             read_mem 1
             push 2 add add
@@ -1032,6 +1053,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 read_mem 1 push 2 add
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+                hint target_chunks_j = stack[0]
+                hint chunk_size = stack[1]
 
                 /* prepare to call mmr verify from memory
                    For this call to work, the stack needs to look like this:
@@ -1040,15 +1063,28 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 dup 5 {&field_peaks}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks
+                hint peaks = stack[0]
 
-                dup 6 {&field_mmr_num_leafs} push 1 read_mem 2 pop 1
+                dup 6 {&field_mmr_num_leafs}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks *mmr_num_leafs
+                hint mmr_num_leafs = stack[0]
+
+                push 1 add read_mem 2 pop 1
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs]
+                hint num_leafs = stack[0..2]
 
-                dup 3 {&field_chunk_index} push 1 read_mem 2 pop 1
+                dup 3 {&field_chunk_index} push 1 add read_mem 2 pop 1
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index]
+                hint leaf_index = stack[2..4]
 
-                dup 5 {&field_chunk} read_mem 1 push 2 add swap 1 call {hash_varlen}
+                dup 5 {&field_with_size_chunk}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] *chunk size
+                hint chunk_size = stack[0]
+                hint chunk = stack[1]
+
+                call {hash_varlen}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest]
+                hint chunk_digest = stack[0..5]
 
                 dup 10 {&field_auth_path}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest] *auth_path
