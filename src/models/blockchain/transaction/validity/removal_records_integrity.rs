@@ -870,9 +870,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 0 push 1 add read_mem 1 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N
 
-                push 0 dup 2 push 1 add
+                push 0 dup 2 push 2 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N 0 *target_chunks[0]_si
-                hint target_chunks_j = stack[0]
+                hint target_chunks_j_si = stack[0]
                 hint j = stack[1]
                 hint num_chunks = stack[2]
                 hint target_chunks = stack[3]
@@ -1021,8 +1021,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
 
         // field getters for chunk dictionary entry
-        // *chunk_dictionary_entry : (chunk_index, (authentication_path, chunk))
-        // serialized as: size(ap+chunk), size(chunk), len(chunk), [indices], size(ap), len(ap), [auth path], [chunk index]
+        // *chunk_dictionary_entry : (chunk_index, (mmr_mp, chunk))
+        // serialized as: size(chunk+mmr_mp), size(chunk), len(chunk), [indices], size(mmr_mp), [mmr_mp], [chunk index]
         let field_chunk_index = triton_asm!(
             read_mem 1 push 1 add add
         );
@@ -1036,10 +1036,15 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             hint chunk = stack[0]
             swap 1
         );
+        type MmrMembershipProofTip5 = MmrMembershipProof<Hash>;
+        let field_authentication_path_on_mmrmp =
+            field!(MmrMembershipProofTip5::authentication_path);
         let field_auth_path = triton_asm!(
             push 1 add
             read_mem 1
-            push 2 add add
+            push 3 add add
+            hint mmr_mp = stack[0]
+            {&field_authentication_path_on_mmrmp}
         );
 
         let subroutine_visit_all_chunks = triton_asm! {
@@ -1050,6 +1055,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 skiz return
                 // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
+
+                break
 
                 read_mem 1 push 2 add
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
@@ -1065,6 +1072,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks
                 hint peaks = stack[0]
 
+                break
+
                 dup 6 {&field_mmr_num_leafs}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks *mmr_num_leafs
                 hint mmr_num_leafs = stack[0]
@@ -1075,7 +1084,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 dup 3 {&field_chunk_index} push 1 add read_mem 2 pop 1
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index]
-                hint leaf_index = stack[2..4]
+                hint leaf_index = stack[0..2]
 
                 dup 5 {&field_with_size_chunk}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] *chunk size
@@ -1088,6 +1097,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 dup 10 {&field_auth_path}
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest] *auth_path
+                hint auth_path = stack[0]
 
                 call {mmr_verify_from_memory} assert
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
