@@ -98,7 +98,9 @@ Blocks are stored on disk and their position on disk is stored in the `block_ind
 
   2. avoid deadlocking others. Always be certain that the global lock will be released in timely fashion. In other words if you have some kind of long running task with an event loop that needs to acquire the global lock, ensure that it gets acquired+released inside the loop rather than outside.
 
-- Atomic writing to databases: The archival mutator set is spread across multiple databases due to how the underlying data structures are defined. If one of the databases are updated but the other is not, this will leave the archival mutator set in an invalid state. We could fix this by allowing an archival mutator set to be stored in only one database. We should also add logic to rebuild the archival mutator set state from the `block_index` database and the blocks stored on disk since it can be derived from the blocks. This functionality could be contained in a separate binary, just like we have a binary for the CLI interface in the form of the RPC client.
+- Atomic writing to databases: `neptune-core` presently writes to the following databases: wallet_db, block_index_db, archival_mutator_set, peer_state. If one of the databases are updated but the other is not, this can leave data in an invalid state. We could fix this by storing all state in a single transactional database.
+
+note: We should also add logic to rebuild the archival state from the `block_index_db` and the blocks stored on disk since it can be derived from the blocks. This functionality could be contained in a separate binary, just like we have a binary for the CLI interface in the form of the RPC client.
 
 ## Tracing
 A structured way of inspecting a program when designing the RPC API, is to use tracing, which is a logger, that is suitable for programs with asynchronous control flow.
