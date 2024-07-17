@@ -487,6 +487,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 
             /* authenticate mutator set accumulator */
+
             dup 5
             dup 5
             dup 5
@@ -588,6 +589,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 
             /* iterate over all input UTXOs */
+
             call {new_list_u64}
             // _ [txk_mast_hash] *witness *all_aocl_indices
             hint all_aocl_indices = stack[0]
@@ -1277,7 +1279,7 @@ mod tests {
     }
 
     #[proptest(cases = 5)]
-    fn derived_witness_generates_accepting_program_proptest(
+    fn removal_records_integrity_proptest(
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         let removal_records_integrity_witness =
@@ -1286,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    fn removal_records_integrity_witness_unit_test() {
+    fn removal_records_integrity_unit_test() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
