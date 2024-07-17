@@ -1076,16 +1076,16 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         );
 
         let subroutine_visit_all_chunks = triton_asm! {
-            // INVARIANT: _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
+            // INVARIANT: _ *visited_chunk_indices *swbfi *target_chunks N j *target_chunks[i]_si
             {visit_all_chunks}:
                 dup 2 dup 2 eq
-                // _  *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si (N == i)
+                // _  *visited_chunk_indices *swbfi *target_chunks N j *target_chunks[i]_si (N == i)
 
                 skiz return
-                // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i]_si
+                // _ *visited_chunk_indices *swbfi *target_chunks N j *target_chunks[i]_si
 
                 read_mem 1 push 2 add
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i]
                 hint target_chunks_j = stack[0]
                 hint chunk_size = stack[1]
 
@@ -1095,57 +1095,58 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 */
 
                 dup 5 {&field_peaks}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks
                 hint peaks = stack[0]
 
                 dup 6 {&field_mmr_num_leafs}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks *mmr_num_leafs
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks *mmr_num_leafs
                 hint mmr_num_leafs = stack[0]
 
                 push 1 add read_mem 2 pop 1
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks [num_leafs]
                 hint num_leafs = stack[0..2]
 
                 dup 3 {&field_chunk_index} push 1 add read_mem 2 pop 1
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index]
                 hint leaf_index = stack[0..2]
 
                 dup 5 {&field_with_size_chunk}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] *chunk size
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] *chunk size
                 hint chunk_size = stack[0]
                 hint chunk = stack[1]
 
                 call {hash_varlen}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest]
                 hint chunk_digest = stack[0..5]
 
                 dup 10 {&field_auth_path}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest] *auth_path
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *peaks [num_leafs] [leaf_index] [chunk_digest] *auth_path
                 hint auth_path = stack[0]
 
                 call {mmr_verify_from_memory} assert
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i]
 
 
                 /* record chunk index as visited */
 
                 dup 6 dup 1 {&field_chunk_index}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *visited_chunk_indices *chunk_index
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *visited_chunk_indices *chunk_index
 
-                push 1 read_mem 2 pop 1
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *visited_chunk_indices [chunk_index]
+                break
+                push 1 add read_mem 2 pop 1
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *visited_chunk_indices [chunk_index]
 
                 call {push_u64}
-                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+                // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i]
 
 
                 /* prepare next iteration */
 
                 add
-                // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i+1]_si
+                // _ *visited_chunk_indices *swbfi *target_chunks N j *target_chunks[i+1]_si
 
                 swap 1 push 1 add swap 1
-                // _ *visited_chunk_indices *swbfi *target_chunks N (i+1) *target_chunks[i+1]_si
+                // _ *visited_chunk_indices *swbfi *target_chunks N (j+1) *target_chunks[i+1]_si
 
                 recurse
         };
