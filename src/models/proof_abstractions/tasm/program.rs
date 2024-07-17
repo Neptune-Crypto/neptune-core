@@ -31,7 +31,7 @@ pub enum ConsensusError {
 /// block validity.
 pub trait ConsensusProgram
 where
-    Self: RefUnwindSafe,
+    Self: RefUnwindSafe + Clone,
 {
     /// The canonical reference source code for the consensus program, written in the
     /// subset of rust that the tasm-lang compiler understands. To run this program, call

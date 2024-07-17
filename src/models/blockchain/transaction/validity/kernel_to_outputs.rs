@@ -374,34 +374,3 @@ mod test {
         );
     }
 }
-
-#[cfg(test)]
-mod bench {
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::tests::shared::bench_consensus_program;
-    use proptest::arbitrary::Arbitrary;
-    use proptest::strategy::Strategy;
-    use proptest::test_runner::TestRunner;
-    use tasm_lib::snippet_bencher::BenchmarkCase;
-
-    use super::KernelToOutputsWitness;
-
-    #[test]
-    fn bench_kernel_to_outputs_common() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        bench_consensus_program(
-            KernelToOutputs,
-            &kernel_to_outputs_witness.standard_input(),
-            kernel_to_outputs_witness.nondeterminism(),
-            "KernelToOutputs",
-            BenchmarkCase::CommonCase,
-        );
-    }
-}

@@ -899,25 +899,3 @@ pub async fn mock_genesis_archival_state(
 
     (archival_state, peer_db, data_dir)
 }
-
-/// Benchmark the TASM code fo a consensus program.
-pub fn bench_consensus_program<CP: ConsensusProgram>(
-    cp: CP,
-    input: &PublicInput,
-    nondeterminism: NonDeterminism,
-    name: &str,
-    case: BenchmarkCase,
-) {
-    let program = cp.program();
-    let (aet, _output) = program
-        .trace_execution(input.clone(), nondeterminism.clone())
-        .unwrap();
-    let benchmark_result = BenchmarkResult::new(&aet);
-    let benchmark = NamedBenchmarkResult {
-        name: name.to_owned(),
-        benchmark_result,
-        case,
-    };
-
-    write_benchmarks(vec![benchmark]);
-}

@@ -234,33 +234,3 @@ mod test {
         }
     }
 }
-
-#[cfg(test)]
-mod bench {
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::tests::shared::bench_consensus_program;
-    use proptest::arbitrary::Arbitrary;
-    use proptest::strategy::Strategy;
-    use proptest::test_runner::TestRunner;
-    use tasm_lib::snippet_bencher::BenchmarkCase;
-
-    use super::{CollectLockScripts, CollectLockScriptsWitness};
-
-    #[test]
-    fn bench_collect_lock_scripts_common() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
-        bench_consensus_program(
-            CollectLockScripts,
-            &collect_lock_scripts_witness.standard_input(),
-            collect_lock_scripts_witness.nondeterminism(),
-            "CollectLockScripts",
-            BenchmarkCase::CommonCase,
-        );
-    }
-}

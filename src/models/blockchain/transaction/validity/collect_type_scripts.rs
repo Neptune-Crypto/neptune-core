@@ -451,32 +451,3 @@ mod test {
         prop(primitive_witness).expect("");
     }
 }
-
-#[cfg(test)]
-mod bench {
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::tests::shared::bench_consensus_program;
-    use proptest::strategy::Strategy;
-    use proptest::test_runner::TestRunner;
-    use tasm_lib::snippet_bencher::BenchmarkCase;
-
-    use super::{CollectTypeScripts, CollectTypeScriptsWitness};
-
-    #[test]
-    fn bench_collect_type_scripts_common() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(2, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        bench_consensus_program(
-            CollectTypeScripts,
-            &collect_type_scripts_witness.standard_input(),
-            collect_type_scripts_witness.nondeterminism(),
-            "CollectTypeScripts",
-            BenchmarkCase::CommonCase,
-        );
-    }
-}

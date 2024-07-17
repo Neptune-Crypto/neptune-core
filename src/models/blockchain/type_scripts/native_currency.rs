@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
@@ -634,6 +633,7 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
+    use crate::models::blockchain::transaction::utxo::LockScriptAndWitness;
     use proptest::prelude::*;
     use proptest::prop_assert;
     use proptest::{
@@ -641,9 +641,8 @@ pub mod test {
     };
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
-    use transaction::utxo::LockScriptAndWitness;
 
-    use self::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::{utxo::Utxo, PublicAnnouncement};
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
@@ -793,47 +792,5 @@ pub mod test {
             native_currency_witness,
             &[InstructionError::AssertionFailed],
         )?;
-    }
-}
-
-#[cfg(test)]
-mod bench {
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::tests::shared::bench_consensus_program;
-    use proptest::strategy::Strategy;
-    use proptest::test_runner::TestRunner;
-    use tasm_lib::snippet_bencher::BenchmarkCase;
-
-    use super::*;
-
-    #[test]
-    fn bench_native_currency() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(2, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let nc_witness = NativeCurrencyWitness::from(primitive_witness);
-        bench_consensus_program(
-            NativeCurrency,
-            &nc_witness.standard_input(),
-            nc_witness.nondeterminism(),
-            "NativeCurrency-2in-2out",
-            BenchmarkCase::CommonCase,
-        );
-
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(4, 4, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let nc_witness = NativeCurrencyWitness::from(primitive_witness);
-        bench_consensus_program(
-            NativeCurrency,
-            &nc_witness.standard_input(),
-            nc_witness.nondeterminism(),
-            "NativeCurrency-4in-4out",
-            BenchmarkCase::CommonCase,
-        );
     }
 }
