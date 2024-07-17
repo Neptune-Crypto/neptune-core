@@ -2,7 +2,6 @@ use crate::prelude::{triton_vm, twenty_first};
 
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
@@ -16,7 +15,6 @@ use triton_vm::triton_asm;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::util_types::mutator_set::ms_membership_proof::{
     pseudorandom_mutator_set_membership_proof, MsMembershipProof,
@@ -47,9 +45,7 @@ impl BasicSnippet for ComputeIndices {
         type MsMpH = MsMembershipProof;
         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
-        let mp_to_ap = tasm_lib::field!(MsMpH::auth_path_aocl);
-        type MmrMpH = MmrMembershipProof<Hash>;
-        let ap_to_li = tasm_lib::field!(MmrMpH::leaf_index);
+        let mp_to_li = tasm_lib::field!(MsMpH::aocl_leaf_index);
         let entrypoint = self.entrypoint();
         let read_digest = library.import(Box::new(PushRamToStack {
             data_type: DataType::Digest,
@@ -75,8 +71,7 @@ impl BasicSnippet for ComputeIndices {
             {&mp_to_rp} // _ [item] *mp *sr *rp
 
             swap 2 // _ [item] *rp *sr *mp
-            {&mp_to_ap} // _ [item] *rp *sr *ap
-            {&ap_to_li} // _ [item] *rp *sr *li
+            {&mp_to_li} // _ [item] *rp *sr *li
 
             // read leaf index from memory
             call {read_u64}

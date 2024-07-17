@@ -2,10 +2,10 @@
   {
     "name": "tasm_neptune_transaction_verify_aocl_membership",
     "benchmark_result": {
-      "clock_cycle_count": 575,
+      "clock_cycle_count": 579,
       "hash_table_height": 360,
       "u32_table_height": 149,
-      "op_stack_table_height": 398,
+      "op_stack_table_height": 402,
       "ram_table_height": 43
     },
     "case": "CommonCase"
@@ -13,10 +13,10 @@
   {
     "name": "tasm_neptune_transaction_verify_aocl_membership",
     "benchmark_result": {
-      "clock_cycle_count": 560,
+      "clock_cycle_count": 564,
       "hash_table_height": 360,
       "u32_table_height": 153,
-      "op_stack_table_height": 398,
+      "op_stack_table_height": 402,
       "ram_table_height": 43
     },
     "case": "WorstCase"
