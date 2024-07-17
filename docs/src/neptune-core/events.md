@@ -1,7 +1,6 @@
 # Events
 
-The Neptune Core client can be seen as an event-driven client. Below is a list of all the events, and the messages that
-these events create.
+neptune-core can be seen as an event-driven program. Below is a list of all the events, and the messages that these events create.
 
 ## Events
 

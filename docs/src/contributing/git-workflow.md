@@ -7,15 +7,13 @@ We follow a standard [GitHub Flow](https://docs.github.com/en/get-started/using-
 It can be visualized like this:
 
 ```
-master
--------*----------------------*>
- \             --------
-  \  dev      / topic  \
-   ----*----------------------*--------------->
-        \ release              \ release
-        ------------------>    --------->
-        \ hotfix /
-        --------
+            --------
+master     / topic  \
+----*----------------------*--------------->
+    \ release              \ release
+    ------------------>    --------->
+    \ hotfix /
+    --------
 ```
 
 ### master branch (aka trunk)
