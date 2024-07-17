@@ -17,7 +17,7 @@ use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
 use tasm_lib::list::contains::Contains;
-use tasm_lib::list::multiset_equality::MultisetEquality;
+use tasm_lib::list::multiset_equality_u64s::MultisetEqualityU64s;
 use tasm_lib::list::new::New;
 use tasm_lib::list::push::Push;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
@@ -429,11 +429,22 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // authenticate chunks in dictionary
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
+            println!(
+                "num leafs: {} = {} + ({} << 32)",
+                swbfi.count_leaves(),
+                swbfi.count_leaves() & (u32::MAX as u64),
+                swbfi.count_leaves() >> 32,
+            );
             for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
                 println!("chunk digest: {}", Hash::hash(chunk));
-                println!("num leafs: {}", swbfi.count_leaves());
-                println!("leaf index: {}", mmrmp.leaf_index);
+                println!(
+                    "leaf index: {} = {} + ({} << 32)",
+                    mmrmp.leaf_index,
+                    mmrmp.leaf_index & (u32::MAX as u64),
+                    mmrmp.leaf_index >> 32
+                );
                 println!("chunk index: {}", chunk_index);
+                assert_eq!(*chunk_index, mmrmp.leaf_index);
                 assert!(mmrmp.verify(&swbfi.get_peaks(), Hash::hash(chunk), swbfi.count_leaves()));
                 visited_chunk_indices.push(*chunk_index);
             }
@@ -662,7 +673,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let push_u64 = library.import(Box::new(Push {
             element_type: DataType::U64,
         }));
-        let multiset_equality = library.import(Box::new(MultisetEquality));
+        let multiset_equality_u64s = library.import(Box::new(MultisetEqualityU64s));
 
         let collect_aocl_index = "collect_aocl_index".to_string();
         let for_all_absolute_indices = "for_all_absolute_indices".to_string();
@@ -868,7 +879,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi
                 hint swbfi = stack[0]
 
-                dup 7 push 1 add {&field_target_chunks}
+                break
+
+                dup 11 push 1 add
+                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *utxos[i]
+                hint removal_records_i = stack[0]
+
+                {&field_target_chunks}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks
 
                 dup 0 push 1 add read_mem 1 pop 1
@@ -884,12 +901,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 call {visit_all_chunks}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi *target_chunks N N *target_chunks[N]_si
 
-                pop 4
+                pop 5
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices
 
 
                 /* equate chunk index lists as sets */
-                call {multiset_equality}
+
+                call {multiset_equality_u64s}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] ({inactive_chunk_indices} == {visited_chunk_indices})
 
                 assert
@@ -1028,7 +1046,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         // *chunk_dictionary_entry : (chunk_index, (mmr_mp, chunk))
         // serialized as: size(chunk+mmr_mp), size(chunk), len(chunk), [indices], size(mmr_mp), [mmr_mp], [chunk index]
         let field_chunk_index = triton_asm!(
-            read_mem 1 push 2 add add
+            read_mem 1
+            hint size_of_chunk_and_mmrmp = stack[1]
+            hint chunk_entry_minus_one = stack[0]
+            push 2 add
+            hint chunk_si = stack[0]
+            add
+            hint chunk_index_ptr = stack[0]
         );
         let field_with_size_chunk = triton_asm!(
             push 1 add
@@ -1101,6 +1125,21 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 call {mmr_verify_from_memory} assert
                 // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+
+
+                /* record chunk index as visited */
+
+                dup 6 dup 1 {&field_chunk_index}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *visited_chunk_indices *chunk_index
+
+                push 1 read_mem 2 pop 1
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i] *visited_chunk_indices [chunk_index]
+
+                call {push_u64}
+                // _ *visited_chunk_indices *swbfi *target_chunks N i chunk_size *target_chunks[i]
+
+
+                /* prepare next iteration */
 
                 add
                 // _ *visited_chunk_indices *swbfi *target_chunks N i *target_chunks[i+1]_si
