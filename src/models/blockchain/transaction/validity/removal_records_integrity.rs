@@ -123,7 +123,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         );
 
         // set digests
-        let digests = vec![
+        let digests = [
             self.mast_path_mutator_set.clone(),
             self.mast_path_inputs.clone(),
             self.membership_proofs
@@ -457,6 +457,23 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             element_type: DataType::U64,
         }));
         let hash_varlen = library.import(Box::new(HashVarlen));
+        let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
+        let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
+        let compute_indices = library.import(Box::new(ComputeIndices));
+        let hash_index_list = library.import(Box::new(HashStaticSize {
+            size: NUM_TRIALS as usize * 4,
+        }));
+        let contains_u64 = library.import(Box::new(Contains {
+            element_type: DataType::U64,
+        }));
+        let push_u64 = library.import(Box::new(Push {
+            element_type: DataType::U64,
+        }));
+        let multiset_equality_u64s = library.import(Box::new(MultisetEqualityU64s));
+        let shift_right_log2_chunk_size =
+            library.import(Box::new(ShiftRightStaticU128::<LOG2_CHUNK_SIZE>));
+        let lt_u64 = library.import(Box::new(LtStandardU64));
+        let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
 
         let field_aocl = field!(RemovalRecordsIntegrityWitness::aocl);
         let field_swbfi = field!(RemovalRecordsIntegrityWitness::swbfi);
@@ -474,20 +491,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let outer_loop = "for_all_utxos".to_string();
 
-        let payload = triton_asm! {
-            /* read txkmh */
-            read_io 5
-            // _ [txk_mast_hash]
-            hint txk_mast_hash = stack[0..5]
-
-            /* point to witness */
-            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+        let authenticate_mutator_set_acc_against_txkmh = triton_asm!(
             // _ [txk_mast_hash] *witness
-            hint witness = stack[0]
-
-
-            /* authenticate mutator set accumulator */
-
             dup 5
             dup 5
             dup 5
@@ -563,10 +568,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
             call {merkle_verify}
             // _ [txk_mast_hash] *witness
+        );
 
-
-            /* authenticate computed removal records against txk mast hash */
-
+        let authenticate_removal_records_against_txkmh = triton_asm!(
+            // _ [txk_mast_hash] *witness
             dup 5
             dup 5
             dup 5
@@ -586,10 +591,27 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
             call {merkle_verify}
             // _ [txk_mast_hash] *witness
+        );
 
+        let payload = triton_asm! {
+            /* read txkmh */
+            read_io {DIGEST_LENGTH}
+            hint txk_mast_hash = stack[0..5]
+            // _ [txk_mast_hash]
+
+            /* point to witness */
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            hint witness = stack[0]
+            // _ [txk_mast_hash] *witness
+
+            {&authenticate_mutator_set_acc_against_txkmh}
+            // _ [txk_mast_hash] *witness
+
+
+            /* authenticate divined removal records against txk mast hash */
+            {&authenticate_removal_records_against_txkmh}
 
             /* iterate over all input UTXOs */
-
             call {new_list_u64}
             // _ [txk_mast_hash] *witness *all_aocl_indices
             hint all_aocl_indices = stack[0]
@@ -647,20 +669,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_aocl_leaf_index = field!(MsMembershipProof::aocl_leaf_index);
         let field_indices = field!(RemovalRecord::absolute_indices);
         let field_target_chunks = field!(RemovalRecord::target_chunks);
-
-        let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
-        let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
-        let compute_indices = library.import(Box::new(ComputeIndices));
-        let hash_index_list = library.import(Box::new(HashStaticSize {
-            size: NUM_TRIALS as usize * 4,
-        }));
-        let contains_u64 = library.import(Box::new(Contains {
-            element_type: DataType::U64,
-        }));
-        let push_u64 = library.import(Box::new(Push {
-            element_type: DataType::U64,
-        }));
-        let multiset_equality_u64s = library.import(Box::new(MultisetEqualityU64s));
 
         let collect_aocl_index = "collect_aocl_index".to_string();
         let for_all_absolute_indices = "for_all_absolute_indices".to_string();
@@ -936,9 +944,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let collect_inactive_chunk_index = "collect_inactive_chunk_index".to_string();
         const LOG2_CHUNK_SIZE: u8 = 12;
         assert_eq!(CHUNK_SIZE, 1 << LOG2_CHUNK_SIZE);
-        let shift_right_log2_chunk_size =
-            library.import(Box::new(ShiftRightStaticU128::<LOG2_CHUNK_SIZE>));
-        let lt_u64 = library.import(Box::new(LtStandardU64));
 
         let subroutine_for_all_absolute_indices = triton_asm! {
             // INVARIANT: _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS 0 *bloom_index[0]
@@ -1021,8 +1026,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
                 return
         };
-
-        let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
 
         // field getters for chunk dictionary entry
         // *chunk_dictionary_entry : (chunk_index, (mmr_mp, chunk))
@@ -1232,22 +1235,21 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
 #[cfg(test)]
 mod tests {
-
-    use crate::models::{
-        blockchain::transaction::primitive_witness::PrimitiveWitness,
-        proof_abstractions::SecretWitness,
-    };
-
     use super::*;
-    use proptest::{
-        arbitrary::Arbitrary,
-        prop_assert_eq,
-        strategy::Strategy,
-        test_runner::{TestCaseError, TestRunner},
-    };
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::proof_abstractions::tasm::program::ConsensusError;
+    use crate::models::proof_abstractions::SecretWitness;
+    use crate::triton_vm::prelude::*;
+
+    use proptest::arbitrary::Arbitrary;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::strategy::Strategy;
+    use proptest::test_runner::TestCaseError;
+    use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
 
-    fn prop(
+    fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
     ) -> Result<(), TestCaseError> {
         let salted_inputs_utxos_hash = Hash::hash(&removal_records_integrity_witness.input_utxos)
@@ -1278,13 +1280,38 @@ mod tests {
         Ok(())
     }
 
+    fn prop_negative(
+        removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
+        allowed_failure_codes: &[InstructionError],
+    ) -> Result<(), TestCaseError> {
+        let tasm_result = RemovalRecordsIntegrity.run_tasm(
+            &removal_records_integrity_witness.standard_input(),
+            removal_records_integrity_witness.nondeterminism(),
+        );
+        prop_assert!(tasm_result.is_err());
+        let triton_vm_error_code = match tasm_result.unwrap_err() {
+            ConsensusError::TritonVMPanic(_string, instruction_error) => instruction_error,
+            _ => unreachable!(),
+        };
+
+        prop_assert!(allowed_failure_codes.contains(&triton_vm_error_code));
+
+        let rust_result = RemovalRecordsIntegrity.run_rust(
+            &removal_records_integrity_witness.standard_input(),
+            removal_records_integrity_witness.nondeterminism(),
+        );
+        prop_assert!(rust_result.is_err());
+
+        Ok(())
+    }
+
     #[proptest(cases = 5)]
     fn removal_records_integrity_proptest(
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        prop(removal_records_integrity_witness)?;
+        prop_positive(removal_records_integrity_witness)?;
     }
 
     #[test]
@@ -1297,7 +1324,41 @@ mod tests {
         println!("primitive_witness: {primitive_witness}");
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        let property = prop(removal_records_integrity_witness);
+        let property = prop_positive(removal_records_integrity_witness);
         assert!(property.is_ok(), "err: {}", property.unwrap_err());
+    }
+
+    #[test]
+    fn removal_records_fail_on_bad_ms_acc() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mut bad_removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_removal_records_integrity_witness.mast_path_mutator_set[1] = Digest::default();
+        let property = prop_negative(
+            bad_removal_records_integrity_witness,
+            &[InstructionError::VectorAssertionFailed(0)],
+        );
+        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
+    }
+
+    #[test]
+    fn removal_records_fail_on_bad_mast_path_inputs() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mut bad_removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_removal_records_integrity_witness.mast_path_inputs[1] = Digest::default();
+        let property = prop_negative(
+            bad_removal_records_integrity_witness,
+            &[InstructionError::VectorAssertionFailed(0)],
+        );
+        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
     }
 }
