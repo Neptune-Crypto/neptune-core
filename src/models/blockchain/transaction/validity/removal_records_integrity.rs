@@ -429,21 +429,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // authenticate chunks in dictionary
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
-            println!(
-                "num leafs: {} = {} + ({} << 32)",
-                swbfi.count_leaves(),
-                swbfi.count_leaves() & (u32::MAX as u64),
-                swbfi.count_leaves() >> 32,
-            );
             for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
-                println!("chunk digest: {}", Hash::hash(chunk));
-                println!(
-                    "leaf index: {} = {} + ({} << 32)",
-                    mmrmp.leaf_index,
-                    mmrmp.leaf_index & (u32::MAX as u64),
-                    mmrmp.leaf_index >> 32
-                );
-                println!("chunk index: {}", chunk_index);
                 assert_eq!(*chunk_index, mmrmp.leaf_index);
                 assert!(mmrmp.verify(&swbfi.get_peaks(), Hash::hash(chunk), swbfi.count_leaves()));
                 visited_chunk_indices.push(*chunk_index);
@@ -636,12 +622,11 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             call {outer_loop}
             // _ [txk_mast_hash] *witness *all_aocl_indices *removal_records[0]_si num_utxos num_utxos *utxos[num_utxos]_si *msmp[num_utxos]_si *aocl
 
-            pop 4
+            pop 5 pop 2
             // _ [txk_mast_hash] *witness
 
 
             /* compute and output hash of salted input UTXOs */
-
             {&field_with_size_input_utxos}
             // _ [txk_mast_hash] *salted_input_utxos size
 
@@ -780,9 +765,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 hint msmp_i = stack[0]
 
                 call {compute_indices}
-                // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices_li
-
-                push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices
                 hint computed_bloom_indices = stack[0]
 
@@ -801,7 +783,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices]
                 hint present_bloom_indices = stack[0..5]
 
-                dup 5 call {hash_index_list} pop 1
+                dup 5 push 1 add call {hash_index_list} pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [present_bloom_indices] [computed_bloom_indices]
                 hint computed_bloom_indices = stack[0..5]
 
@@ -878,8 +860,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 12 {&field_swbfi}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *swbfi
                 hint swbfi = stack[0]
-
-                break
 
                 dup 11 push 1 add
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl *computed_bloom_indices [swbfi_num_leafs] *inactive_chunk_indices *visited_chunk_indices *utxos[i]
@@ -969,9 +949,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 
                 /* compute chunk index */
-
                 dup 0 push 3 add read_mem 4 pop 1
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i]]
+                hint bloom_index = stack[0..4]
 
                 call {shift_right_log2_chunk_size}
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [bloom_index[i] / chunk_size]
@@ -980,10 +960,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 swap 2 pop 1
                 swap 2 pop 1
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
+                hint chunk_index = stack[0..2]
 
 
                 /* test activity */
-
                 dup 7 dup 7
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] [swbf_num_leafs]
 
@@ -1031,7 +1011,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // AFTER: _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index]
             {collect_inactive_chunk_index}:
 
-                dup 5 dup 3 dup 3
+                dup 5 dup 2 dup 2
                 // _ [swbf_num_leafs] *inactive_chunk_indices NUM_TRIALS i *bloom_index[i] [chunk_index] *inactive_chunk_indices [chunk_index]
 
                 call {push_u64}
@@ -1132,7 +1112,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 dup 6 dup 1 {&field_chunk_index}
                 // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *visited_chunk_indices *chunk_index
 
-                break
                 push 1 add read_mem 2 pop 1
                 // _ *visited_chunk_indices *swbfi *target_chunks N j chunk_size *target_chunks[i] *visited_chunk_indices [chunk_index]
 
@@ -1286,7 +1265,13 @@ mod tests {
                 removal_records_integrity_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(rust_result, tasm_result);
+        prop_assert_eq!(
+            rust_result.clone(),
+            tasm_result.clone(),
+            "\ntasm output: [{}]\nbut expected: [{}]",
+            tasm_result.iter().join(", "),
+            rust_result.iter().join(", "),
+        );
 
         Ok(())
     }
@@ -1310,6 +1295,7 @@ mod tests {
         println!("primitive_witness: {primitive_witness}");
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        assert!(prop(removal_records_integrity_witness).is_ok());
+        let property = prop(removal_records_integrity_witness);
+        assert!(property.is_ok(), "err: {}", property.unwrap_err());
     }
 }
