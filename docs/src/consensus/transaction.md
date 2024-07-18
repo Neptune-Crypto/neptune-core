@@ -41,10 +41,12 @@ A transaction witness is defined to be valid if, after deriving from it a set of
 A transaction witness consists of the following fields:
 
  - `input_utxos: SaltedUtxos` A wrapper object wrapping together a list of input `Utxo`s and a salt, which is 3 `BFieldElement`s.
- - `input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
+ - `lock_scripts_and_witnesses: Vec<LockScriptAndWitness>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
  - `type_scripts_and_witnesses: Vec<TypeScriptAndWitness>` The scripts that authenticate the correct evolution of all token types involved.
  - `input_membership_proofs: Vec<MsMembershipProof>` Membership proofs in the mutator set for the input UTXOs.
  - `output_utxos: SaltedUtxos` A wrapper object wrapping together a list of output `Utxo`s and a salt, which is 3 `BFieldElement`s.
+ - `output_sender_randomnesses: Vec<Digest>` Senders' contributions to output commitment randomnesses.
+ - `output_receiver_digests: Vec<Digest>` Receivers' contributions to output commitment randomnesses.
  - `mutator_set_accumulator: MutatorSetAccumulator` The mutator set accumulator, which is the anonymous accumulator.
  - `kernel: TransactionKernel` The transaction kernel that this witness attests to.
 
