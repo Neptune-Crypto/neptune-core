@@ -18,6 +18,7 @@ use serde_derive::Serialize;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
+use tasm_lib::triton_vm::program::NonDeterminism;
 use triton_vm::triton_asm;
 use triton_vm::triton_instr;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
@@ -32,6 +33,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::state::LockScriptAndWitness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
@@ -131,19 +133,6 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     Ok(bytes[0..length].to_vec())
 }
 
-/// Verify the UTXO owner's assent to the transaction.
-/// This is the rust reference implementation, but the version of
-/// this logic that is proven is `lock_script`.
-///
-/// This function mocks proof verification.
-pub fn std_lockscript_reference_verify_unlock(
-    spending_lock: Digest,
-    _bind_to: Digest,
-    witness_data: [BFieldElement; DIGEST_LENGTH],
-) -> bool {
-    spending_lock == Digest::new(witness_data).hash::<Hash>()
-}
-
 impl SpendingKey {
     pub fn to_address(&self) -> ReceivingAddress {
         let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&self.seed).unwrap());
@@ -155,6 +144,14 @@ impl SpendingKey {
             privacy_digest,
             spending_lock: self.generate_spending_lock(),
         }
+    }
+
+    pub fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+        let receiving_address = self.to_address();
+        LockScriptAndWitness::new_with_nondeterminism(
+            receiving_address.lock_script().program,
+            NonDeterminism::new(self.unlock_key.reversed().values()),
+        )
     }
 
     /// Return announces a list of (addition record, utxo, sender randomness, receiver preimage)
@@ -362,7 +359,7 @@ impl ReceivingAddress {
     /// Generate a lock script from the spending lock. Satisfaction
     /// of this lock script establishes the UTXO owner's assent to
     /// the transaction. The logic contained in here should be
-    /// identical to `verify_unlock`.
+    /// identical to [Self::verify_unlock].
     pub fn lock_script(&self) -> LockScript {
         let mut push_spending_lock_digest_to_stack = vec![];
         for elem in self.spending_lock.values().iter().rev() {
@@ -427,12 +424,8 @@ impl ReceivingAddress {
     /// this logic that is proven is `lock_script`.
     ///
     /// This function mocks proof verification.
-    fn _reference_verify_unlock(
-        &self,
-        msg: Digest,
-        witness_data: [BFieldElement; DIGEST_LENGTH],
-    ) -> bool {
-        std_lockscript_reference_verify_unlock(self.spending_lock, msg, witness_data)
+    fn verify_unlock(&self, msg: Digest, witness_data: [BFieldElement; DIGEST_LENGTH]) -> bool {
+        self.spending_lock == Digest::new(witness_data).hash::<Hash>()
     }
 }
 
@@ -454,6 +447,7 @@ fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NU
 #[cfg(test)]
 mod test_generation_addresses {
     use rand::{random, thread_rng, Rng, RngCore};
+    use triton_vm::program::PublicInput;
     use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
     use crate::{
@@ -463,8 +457,22 @@ mod test_generation_addresses {
         },
         tests::shared::make_mock_transaction,
     };
+    use proptest::prop_assert;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
 
     use super::*;
+
+    #[proptest]
+    fn lock_script_halts_gracefully(
+        #[strategy(arb::<Digest>())] txk_mast_hash: Digest,
+        #[strategy(arb::<Digest>())] seed: Digest,
+    ) {
+        let spending_key = SpendingKey::derive_from_seed(seed);
+        let lock_script_and_witness = spending_key.lock_script_and_witness();
+        prop_assert!(lock_script_and_witness
+            .halts_gracefully(PublicInput::new(txk_mast_hash.reversed().values().to_vec())));
+    }
 
     #[test]
     fn test_conversion_fixed_length() {
@@ -528,7 +536,7 @@ mod test_generation_addresses {
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(msg);
-        assert!(receiving_address._reference_verify_unlock(msg, witness_data));
+        assert!(receiving_address.verify_unlock(msg, witness_data));
 
         let receiving_address_again = spending_key.to_address();
         assert_eq!(receiving_address, receiving_address_again);
