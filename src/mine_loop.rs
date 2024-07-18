@@ -357,9 +357,10 @@ mod mine_loop_tests {
         models::{proof_abstractions::timestamp::Timestamp, state::UtxoReceiverData},
         tests::shared::mock_genesis_global_state,
     };
+    use lock_script::LockScript;
     use tasm_lib::Digest;
     use tracing_test::traced_test;
-    use utxo::{LockScript, Utxo};
+    use utxo::Utxo;
 
     use super::*;
 

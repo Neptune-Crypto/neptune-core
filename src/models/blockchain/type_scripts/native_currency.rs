@@ -633,7 +633,7 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
-    use crate::models::blockchain::transaction::utxo::LockScriptAndWitness;
+    use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use proptest::prelude::*;
     use proptest::prop_assert;
     use proptest::{

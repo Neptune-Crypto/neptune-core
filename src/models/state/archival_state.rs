@@ -840,7 +840,7 @@ mod archival_state_tests {
 
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::utxo::LockScript;
+    use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;

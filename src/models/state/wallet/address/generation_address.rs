@@ -29,7 +29,7 @@ use twenty_first::{
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
+use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;

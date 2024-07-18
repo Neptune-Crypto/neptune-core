@@ -360,7 +360,7 @@ mod wallet_state_tests {
     use super::*;
     use crate::{
         models::blockchain::{
-            transaction::utxo::LockScript, type_scripts::neptune_coins::NeptuneCoins,
+            transaction::lock_script::LockScript, type_scripts::neptune_coins::NeptuneCoins,
         },
         tests::shared::make_mock_transaction,
     };

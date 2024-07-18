@@ -2,6 +2,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
+pub mod lock_script;
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
@@ -431,9 +432,10 @@ mod tests {
 
 #[cfg(test)]
 mod transaction_tests {
+    use lock_script::LockScript;
     use rand::random;
     use tracing_test::traced_test;
-    use transaction_tests::utxo::{LockScript, Utxo};
+    use transaction_tests::utxo::Utxo;
 
     use super::*;
     use crate::{

@@ -1,7 +1,7 @@
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
-use crate::models::blockchain::transaction::utxo::LockScriptAndWitness;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;

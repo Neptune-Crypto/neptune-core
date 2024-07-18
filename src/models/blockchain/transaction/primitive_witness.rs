@@ -42,11 +42,9 @@ use crate::{
 };
 use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
 
-use super::{
-    transaction_kernel::TransactionKernel,
-    utxo::{LockScript, LockScriptAndWitness, Utxo},
-    PublicAnnouncement,
-};
+use super::lock_script::LockScript;
+use super::lock_script::LockScriptAndWitness;
+use super::{transaction_kernel::TransactionKernel, utxo::Utxo, PublicAnnouncement};
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
 /// is desirable to associate a random but consistent salt for the entire list of UTXOs.
