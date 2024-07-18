@@ -81,7 +81,7 @@ pub trait TypeScriptWitness {
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;
-
+    fn type_script_and_witness(&self) -> TypeScriptAndWitness;
     fn type_script_standard_input(&self) -> PublicInput {
         PublicInput::new(
             [

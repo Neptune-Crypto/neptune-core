@@ -25,7 +25,9 @@ use tracing::{debug, warn};
 
 use crate::{
     models::{
-        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
+        blockchain::type_scripts::{
+            native_currency::NativeCurrencyWitness, neptune_coins::NeptuneCoins, TypeScriptWitness,
+        },
         proof_abstractions::tasm::program::ConsensusProgram,
     },
     util_types::mutator_set::commit,
@@ -143,18 +145,10 @@ impl PrimitiveWitness {
             .iter()
             .map(|address_seed| generation_address::SpendingKey::derive_from_seed(*address_seed))
             .collect_vec();
-        let input_lock_scripts = input_spending_keys
-            .iter()
-            .map(|spending_key| spending_key.to_address().lock_script())
-            .collect_vec();
-        let input_lock_script_witnesses = input_spending_keys
-            .iter()
-            .map(|spending_key| spending_key.unlock_key.values().to_vec())
-            .collect_vec();
-        let input_lock_scripts_and_witnesses = input_lock_scripts
+
+        let input_lock_scripts_and_witnesses = input_spending_keys
             .into_iter()
-            .zip(input_lock_script_witnesses)
-            .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
+            .map(|spending_key| spending_key.lock_script_and_witness())
             .collect_vec();
 
         let input_utxos = input_lock_scripts_and_witnesses
@@ -632,24 +626,32 @@ impl PrimitiveWitness {
                                 mutator_set_hash: mutator_set_accumulator.hash(),
                             };
 
+                            let salted_input_utxos = SaltedUtxos {
+                                utxos: input_utxos.clone(),
+                                salt: inputs_salt.clone().try_into().unwrap(),
+                            };
+                            let salted_output_utxos = SaltedUtxos {
+                                utxos: output_utxos.clone(),
+                                salt: outputs_salt.clone().try_into().unwrap(),
+                            };
+
                             let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
-                                vec![TypeScriptAndWitness::new(NativeCurrency.program())]
+                                let native_currency_type_script_witness = NativeCurrencyWitness {
+                                    salted_input_utxos: salted_input_utxos.clone(),
+                                    salted_output_utxos: salted_output_utxos.clone(),
+                                    kernel: kernel.clone(),
+                                };
+                                vec![native_currency_type_script_witness.type_script_and_witness()]
                             } else {
                                 vec![]
                             };
 
                             PrimitiveWitness {
                                 lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
-                                input_utxos: SaltedUtxos {
-                                    utxos: input_utxos.clone(),
-                                    salt: inputs_salt.clone().try_into().unwrap(),
-                                },
+                                input_utxos: salted_input_utxos,
                                 input_membership_proofs: input_membership_proofs.clone(),
                                 type_scripts_and_witnesses,
-                                output_utxos: SaltedUtxos {
-                                    utxos: output_utxos.clone(),
-                                    salt: outputs_salt.clone().try_into().unwrap(),
-                                },
+                                output_utxos: salted_output_utxos,
                                 output_sender_randomnesses: output_sender_randomnesses.clone(),
                                 output_receiver_digests: output_receiver_preimages
                                     .iter()

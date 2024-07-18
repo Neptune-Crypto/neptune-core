@@ -129,7 +129,11 @@ mod transaction {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        let nc_witness = NativeCurrencyWitness::from(primitive_witness);
+        let nc_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         bench_and_profile_consensus_program(
             NativeCurrency,
             &nc_witness.standard_input(),

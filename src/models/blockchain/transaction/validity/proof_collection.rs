@@ -36,7 +36,8 @@ use crate::models::{
 };
 
 use super::{
-    kernel_to_outputs::KernelToOutputsWitness, removal_records_integrity::RemovalRecordsIntegrity,
+    collect_type_scripts::CollectTypeScriptsWitness, kernel_to_outputs::KernelToOutputsWitness,
+    removal_records_integrity::RemovalRecordsIntegrity,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -55,13 +56,35 @@ pub struct ProofCollection {
 }
 
 impl ProofCollection {
-    pub fn produce(primitive_witness: PrimitiveWitness) -> Self {
+    fn extract_specific_witnesses(
+        primitive_witness: &PrimitiveWitness,
+    ) -> (
+        RemovalRecordsIntegrityWitness,
+        CollectLockScriptsWitness,
+        KernelToOutputsWitness,
+        CollectTypeScriptsWitness,
+    ) {
         // collect witnesses
         let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
-        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let collect_type_scripts_witness = KernelToOutputsWitness::from(&primitive_witness);
+            RemovalRecordsIntegrityWitness::from(primitive_witness);
+        let collect_lock_scripts_witness = CollectLockScriptsWitness::from(primitive_witness);
+        let kernel_to_outputs_witness = KernelToOutputsWitness::from(primitive_witness);
+        let collect_type_scripts_witness = CollectTypeScriptsWitness::from(primitive_witness);
+
+        (
+            removal_records_integrity_witness,
+            collect_lock_scripts_witness,
+            kernel_to_outputs_witness,
+            collect_type_scripts_witness,
+        )
+    }
+    pub fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
+        let (
+            removal_records_integrity_witness,
+            collect_lock_scripts_witness,
+            kernel_to_outputs_witness,
+            collect_type_scripts_witness,
+        ) = Self::extract_specific_witnesses(primitive_witness);
 
         // verify graceful halts
         let removal_records_integrity_halts = RemovalRecordsIntegrity
@@ -106,15 +129,26 @@ impl ProofCollection {
             .iter()
             .all(|ts| ts.halts_gracefully(txk_mast_hash, salted_inputs_hash, salted_outputs_hash));
 
-        if !removal_records_integrity_halts
-            || !collect_lock_scripts_halts
-            || !kernel_to_outputs_halts
-            || !collect_type_scripts_halts
-            || !all_lock_scripts_halt
-            || !all_type_scripts_halt
-        {
-            panic!("cannot produce proof collection for transaction because one or more consensus programs fails to halt gracefully")
-        }
+        removal_records_integrity_halts
+            || collect_lock_scripts_halts
+            || kernel_to_outputs_halts
+            || collect_type_scripts_halts
+            || all_lock_scripts_halt
+            || all_type_scripts_halt
+    }
+
+    pub fn produce(primitive_witness: &PrimitiveWitness) -> Self {
+        let (
+            removal_records_integrity_witness,
+            collect_lock_scripts_witness,
+            kernel_to_outputs_witness,
+            collect_type_scripts_witness,
+        ) = Self::extract_specific_witnesses(primitive_witness);
+
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+        let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
+        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
+        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
 
         // prove
         let removal_records_integrity = RemovalRecordsIntegrity.prove(
@@ -305,5 +339,33 @@ impl ConsensusProgram for StandardDecomposition {
 
     fn code(&self) -> Vec<LabelledInstruction> {
         todo!()
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use proptest::prop_assert;
+    use proptest::{arbitrary::Arbitrary, strategy::Strategy, test_runner::TestRunner};
+    use test_strategy::proptest;
+
+    #[proptest(cases = 5)]
+    fn can_produce_valid_collection(
+        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        prop_assert!(ProofCollection::can_produce(&primitive_witness));
+    }
+
+    #[test]
+    fn can_verify_valid_collection() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let proof_collection = ProofCollection::produce(&primitive_witness);
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+        assert!(proof_collection.verify(txk_mast_hash));
     }
 }

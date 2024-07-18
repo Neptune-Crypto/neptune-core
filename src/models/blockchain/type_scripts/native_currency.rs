@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
@@ -16,6 +15,7 @@ use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::tasm::coinbase_amount::CoinbaseAmount;
 use crate::models::blockchain::type_scripts::BFieldCodec;
+use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
@@ -584,15 +584,12 @@ impl TypeScriptWitness for NativeCurrencyWitness {
     fn salted_output_utxos(&self) -> SaltedUtxos {
         self.salted_output_utxos.clone()
     }
-}
 
-impl From<PrimitiveWitness> for NativeCurrencyWitness {
-    fn from(primitive_witness: PrimitiveWitness) -> Self {
-        Self {
-            salted_input_utxos: primitive_witness.input_utxos.clone(),
-            salted_output_utxos: primitive_witness.output_utxos.clone(),
-            kernel: primitive_witness.kernel.clone(),
-        }
+    fn type_script_and_witness(&self) -> TypeScriptAndWitness {
+        TypeScriptAndWitness::new_with_nondeterminism(
+            NativeCurrency.program(),
+            self.nondeterminism(),
+        )
     }
 }
 
@@ -705,7 +702,11 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_positive(native_currency_witness).unwrap();
     }
 
@@ -716,7 +717,11 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_positive(native_currency_witness).unwrap();
     }
 
@@ -729,7 +734,11 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_positive(native_currency_witness)?;
     }
 
@@ -741,7 +750,11 @@ pub mod test {
         #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements))]
         primitive_witness: PrimitiveWitness,
     ) {
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_positive(native_currency_witness)?;
     }
 
@@ -762,7 +775,11 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_negative(
             native_currency_witness,
             &[InstructionError::AssertionFailed],
@@ -787,7 +804,11 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
         prop_negative(
             native_currency_witness,
             &[InstructionError::AssertionFailed],

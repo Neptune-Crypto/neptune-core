@@ -441,6 +441,9 @@ impl TypeScriptWitness for TimeLockWitness {
     fn salted_output_utxos(&self) -> SaltedUtxos {
         SaltedUtxos::empty()
     }
+    fn type_script_and_witness(&self) -> TypeScriptAndWitness {
+        TypeScriptAndWitness::new_with_nondeterminism(TimeLock.program(), self.nondeterminism())
+    }
 }
 
 impl From<transaction::primitive_witness::PrimitiveWitness> for TimeLockWitness {

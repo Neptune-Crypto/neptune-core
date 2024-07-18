@@ -4,7 +4,7 @@ use tasm_lib::triton_vm::{instruction::LabelledInstruction, prelude::BFieldCodec
 
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-use super::standard_decomposition::ProofCollection;
+use super::proof_collection::ProofCollection;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionValidity;

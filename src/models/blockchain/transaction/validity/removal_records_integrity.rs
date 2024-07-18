@@ -142,6 +142,10 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         PublicInput::new(self.mast_root.reversed().values().to_vec())
     }
 
+    fn output(&self) -> Vec<BFieldElement> {
+        Hash::hash(&self.input_utxos).values().to_vec()
+    }
+
     fn program(&self) -> triton_vm::prelude::Program {
         RemovalRecordsIntegrity.program()
     }
@@ -385,7 +389,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 msmp.sender_randomness,
                 msmp.receiver_preimage.hash::<Hash>(),
             );
-            println!("addition record: {}", addition_record.canonical_commitment);
             tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
                 &aocl.get_peaks(),
                 aocl.count_leaves(),
@@ -1252,9 +1255,7 @@ mod tests {
     fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
     ) -> Result<(), TestCaseError> {
-        let salted_inputs_utxos_hash = Hash::hash(&removal_records_integrity_witness.input_utxos)
-            .values()
-            .to_vec();
+        let salted_inputs_utxos_hash = removal_records_integrity_witness.output();
         let rust_result = RemovalRecordsIntegrity
             .run_rust(
                 &removal_records_integrity_witness.standard_input(),

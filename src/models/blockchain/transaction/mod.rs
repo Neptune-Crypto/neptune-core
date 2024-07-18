@@ -22,7 +22,7 @@ use tracing::error;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use validity::standard_decomposition::ProofCollection;
+use validity::proof_collection::ProofCollection;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
