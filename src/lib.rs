@@ -63,7 +63,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tracing::{info, trace};
 
-use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
+use crate::models::channel::{MainToMiner, MainToPeerTask, MinerToMain, PeerTaskToMain};
 use crate::models::peer::HandshakeData;
 
 /// Magic string to ensure other program is Neptune Core
@@ -119,13 +119,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
 
-    // Construct the broadcast channel to communicate from the main thread to peer threads
+    // Construct the broadcast channel to communicate from the main task to peer tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
+        broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
 
-    // Add the MPSC (multi-producer, single consumer) channel for peer-thread-to-main communication
-    let (peer_thread_to_main_tx, peer_thread_to_main_rx) =
-        mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
+    // Add the MPSC (multi-producer, single consumer) channel for peer-task-to-main communication
+    let (peer_task_to_main_tx, peer_task_to_main_rx) =
+        mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
 
     // Create handshake data which is used when connecting to outgoing peers specified in the
     // CLI arguments
@@ -166,14 +166,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         .await?;
     info!("UTXO restoration check complete");
 
-    // Connect to peers, and provide each peer thread with a thread-safe copy of the state
-    let mut thread_join_handles = vec![];
+    // Connect to peers, and provide each peer task with a thread-safe copy of the state
+    let mut task_join_handles = vec![];
     for peer_address in global_state_lock.cli().peers.clone() {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
-        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
+        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
             main_to_peer_broadcast_tx.subscribe();
-        let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
-            peer_thread_to_main_tx.clone();
+        let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = peer_task_to_main_tx.clone();
         let own_handshake_data_clone = own_handshake_data.clone();
         let peer_join_handle = tokio::task::Builder::new()
             .name("call_peer_wrapper_3")
@@ -182,17 +181,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                     peer_address,
                     peer_state_var.clone(),
                     main_to_peer_broadcast_rx_clone,
-                    peer_thread_to_main_tx_clone,
+                    peer_task_to_main_tx_clone,
                     own_handshake_data_clone,
                     1, // All outgoing connections have distance 1
                 )
                 .await;
             })?;
-        thread_join_handles.push(peer_join_handle);
+        task_join_handles.push(peer_join_handle);
     }
     info!("Made outgoing connections to peers");
 
-    // Start mining threads if requested
+    // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
@@ -207,10 +206,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                     miner_state_lock,
                 )
                 .await
-                .expect("Error in mining thread");
+                .expect("Error in mining task");
             })?;
-        thread_join_handles.push(miner_join_handle);
-        info!("Started mining thread");
+        task_join_handles.push(miner_join_handle);
+        info!("Started mining task");
     }
 
     // Start RPC server for CLI request and more. It's important that this is done as late
@@ -253,24 +252,24 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .for_each(|_| async {})
             .await;
     });
-    thread_join_handles.push(rpc_join_handle);
+    task_join_handles.push(rpc_join_handle);
     info!("Started RPC server");
 
-    // Handle incoming connections, messages from peer threads, and messages from the mining thread
+    // Handle incoming connections, messages from peer tasks, and messages from the mining task
     info!("Starting main loop");
     let main_loop_handler = MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,
-        peer_thread_to_main_tx,
+        peer_task_to_main_tx,
         main_to_miner_tx,
     );
     main_loop_handler
         .run(
-            peer_thread_to_main_rx,
+            peer_task_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
-            thread_join_handles,
+            task_join_handles,
         )
         .await
 }

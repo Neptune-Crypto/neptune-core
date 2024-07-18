@@ -44,7 +44,7 @@ pub struct WalletState {
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
 
-    // Any thread may read from expected_utxos, only main thread may write
+    // Any task may read from expected_utxos, only main task may write
     pub expected_utxos: UtxoNotificationPool,
 
     /// Path to directory containing wallet files

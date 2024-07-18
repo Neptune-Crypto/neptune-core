@@ -118,7 +118,7 @@ struct TransactionDetails {
 pub struct GlobalStateLock {
     global_state_lock: sync_tokio::AtomicRw<GlobalState>,
 
-    /// The `cli_args::Args` are read-only and accessible by all threads.
+    /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 }
 
@@ -218,27 +218,27 @@ impl DerefMut for GlobalStateLock {
     }
 }
 
-/// `GlobalState` handles all state of a Neptune node that is shared across its threads.
+/// `GlobalState` handles all state of a Neptune node that is shared across its tasks.
 ///
-/// Some fields are only written to by certain threads.
+/// Some fields are only written to by certain tasks.
 #[derive(Debug)]
 pub struct GlobalState {
-    /// The `WalletState` may be updated by the main thread and the RPC server.
+    /// The `WalletState` may be updated by the main task and the RPC server.
     pub wallet_state: WalletState,
 
-    /// The `BlockchainState` may only be updated by the main thread.
+    /// The `BlockchainState` may only be updated by the main task.
     pub chain: BlockchainState,
 
-    /// The `NetworkingState` may be updated by both the main thread and peer threads.
+    /// The `NetworkingState` may be updated by both the main task and peer tasks.
     pub net: NetworkingState,
 
-    /// The `cli_args::Args` are read-only and accessible by all threads.
+    /// The `cli_args::Args` are read-only and accessible by all tasks.
     cli: cli_args::Args,
 
-    /// The `Mempool` may only be updated by the main thread.
+    /// The `Mempool` may only be updated by the main task.
     pub mempool: Mempool,
 
-    // Only the mining thread should write to this, anyone can read.
+    // Only the mining task should write to this, anyone can read.
     pub mining: bool,
 }
 
@@ -414,16 +414,16 @@ impl GlobalState {
         }
     }
 
-    /// generates `UtxoReceiverList` from a list of address:amount pairs (outputs).
+    /// generates `TxOutputList` from a list of address:amount pairs (outputs).
     ///
-    /// This is a helper method for generating the `UtxoReceiverList` that
+    /// This is a helper method for generating the `TxOutputList` that
     /// is required by create_transaction() and create_raw_transaction().
     ///
     /// For each output, if a wallet key exists for the address then OffChain
     /// notification will be used via `ExpectedUtxo`.  Otherwise OnChainPubKey
     /// notification will be used via `PublicAnnouncement`.
     ///
-    /// If a different behavior is desired, the UtxoReceiverList can be
+    /// If a different behavior is desired, the TxOutputList can be
     /// constructed manually.
     pub fn generate_tx_outputs(
         &self,
@@ -432,14 +432,14 @@ impl GlobalState {
         let mut tx_outputs = TxOutputList::default();
         let block_height = self.chain.light_state().header().height;
 
-        // Convert outputs.  [address:amount] --> [UtxoReceiver]
+        // Convert outputs.  [address:amount] --> TxOutputList
         for (address, amount) in outputs.into_iter() {
             let sender_randomness = self
                 .wallet_state
                 .wallet_secret
                 .generate_sender_randomness(block_height, address.privacy_digest());
 
-            // append to receiver data list
+            // append to tx_outputs
             //
             // The UtxoNotifyType (Onchain or Offchain) is automatically detected
             // based on whether the address belongs to our wallet or not.
@@ -477,7 +477,7 @@ impl GlobalState {
     /// This function will modify the `tx_outputs` parameter by
     /// appending an element representing the change output, if change is
     /// needed.  Expected utxos, including change can then be retrieved
-    /// with [UtxoReceiverList::expected_utxos()].
+    /// with [TxOutputList::expected_utxos()].
     ///
     /// The `change_utxo_notify_method` parameter should normally be
     /// UtxoNotifyMethod::OffChain in order to save blockchain space.

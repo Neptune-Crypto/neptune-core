@@ -106,7 +106,7 @@ To use tokio-console with neptune-core:
 
 ## Local Integration Test Strategy
 
-This repository contains unit tests, but multi-threaded programs are notoriously hard to test. And the unit tests usually only cover narrow parts of the code within a single thread. When you are making changes to the code, you can run through the following checks
+This repository contains unit tests, but async programs are notoriously hard to test. And the unit tests usually only cover narrow parts of the code within a single async task. When you are making changes to the code, you can run through the following checks
 1. `cargo b` to verify that it builds without warnings
 2. `cargo t` to verify that all unit tests work
 3. `run-multiple-instances.sh` to spin up three nodes that are connected through `localhost`. Instance `I0` and `I2` should be mining and all three clients should be converging on the same blocks. You can read the hashes of the blocks in the log output and verify that they all store the same blocks.

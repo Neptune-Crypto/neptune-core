@@ -174,10 +174,10 @@ fn mine_block_worker(
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        // If the sender is cancelled, the parent to this thread most
-        // likely received a new block, and this thread hasn't been stopped
-        // yet by the operating system, although the call to abort this
-        // thread *has* been made.
+        // If the sender is cancelled, the parent of this task most
+        // likely received a new block, and this task hasn't been stopped
+        // yet by the executor, although the call to abort this
+        // task *has* been made.
         if sender.is_canceled() {
             info!(
                 "Abandoning mining of current block with height {}",
@@ -361,7 +361,7 @@ pub async fn mine(
     mut latest_block: Block,
     global_state_lock: GlobalStateLock,
 ) -> Result<()> {
-    // Wait before starting mining thread to ensure that peers have sent us information about
+    // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 10;
@@ -369,48 +369,48 @@ pub async fn mine(
 
     let mut pause_mine = false;
     loop {
-        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
-        let miner_thread: Option<JoinHandle<()>> =
-            if global_state_lock.lock(|s| s.net.syncing).await {
-                info!("Not mining because we are syncing");
-                global_state_lock.set_mining(false).await;
-                None
-            } else if pause_mine {
-                info!("Not mining because mining was paused");
-                global_state_lock.set_mining(false).await;
-                None
-            } else {
-                // Build the block template and spawn the worker thread to mine on it
-                let now = Timestamp::now();
-                let (transaction, coinbase_utxo_info) = create_block_transaction(
-                    &latest_block,
-                    global_state_lock.lock_guard().await.deref(),
-                    now,
-                );
-                let (block_header, block_body) =
-                    make_block_template(&latest_block, transaction, now, None);
-                let miner_task = mine_block(
-                    block_header,
-                    block_body,
-                    latest_block.clone(),
-                    worker_thread_tx,
-                    coinbase_utxo_info,
-                    latest_block.kernel.header.difficulty,
-                    global_state_lock.cli().unrestricted_mining,
-                    None, // using default TARGET_BLOCK_INTERVAL
-                );
-                global_state_lock.set_mining(true).await;
-                Some(
-                    tokio::task::Builder::new()
-                        .name("mine_block")
-                        .spawn(miner_task)?,
-                )
-            };
+        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let miner_task: Option<JoinHandle<()>> = if global_state_lock.lock(|s| s.net.syncing).await
+        {
+            info!("Not mining because we are syncing");
+            global_state_lock.set_mining(false).await;
+            None
+        } else if pause_mine {
+            info!("Not mining because mining was paused");
+            global_state_lock.set_mining(false).await;
+            None
+        } else {
+            // Build the block template and spawn the worker task to mine on it
+            let now = Timestamp::now();
+            let (transaction, coinbase_utxo_info) = create_block_transaction(
+                &latest_block,
+                global_state_lock.lock_guard().await.deref(),
+                now,
+            );
+            let (block_header, block_body) =
+                make_block_template(&latest_block, transaction, now, None);
+            let miner_task = mine_block(
+                block_header,
+                block_body,
+                latest_block.clone(),
+                worker_task_tx,
+                coinbase_utxo_info,
+                latest_block.kernel.header.difficulty,
+                global_state_lock.cli().unrestricted_mining,
+                None, // using default TARGET_BLOCK_INTERVAL
+            );
+            global_state_lock.set_mining(true).await;
+            Some(
+                tokio::task::Builder::new()
+                    .name("mine_block")
+                    .spawn(miner_task)?,
+            )
+        };
 
-        // Await a message from either the worker thread or from the main loop
+        // Await a message from either the worker task or from the main loop
         select! {
             changed = from_main.changed() => {
-                info!("Mining thread got message from main");
+                info!("Mining task got message from main");
                 if let e@Err(_) = changed {
                     return e.context("Miner failed to read from watch channel");
                 }
@@ -422,25 +422,25 @@ pub async fn mine(
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
 
-                        if let Some(mt) = miner_thread {
+                        if let Some(mt) = miner_task {
                             mt.abort();
                         }
 
                         break;
                     }
                     MainToMiner::NewBlock(block) => {
-                        if let Some(mt) = miner_thread {
+                        if let Some(mt) = miner_task {
                             mt.abort();
                         }
                         latest_block = *block;
-                        info!("Miner thread received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
+                        info!("Miner task received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
                     }
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {}
                     MainToMiner::StopMining => {
                         pause_mine = true;
 
-                        if let Some(mt) = miner_thread {
+                        if let Some(mt) = miner_task {
                             mt.abort();
                         }
                     }
@@ -454,30 +454,30 @@ pub async fn mine(
                     }
                     MainToMiner::StartSyncing => {
                         // when syncing begins, we must halt the mining
-                        // thread.  But we don't change the pause_mine
+                        // task.  But we don't change the pause_mine
                         // variable, because it reflects the logical on/off
                         // of mining, which syncing can temporarily override
                         // but not alter the setting.
-                        if let Some(mt) = miner_thread {
+                        if let Some(mt) = miner_task {
                             mt.abort();
                         }
                     }
                 }
             }
-            new_block_res = worker_thread_rx => {
+            new_block_res = worker_task_rx => {
                 let new_block_found = match new_block_res {
                     Ok(res) => res,
                     Err(err) => {
-                        warn!("Mining thread was cancelled prematurely. Got: {}", err);
+                        warn!("Mining task was cancelled prematurely. Got: {}", err);
                         continue;
                     }
                 };
 
-                debug!("Worker thread reports new block of height {}", new_block_found.block.kernel.header.height);
+                debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
 
                 // Sanity check, remove for more efficient mining.
                 // The below PoW check could fail due to race conditions. So we don't panic,
-                // we only ignore what the worker thread sent us.
+                // we only ignore what the worker task sent us.
                 if !new_block_found.block.has_proof_of_work(&latest_block) {
                     error!("Own mined block did not have valid PoW Discarding.");
                 }
@@ -503,8 +503,8 @@ pub async fn mine(
                     error!("Got bad message from `main_loop`: {:?}", msg);
 
                     // TODO: Handle this case
-                    // We found a new block but the main thread updated with a block
-                    // before our could be registered. We should mine on the one
+                    // We found a new block but the main task updated with a block
+                    // before ours could be registered. We should mine on the one
                     // received from the main loop and not the one we found here.
                 }
             }
@@ -656,7 +656,7 @@ mod mine_loop_tests {
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
-        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
@@ -676,14 +676,14 @@ mod mine_loop_tests {
             block_header,
             block_body,
             tip_block_orig.clone(),
-            worker_thread_tx,
+            worker_task_tx,
             coinbase_utxo_info,
             difficulty,
             unrestricted_mining,
             None,
         );
 
-        let mined_block_info = worker_thread_rx.await.unwrap();
+        let mined_block_info = worker_task_rx.await.unwrap();
 
         assert!(mined_block_info.block.is_valid(tip_block_orig, now));
         assert!(mined_block_info.block.has_proof_of_work(tip_block_orig));
@@ -707,7 +707,7 @@ mod mine_loop_tests {
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
-        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
@@ -732,14 +732,14 @@ mod mine_loop_tests {
             block_header,
             block_body,
             tip_block_orig.clone(),
-            worker_thread_tx,
+            worker_task_tx,
             coinbase_utxo_info,
             difficulty,
             unrestricted_mining,
             None,
         );
 
-        let mined_block_info = worker_thread_rx.await.unwrap();
+        let mined_block_info = worker_task_rx.await.unwrap();
 
         let block_timestamp = mined_block_info.block.kernel.header.timestamp;
 
@@ -831,21 +831,21 @@ mod mine_loop_tests {
                 Some(target_block_interval),
             );
 
-            let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
+            let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
             let height = block_header.height;
 
             mine_block_worker(
                 block_header,
                 block_body,
                 prev_block.clone(),
-                worker_thread_tx,
+                worker_task_tx,
                 coinbase_utxo_info,
                 difficulty,
                 unrestricted_mining,
                 Some(target_block_interval),
             );
 
-            let mined_block_info = worker_thread_rx.await.unwrap();
+            let mined_block_info = worker_task_rx.await.unwrap();
 
             // note: this assertion often fails prior to fix for #154.
             assert!(mined_block_info.block.is_valid_extended(

@@ -49,7 +49,7 @@ pub struct ArchivalState {
     pub block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
-    // this object in a spawned worker thread.
+    // this object in a spawned worker task.
     genesis_block: Box<Block>,
 
     // The archival mutator set is persisted to one database that also records a sync label,

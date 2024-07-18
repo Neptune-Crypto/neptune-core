@@ -97,14 +97,14 @@ impl Display for PeerSanctionReason {
                 "non-mined transaction has coinbase"
             }
             PeerSanctionReason::NoStandingFoundMaybeCrash => {
-                "No standing found in map. Did peer thread crash?"
+                "No standing found in map. Did peer task crash?"
             }
         };
         write!(f, "{string}")
     }
 }
 
-/// Used by main thread to manage synchronizations/catch-up. Main thread has
+/// Used by main task to manage synchronizations/catch-up. Main task has
 /// a value of this type for each connected peer.
 
 #[derive(Debug, Clone, Copy)]

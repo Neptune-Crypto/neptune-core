@@ -152,7 +152,7 @@ pub struct OverviewScreen {
     in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
-    poll_thread: Option<Arc<Mutex<JoinHandle<()>>>>,
+    poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
@@ -172,7 +172,7 @@ impl OverviewScreen {
                 listen_addr_for_peers,
             ))),
             server: rpc_server,
-            poll_thread: None,
+            poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -279,15 +279,15 @@ impl Screen for OverviewScreen {
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
-        self.poll_thread = Some(Arc::new(Mutex::new(tokio::spawn(async move {
+        self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
             OverviewScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
         }))));
     }
 
     fn deactivate(&mut self) {
         self.active = false;
-        if let Some(thread_handle) = &self.poll_thread {
-            (*thread_handle.lock().unwrap()).abort();
+        if let Some(task_handle) = &self.poll_task {
+            (*task_handle.lock().unwrap()).abort();
         }
     }
 

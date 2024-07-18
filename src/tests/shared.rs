@@ -60,7 +60,7 @@ use crate::models::blockchain::transaction::validity::TransactionValidationLogic
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::blockchain::type_scripts::TypeScript;
-use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
+use crate::models::channel::{MainToPeerTask, PeerTaskToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
@@ -221,16 +221,16 @@ pub async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
 ) -> Result<(
-    broadcast::Sender<MainToPeerThread>,
-    broadcast::Receiver<MainToPeerThread>,
-    mpsc::Sender<PeerThreadToMain>,
-    mpsc::Receiver<PeerThreadToMain>,
+    broadcast::Sender<MainToPeerTask>,
+    broadcast::Receiver<MainToPeerTask>,
+    mpsc::Sender<PeerTaskToMain>,
+    mpsc::Receiver<PeerTaskToMain>,
     GlobalStateLock,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
+        broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let devnet_wallet = WalletSecret::devnet_wallet();

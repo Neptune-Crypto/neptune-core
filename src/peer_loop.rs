@@ -5,7 +5,7 @@ use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::channel::{MainToPeerThread, PeerThreadToMain, PeerThreadToMainTransaction};
+use crate::models::channel::{MainToPeerTask, PeerTaskToMain, PeerTaskToMainTransaction};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
 };
@@ -38,7 +38,7 @@ pub type PeerStandingNumber = i32;
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.
 pub struct PeerLoopHandler {
-    to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    to_main_tx: mpsc::Sender<PeerTaskToMain>,
     global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
@@ -48,7 +48,7 @@ pub struct PeerLoopHandler {
 
 impl PeerLoopHandler {
     pub fn new(
-        to_main_tx: mpsc::Sender<PeerThreadToMain>,
+        to_main_tx: mpsc::Sender<PeerTaskToMain>,
         global_state_lock: GlobalStateLock,
         peer_address: SocketAddr,
         peer_handshake_data: HandshakeData,
@@ -91,7 +91,7 @@ impl PeerLoopHandler {
         Ok(())
     }
 
-    /// Handle validation and send all blocks to the main thread if they're all
+    /// Handle validation and send all blocks to the main task if they're all
     /// valid. Use with a list of blocks or a single block. When the
     /// `received_blocks` is a list, the parent of the `i+1`th block in the
     /// list is the `i`th block. The parent of element zero in this list is
@@ -155,11 +155,11 @@ impl PeerLoopHandler {
             previous_block = new_block;
         }
 
-        // Send the new blocks to the main thread which handles the state update
+        // Send the new blocks to the main task which handles the state update
         // and storage to the database.
         let new_block_height = received_blocks.last().unwrap().kernel.header.height;
         self.to_main_tx
-            .send(PeerThreadToMain::NewBlocks(received_blocks))
+            .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
         info!(
             "Updated block info by block from peer. block height {}",
@@ -369,7 +369,7 @@ impl PeerLoopHandler {
                         .await?;
                 }
                 self.to_main_tx
-                    .send(PeerThreadToMain::PeerDiscoveryAnswer((
+                    .send(PeerTaskToMain::PeerDiscoveryAnswer((
                         peers,
                         self.peer_address,
                         // The distance to the revealed peers is 1 + this peer's distance
@@ -657,13 +657,13 @@ impl PeerLoopHandler {
                         );
 
                         self.to_main_tx
-                            .send(PeerThreadToMain::AddPeerMaxBlockHeight((
+                            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
                                 block_notification.height,
                                 block_notification.proof_of_work_family,
                             )))
                             .await
-                            .expect("Sending to main thread must succeed");
+                            .expect("Sending to main task must succeed");
                     } else if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty()
                     {
                         debug!(
@@ -832,7 +832,7 @@ impl PeerLoopHandler {
                 }
 
                 // Otherwise relay to main
-                let pt2m_transaction = PeerThreadToMainTransaction {
+                let pt2m_transaction = PeerTaskToMainTransaction {
                     transaction: *transaction.to_owned(),
                     confirmable_for_block: self
                         .global_state_lock
@@ -843,7 +843,7 @@ impl PeerLoopHandler {
                         .hash(),
                 };
                 self.to_main_tx
-                    .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
+                    .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -889,14 +889,14 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Handle message from main thread. The boolean return value indicates if
+    /// Handle message from main task. The boolean return value indicates if
     /// the connection should be closed.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
-    async fn handle_main_thread_message<S>(
+    async fn handle_main_task_message<S>(
         &self,
-        msg: MainToPeerThread,
+        msg: MainToPeerTask,
         peer: &mut S,
         peer_state_info: &mut MutablePeerState,
     ) -> Result<bool>
@@ -907,7 +907,7 @@ impl PeerLoopHandler {
     {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
-            MainToPeerThread::Block(block) => {
+            MainToPeerTask::Block(block) => {
                 // We don't currently differentiate whether a new block came from a peer, or from our
                 // own miner. It's always shared through this logic.
                 let new_block_height = block.kernel.header.height;
@@ -920,7 +920,7 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            MainToPeerThread::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
+            MainToPeerTask::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
                 // Only ask one of the peers about the batch of blocks
                 if peer_addr_target != self.peer_address {
                     return Ok(false);
@@ -941,7 +941,7 @@ impl PeerLoopHandler {
 
                 Ok(false)
             }
-            MainToPeerThread::PeerSynchronizationTimeout(socket_addr) => {
+            MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
                 if self.peer_address != socket_addr {
                     return Ok(false);
                 }
@@ -953,24 +953,24 @@ impl PeerLoopHandler {
                 // sanction, we don't disconnect.
                 Ok(false)
             }
-            MainToPeerThread::MakePeerDiscoveryRequest => {
+            MainToPeerTask::MakePeerDiscoveryRequest => {
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(false)
             }
-            MainToPeerThread::Disconnect(target_socket_addr) => {
+            MainToPeerTask::Disconnect(target_socket_addr) => {
                 // Disconnect from this peer if its address matches that which the main
-                // thread requested to disconnected from.
+                // task requested to disconnect from.
                 Ok(target_socket_addr == self.peer_address)
             }
             // Disconnect from this peer, no matter what.
-            MainToPeerThread::DisconnectAll() => Ok(true),
-            MainToPeerThread::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
+            MainToPeerTask::DisconnectAll() => Ok(true),
+            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
                 Ok(false)
             }
-            MainToPeerThread::TransactionNotification(transaction_notification) => {
+            MainToPeerTask::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
                 peer.send(PeerMessage::TransactionNotification(
                     transaction_notification,
@@ -982,12 +982,12 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Loop for the peer threads. Awaits either a message from the peer over TCP,
-    /// or a message from main over the main-to-peer-threads broadcast channel.
+    /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
+    /// or a message from main over the main-to-peer-tasks broadcast channel.
     async fn run<S>(
         &self,
         mut peer: S,
-        mut from_main_rx: broadcast::Receiver<MainToPeerThread>,
+        mut from_main_rx: broadcast::Receiver<MainToPeerTask>,
         peer_state_info: &mut MutablePeerState,
     ) -> Result<()>
     where
@@ -1038,16 +1038,16 @@ impl PeerLoopHandler {
                     }
                 }
 
-                // Handle messages from main thread
+                // Handle messages from main task
                 main_msg_res = from_main_rx.recv() => {
                     let close_connection = match main_msg_res {
-                        Ok(main_msg) => match self.handle_main_thread_message(main_msg, &mut peer, peer_state_info).await {
+                        Ok(main_msg) => match self.handle_main_task_message(main_msg, &mut peer, peer_state_info).await {
                             Ok(close) => close,
 
-                            // If the handler of main-thread messages returns error, the connection is closed.
+                            // If the handler of main-task messages returns error, the connection is closed.
                             // This might indicate that the peer got banned.
                             Err(err) => {
-                                warn!("handle_main_thread_message returned an eror: {}", err);
+                                warn!("handle_main_task_message returned an eror: {}", err);
                                 true
                             },
                         }
@@ -1055,7 +1055,7 @@ impl PeerLoopHandler {
                     };
 
                     if close_connection {
-                        info!("handle_main_thread_message is closing the connection to {}", self.peer_address);
+                        info!("handle_main_task_message is closing the connection to {}", self.peer_address);
                         break;
                     }
                 }
@@ -1075,7 +1075,7 @@ impl PeerLoopHandler {
     pub async fn run_wrapper<S>(
         &self,
         mut peer: S,
-        from_main_rx: broadcast::Receiver<MainToPeerThread>,
+        from_main_rx: broadcast::Receiver<MainToPeerTask>,
     ) -> Result<()>
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -1106,7 +1106,7 @@ impl PeerLoopHandler {
 
         // There is potential for a race-condition in the peer_map here, as we've previously
         // counted the number of entries and checked if instance ID was already connected. But
-        // this check could have been invalidated by other threads so we perform it again
+        // this check could have been invalidated by other tasks so we perform it again
 
         if global_state
             .net
@@ -1134,7 +1134,7 @@ impl PeerLoopHandler {
 
         // This message is used to determine if we are to enter synchronization mode.
         self.to_main_tx
-            .send(PeerThreadToMain::AddPeerMaxBlockHeight((
+            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
                 self.peer_address,
                 self.peer_handshake_data.tip_header.height,
                 self.peer_handshake_data.tip_header.proof_of_work_family,
@@ -1323,12 +1323,12 @@ mod peer_loop_tests {
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -1407,12 +1407,12 @@ mod peer_loop_tests {
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -1452,7 +1452,7 @@ mod peer_loop_tests {
         let mut rng = thread_rng();
         // The scenario tested here is that a client receives a block that is already
         // known and stored. The expected behavior is to ignore the block and not send
-        // a message to the main thread.
+        // a message to the main task.
         let network = Network::Alpha;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
@@ -1488,11 +1488,11 @@ mod peer_loop_tests {
 
         // Verify that no block was sent to main loop
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
         match to_main_rx1.try_recv() {
@@ -1763,18 +1763,18 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         // Verify that a block was sent to `main_loop`
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(_block)) => (),
-            _ => bail!("Did not find msg sent to main thread"),
+            Some(PeerTaskToMain::NewBlocks(_block)) => (),
+            _ => bail!("Did not find msg sent to main task"),
         };
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -1830,12 +1830,12 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_1.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
@@ -1843,10 +1843,10 @@ mod peer_loop_tests {
                     bail!("2nd received block by main loop must be block 2");
                 }
             }
-            _ => bail!("Did not find msg sent to main thread 1"),
+            _ => bail!("Did not find msg sent to main task 1"),
         };
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -1937,11 +1937,11 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -2018,12 +2018,12 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
@@ -2034,10 +2034,10 @@ mod peer_loop_tests {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
-            _ => bail!("Did not find msg sent to main thread"),
+            _ => bail!("Did not find msg sent to main task"),
         };
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -2098,12 +2098,12 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_1.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
@@ -2114,10 +2114,10 @@ mod peer_loop_tests {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
-            _ => bail!("Did not find msg sent to main thread"),
+            _ => bail!("Did not find msg sent to main task"),
         };
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -2177,7 +2177,7 @@ mod peer_loop_tests {
             // Then anticipate the request of the block that was announced
             // in the interruption.
             // Note that we cannot anticipate the response, as only the main
-            // thread writes to the database. And the database needs to be updated
+            // task writes to the database. And the database needs to be updated
             // for the handling of block 5 to be done correctly.
             Action::Write(PeerMessage::BlockRequestByHeight(
                 block_5.kernel.header.height,
@@ -2199,12 +2199,12 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
@@ -2215,10 +2215,10 @@ mod peer_loop_tests {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
-            _ => bail!("Did not find msg sent to main thread"),
+            _ => bail!("Did not find msg sent to main task"),
         };
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -2301,13 +2301,13 @@ mod peer_loop_tests {
 
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive peer block max height"),
         }
 
         // Verify that blocks are sent to `main_loop` in expected ordering
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
@@ -2318,11 +2318,11 @@ mod peer_loop_tests {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
-            _ => bail!("Did not find msg sent to main thread"),
+            _ => bail!("Did not find msg sent to main task"),
         };
 
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 
@@ -2378,7 +2378,7 @@ mod peer_loop_tests {
         // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
         // by the `main_loop`.
         match to_main_rx1.recv().await {
-            Some(PeerThreadToMain::Transaction(_)) => (),
+            Some(PeerTaskToMain::Transaction(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
         }
 

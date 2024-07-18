@@ -42,7 +42,7 @@ pub enum MinerToMain {
 }
 
 #[derive(Clone, Debug)]
-pub enum MainToPeerThread {
+pub enum MainToPeerTask {
     Block(Box<Block>),
     RequestBlockBatch(Vec<Digest>, SocketAddr), // (most canonical known digests, peer_socket_to_request)
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
@@ -53,48 +53,48 @@ pub enum MainToPeerThread {
     DisconnectAll(),                              // Disconnect from all peers
 }
 
-impl MainToPeerThread {
+impl MainToPeerTask {
     pub fn get_type(&self) -> String {
         match self {
-            MainToPeerThread::Block(_) => "block".to_string(),
-            MainToPeerThread::RequestBlockBatch(_, _) => "req block batch".to_string(),
-            MainToPeerThread::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
-            MainToPeerThread::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),
-            MainToPeerThread::MakeSpecificPeerDiscoveryRequest(_) => {
+            MainToPeerTask::Block(_) => "block".to_string(),
+            MainToPeerTask::RequestBlockBatch(_, _) => "req block batch".to_string(),
+            MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
+            MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),
+            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {
                 "make specific peer discovery req".to_string()
             }
-            MainToPeerThread::TransactionNotification(_) => "transaction notification".to_string(),
-            MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
-            MainToPeerThread::DisconnectAll() => "disconnect all".to_string(),
+            MainToPeerTask::TransactionNotification(_) => "transaction notification".to_string(),
+            MainToPeerTask::Disconnect(_) => "disconnect".to_string(),
+            MainToPeerTask::DisconnectAll() => "disconnect all".to_string(),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum PeerThreadToMain {
+pub enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
-    Transaction(Box<PeerThreadToMainTransaction>),
+    Transaction(Box<PeerTaskToMainTransaction>),
 }
 
 #[derive(Clone, Debug)]
-pub struct PeerThreadToMainTransaction {
+pub struct PeerTaskToMainTransaction {
     pub transaction: Transaction,
     pub confirmable_for_block: Digest,
 }
 
-impl PeerThreadToMain {
+impl PeerTaskToMain {
     pub fn get_type(&self) -> String {
         match self {
-            PeerThreadToMain::NewBlocks(_) => "new blocks".to_string(),
-            PeerThreadToMain::AddPeerMaxBlockHeight(_) => "add peer max block height".to_string(),
-            PeerThreadToMain::RemovePeerMaxBlockHeight(_) => {
+            PeerTaskToMain::NewBlocks(_) => "new blocks".to_string(),
+            PeerTaskToMain::AddPeerMaxBlockHeight(_) => "add peer max block height".to_string(),
+            PeerTaskToMain::RemovePeerMaxBlockHeight(_) => {
                 "remove peer max block height".to_string()
             }
-            PeerThreadToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
-            PeerThreadToMain::Transaction(_) => "transaction".to_string(),
+            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
+            PeerTaskToMain::Transaction(_) => "transaction".to_string(),
         }
     }
 }

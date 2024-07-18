@@ -102,7 +102,7 @@ pub struct HistoryScreen {
     in_focus: bool,
     data: BalanceUpdateArc,
     server: Arc<RPCClient>,
-    poll_thread: Option<JoinHandleArc>,
+    poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
 }
@@ -117,7 +117,7 @@ impl HistoryScreen {
             in_focus: false,
             data: data.clone(),
             server: rpc_server,
-            poll_thread: None,
+            poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             events: data.into(),
         }
@@ -204,15 +204,15 @@ impl Screen for HistoryScreen {
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
-        self.poll_thread = Some(Arc::new(Mutex::new(tokio::spawn(async move {
+        self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
             HistoryScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
         }))));
     }
 
     fn deactivate(&mut self) {
         self.active = false;
-        if let Some(thread_handle) = &self.poll_thread {
-            (*thread_handle.lock().unwrap()).abort();
+        if let Some(task_handle) = &self.poll_task {
+            (*task_handle.lock().unwrap()).abort();
         }
     }
 

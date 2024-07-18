@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     models::{
-        channel::{MainToPeerThread, PeerThreadToMain},
+        channel::{MainToPeerTask, PeerTaskToMain},
         peer::{
             ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage, PeerStanding,
         },
@@ -134,15 +134,15 @@ pub async fn answer_peer_wrapper<S>(
     stream: S,
     state_lock: GlobalStateLock,
     peer_address: std::net::SocketAddr,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
+    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
     let state_lock_clone = state_lock.clone();
-    let peer_thread_to_main_tx_clone = peer_thread_to_main_tx.clone();
+    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
     let mut inner_ret: anyhow::Result<()> = Ok(());
 
     let panic_result = std::panic::AssertUnwindSafe(async {
@@ -150,8 +150,8 @@ where
             stream,
             state_lock_clone,
             peer_address,
-            main_to_peer_thread_rx,
-            peer_thread_to_main_tx,
+            main_to_peer_task_rx,
+            peer_task_to_main_tx,
             own_handshake_data,
         )
         .await;
@@ -162,11 +162,11 @@ where
     match panic_result {
         Ok(_) => (),
         Err(_err) => {
-            error!("Peer thread (incoming) for {peer_address} panicked. Invoking close connection callback");
+            error!("Peer task (incoming) for {peer_address} panicked. Invoking close connection callback");
             let _ret = close_peer_connected_callback(
                 state_lock.clone(),
                 peer_address,
-                &peer_thread_to_main_tx_clone,
+                &peer_task_to_main_tx_clone,
             )
             .await;
         }
@@ -179,8 +179,8 @@ async fn answer_peer<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
+    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
 ) -> Result<()>
 where
@@ -249,7 +249,7 @@ where
     info!("Connection accepted from {}", peer_address);
     let peer_distance = 1; // All incoming connections have distance 1
     let peer_loop_handler = PeerLoopHandler::new(
-        peer_thread_to_main_tx,
+        peer_task_to_main_tx,
         state,
         peer_address,
         peer_handshake_data,
@@ -258,24 +258,24 @@ where
     );
 
     peer_loop_handler
-        .run_wrapper(peer, main_to_peer_thread_rx)
+        .run_wrapper(peer, main_to_peer_task_rx)
         .await?;
 
     Ok(())
 }
 
 /// Perform handshake and establish connection to a new peer while handling any panics in the peer
-/// thread gracefully.
+/// task gracefully.
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
     state: GlobalStateLock,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
+    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
     distance: u8,
 ) {
     let state_clone = state.clone();
-    let peer_thread_to_main_tx_clone = peer_thread_to_main_tx.clone();
+    let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
     let panic_result = std::panic::AssertUnwindSafe(async {
         debug!("Attempting to initiate connection");
         match tokio::net::TcpStream::connect(peer_address).await {
@@ -287,8 +287,8 @@ pub async fn call_peer_wrapper(
                     stream,
                     state,
                     peer_address,
-                    main_to_peer_thread_rx,
-                    peer_thread_to_main_tx,
+                    main_to_peer_task_rx,
+                    peer_task_to_main_tx,
                     &own_handshake_data,
                     distance,
                 )
@@ -308,11 +308,11 @@ pub async fn call_peer_wrapper(
     match panic_result {
         Ok(_) => (),
         Err(_) => {
-            error!("Peer thread (outgoing) for {peer_address} panicked. Invoking close connection callback");
+            error!("Peer task (outgoing) for {peer_address} panicked. Invoking close connection callback");
             let _ret = close_peer_connected_callback(
                 state_clone,
                 peer_address,
-                &peer_thread_to_main_tx_clone,
+                &peer_task_to_main_tx_clone,
             )
             .await;
         }
@@ -323,8 +323,8 @@ async fn call_peer<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
+    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake: &HandshakeData,
     peer_distance: u8,
 ) -> Result<()>
@@ -404,7 +404,7 @@ where
     }
 
     let peer_loop_handler = PeerLoopHandler::new(
-        peer_thread_to_main_tx,
+        peer_task_to_main_tx,
         state,
         peer_address,
         other_handshake,
@@ -412,7 +412,7 @@ where
         peer_distance,
     );
     peer_loop_handler
-        .run_wrapper(peer, main_to_peer_thread_rx)
+        .run_wrapper(peer, main_to_peer_task_rx)
         .await?;
 
     Ok(())
@@ -420,14 +420,14 @@ where
 
 /// Remove peer from state. This function must be called every time
 /// a peer is disconnected. Whether this happens through a panic
-/// in the peer thread or through a regular disconnect.
+/// in the peer task or through a regular disconnect.
 ///
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub async fn close_peer_connected_callback(
     global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
-    to_main_tx: &mpsc::Sender<PeerThreadToMain>,
+    to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) -> Result<()> {
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
     // Store any new peer-standing to database
@@ -449,7 +449,7 @@ pub async fn close_peer_connected_callback(
 
     // This message is used to determine if we are to exit synchronization mode
     to_main_tx
-        .send(PeerThreadToMain::RemovePeerMaxBlockHeight(peer_address))
+        .send(PeerTaskToMain::RemovePeerMaxBlockHeight(peer_address))
         .await?;
 
     Ok(())

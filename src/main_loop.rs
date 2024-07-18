@@ -26,7 +26,7 @@ use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 
 use crate::models::channel::{
-    MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
+    MainToMiner, MainToPeerTask, MinerToMain, PeerTaskToMain, RPCServerToMain,
 };
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
@@ -43,8 +43,8 @@ const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,
-    main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_miner_tx: watch::Sender<MainToMiner>,
 }
 
@@ -52,8 +52,8 @@ impl MainLoopHandler {
     pub fn new(
         incoming_peer_listener: TcpListener,
         global_state_lock: GlobalStateLock,
-        main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
-        peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+        main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+        peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: watch::Sender<MainToMiner>,
     ) -> Self {
         Self {
@@ -61,7 +61,7 @@ impl MainLoopHandler {
             global_state_lock,
             main_to_miner_tx,
             main_to_peer_broadcast_tx,
-            peer_thread_to_main_tx,
+            peer_task_to_main_tx,
         }
     }
 }
@@ -70,15 +70,15 @@ impl MainLoopHandler {
 struct MutableMainLoopState {
     sync_state: SyncState,
     potential_peers: PotentialPeersState,
-    thread_handles: Vec<JoinHandle<()>>,
+    task_handles: Vec<JoinHandle<()>>,
 }
 
 impl MutableMainLoopState {
-    fn new(thread_handles: Vec<JoinHandle<()>>) -> Self {
+    fn new(task_handles: Vec<JoinHandle<()>>) -> Self {
         Self {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
-            thread_handles,
+            task_handles,
         }
     }
 }
@@ -299,12 +299,12 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
+    async fn handle_miner_task_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
-                // When receiving a block from the miner thread, we assume it is valid
+                // When receiving a block from the miner task, we assume it is valid
                 // and we assume it is the longest chain even though we could have received
-                // a block from a peer thread before this event is triggered.
+                // a block from a peer task before this event is triggered.
                 let new_block = new_block_info.block;
                 info!("Miner found new block: {}", new_block.kernel.header.height);
 
@@ -329,7 +329,7 @@ impl MainLoopHandler {
                     < new_block.kernel.header.proof_of_work_family
                     && new_block.kernel.header.prev_block_digest == tip_hash;
                 if !block_is_new {
-                    warn!("Got new block from miner thread that was not child of tip. Discarding.");
+                    warn!("Got new block from miner task that was not child of tip. Discarding.");
                     return Ok(());
                 }
 
@@ -348,7 +348,7 @@ impl MainLoopHandler {
 
                 // Share block with peers
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Block(new_block.clone()))
+                    .send(MainToPeerTask::Block(new_block.clone()))
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
@@ -359,17 +359,17 @@ impl MainLoopHandler {
 
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn handle_peer_thread_message(
+    async fn handle_peer_task_message(
         &self,
-        msg: PeerThreadToMain,
+        msg: PeerTaskToMain,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
-        debug!("Received {} from a peer thread", msg.get_type());
+        debug!("Received {} from a peer task", msg.get_type());
         match msg {
-            PeerThreadToMain::NewBlocks(blocks) => {
+            PeerTaskToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    // The peer threads also check this condition, if block is more canonical than current
+                    // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer.
                     // TODO: Is this check right? We might still want to store the blocks even though
@@ -430,10 +430,10 @@ impl MainLoopHandler {
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Block(Box::new(last_block)))
+                    .send(MainToPeerTask::Block(Box::new(last_block)))
                     .expect("Peer handler broadcast was closed. This should never happen");
             }
-            PeerThreadToMain::AddPeerMaxBlockHeight((
+            PeerTaskToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,
                 claimed_max_pow_family,
@@ -463,7 +463,7 @@ impl MainLoopHandler {
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing)?;
                 }
             }
-            PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
+            PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
                 debug!(
                     "Removing max block height from sync data structure for peer {}",
                     socket_addr
@@ -488,7 +488,7 @@ impl MainLoopHandler {
                     }
                 }
             }
-            PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
+            PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
                 let max_peers = self.global_state_lock.cli().max_peers;
                 for pot_peer in pot_peers {
                     main_loop_state.potential_peers.add(
@@ -499,7 +499,7 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::Transaction(pt2m_transaction) => {
+            PeerTaskToMain::Transaction(pt2m_transaction) => {
                 debug!(
                     "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
                     pt2m_transaction.transaction.kernel.inputs.len(),
@@ -524,7 +524,7 @@ impl MainLoopHandler {
                 let transaction_notification: TransactionNotification =
                     pt2m_transaction.transaction.into();
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::TransactionNotification(
+                    .send(MainToPeerTask::TransactionNotification(
                         transaction_notification,
                     ))?;
             }
@@ -566,7 +566,7 @@ impl MainLoopHandler {
             match peer_to_disconnect {
                 Some(peer) => {
                     self.main_to_peer_broadcast_tx
-                        .send(MainToPeerThread::Disconnect(peer.connected_address))?;
+                        .send(MainToPeerTask::Disconnect(peer.connected_address))?;
                 }
                 None => warn!("Unable to resolve max peer constraint due to manual override."),
             };
@@ -607,27 +607,23 @@ impl MainLoopHandler {
             let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let global_state_lock_clone = self.global_state_lock.clone();
-            let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
+            let peer_task_to_main_tx_clone = self.peer_task_to_main_tx.to_owned();
 
-            let outgoing_connection_thread = tokio::task::Builder::new()
+            let outgoing_connection_task = tokio::task::Builder::new()
                 .name("call_peer_wrapper_1")
                 .spawn(async move {
                     call_peer_wrapper(
                         peer_with_lost_connection,
                         global_state_lock_clone,
                         main_to_peer_broadcast_rx,
-                        peer_thread_to_main_tx_clone,
+                        peer_task_to_main_tx_clone,
                         own_handshake_data,
                         1, // All CLI-specified peers have distance 1 by definition
                     )
                     .await;
                 })?;
-            main_loop_state
-                .thread_handles
-                .push(outgoing_connection_thread);
-            main_loop_state
-                .thread_handles
-                .retain(|th| !th.is_finished());
+            main_loop_state.task_handles.push(outgoing_connection_task);
+            main_loop_state.task_handles.retain(|th| !th.is_finished());
         }
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
@@ -650,7 +646,7 @@ impl MainLoopHandler {
 
         // 0)
         self.main_to_peer_broadcast_tx
-            .send(MainToPeerThread::MakePeerDiscoveryRequest)?;
+            .send(MainToPeerTask::MakePeerDiscoveryRequest)?;
 
         // 1)
         let (peer_candidate, candidate_distance) = match main_loop_state
@@ -669,30 +665,26 @@ impl MainLoopHandler {
         let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let global_state_lock_clone = self.global_state_lock.clone();
-        let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
-        let outgoing_connection_thread = tokio::task::Builder::new()
+        let peer_task_to_main_tx_clone = self.peer_task_to_main_tx.to_owned();
+        let outgoing_connection_task = tokio::task::Builder::new()
             .name("call_peer_wrapper_2")
             .spawn(async move {
                 call_peer_wrapper(
                     peer_candidate,
                     global_state_lock_clone,
                     main_to_peer_broadcast_rx,
-                    peer_thread_to_main_tx_clone,
+                    peer_task_to_main_tx_clone,
                     own_handshake_data,
                     candidate_distance,
                 )
                 .await;
             })?;
-        main_loop_state
-            .thread_handles
-            .push(outgoing_connection_thread);
-        main_loop_state
-            .thread_handles
-            .retain(|th| !th.is_finished());
+        main_loop_state.task_handles.push(outgoing_connection_task);
+        main_loop_state.task_handles.retain(|th| !th.is_finished());
 
         // 3
         self.main_to_peer_broadcast_tx
-            .send(MainToPeerThread::MakeSpecificPeerDiscoveryRequest(
+            .send(MainToPeerTask::MakeSpecificPeerDiscoveryRequest(
                 peer_candidate,
             ))?;
 
@@ -735,7 +727,7 @@ impl MainLoopHandler {
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
             self.main_to_peer_broadcast_tx
-                .send(MainToPeerThread::PeerSynchronizationTimeout(peer))?;
+                .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
         }
 
         if !try_new_request {
@@ -776,7 +768,7 @@ impl MainLoopHandler {
             chosen_peer, current_block_hash, current_block_height
         );
         self.main_to_peer_broadcast_tx
-            .send(MainToPeerThread::RequestBlockBatch(
+            .send(MainToPeerTask::RequestBlockBatch(
                 most_canonical_digests,
                 *chosen_peer,
             ))
@@ -793,13 +785,13 @@ impl MainLoopHandler {
 
     pub async fn run(
         &self,
-        mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
+        mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        thread_handles: Vec<JoinHandle<()>>,
+        task_handles: Vec<JoinHandle<()>>,
     ) -> Result<()> {
-        // Handle incoming connections, messages from peer threads, and messages from the mining thread
-        let mut main_loop_state = MutableMainLoopState::new(thread_handles);
+        // Handle incoming connections, messages from peer tasks, and messages from the mining task
+        let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
         // Set peer discovery to run every N seconds. The timer must be reset every time it has run.
         let peer_discovery_timer_interval = Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS);
@@ -827,7 +819,7 @@ impl MainLoopHandler {
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
 
-        // Spawn threads to monitor for SIGTERM, SIGINT, and SIGQUIT. These
+        // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
         let (_tx_term, mut rx_term): (mpsc::Sender<()>, mpsc::Receiver<()>) =
             tokio::sync::mpsc::channel(2);
@@ -897,11 +889,11 @@ impl MainLoopHandler {
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
                     let state = self.global_state_lock.lock_guard().await;
-                    let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
-                    let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
+                    let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
+                    let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
-                    let incoming_peer_thread_handle = tokio::task::Builder::new()
+                    let incoming_peer_task_handle = tokio::task::Builder::new()
                         .name("sigterm_handler")
                         .spawn(async move {
                         match answer_peer_wrapper(
@@ -909,33 +901,33 @@ impl MainLoopHandler {
                             global_state_lock,
                             peer_address,
                             main_to_peer_broadcast_rx_clone,
-                            peer_thread_to_main_tx_clone,
+                            peer_task_to_main_tx_clone,
                             own_handshake_data,
                         ).await {
                             Ok(()) => (),
                             Err(err) => error!("Got error: {:?}", err),
                         }
                     })?;
-                    main_loop_state.thread_handles.push(incoming_peer_thread_handle);
-                    main_loop_state.thread_handles.retain(|th| !th.is_finished());
+                    main_loop_state.task_handles.push(incoming_peer_task_handle);
+                    main_loop_state.task_handles.retain(|th| !th.is_finished());
                 }
 
-                // Handle messages from peer threads
-                Some(msg) = peer_thread_to_main_rx.recv() => {
-                    debug!("Received message sent to main thread.");
-                    self.handle_peer_thread_message(
+                // Handle messages from peer tasks
+                Some(msg) = peer_task_to_main_rx.recv() => {
+                    debug!("Received message sent to main task.");
+                    self.handle_peer_task_message(
                         msg,
                         &mut main_loop_state,
                     )
                     .await?
                 }
 
-                // Handle messages from miner thread
+                // Handle messages from miner task
                 Some(main_message) = miner_to_main_rx.recv() => {
-                    self.handle_miner_thread_message(main_message).await?
+                    self.handle_miner_task_message(main_message).await?
                 }
 
-                // Handle messages from rpc server thread
+                // Handle messages from rpc server task
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
                     let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone()).await?;
                     if shutdown_after_execution {
@@ -990,8 +982,7 @@ impl MainLoopHandler {
             }
         }
 
-        self.graceful_shutdown(main_loop_state.thread_handles)
-            .await?;
+        self.graceful_shutdown(main_loop_state.task_handles).await?;
         info!("Shutdown completed.");
         Ok(())
     }
@@ -1011,7 +1002,7 @@ impl MainLoopHandler {
                 // send notification to peers
                 let notification: TransactionNotification = transaction.as_ref().clone().into();
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::TransactionNotification(notification))?;
+                    .send(MainToPeerTask::TransactionNotification(notification))?;
 
                 // insert transaction into mempool
                 self.global_state_lock
@@ -1041,7 +1032,7 @@ impl MainLoopHandler {
         }
     }
 
-    async fn graceful_shutdown(&self, thread_handles: Vec<JoinHandle<()>>) -> Result<()> {
+    async fn graceful_shutdown(&self, task_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
         // Stop mining
@@ -1050,7 +1041,7 @@ impl MainLoopHandler {
         // Send 'bye' message to all peers.
         let _result = self
             .main_to_peer_broadcast_tx
-            .send(MainToPeerThread::DisconnectAll());
+            .send(MainToPeerTask::DisconnectAll());
         debug!("sent bye");
 
         // Flush all databases
@@ -1060,7 +1051,7 @@ impl MainLoopHandler {
         sleep(Duration::new(0, 500 * 1_000_000));
 
         // Child processes should have finished by now. If not, abort them violently.
-        for jh in thread_handles {
+        for jh in task_handles {
             jh.abort();
         }
 
