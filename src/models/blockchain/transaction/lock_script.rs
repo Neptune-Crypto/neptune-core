@@ -1,3 +1,4 @@
+use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::prelude::{triton_vm, twenty_first};
 use arbitrary::Arbitrary;
 
@@ -8,7 +9,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
 use tasm_lib::triton_vm::proof::{Claim, Proof};
-use tasm_lib::triton_vm::stark::Stark;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
@@ -137,13 +137,7 @@ impl LockScriptAndWitness {
     pub fn prove(&self, public_input: PublicInput) -> Proof {
         let claim =
             Claim::new(self.program.hash::<Hash>()).with_input(public_input.individual_tokens);
-        triton_vm::prove(
-            Stark::default(),
-            &claim,
-            &self.program,
-            self.nondeterminism(),
-        )
-        .expect("cannot prove graceful halt of lockscript")
+        prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
     }
 }
 

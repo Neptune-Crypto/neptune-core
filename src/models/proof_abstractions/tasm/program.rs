@@ -4,10 +4,12 @@ use itertools::Itertools;
 use tasm_lib::{
     maybe_write_debuggable_program_to_disk,
     triton_vm::{
+        self,
         error::InstructionError,
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
+        stark::Stark,
         vm::VMState,
     },
     twenty_first::math::b_field_element::BFieldElement,
@@ -100,21 +102,59 @@ where
     ///
     /// If we are in the test environment, try reading it from disk. And if it
     /// not there, generate it and store it to disk.
+    ///
+    /// This method is a thin wrapper around [`prove_consensus_program`], which
+    /// does the same but for arbitrary programs.
     fn prove(&self, claim: &Claim, nondeterminism: NonDeterminism) -> Proof {
-        #[cfg(test)]
-        let proof =
-            test::load_proof_or_produce_and_save(claim.clone(), self.program(), nondeterminism);
-        #[cfg(not(test))]
-        let proof = tasm_lib::triton_vm::prove(
-            tasm_lib::triton_vm::stark::Stark::default(),
-            &claim,
-            &self.program(),
-            nondeterminism,
-        )
-        .unwrap();
-
-        proof
+        prove_consensus_program(self.program(), claim.clone(), nondeterminism)
     }
+}
+
+/// Run the program and generate a proof for it, assuming the Triton VM run
+/// halts gracefully.
+///
+/// If we are in a test environment, try reading it from disk. If it is not
+/// there, generate it and store it to disk.
+///
+/// This method works for arbitrary programs, including ones that do not
+/// implement trait [`ConsensusProgram`].
+///
+// Currently, only lock scripts and type scripts fit that description. It may be
+// worthwhile to investigate whether they can be made to implement
+// ConsensusProgram.
+pub fn prove_consensus_program(
+    program: Program,
+    claim: Claim,
+    nondeterminism: NonDeterminism,
+) -> Proof {
+    assert_eq!(program.hash::<Hash>(), claim.program_digest);
+    #[cfg(test)]
+    let proof = test::load_proof_or_produce_and_save(
+        claim.clone(),
+        program.clone(),
+        nondeterminism.clone(),
+    );
+    #[cfg(not(test))]
+    let proof = tasm_lib::triton_vm::prove(
+        tasm_lib::triton_vm::stark::Stark::default(),
+        &claim,
+        &program,
+        nondeterminism.clone(),
+    )
+    .unwrap();
+
+    let vm_output = program.run(PublicInput::new(claim.input.clone()), nondeterminism);
+    assert!(vm_output.is_ok());
+    assert_eq!(claim.program_digest, program.hash::<Hash>());
+    assert_eq!(claim.output, vm_output.unwrap());
+
+    // assert!(tasm_lib::triton_vm::verify(
+    //     tasm_lib::triton_vm::stark::Stark::default(),
+    //     &claim,
+    //     &proof
+    // ));
+
+    proof
 }
 
 #[cfg(test)]
@@ -230,7 +270,7 @@ pub mod test {
             }
             None => {
                 print!(" - Proving ... ");
-                stdout().flush();
+                stdout().flush().expect("could not flush terminal");
                 let tick = SystemTime::now();
                 let proof = produce_and_save_proof(claim, program, nondeterminism);
                 let duration = SystemTime::now().duration_since(tick).unwrap();

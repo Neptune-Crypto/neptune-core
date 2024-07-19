@@ -89,6 +89,10 @@ impl SecretWitness for KernelToOutputsWitness {
             .with_ram(memory)
             .with_digests(digests)
     }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        Hash::hash(&self.output_utxos).values().to_vec()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
@@ -305,7 +309,6 @@ impl ConsensusProgram for KernelToOutputs {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -314,14 +317,12 @@ mod test {
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestRunner;
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
-    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
     use test_strategy::proptest;
 
     use super::KernelToOutputsWitness;
 
     #[proptest(cases = 12)]
-    fn derived_witness_generates_accepting_program_proptest(
+    fn kernel_to_outputs_proptest(
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
         #[strategy(0usize..5)] _num_pub_announcements: usize,
@@ -329,10 +330,7 @@ mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
-        let expected_salted_outputs_digest =
-            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
-                .values()
-                .to_vec();
+        let expected_output = kernel_to_outputs_witness.output();
 
         let rust_result = KernelToOutputs
             .run_rust(
@@ -340,7 +338,7 @@ mod test {
                 kernel_to_outputs_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(expected_salted_outputs_digest, rust_result.clone());
+        prop_assert_eq!(expected_output, rust_result.clone());
 
         let tasm_result = KernelToOutputs
             .run_tasm(
@@ -352,7 +350,29 @@ mod test {
     }
 
     #[test]
-    fn derived_witness_generates_accepting_tasm_program_unittest() {
+    fn kernel_to_outputs_unittest() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
+        let tasm_result = KernelToOutputs
+            .run_tasm(
+                &kernel_to_outputs_witness.standard_input(),
+                kernel_to_outputs_witness.nondeterminism(),
+            )
+            .unwrap();
+
+        assert_eq!(kernel_to_outputs_witness.output(), tasm_result);
+    }
+    use crate::triton_vm::proof::Claim;
+    use crate::triton_vm::stark::Stark;
+    use crate::Hash;
+    use tasm_lib::triton_vm;
+
+    #[test]
+    fn kernel_to_outputs_failing_proof() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
@@ -367,10 +387,23 @@ mod test {
             .unwrap();
 
         assert_eq!(
-            Hash::hash_varlen(&primitive_witness.output_utxos.encode())
-                .values()
-                .to_vec(),
-            tasm_result
+            kernel_to_outputs_witness.output(),
+            tasm_result.clone(),
+            "incorrect output"
+        );
+
+        let claim = Claim::new(KernelToOutputs.program().hash::<Hash>())
+            .with_input(kernel_to_outputs_witness.standard_input().individual_tokens).with_output(tasm_result);
+        let proof = triton_vm::prove(
+            Stark::default(),
+            &claim,
+            &KernelToOutputs.program(),
+            kernel_to_outputs_witness.nondeterminism(),
+        )
+        .expect("could not produce proof");
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &proof),
+            "proof fails"
         );
     }
 }
