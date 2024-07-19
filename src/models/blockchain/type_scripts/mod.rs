@@ -1,5 +1,8 @@
 use crate::{
-    models::proof_abstractions::{mast_hash::MastHash, tasm::program::ConsensusProgram},
+    models::proof_abstractions::{
+        mast_hash::MastHash,
+        tasm::program::{prove_consensus_program, ConsensusProgram},
+    },
     Hash,
 };
 use arbitrary::Arbitrary;
@@ -12,12 +15,10 @@ use std::{
 };
 use tasm_lib::{
     triton_vm::{
-        self,
         instruction::LabelledInstruction,
         prelude::BFieldElement,
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
-        stark::Stark,
     },
     twenty_first::{
         math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
@@ -174,25 +175,19 @@ impl TypeScriptAndWitness {
             .is_ok()
     }
 
-    /// Assuming the lock script halts gracefully, prove it.
+    /// Assuming the type script halts gracefully, prove it.
     pub fn prove(
         &self,
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
     ) -> Proof {
-        let standard_input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
+        let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
-            .flat_map(|d| d.reversed().values().to_vec())
+            .flat_map(|d| d.reversed().values())
             .collect_vec();
-        let claim = Claim::new(self.program.hash::<Hash>()).with_input(standard_input);
-        triton_vm::prove(
-            Stark::default(),
-            &claim,
-            &self.program,
-            self.nondeterminism(),
-        )
-        .expect("cannot prove graceful halt of lockscript")
+        let claim = Claim::new(self.program.hash::<Hash>()).with_input(input);
+        prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
     }
 }
 

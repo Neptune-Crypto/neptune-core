@@ -9,6 +9,7 @@ use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::proof_abstractions::SecretWitness;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::eq_digest::EqDigest;
@@ -53,6 +54,14 @@ impl SecretWitness for CollectLockScriptsWitness {
 
     fn program(&self) -> triton_vm::prelude::Program {
         CollectLockScripts.program()
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        self.salted_input_utxos
+            .utxos
+            .iter()
+            .flat_map(|utxo| utxo.lock_script_hash.values())
+            .collect_vec()
     }
 }
 
@@ -179,7 +188,6 @@ mod test {
     use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -189,12 +197,7 @@ mod test {
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
-        let expected_lock_script_hashes = collect_lock_scripts_witness
-            .salted_input_utxos
-            .utxos
-            .iter()
-            .flat_map(|utxo| utxo.lock_script_hash.values())
-            .collect_vec();
+        let expected_output = collect_lock_scripts_witness.output();
 
         let rust_result = CollectLockScripts
             .run_rust(
@@ -202,7 +205,7 @@ mod test {
                 collect_lock_scripts_witness.nondeterminism(),
             )
             .unwrap();
-        prop_assert_eq!(expected_lock_script_hashes, rust_result.clone());
+        prop_assert_eq!(expected_output, rust_result.clone());
 
         let tasm_result = CollectLockScripts
             .run_tasm(
@@ -216,14 +219,14 @@ mod test {
     }
 
     #[proptest(cases = 5)]
-    fn derived_witness_generates_accepting_program_proptest(
+    fn collect_lock_script_proptest(
         #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
     }
 
     #[test]
-    fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
+    fn collect_lock_script_unit() {
         let mut test_runner = TestRunner::deterministic();
         for num_inputs in 0..5 {
             let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))

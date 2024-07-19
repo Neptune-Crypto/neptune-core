@@ -9,6 +9,7 @@ use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::proof_abstractions::SecretWitness;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -65,6 +66,17 @@ impl SecretWitness for CollectTypeScriptsWitness {
 
     fn program(&self) -> triton_vm::prelude::Program {
         CollectTypeScripts.program()
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        self.salted_input_utxos
+            .utxos
+            .iter()
+            .chain(self.salted_output_utxos.utxos.iter())
+            .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec())
+            .unique()
+            .flat_map(|d| d.values())
+            .collect_vec()
     }
 }
 
@@ -360,7 +372,6 @@ mod test {
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -370,27 +381,8 @@ mod test {
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
-        let all_type_script_hashes = collect_type_scripts_witness
-            .salted_input_utxos
-            .utxos
-            .iter()
-            .chain(
-                collect_type_scripts_witness
-                    .salted_output_utxos
-                    .utxos
-                    .iter(),
-            )
-            .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec())
-            .unique()
-            .collect_vec();
-        println!(
-            "all type script hashes: {}",
-            all_type_script_hashes.iter().join(" / ")
-        );
-        let expected_output = all_type_script_hashes
-            .into_iter()
-            .flat_map(|d| d.values().to_vec())
-            .collect_vec();
+
+        let expected_output = collect_type_scripts_witness.output();
 
         let rust_result = CollectTypeScripts
             .run_rust(
