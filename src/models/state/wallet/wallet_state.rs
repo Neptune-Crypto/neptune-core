@@ -1,4 +1,5 @@
 use super::address::generation_address::SpendingKey;
+use super::address::symmetric_key::SymmetricKey;
 use super::address::SpendingKeyType;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
@@ -12,7 +13,7 @@ use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{Transaction, TxInput, TxInputList};
+use crate::models::blockchain::transaction::{AnnouncedUtxo, Transaction, TxInput, TxInputList};
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
@@ -257,51 +258,68 @@ impl WalletState {
         spent_own_utxos
     }
 
-    /// Scan the given transaction for announced UTXOs as
-    /// recognized by owned `SpendingKey`s, and then verify
-    /// those announced UTXOs are actually present.
-    fn scan_for_announced_utxos(
-        &self,
-        transaction: &Transaction,
-    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
-        // TODO: These spending keys should probably be derived dynamically from some
-        // state in the wallet. And we should allow for other types than just generation
-        // addresses.
-        let spending_keys = self.get_known_generation_spending_keys();
+    /// Scan the given transaction for announced UTXOs as recognized by owned
+    /// `SpendingKey`s, and then verify those announced UTXOs are actually
+    /// present.
+    fn scan_for_announced_utxos<'a>(
+        &'a self,
+        transaction: &'a Transaction,
+    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        // get recognized UTXOs for all known generation keys
+        let gen_announced_utxos = self
+            .get_known_generation_spending_keys()
+            .into_iter()
+            .flat_map(|spending_key| {
+                spending_key
+                    .scan_for_announced_utxos(transaction)
+                    .collect_vec()
+            });
 
-        // get recognized UTXOs
-        let recognized_utxos = spending_keys
-            .iter()
-            .map(|spending_key| spending_key.scan_for_announced_utxos(transaction))
-            .collect_vec()
-            .concat();
+        // get recognized UTXOs for all known symmetric keys (typically from own wallet)
+        let sym_announced_utxos = self
+            .get_known_symmetric_keys()
+            .into_iter()
+            .flat_map(|sym_key| sym_key.scan_for_announced_utxos(transaction).collect_vec());
+
+        // chain all announced utxos together.
+        let announced_utxos = gen_announced_utxos.chain(sym_announced_utxos);
 
         // filter for presence in transaction
-        recognized_utxos
-            .into_iter()
-            .filter(|(ar, ut, _sr, _rp)| if !transaction.kernel.outputs.contains(ar) {
-                warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {ut:#?}");
-                false
-            } else { true })
-            .collect_vec()
+        //
+        // note: this is a nice sanity check, but probably is un-necessary
+        //       work that can eventually be removed.
+        announced_utxos
+            .filter(|au| match transaction.kernel.outputs.contains(&au.addition_record) {
+                true => true,
+                false => {
+                    warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
+                    false
+                }
+            })
     }
 
     // returns true if the utxo can be unlocked by one of the
     // known wallet keys.
     pub fn can_unlock(&self, utxo: &Utxo) -> bool {
-        self.get_known_generation_spending_keys()
-            .iter()
-            .map(|k| k.to_address().lock_script().hash())
-            .any(|h| h == utxo.lock_script_hash)
+        self.find_spending_key_for_utxo(utxo).is_some()
     }
 
     // returns Some(SpendingKeyType) if the utxo can be unlocked by one of the known
     // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKeyType> {
-        self.get_known_generation_spending_keys()
-            .iter()
+        let gen_keys = self
+            .get_known_generation_spending_keys()
+            .into_iter()
+            .map(SpendingKeyType::from);
+
+        let sym_keys = self
+            .get_known_symmetric_keys()
+            .into_iter()
+            .map(SpendingKeyType::from);
+
+        gen_keys
+            .chain(sym_keys)
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
-            .map(|k| (*k).into())
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
@@ -318,6 +336,20 @@ impl WalletState {
         vec![self.wallet_secret.nth_generation_spending_key(0)]
     }
 
+    // TODO: These spending keys should probably be derived dynamically from some
+    // state in the wallet. And we should allow for other types than just generation
+    // addresses.
+    //
+    // Probably the wallet should keep track of index of latest derived key
+    // that has been requested by the user for purpose of receiving
+    // funds.  We could also perform a sequential scan at startup (or import)
+    // of keys that have received funds, up to some "gap".  In bitcoin/bip32
+    // this gap is defined as 20 keys in a row that have never received funds.
+    pub fn get_known_symmetric_keys(&self) -> Vec<SymmetricKey> {
+        // for now we always return just the 1st key.
+        vec![self.wallet_secret.nth_symmetric_key(0)]
+    }
+
     /// Update wallet state with new block. Assume the given block
     /// is valid and that the wallet state is not up to date yet.
     pub async fn update_wallet_state_with_new_block(
@@ -330,23 +362,32 @@ impl WalletState {
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
             self.scan_for_spent_utxos(&transaction).await;
 
-        // utxo, sender randomness, receiver preimage, addition record
-        let mut received_outputs: Vec<(AdditionRecord, Utxo, Digest, Digest)> = vec![];
-        received_outputs.append(&mut self.scan_for_announced_utxos(&transaction));
-        debug!(
-            "received_outputs as announced outputs = {}",
-            received_outputs.len()
-        );
-        let expected_utxos_in_this_block =
-            self.expected_utxos.scan_for_expected_utxos(&transaction);
-        received_outputs.append(&mut expected_utxos_in_this_block.clone());
-        debug!("received total outputs: = {}", received_outputs.len());
+        let onchain_received_outputs = self.scan_for_announced_utxos(&transaction);
+
+        let offchain_received_outputs = self
+            .expected_utxos
+            .scan_for_expected_utxos(&transaction)
+            .collect_vec();
+
+        let all_received_outputs =
+            onchain_received_outputs.chain(offchain_received_outputs.iter().cloned());
 
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
-            received_outputs
-                .into_iter()
-                .map(|(ar, utxo, send_rand, rec_premi)| (ar, (utxo, send_rand, rec_premi)))
+            all_received_outputs
+                .map(|au| {
+                    (
+                        au.addition_record,
+                        (au.utxo, au.sender_randomness, au.receiver_preimage),
+                    )
+                })
                 .collect();
+
+        debug!(
+            "announced outputs received: onchain: {}, offchain: {}, total: {}",
+            addition_record_to_utxo_info.len() - offchain_received_outputs.len(),
+            offchain_received_outputs.len(),
+            addition_record_to_utxo_info.len()
+        );
 
         // Derive the membership proofs for received UTXOs, and in
         // the process update existing membership proofs with
@@ -636,17 +677,15 @@ impl WalletState {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
+        // Mark all expected UTXOs that were received in this block as received
+        offchain_received_outputs.into_iter().for_each(|au| {
+            self.expected_utxos
+                .mark_as_received(au.addition_record, new_block.hash())
+                .expect("Expected UTXO must be present when marking it as received")
+        });
+
         self.wallet_db.set_sync_label(new_block.hash()).await;
         self.wallet_db.persist().await;
-
-        // Mark all expected UTXOs that were received in this block as received
-        expected_utxos_in_this_block
-            .into_iter()
-            .for_each(|(addition_rec, _, _, _)| {
-                self.expected_utxos
-                    .mark_as_received(addition_rec, new_block.hash())
-                    .expect("Expected UTXO must be present when marking it as received")
-            });
 
         Ok(())
     }

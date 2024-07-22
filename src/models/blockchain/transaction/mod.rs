@@ -1,6 +1,7 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityTree, WitnessType};
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::{triton_vm, twenty_first};
 
 pub mod primitive_witness;
@@ -27,6 +28,7 @@ use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use utxo::Utxo;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -45,7 +47,41 @@ pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UtxoNotification;
 pub use transaction_output::UtxoNotifyMethod;
+pub use transaction_output::UtxoNotifyMethodSpecifier;
 
+/// represents a utxo and secrets necessary for recipient to claim it.
+///
+/// these are built from one of:
+///   onchain symmetric-key public announcements
+///   onchain asymmetric-key public announcements
+///   offchain expected-utxos
+///
+/// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
+#[derive(Clone, Debug)]
+pub struct AnnouncedUtxo {
+    pub addition_record: AdditionRecord,
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
+}
+
+impl From<&ExpectedUtxo> for AnnouncedUtxo {
+    fn from(eu: &ExpectedUtxo) -> Self {
+        Self {
+            addition_record: eu.addition_record,
+            utxo: eu.utxo.clone(),
+            sender_randomness: eu.sender_randomness,
+            receiver_preimage: eu.receiver_preimage,
+        }
+    }
+}
+
+/// represents arbitrary data that can be stored in a transaction on the public blockchain
+///
+/// initially these are used for transmitting encrypted secrets necessary
+/// for a utxo recipient to identify and claim it.
+///
+/// See [Transaction], [UtxoNotification]
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, Arbitrary,
 )]
