@@ -31,6 +31,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::Hash;
 
 use self::address::generation_address;
+use self::address::symmetric_key;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
@@ -191,7 +192,7 @@ impl WalletSecret {
     /// For now, this always returns key at index 0.  In the future it will
     /// return key at present counter, and increment the counter.
     ///
-    /// Note that incrementing the counter request &mut self.  Many areas of the
+    /// Note that incrementing the counter requires &mut self.  Many areas of the
     /// code presently take a shortcut and use nth_generation_spending_key(0)
     /// which takes &self.  This will likely require a significant refactor in
     /// the future to resolve.
@@ -221,6 +222,37 @@ impl WalletSecret {
             .concat(),
         );
         generation_address::SpendingKey::derive_from_seed(key_seed)
+    }
+
+    /// Get the next unused symmetric key.
+    ///
+    /// For now, this always returns key at index 0.  In the future it will
+    /// return key at present counter, and increment the counter.
+    ///
+    /// Note that incrementing the counter requires &mut self.
+    pub fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
+        self.nth_symmetric_key(0)
+    }
+
+    // note: this method is private to force/ensure that callers use
+    // next_unused_symmetric_key() which takes &mut self.
+    fn nth_symmetric_key(&self, counter: u64) -> symmetric_key::SymmetricKey {
+        assert!(
+            counter.is_zero(),
+            "For now we only support one symmetric key per wallet"
+        );
+
+        let key_seed = Hash::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                vec![
+                    symmetric_key::SYMMETRIC_KEY_FLAG,
+                    BFieldElement::new(counter),
+                ],
+            ]
+            .concat(),
+        );
+        symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
