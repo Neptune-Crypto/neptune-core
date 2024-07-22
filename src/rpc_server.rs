@@ -5,6 +5,7 @@ use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::UtxoNotifyMethod;
+use crate::models::blockchain::transaction::UtxoNotifyMethodSpecifier;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
@@ -145,12 +146,14 @@ pub trait RPC {
     async fn send(
         amount: NeptuneCoins,
         address: ReceivingAddressType,
+        change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
     async fn send_to_many(
         outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
+        change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -540,9 +543,11 @@ impl RPC for NeptuneRPCServer {
         ctx: context::Context,
         amount: NeptuneCoins,
         address: ReceivingAddressType,
+        change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        self.send_to_many(ctx, vec![(address, amount)], fee).await
+        self.send_to_many(ctx, vec![(address, amount)], change_utxo_notify_method, fee)
+            .await
     }
 
     /// Locking:
@@ -553,20 +558,21 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
+        change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
         let now = Timestamp::now();
 
-        // we obtain a change_address first, as it requires modifying wallet state.
-        let change_spending_key = self
-            .state
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .wallet_secret
-            .next_unused_generation_spending_key();
+        // convert UtxoNotifyMethod to UtxoNotifyMethodSpecifier This will
+        // derive the next key of appropriate type for the change output.
+        // note that this (briefly) requires the global write lock.
+        let utxo_notify_method_specifier =
+            UtxoNotifyMethodSpecifier::from_utxo_notify_method_and_wallet(
+                change_utxo_notify_method,
+                &mut self.state.lock_guard_mut().await.wallet_state,
+            );
 
         // write state to disk, as create_transaction() may take a long time.
         self.state.flush_databases().await.expect("flushed DBs");
@@ -589,13 +595,7 @@ impl RPC for NeptuneRPCServer {
         //
         // note: A change output will be added to tx_outputs if needed.
         let transaction = match state
-            .create_transaction(
-                &mut tx_outputs,
-                change_spending_key.into(),
-                UtxoNotifyMethod::OffChain,
-                fee,
-                now,
-            )
+            .create_transaction(&mut tx_outputs, utxo_notify_method_specifier, fee, now)
             .await
         {
             Ok(tx) => tx,
@@ -822,7 +822,8 @@ mod rpc_server_tests {
             .send(
                 ctx,
                 NeptuneCoins::one(),
-                own_receiving_address,
+                own_receiving_address.clone(),
+                UtxoNotifyMethod::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -831,6 +832,7 @@ mod rpc_server_tests {
             .send_to_many(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
+                UtxoNotifyMethod::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -1369,7 +1371,10 @@ mod rpc_server_tests {
             .len();
 
         // --- Operation: perform send_to_many
-        let result = rpc_server.clone().send_to_many(ctx, outputs, fee).await;
+        let result = rpc_server
+            .clone()
+            .send_to_many(ctx, outputs, UtxoNotifyMethod::OffChain, fee)
+            .await;
 
         // --- Test: verify op returns a value.
         assert!(result.is_some());

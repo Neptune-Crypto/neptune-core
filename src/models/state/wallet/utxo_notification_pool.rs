@@ -1,4 +1,5 @@
 use crate::{
+    models::blockchain::transaction::AnnouncedUtxo,
     prelude::twenty_first,
     util_types::mutator_set::{addition_record::AdditionRecord, commit},
 };
@@ -30,6 +31,24 @@ pub type Credibility = i32;
 pub const UNRECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS: u64 = 28 * 24 * 60 * 60;
 pub const RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS: u64 = 3 * 24 * 60 * 60;
 
+/// represents utxo and secrets necessary for recipient to claim it.
+///
+/// [ExpectedUtxo] is intended for offchain temporary storage of utxos that a
+/// wallet sends to itself, eg change outputs.
+///
+/// The `ExpectedUtxo` will exist in the local [UtxoNotificationPool] from the
+/// time the transaction is sent until it is mined in a block and claimed by the
+/// wallet.
+///
+/// note that when using `ExpectedUtxo` there is a risk of losing funds because
+/// the wallet stores this state on disk and if the associated file(s) are lost
+/// then the funds cannot be claimed.
+///
+/// an alternative is to use onchain symmetric keys instead, which uses some
+/// blockchain space and may leak some privacy if a key is ever used more than
+/// once.
+///
+/// see [UtxoNotificationPool], [AnnouncedUtxo], [UtxoNotification](crate::models::blockchain::transaction::UtxoNotification)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
@@ -168,23 +187,16 @@ impl UtxoNotificationPool {
     /// Scan the transaction for outputs that match with list of expected
     /// incoming UTXOs, and returns expected UTXOs that are present in the
     /// transaction.
-    /// Returns a list of (addition record, UTXO, sender randomness, receiver_preimage)
-    pub fn scan_for_expected_utxos(
-        &self,
-        transaction: &Transaction,
-    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
-        let mut received_expected_utxos = vec![];
-        for tx_output in transaction.kernel.outputs.iter() {
-            if let Some(expected_utxo) = self.notifications.get(tx_output) {
-                received_expected_utxos.push((
-                    tx_output.to_owned(),
-                    expected_utxo.utxo.to_owned(),
-                    expected_utxo.sender_randomness,
-                    expected_utxo.receiver_preimage,
-                ));
-            }
-        }
-        received_expected_utxos
+    /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
+    pub fn scan_for_expected_utxos<'a>(
+        &'a self,
+        transaction: &'a Transaction,
+    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        transaction.kernel.outputs.iter().filter_map(|tx_output| {
+            self.notifications
+                .get(tx_output)
+                .map(|expected_utxo| expected_utxo.into())
+        })
     }
 
     /// Return all expected UTXOs
@@ -403,8 +415,9 @@ mod wallet_state_tests {
         let mock_tx_containing_expected_utxo =
             make_mock_transaction(vec![], vec![expected_addition_record]);
 
-        let ret_with_tx_containing_utxo =
-            notification_pool.scan_for_expected_utxos(&mock_tx_containing_expected_utxo);
+        let ret_with_tx_containing_utxo = notification_pool
+            .scan_for_expected_utxos(&mock_tx_containing_expected_utxo)
+            .collect_vec();
         assert_eq!(1, ret_with_tx_containing_utxo.len());
 
         // Call scan but with another input. Verify that it returns the empty list
@@ -414,7 +427,9 @@ mod wallet_state_tests {
             receiver_preimage.hash::<Hash>(),
         );
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
-        let ret_with_tx_without_utxo = notification_pool.scan_for_expected_utxos(&tx_without_utxo);
+        let ret_with_tx_without_utxo = notification_pool
+            .scan_for_expected_utxos(&tx_without_utxo)
+            .collect_vec();
         assert!(ret_with_tx_without_utxo.is_empty());
 
         // Verify that we can remove the expected UTXO again

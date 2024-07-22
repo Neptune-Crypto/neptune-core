@@ -17,6 +17,7 @@ use serde_derive::Serialize;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
+use tracing::warn;
 use triton_vm::triton_asm;
 use triton_vm::triton_instr;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
@@ -30,9 +31,8 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::models::blockchain::transaction::{AnnouncedUtxo, PublicAnnouncement};
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
@@ -55,15 +55,15 @@ pub struct ReceivingAddress {
 
 /// Determine if the public announcement is flagged to indicate it might be a generation
 /// address ciphertext.
-fn public_announcement_is_marked(announcement: &PublicAnnouncement) -> bool {
+fn public_announcement_is_marked_generation(announcement: &PublicAnnouncement) -> bool {
     matches!(announcement.message.first(), Some(&GENERATION_FLAG))
 }
 
-fn derive_receiver_id(seed: Digest) -> BFieldElement {
+pub(super) fn derive_receiver_id(seed: Digest) -> BFieldElement {
     Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
 }
 
-fn receiver_identifier_from_public_announcement(
+pub(super) fn receiver_identifier_from_public_announcement(
     announcement: &PublicAnnouncement,
 ) -> Result<BFieldElement> {
     match announcement.message.get(1) {
@@ -72,7 +72,7 @@ fn receiver_identifier_from_public_announcement(
     }
 }
 
-fn ciphertext_from_public_announcement(
+pub(super) fn ciphertext_from_public_announcement(
     announcement: &PublicAnnouncement,
 ) -> Result<Vec<BFieldElement>> {
     if announcement.message.len() <= 2 {
@@ -106,6 +106,10 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 /// Decodes a slice of BFieldElements to a vec of bytes. This method
 /// computes the inverse of `bytes_to_bfes`.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
+    if bfes.is_empty() {
+        bail!("Cannot decode empty byte stream");
+    }
+
     let length = bfes[0].value() as usize;
     if length > std::mem::size_of_val(bfes) {
         bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
@@ -157,58 +161,64 @@ impl SpendingKey {
         }
     }
 
-    /// Return announces a list of (addition record, utxo, sender randomness, receiver preimage)
-    pub fn scan_for_announced_utxos(
-        &self,
-        transaction: &Transaction,
-    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
-        let mut received_utxos_with_randomnesses = vec![];
+    /// scans public announcements in a [Transaction] and finds any that match this key
+    ///
+    /// note that a single [Transaction] may represent an entire block
+    ///
+    /// returns an iterator over [AnnouncedUtxo]
+    ///
+    /// side-effect: logs a warning for any announcement targeted at this key
+    /// that cannot be decypted.
+    pub fn scan_for_announced_utxos<'a>(
+        &'a self,
+        transaction: &'a Transaction,
+    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        // pre-compute receiver_digest
+        let receiver_preimage = self.privacy_preimage;
+        let receiver_digest = receiver_preimage.hash::<Hash>();
 
-        // for all public scripts that contain a ciphertext for me,
-        for matching_announcement in transaction
+        // for all public announcements
+        transaction
             .kernel
             .public_announcements
             .iter()
-            .filter(|pa| public_announcement_is_marked(pa))
-            .filter(|pa| {
-                let receiver_id = receiver_identifier_from_public_announcement(pa);
-                match receiver_id {
-                    Ok(recid) => recid == self.receiver_identifier,
-                    Err(_) => false,
+
+            // ... that are marked as symmetric key encrypted
+            .filter(|pa| public_announcement_is_marked_generation(pa))
+
+            // ... that match the receiver_id of this key
+            .filter(move |pa| {
+                matches!(receiver_identifier_from_public_announcement(pa), Ok(r) if r == self.receiver_identifier)
+            })
+
+            // ... that have a ciphertext field
+            .filter_map(|pa| self.ok_warn(ciphertext_from_public_announcement(pa)) )
+
+            // ... which can be decrypted with this key
+            .filter_map(|c| self.ok_warn(self.decrypt(&c)))
+
+            // ... map to AnnouncedUtxo
+            .map(move |(utxo, sender_randomness)| {
+                // and join those with the receiver digest to get a commitment
+                // Note: the commitment is computed in the same way as in the mutator set.
+                AnnouncedUtxo {
+                    addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
+                    utxo,
+                    sender_randomness,
+                    receiver_preimage,
                 }
             })
-        {
-            // decrypt it to obtain the utxo and sender randomness
-            let ciphertext = ciphertext_from_public_announcement(matching_announcement);
-            let decryption_result = match ciphertext {
-                Ok(ctxt) => self.decrypt(&ctxt),
-                _ => {
-                    continue;
-                }
-            };
-            let (utxo, sender_randomness) = match decryption_result {
-                Ok(tuple) => tuple,
-                _ => {
-                    continue;
-                }
-            };
+    }
 
-            // and join those with the receiver digest to get a commitment
-            // Note: the commitment is computed in the same way as in the mutator set.
-            let receiver_preimage = self.privacy_preimage;
-            let receiver_digest = receiver_preimage.hash::<Hash>();
-            let addition_record = commit(Hash::hash(&utxo), sender_randomness, receiver_digest);
-
-            // push to list
-            received_utxos_with_randomnesses.push((
-                addition_record,
-                utxo,
-                sender_randomness,
-                receiver_preimage,
-            ));
+    /// converts a result into an Option and logs a warning on any error
+    fn ok_warn<T>(&self, result: Result<T>) -> Option<T> {
+        match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                warn!("possible loss of funds! skipping public announcement for symmetric key with receiver_identifier: {}.  error: {}", self.receiver_identifier, e.to_string());
+                None
+            }
         }
-
-        received_utxos_with_randomnesses
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -243,7 +253,7 @@ impl SpendingKey {
     }
 
     /// Decrypt a Generation Address ciphertext
-    fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
+    pub(super) fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
         // parse ciphertext
         if ciphertext.len() <= CIPHERTEXT_SIZE_IN_BFES {
             bail!("Ciphertext does not have nonce.");
@@ -439,7 +449,9 @@ impl ReceivingAddress {
 
 // note: copied from twenty_first::math::lattice::kem::shake256()
 //       which is not public
-fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NUM_OUT_BYTES] {
+pub(super) fn shake256<const NUM_OUT_BYTES: usize>(
+    randomness: impl AsRef<[u8]>,
+) -> [u8; NUM_OUT_BYTES] {
     let mut hasher = Shake256::default();
     hasher.update(randomness.as_ref());
 
@@ -454,6 +466,7 @@ fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NU
 
 #[cfg(test)]
 mod test_generation_addresses {
+    use itertools::Itertools;
     use rand::{random, thread_rng, Rng, RngCore};
     use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
@@ -591,20 +604,29 @@ mod test_generation_addresses {
             .unwrap();
         let mut mock_tx = make_mock_transaction(vec![], vec![]);
 
-        assert!(spending_key.scan_for_announced_utxos(&mock_tx).is_empty());
+        assert!(spending_key.scan_for_announced_utxos(&mock_tx).count() == 0);
 
         // Add a pubscript for our keys and verify that they are recognized
-        assert!(public_announcement_is_marked(&public_announcement));
+        assert!(public_announcement_is_marked_generation(
+            &public_announcement
+        ));
         mock_tx
             .kernel
             .public_announcements
             .push(public_announcement);
 
-        let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx);
+        let announced_txs = spending_key
+            .scan_for_announced_utxos(&mock_tx)
+            .collect_vec();
         assert_eq!(1, announced_txs.len());
 
-        let (read_ar, read_utxo, read_sender_randomness, returned_receiver_preimage) =
-            announced_txs[0].clone();
+        let (read_ar, read_utxo, read_sender_randomness, returned_receiver_preimage) = (
+            announced_txs[0].addition_record,
+            announced_txs[0].utxo.clone(),
+            announced_txs[0].sender_randomness,
+            announced_txs[0].receiver_preimage,
+        );
+
         assert_eq!(utxo, read_utxo);
 
         let expected_addition_record = commit(

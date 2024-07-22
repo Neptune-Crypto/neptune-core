@@ -4,6 +4,7 @@ use clap_complete::{generate, Shell};
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
+use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::ReceivingAddressType;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
@@ -452,7 +453,15 @@ async fn main() -> Result<()> {
             // Parse on client
             let receiving_address = ReceivingAddressType::from_bech32m(&address, args.network)?;
 
-            client.send(ctx, amount, receiving_address, fee).await?;
+            client
+                .send(
+                    ctx,
+                    amount,
+                    receiving_address,
+                    UtxoNotifyMethod::OnChainSymmetricKey,
+                    fee,
+                )
+                .await?;
             println!("Send completed.");
         }
         Command::SendToMany { outputs, fee } => {
@@ -461,7 +470,14 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            client.send_to_many(ctx, parsed_outputs, fee).await?;
+            client
+                .send_to_many(
+                    ctx,
+                    parsed_outputs,
+                    UtxoNotifyMethod::OnChainSymmetricKey,
+                    fee,
+                )
+                .await?;
             println!("Send completed.");
         }
         Command::PauseMiner => {

@@ -1,8 +1,11 @@
+use super::utxo::LockScript;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
 use crate::models::state::wallet::address::ReceivingAddressType;
+use crate::models::state::wallet::address::SpendingKeyType;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
@@ -11,24 +14,112 @@ use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
 /// enumerates how a transaction recipient should be notified
 /// that a Utxo exists which they can claim/spend.
 ///
-/// see also: [UtxoNotification]
-#[derive(Debug, Clone)]
+/// see also: [UtxoNotifyMethodSpecifier], [UtxoNotification]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UtxoNotifyMethod {
     OnChainPubKey,
     OnChainSymmetricKey,
     OffChain,
 }
 
+/// enumerates how a transaction recipient should be notified
+/// that a Utxo exists and specifies receiver details
+///
+/// see also: [UtxoNotifyMethod], [UtxoNotification]
+#[derive(Debug, Clone)]
+pub enum UtxoNotifyMethodSpecifier {
+    OnChainPubKey(ReceivingAddressType),
+    OnChainSymmetricKey(SymmetricKey),
+    OffChain(SpendingKeyType),
+}
+
+impl UtxoNotifyMethodSpecifier {
+    /// converts [UtxoNotifyMethod] to [UtxoNotifyMethodSpecifier]
+    ///
+    /// This method derives the next key of appropriate type.  This requires
+    /// modifying wallet state in order for the wallet to track the latest key.
+    pub fn from_utxo_notify_method_and_wallet(
+        utxo_notify_method: UtxoNotifyMethod,
+        wallet_state: &mut WalletState,
+    ) -> Self {
+        let ws = &mut wallet_state.wallet_secret;
+
+        match utxo_notify_method {
+            UtxoNotifyMethod::OnChainPubKey => UtxoNotifyMethodSpecifier::OnChainPubKey(
+                ws.next_unused_generation_spending_key().to_address().into(),
+            ),
+            UtxoNotifyMethod::OnChainSymmetricKey => {
+                UtxoNotifyMethodSpecifier::OnChainSymmetricKey(ws.next_unused_symmetric_key())
+            }
+            UtxoNotifyMethod::OffChain => {
+                UtxoNotifyMethodSpecifier::OffChain(ws.next_unused_generation_spending_key().into())
+            }
+        }
+    }
+
+    /// returns [LockScript] of the underlying key or address
+    pub fn lock_script(&self) -> LockScript {
+        match self {
+            Self::OnChainPubKey(addr) => addr.lock_script(),
+            Self::OnChainSymmetricKey(key) => key.lock_script(),
+            Self::OffChain(key) => key.to_address().lock_script(),
+        }
+    }
+
+    /// returns privacy digest of the underlying key or address
+    pub fn privacy_digest(&self) -> Digest {
+        match self {
+            Self::OnChainPubKey(addr) => addr.privacy_digest(),
+            Self::OnChainSymmetricKey(key) => key.privacy_digest(),
+            Self::OffChain(key) => key.to_address().privacy_digest(),
+        }
+    }
+
+    /// generates a [TxOutput] for the underlying key or address
+    pub fn tx_output(&self, utxo: Utxo, sender_randomness: Digest) -> Result<TxOutput> {
+        let tx_output = match self {
+            Self::OnChainPubKey(change_address) => {
+                let public_announcement =
+                    change_address.generate_public_announcement(&utxo, sender_randomness)?;
+                TxOutput::onchain_pubkey(
+                    utxo,
+                    sender_randomness,
+                    change_address.privacy_digest(),
+                    public_announcement,
+                )
+            }
+            Self::OnChainSymmetricKey(symmetric_key) => {
+                let public_announcement =
+                    symmetric_key.generate_public_announcement(&utxo, sender_randomness)?;
+                TxOutput::onchain_symkey(
+                    utxo,
+                    sender_randomness,
+                    symmetric_key.privacy_digest(),
+                    public_announcement,
+                )
+            }
+            Self::OffChain(spending_key) => {
+                TxOutput::offchain(utxo, sender_randomness, spending_key.privacy_preimage())
+            }
+        };
+        Ok(tx_output)
+    }
+}
+
 /// enumerates transaction notifications.
 ///
 /// This mirrors variants in [`UtxoNotifyMethod`] but also holds notification
 /// data.
+///
+/// see also: [UtxoNotifyMethod], [UtxoNotifyMethodSpecifier]
 #[derive(Debug, Clone)]
 pub enum UtxoNotification {
     OnChainPubKey(PublicAnnouncement),
