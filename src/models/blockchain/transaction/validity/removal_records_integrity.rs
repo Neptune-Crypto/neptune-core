@@ -10,7 +10,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum::EnumCount;
 use tasm_lib::arithmetic::u128::shift_right_static_u128::ShiftRightStaticU128;
-use tasm_lib::arithmetic::u64::lt_u64::LtStandardU64;
+use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -475,7 +475,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let multiset_equality_u64s = library.import(Box::new(MultisetEqualityU64s));
         let shift_right_log2_chunk_size =
             library.import(Box::new(ShiftRightStaticU128::<LOG2_CHUNK_SIZE>));
-        let lt_u64 = library.import(Box::new(LtStandardU64));
+        let lt_u64 = library.import(Box::new(LtU64ConsumeArgs));
         let mmr_verify_from_memory = library.import(Box::new(MmrVerifyFromMemory));
 
         let field_aocl = field!(RemovalRecordsIntegrityWitness::aocl);
