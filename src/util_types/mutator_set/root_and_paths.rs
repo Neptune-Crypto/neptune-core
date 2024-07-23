@@ -142,7 +142,7 @@ mod test {
         for (path, indexed_leaf) in root_and_paths.paths.into_iter().zip(indexed_leafs) {
             let inclusion_proof = MerkleTreeInclusionProof::<Hash> {
                 tree_height,
-                indexed_leaves: vec![indexed_leaf],
+                indexed_leafs: vec![indexed_leaf],
                 authentication_structure: path,
                 ..Default::default()
             };

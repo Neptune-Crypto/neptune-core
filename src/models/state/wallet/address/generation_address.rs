@@ -22,9 +22,9 @@ use tasm_lib::triton_vm::program::NonDeterminism;
 use triton_vm::triton_asm;
 use triton_vm::triton_instr;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
-use twenty_first::math::tip5::DIGEST_LENGTH;
+use twenty_first::math::tip5::Digest;
 use twenty_first::{
-    math::{b_field_element::BFieldElement, lattice, tip5::Digest},
+    math::{b_field_element::BFieldElement, lattice},
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
@@ -137,7 +137,7 @@ impl SpendingKey {
     pub fn to_address(&self) -> ReceivingAddress {
         let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = self.privacy_preimage.hash::<Hash>();
+        let privacy_digest = self.privacy_preimage.hash();
         ReceivingAddress {
             receiver_identifier: self.receiver_identifier,
             encryption_key: pk,
@@ -192,7 +192,7 @@ impl SpendingKey {
             // and join those with the receiver digest to get a commitment
             // Note: the commitment is computed in the same way as in the mutator set.
             let receiver_preimage = self.privacy_preimage;
-            let receiver_digest = receiver_preimage.hash::<Hash>();
+            let receiver_digest = receiver_preimage.hash();
             let addition_record = commit(Hash::hash(&utxo), sender_randomness, receiver_digest);
 
             // push to list
@@ -270,12 +270,12 @@ impl SpendingKey {
     }
 
     fn generate_spending_lock(&self) -> Digest {
-        self.unlock_key.hash::<Hash>()
+        self.unlock_key.hash()
     }
 
     /// Unlock the UTXO binding it to some transaction by its kernel hash.
     /// This function mocks proof generation.
-    pub fn binding_unlock(&self, _bind_to: Digest) -> [BFieldElement; DIGEST_LENGTH] {
+    pub fn binding_unlock(&self, _bind_to: Digest) -> [BFieldElement; Digest::LEN] {
         let witness_data = self.unlock_key;
         witness_data.values()
     }
@@ -287,7 +287,7 @@ impl ReceivingAddress {
         let receiver_identifier = derive_receiver_id(seed);
         let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = spending_key.privacy_preimage.hash::<Hash>();
+        let privacy_digest = spending_key.privacy_preimage.hash();
         Self {
             receiver_identifier,
             encryption_key: pk,
@@ -305,7 +305,7 @@ impl ReceivingAddress {
     /// address.
     pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
         match witness.try_into() {
-            Ok(witness_array) => Digest::new(witness_array).hash::<Hash>() == self.spending_lock,
+            Ok(witness_array) => Digest::new(witness_array).hash() == self.spending_lock,
             Err(_) => false,
         }
     }
@@ -424,8 +424,8 @@ impl ReceivingAddress {
     /// this logic that is proven is `lock_script`.
     ///
     /// This function mocks proof verification.
-    fn verify_unlock(&self, msg: Digest, witness_data: [BFieldElement; DIGEST_LENGTH]) -> bool {
-        self.spending_lock == Digest::new(witness_data).hash::<Hash>()
+    fn verify_unlock(&self, msg: Digest, witness_data: [BFieldElement; Digest::LEN]) -> bool {
+        self.spending_lock == Digest::new(witness_data).hash()
     }
 }
 

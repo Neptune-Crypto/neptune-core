@@ -28,17 +28,14 @@ use tasm_lib::neptune::mutator_set;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use tasm_lib::DIGEST_LENGTH;
+use tasm_lib::Digest;
 use tasm_lib::{field, field_with_size};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::{
-    math::tip5::Digest,
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr},
-};
+use twenty_first::util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr};
 
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -211,7 +208,7 @@ impl RemovalRecordsIntegrityWitness {
     pub fn pseudorandom_mmra_with_mps(
         seed: [u8; 32],
         leafs: &[Digest],
-    ) -> (MmrAccumulator<Hash>, Vec<MmrMembershipProof<Hash>>) {
+    ) -> (MmrAccumulator<Hash>, Vec<(u64, MmrMembershipProof<Hash>)>) {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // sample size of MMR
@@ -236,9 +233,10 @@ impl RemovalRecordsIntegrityWitness {
 
         // iterate over all trees
         let mut peaks = vec![];
-        let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
-        let mut mps: Vec<MmrMembershipProof<Hash>> =
-            (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
+        let dummy_mp = MmrMembershipProof::new(vec![]);
+        let mut mps = (0..leafs.len())
+            .map(|i| (i as u64, dummy_mp.clone()))
+            .collect_vec();
         for tree in 0..num_peaks {
             // select all leafs and merkle tree indices for this tree
             let leafs_and_mt_indices = leafs_and_indices
@@ -300,7 +298,10 @@ impl RemovalRecordsIntegrityWitness {
                         (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
                         authentication_path,
                     )| {
-                        MmrMembershipProof::<Hash>::new(mmr_index, authentication_path)
+                        (
+                            mmr_index,
+                            MmrMembershipProof::<Hash>::new(authentication_path),
+                        )
                     },
                 )
                 .collect_vec();
@@ -310,25 +311,25 @@ impl RemovalRecordsIntegrityWitness {
                 .map(|_| rng.gen())
                 .collect_vec();
             let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
-            for (&(leaf, _mt_index, _original_index), mp) in
+            for (&(leaf, _mt_index, _original_index), (mmr_leaf_index, mp)) in
                 leafs_and_mt_indices.iter().zip(membership_proofs.iter())
             {
-                assert!(mp.verify(&dummy_peaks, leaf, leaf_count));
+                assert!(mp.verify(*mmr_leaf_index, leaf, &dummy_peaks, leaf_count));
             }
 
             // collect membership proofs in vector, with indices matching those of the supplied leafs
-            for ((_leaf, _mt_index, original_index), mp) in
+            for ((_leaf, _mt_index, original_index), (mmr_leaf_index, mp)) in
                 leafs_and_mt_indices.iter().zip(membership_proofs.iter())
             {
-                mps[*original_index] = mp.clone();
+                mps[*original_index] = (*mmr_leaf_index, mp.clone());
             }
         }
 
         let mmra = MmrAccumulator::<Hash>::init(peaks, leaf_count);
 
         // sanity check
-        for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
+        for (&leaf, (mmr_leaf_index, mp)) in leafs.iter().zip(mps.iter()) {
+            assert!(mp.verify(*mmr_leaf_index, leaf, &mmra.peaks(), mmra.num_leafs()));
         }
 
         (mmra, mps)
@@ -387,11 +388,11 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             let addition_record: AdditionRecord = commit(
                 utxo_hash,
                 msmp.sender_randomness,
-                msmp.receiver_preimage.hash::<Hash>(),
+                msmp.receiver_preimage.hash(),
             );
             tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
-                &aocl.get_peaks(),
-                aocl.count_leaves(),
+                &aocl.peaks(),
+                aocl.num_leafs(),
                 msmp.aocl_leaf_index,
                 addition_record.canonical_commitment,
             );
@@ -421,8 +422,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             while j < index_set.len() {
                 let absolute_index = index_set[j];
                 let chunk_index: u64 = (absolute_index / (CHUNK_SIZE as u128)) as u64;
-                if chunk_index < swbfi.count_leaves()
-                    && !inactive_chunk_indices.contains(&chunk_index)
+                if chunk_index < swbfi.num_leafs() && !inactive_chunk_indices.contains(&chunk_index)
                 {
                     inactive_chunk_indices.push(chunk_index);
                 }
@@ -433,8 +433,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
             for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
-                assert_eq!(*chunk_index, mmrmp.leaf_index);
-                assert!(mmrmp.verify(&swbfi.get_peaks(), Hash::hash(chunk), swbfi.count_leaves()));
+                assert_eq!(*chunk_index, *chunk_index);
+                assert!(mmrmp.verify(
+                    *chunk_index,
+                    Hash::hash(chunk),
+                    &swbfi.peaks(),
+                    swbfi.num_leafs()
+                ));
                 visited_chunk_indices.push(*chunk_index);
             }
 
@@ -526,7 +531,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             dup 10 {&field_swbfa_hash}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] *swbfa_hash
 
-            push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+            push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] [swbfa_hash]
 
             hash
@@ -598,7 +603,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let payload = triton_asm! {
             /* read txkmh */
-            read_io {DIGEST_LENGTH}
+            read_io {Digest::LEN}
             hint txk_mast_hash = stack[0..5]
             // _ [txk_mast_hash]
 
@@ -716,9 +721,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&field_receiver_preimage}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [default] *receiver_preimage
 
-                push {DIGEST_LENGTH - 1}
+                push {Digest::LEN - 1}
                 add
-                read_mem {DIGEST_LENGTH}
+                read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [default] [receiver_preimage]
                 hint receiver_preimage = stack[0..5]
@@ -734,9 +739,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&field_sender_randomness}
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] *sender_randomness
 
-                push {DIGEST_LENGTH - 1}
+                push {Digest::LEN - 1}
                 add
-                read_mem {DIGEST_LENGTH}
+                read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *all_aocl_indices *removal_records[i]_si num_utxos i *utxos[i]_si *msmp[i]_si *aocl [utxo_hash] *peaks [receiver_preimage] [sender_randomness]
                 hint sender_randomness = stack[0..5]
@@ -1171,7 +1176,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
                 commit(
                     Hash::hash(utxo),
                     msmp.sender_randomness,
-                    msmp.receiver_preimage.hash::<Hash>(),
+                    msmp.receiver_preimage.hash(),
                 )
             })
             .collect_vec();
@@ -1184,14 +1189,14 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         assert_eq!(num_inputs, mmr_mps.len());
         assert_eq!(num_inputs, canonical_commitments.len());
 
-        for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+        for ((idx, mp), &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
             assert!(
-                mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
+                mp.verify(*idx, cc, &aocl.peaks(), aocl.num_leafs()),
                 "Returned MPs must be valid for returned AOCL"
             );
         }
 
-        for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
+        for (ms_mp, (_idx, mmr_mp)) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
             ms_mp.auth_path_aocl = mmr_mp.clone();
         }
         let swbfi: MmrAccumulator<Hash> = u.arbitrary()?;
@@ -1238,12 +1243,15 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::RemovalRecordsIntegrity;
+    use super::RemovalRecordsIntegrityWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::triton_vm::prelude::*;
 
+    use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;

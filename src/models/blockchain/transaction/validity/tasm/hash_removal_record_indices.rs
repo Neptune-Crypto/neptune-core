@@ -140,7 +140,6 @@ mod tests {
         traits::rust_shadow::RustShadow,
     };
     use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism};
-    use twenty_first::math::tip5::DIGEST_LENGTH;
 
     use super::*;
 
@@ -280,7 +279,7 @@ mod tests {
                 output_address,
                 i,
                 &final_memory,
-                DIGEST_LENGTH,
+                Digest::LEN,
             );
             tasm_digests.push(Digest::new(values.try_into().unwrap()));
         }

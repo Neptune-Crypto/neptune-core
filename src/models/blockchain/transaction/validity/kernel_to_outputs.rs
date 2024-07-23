@@ -19,7 +19,6 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::bfieldcodec_derive::BFieldCodec;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::DIGEST_LENGTH;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -181,7 +180,7 @@ impl ConsensusProgram for KernelToOutputs {
             {&field_receiver_digests}       // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests
 
             read_mem 1
-            push {1 + DIGEST_LENGTH} add
+            push {1 + Digest::LEN} add
             swap 1
             dup 0
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[0]_lw N N
@@ -200,11 +199,11 @@ impl ConsensusProgram for KernelToOutputs {
             pop 1
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments[N] N
 
-            push {-(DIGEST_LENGTH as isize)} mul push -1 add add
+            push {-(Digest::LEN as isize)} mul push -1 add add
                                             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments
 
             dup 0 read_mem 1 pop 1          // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments N
-            push {DIGEST_LENGTH} mul push 1 add
+            push {Digest::LEN} mul push 1 add
             // [txkmh] *kernel_to_outputs_witness *salted_output_utxos *utxos[0]_len *sender_randomnesses *receiver_digests[N] *canonical_commitments (5*N+1)
 
             call {hash_varlen}
@@ -241,7 +240,7 @@ impl ConsensusProgram for KernelToOutputs {
             call {hash_varlen}
             // [txkmh] *kernel_to_outputs_witness [salted_outputs_hash]
 
-            write_io {DIGEST_LENGTH}
+            write_io {Digest::LEN}
 
             halt
 
@@ -253,8 +252,8 @@ impl ConsensusProgram for KernelToOutputs {
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i]_lw *canonical_commitments[i] N i
 
                 dup 3
-                read_mem {DIGEST_LENGTH}
-                push {2 * DIGEST_LENGTH} add
+                read_mem {Digest::LEN}
+                push {2 * Digest::LEN} add
                 swap 9
                 pop 1
                 // _ *utxos[i]_len *sender_randomnesses *receiver_digests[i+1]_lw *canonical_commitments[i] N i [receiver_digests[i]]
@@ -393,7 +392,8 @@ mod test {
         );
 
         let claim = Claim::new(KernelToOutputs.program().hash::<Hash>())
-            .with_input(kernel_to_outputs_witness.standard_input().individual_tokens).with_output(tasm_result);
+            .with_input(kernel_to_outputs_witness.standard_input().individual_tokens)
+            .with_output(tasm_result);
         let proof = triton_vm::prove(
             Stark::default(),
             &claim,

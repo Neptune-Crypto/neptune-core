@@ -9,9 +9,9 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use tasm_lib::DIGEST_LENGTH;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
+use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
     algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
@@ -70,7 +70,7 @@ impl MutatorSetAccumulator {
         // track of the mutator set.
 
         // add to list
-        let item_index = self.aocl.count_leaves();
+        let item_index = self.aocl.num_leafs();
         self.aocl
             .append(addition_record.canonical_commitment.to_owned()); // ignore auth path
 
@@ -82,7 +82,7 @@ impl MutatorSetAccumulator {
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
         let chunk_digest: Digest = Hash::hash(&new_chunk);
-        let new_chunk_index = self.swbf_inactive.count_leaves();
+        let new_chunk_index = self.swbf_inactive.num_leafs();
         self.swbf_inactive.append(chunk_digest); // ignore auth path
 
         // Then move window to the right, equivalent to moving values
@@ -97,7 +97,7 @@ impl MutatorSetAccumulator {
 
     /// Return the batch index for the latest addition to the mutator set
     pub fn get_batch_index(&self) -> u64 {
-        match self.aocl.count_leaves() {
+        match self.aocl.num_leafs() {
             0 => 0,
             n => (n - 1) / BATCH_SIZE as u64,
         }
@@ -143,7 +143,7 @@ impl MutatorSetAccumulator {
                     panic!(
                         "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
                         new_target_chunks_clone,
-                        self.aocl.count_leaves(),
+                        self.aocl.num_leafs(),
                         batch_index,
                         removal_record
                     )
@@ -158,9 +158,14 @@ impl MutatorSetAccumulator {
         // to do this, we need to keep track of all membership proofs
         // If we want to update the membership proof with this removal, we
         // could use the below function.
+        let mutation_data = new_target_chunks.chunk_indices_and_membership_proofs_and_leafs();
         self.swbf_inactive.batch_mutate_leaf_and_update_mps(
             &mut [],
-            new_target_chunks.membership_proofs_and_leafs(),
+            &[],
+            mutation_data
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p))
+                .collect_vec(),
         );
 
         new_target_chunks
@@ -180,7 +185,7 @@ impl MutatorSetAccumulator {
         for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
             // determine if inserted index lives in active window
             let active_window_start =
-                (self.aocl.count_leaves() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
+                (self.aocl.num_leafs() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
             if inserted_index < active_window_start {
                 let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
                 if let Some((_mmr_mp, chunk)) =
@@ -218,7 +223,7 @@ impl MutatorSetAccumulator {
         let item_commitment = Hash::hash_pair(item, sender_randomness);
 
         // simulate adding to commitment list
-        let aocl_leaf_index = self.aocl.count_leaves();
+        let aocl_leaf_index = self.aocl.num_leafs();
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
         let target_chunks: ChunkDictionary = ChunkDictionary::default();
 
@@ -237,7 +242,7 @@ impl MutatorSetAccumulator {
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
-        let aocl_leaf_count = self.aocl.count_leaves();
+        let aocl_leaf_count = self.aocl.num_leafs();
         if aocl_leaf_count <= membership_proof.aocl_leaf_index {
             return false;
         }
@@ -247,13 +252,15 @@ impl MutatorSetAccumulator {
             Hash::hash_pair(item, membership_proof.sender_randomness),
             Hash::hash_pair(
                 membership_proof.receiver_preimage,
-                Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+                Digest::new([BFieldElement::zero(); Digest::LEN]),
             ),
         );
-        let is_aocl_member =
-            membership_proof
-                .auth_path_aocl
-                .verify(&self.aocl.get_peaks(), leaf, aocl_leaf_count);
+        let is_aocl_member = membership_proof.auth_path_aocl.verify(
+            membership_proof.aocl_leaf_index,
+            leaf,
+            &self.aocl.peaks(),
+            aocl_leaf_count,
+        );
         if !is_aocl_member {
             return false;
         }
@@ -290,9 +297,10 @@ impl MutatorSetAccumulator {
             let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof<Hash>, Chunk) =
                 membership_proof.target_chunks.get(&chunk_index).unwrap();
             let valid_auth_path = swbf_inactive_mp.verify(
-                &self.swbf_inactive.get_peaks(),
+                chunk_index,
                 Hash::hash(swbf_inactive_chunk),
-                self.swbf_inactive.count_leaves(),
+                &self.swbf_inactive.peaks(),
+                self.swbf_inactive.num_leafs(),
             );
 
             all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
@@ -431,15 +439,18 @@ impl MutatorSetAccumulator {
             // Calculate the digests of the affected leafs in the inactive part of the sliding-window
             // Bloom filter such that we can apply a batch-update operation to the MMR through which
             // this part of the Bloom filter is represented.
-            let swbf_inactive_mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
-                mutation_data_preimage
-                    .into_values()
-                    .map(|x| (x.1, Hash::hash(x.0)))
-                    .collect();
+            let swbf_inactive_mutation_data = mutation_data_preimage
+                .into_iter()
+                .map(|(k, v)| (k, Hash::hash(v.0), v.1))
+                .collect_vec();
 
             // Create a vector of pointers to the MMR-membership part of the mutator set membership
             // proofs that we want to preserve. This is used as input to a batch-call to the
             // underlying MMR.
+            let preseved_mmr_leaf_indices = preserved_membership_proofs
+                .iter()
+                .flat_map(|msmp| msmp.target_chunks.iter().map(|(i, _)| *i).collect_vec())
+                .collect_vec();
             let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<Hash>> =
                 preserved_membership_proofs
                     .iter_mut()
@@ -455,7 +466,11 @@ impl MutatorSetAccumulator {
             // This updates both the inactive part of the SWBF and the MMR membership proofs
             self.swbf_inactive.batch_mutate_leaf_and_update_mps(
                 &mut preseved_mmr_membership_proofs,
-                swbf_inactive_mutation_data,
+                &preseved_mmr_leaf_indices,
+                swbf_inactive_mutation_data
+                    .iter()
+                    .map(|(i, l, p)| LeafMutation::<Hash>::new(*i, *l, p))
+                    .collect_vec(),
             );
 
             chunkidx_to_chunk_difference_dict
@@ -504,7 +519,7 @@ mod ms_accumulator_tests {
         // Insert batch-size items and verify that a new batch interval is reported
         for _ in 0..BATCH_SIZE + 1 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
             let (start, end) = accumulator.active_window_chunk_interval();
             assert_eq!(0, start);
@@ -529,7 +544,7 @@ mod ms_accumulator_tests {
             prop_assert_eq!(batch_interval + (WINDOW_SIZE / CHUNK_SIZE) as u64, end);
 
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             accumulator.add(&addition_record);
         }
     }
@@ -546,7 +561,7 @@ mod ms_accumulator_tests {
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
@@ -647,7 +662,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                        commit(item, sender_randomness, receiver_preimage.hash());
                     let membership_proof_acc =
                         accumulator.prove(item, sender_randomness, receiver_preimage);
 

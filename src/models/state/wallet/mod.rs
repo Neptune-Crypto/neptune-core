@@ -352,7 +352,7 @@ mod wallet_tests {
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
-    use twenty_first::math::tip5::DIGEST_LENGTH;
+    use twenty_first::math::tip5::Digest;
     use twenty_first::math::x_field_element::EXTENSION_DEGREE;
 
     use super::monitored_utxo::MonitoredUtxo;
@@ -1320,7 +1320,7 @@ mod wallet_tests {
         let secret_as_digest = Digest::new(
             [
                 secret.coefficients.to_vec(),
-                vec![BFieldElement::new(0); DIGEST_LENGTH - EXTENSION_DEGREE],
+                vec![BFieldElement::new(0); Digest::LEN - EXTENSION_DEGREE],
             ]
             .concat()
             .try_into()

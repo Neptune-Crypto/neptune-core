@@ -24,11 +24,8 @@ use tasm_lib::{
 use tracing::{debug, warn};
 
 use crate::{
-    models::{
-        blockchain::type_scripts::{
-            native_currency::NativeCurrencyWitness, neptune_coins::NeptuneCoins, TypeScriptWitness,
-        },
-        proof_abstractions::tasm::program::ConsensusProgram,
+    models::blockchain::type_scripts::{
+        native_currency::NativeCurrencyWitness, neptune_coins::NeptuneCoins, TypeScriptWitness,
     },
     util_types::mutator_set::commit,
 };

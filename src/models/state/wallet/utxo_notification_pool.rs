@@ -50,7 +50,7 @@ impl ExpectedUtxo {
             addition_record: commit(
                 Hash::hash(&utxo),
                 sender_randomness,
-                receiver_preimage.hash::<Hash>(),
+                receiver_preimage.hash(),
             ),
             utxo,
             sender_randomness,
@@ -230,7 +230,7 @@ impl UtxoNotificationPool {
         let addition_record = commit(
             Hash::hash(&utxo),
             sender_randomness,
-            receiver_preimage.hash::<Hash>(),
+            receiver_preimage.hash(),
         );
 
         // Check that addition record is not already contained in notification set.
@@ -381,7 +381,7 @@ mod wallet_state_tests {
         let expected_addition_record = commit(
             Hash::hash(&mock_utxo),
             sender_randomness,
-            receiver_preimage.hash::<Hash>(),
+            receiver_preimage.hash(),
         );
         notification_pool
             .add_expected_utxo(
@@ -409,7 +409,7 @@ mod wallet_state_tests {
         let another_addition_record = commit(
             Hash::hash(&mock_utxo),
             random(),
-            receiver_preimage.hash::<Hash>(),
+            receiver_preimage.hash(),
         );
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
         let ret_with_tx_without_utxo =
@@ -506,7 +506,7 @@ mod wallet_state_tests {
                 commit(
                     Hash::hash(&mock_utxo),
                     first_sender_randomness,
-                    receiver_preimage.hash::<Hash>(),
+                    receiver_preimage.hash(),
                 ),
                 Digest::default(),
             )

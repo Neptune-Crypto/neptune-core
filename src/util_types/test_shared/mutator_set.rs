@@ -24,7 +24,7 @@ use crate::util_types::mutator_set::chunk_dictionary::{
     pseudorandom_chunk_dictionary, ChunkDictionary,
 };
 use crate::util_types::mutator_set::ms_membership_proof::{
-    pseudorandom_mmr_membership_proof, pseudorandom_mutator_set_membership_proof, MsMembershipProof,
+    pseudorandom_mutator_set_membership_proof, MsMembershipProof,
 };
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
@@ -80,11 +80,7 @@ pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
 pub fn insert_mock_item(mutator_set: &mut MutatorSetAccumulator) -> (MsMembershipProof, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record = commit(
-        new_item,
-        sender_randomness,
-        receiver_preimage.hash::<Hash>(),
-    );
+    let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
     let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
     mutator_set.add_helper(&addition_record);
 
@@ -125,10 +121,10 @@ pub fn pseudorandom_mmra<H: AlgebraicHasher>(seed: [u8; 32]) -> MmrAccumulator<H
     MmrAccumulator::init(peaks, leaf_count)
 }
 
-pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
+pub fn pseudorandom_mmra_with_mp_and_index<H: AlgebraicHasher>(
     seed: [u8; 32],
     leaf: Digest,
-) -> (MmrAccumulator<H>, MmrMembershipProof<H>) {
+) -> (MmrAccumulator<H>, MmrMembershipProof<H>, u64) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_count = rng.next_u64();
     let num_peaks = leaf_count.count_ones();
@@ -155,18 +151,17 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
         .map(|i| if i == peak_index { root } else { rng.gen() })
         .collect_vec();
     let membership_proof = MmrMembershipProof::<H> {
-        leaf_index,
         authentication_path,
         _hasher: PhantomData,
     };
     let mmr_accumulator = MmrAccumulator::<H>::init(peaks, leaf_count);
-    (mmr_accumulator, membership_proof)
+    (mmr_accumulator, membership_proof, leaf_index)
 }
 
-pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
+pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
     seed: [u8; 32],
     leafs: &[Digest],
-) -> (MmrAccumulator<H>, Vec<MmrMembershipProof<H>>) {
+) -> (MmrAccumulator<H>, Vec<MmrMembershipProof<H>>, Vec<u64>) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     // sample size of MMR
@@ -177,7 +172,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
     let num_peaks = leaf_count.count_ones();
 
     // sample mmr leaf indices and calculate matching derived indices
-    let leaf_indices = leafs
+    let leaf_index_tuples = leafs
         .iter()
         .enumerate()
         .map(|(original_index, _leaf)| (original_index, rng.next_u64() % leaf_count))
@@ -187,16 +182,19 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
             (original_index, mmr_index, mt_index, peak_index)
         })
         .collect_vec();
-    let leafs_and_indices = leafs.iter().copied().zip(leaf_indices).collect_vec();
+    let mmr_leaf_indices = leaf_index_tuples
+        .iter()
+        .map(|(_oi, mmri, _mti, _pi)| *mmri)
+        .collect_vec();
+    let leafs_and_index_tuples = leafs.iter().copied().zip(leaf_index_tuples).collect_vec();
 
     // iterate over all trees
     let mut peaks = vec![];
-    let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
-    let mut mps: Vec<MmrMembershipProof<H>> =
-        (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
+    let dummy_mp = MmrMembershipProof::new(vec![]);
+    let mut mps = (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
     for tree in 0..num_peaks {
         // select all leafs and merkle tree indices for this tree
-        let leafs_and_mt_indices = leafs_and_indices
+        let leafs_and_mt_indices = leafs_and_index_tuples
             .iter()
             .copied()
             .filter(
@@ -238,7 +236,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
         peaks.push(root);
 
         // generate membership proof objects
-        let membership_proofs = leafs_and_indices
+        let indices_and_membership_proofs = leafs_and_index_tuples
             .iter()
             .copied()
             .filter(
@@ -249,7 +247,9 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
                 |(
                     (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
                     authentication_path,
-                )| { MmrMembershipProof::<H>::new(mmr_index, authentication_path) },
+                )| {
+                    (mmr_index, MmrMembershipProof::<H>::new(authentication_path))
+                },
             )
             .collect_vec();
 
@@ -258,15 +258,17 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
             .map(|_| rng.gen())
             .collect_vec();
         let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
-        for (&(leaf, _mt_index, _original_index), mp) in
-            leafs_and_mt_indices.iter().zip(membership_proofs.iter())
+        for (&(leaf, _mt_index, _original_index), (idx, mp)) in leafs_and_mt_indices
+            .iter()
+            .zip(indices_and_membership_proofs.iter())
         {
-            assert!(mp.verify(&dummy_peaks, leaf, leaf_count));
+            assert!(mp.verify(*idx, leaf, &dummy_peaks, leaf_count));
         }
 
         // collect membership proofs in vector, with indices matching those of the supplied leafs
-        for ((_leaf, _mt_index, original_index), mp) in
-            leafs_and_mt_indices.iter().zip(membership_proofs.iter())
+        for ((_leaf, _mt_index, original_index), (_idx, mp)) in leafs_and_mt_indices
+            .iter()
+            .zip(indices_and_membership_proofs.iter())
         {
             mps[*original_index] = mp.clone();
         }
@@ -275,11 +277,11 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
     let mmra = MmrAccumulator::<H>::init(peaks, leaf_count);
 
     // sanity check
-    for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
+    for ((&leaf, mp), li) in leafs.iter().zip(mps.iter()).zip(mmr_leaf_indices.iter()) {
+        assert!(mp.verify(*li, leaf, &mmra.peaks(), mmra.num_leafs()));
     }
 
-    (mmra, mps)
+    (mmra, mps, mmr_leaf_indices)
 }
 
 pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
@@ -345,10 +347,6 @@ pub fn random_swbf_active() -> ActiveWindow {
     aw
 }
 
-pub fn _random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H> {
-    pseudorandom_mmr_membership_proof(thread_rng().gen())
-}
-
 /// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
 pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
     pseudorandom_mutator_set_membership_proof(thread_rng().gen())
@@ -397,8 +395,8 @@ mod shared_tests_test {
     fn test_pseudorandom_mmra_with_single_mp() {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
-        let (mmra, mp) = pseudorandom_mmra_with_mp::<Hash>(rng.gen(), leaf);
-        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()));
+        let (mmra, mp, index) = pseudorandom_mmra_with_mp_and_index::<Hash>(rng.gen(), leaf);
+        assert!(mp.verify(index, leaf, &mmra.peaks(), mmra.num_leafs()));
     }
 
     #[test]
@@ -444,10 +442,11 @@ mod shared_tests_test {
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
-            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
-            for (leaf, mp) in leafs.into_iter().zip(mps) {
+            let (mmra, mps, lis) =
+                pseudorandom_mmra_with_mps_and_indices::<Hash>(inner_rng.gen(), &leafs);
+            for ((leaf, mp), li) in leafs.into_iter().zip(mps).zip(lis) {
                 assert!(
-                    mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()),
+                    mp.verify(li, leaf, &mmra.peaks(), mmra.num_leafs()),
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }

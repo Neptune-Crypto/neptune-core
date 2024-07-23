@@ -4,12 +4,10 @@ use itertools::Itertools;
 use tasm_lib::{
     maybe_write_debuggable_program_to_disk,
     triton_vm::{
-        self,
         error::InstructionError,
         instruction::LabelledInstruction,
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
-        stark::Stark,
         vm::VMState,
     },
     twenty_first::math::b_field_element::BFieldElement,

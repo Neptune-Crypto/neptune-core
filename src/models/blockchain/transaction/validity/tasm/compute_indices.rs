@@ -197,7 +197,6 @@ impl Function for ComputeIndices {
 
         let mut msmp = pseudorandom_mutator_set_membership_proof(rand::Rng::gen(&mut rng));
         msmp.aocl_leaf_index = rng.next_u32() as u64;
-        msmp.auth_path_aocl.leaf_index = msmp.aocl_leaf_index; // TODO: REMOVE on new upstream
 
         let msmp_encoded = twenty_first::math::bfield_codec::BFieldCodec::encode(&msmp);
 

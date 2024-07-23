@@ -20,7 +20,7 @@ use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{field, field_with_size, Digest, DIGEST_LENGTH};
+use tasm_lib::{field, field_with_size, Digest};
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -147,7 +147,7 @@ impl ConsensusProgram for CollectLockScripts {
                 dup 0 push 1 add {&field_lock_script_hash}
                 // _ N i *utxos[i]_si *lock_script_hash
 
-                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
                 // _ N i *utxos[i]_si [lock_script_hash]
 
                 write_io 5
