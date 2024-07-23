@@ -241,10 +241,7 @@ impl MsMembershipProof {
         Ok(all_mutated_mp_indices)
     }
 
-    /**
-     * update_from_addition
-     * Updates a membership proof in anticipation of an addition to the set.
-     */
+    /// Update a membership proof in anticipation of an addition to the set.
     pub fn update_from_addition(
         &mut self,
         own_item: Digest,
@@ -256,8 +253,8 @@ impl MsMembershipProof {
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
-            mutator_set.aocl.num_leafs(),
             self.aocl_leaf_index,
+            mutator_set.aocl.num_leafs(),
             addition_record.canonical_commitment,
             &mutator_set.aocl.peaks(),
         );
