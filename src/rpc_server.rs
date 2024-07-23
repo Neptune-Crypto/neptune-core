@@ -242,7 +242,7 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
-        match leaf_index > 0 && leaf_index < aocl.count_leaves().await {
+        match leaf_index > 0 && leaf_index < aocl.num_leafs().await {
             true => Some(aocl.get_leaf_async(leaf_index).await),
             false => None,
         }
@@ -1098,7 +1098,7 @@ mod rpc_server_tests {
             .archival_mutator_set
             .ams()
             .aocl
-            .count_leaves()
+            .num_leafs()
             .await;
 
         debug_assert!(aocl_leaves > 0);

@@ -20,7 +20,6 @@ use tracing::{debug, error, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
-use twenty_first::math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 pub mod block_body;
@@ -702,7 +701,7 @@ impl Block {
 
         let difficulty_as_bui: BigUint = difficulty.into();
         let max_threshold_as_bui: BigUint =
-            Digest([BFieldElement::new(BFieldElement::MAX); DIGEST_LENGTH]).into();
+            Digest([BFieldElement::new(BFieldElement::MAX); Digest::LEN]).into();
         let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
 
         threshold_as_bui.try_into().unwrap()
@@ -942,21 +941,22 @@ mod block_tests {
         let leaf_index = index as u64;
         let membership_proof = ammr.prove_membership_async(leaf_index).await;
         let v = membership_proof.verify(
-            &last_block_mmra.get_peaks(),
+            leaf_index,
             block_digest,
-            last_block_mmra.count_leaves(),
+            &last_block_mmra.peaks(),
+            last_block_mmra.num_leafs(),
         );
         assert!(
             v,
             "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {}",
-            last_block_mmra.get_peaks().iter().join(","),
-            last_block_mmra.get_peaks().len(),
-            last_block_mmra.count_leaves(),
+            last_block_mmra.peaks().iter().join(","),
+            last_block_mmra.peaks().len(),
+            last_block_mmra.num_leafs(),
             leaf_index,
             membership_proof.authentication_path.iter().join(","),
             blocks.len(),
         );
-        assert_eq!(last_block_mmra.count_leaves(), blocks.len() as u64 - 1);
+        assert_eq!(last_block_mmra.num_leafs(), blocks.len() as u64 - 1);
     }
 
     #[test]

@@ -169,7 +169,7 @@ pub fn tasm_hashing_merkle_verify(root: Digest, leaf_index: u32, leaf: Digest, t
 
     let mt_inclusion_proof = MerkleTreeInclusionProof::<Hash> {
         tree_height: tree_height as usize,
-        indexed_leaves: vec![(leaf_index as usize, leaf)],
+        indexed_leafs: vec![(leaf_index as usize, leaf)],
         authentication_structure: path.clone(),
         _hasher: std::marker::PhantomData,
     };
@@ -202,7 +202,7 @@ pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
 
     let mt_inclusion_proof = MerkleTreeInclusionProof::<Hash> {
         tree_height: tree_height as usize,
-        indexed_leaves: vec![(merkle_leaf_index as usize, leaf)],
+        indexed_leafs: vec![(merkle_leaf_index as usize, leaf)],
         authentication_structure: path,
         _hasher: std::marker::PhantomData,
     };

@@ -8,7 +8,7 @@
 //                 .individual_tokens
 //                 .iter()
 //                 .copied()
-//                 .take(DIGEST_LENGTH)
+//                 .take(Digest::LEN)
 //                 .rev()
 //                 .collect_vec(),
 //         )
@@ -105,16 +105,16 @@
 //                     commit(
 //                         item,
 //                         msmp.sender_randomness,
-//                         msmp.receiver_preimage.hash::<Hash>(),
+//                         msmp.receiver_preimage.hash(),
 //                     ),
 //                     &msmp.auth_path_aocl,
 //                 )
 //             })
 //             .all(|(cc, mp)| {
 //                 mp.verify(
-//                     &removal_record_integrity_witness.aocl.get_peaks(),
+//                     &removal_record_integrity_witness.aocl.peaks(),
 //                     cc.canonical_commitment,
-//                     removal_record_integrity_witness.aocl.count_leaves(),
+//                     removal_record_integrity_witness.aocl.num_leafs(),
 //                 )
 //             }));
 

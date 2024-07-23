@@ -104,7 +104,6 @@ impl Arbitrary for MmraAndMembershipProofs {
                 // prepare to extract membership proofs
                 let mut membership_proofs = vec![
                     MmrMembershipProof {
-                        leaf_index: 0,
                         authentication_path: vec![],
                         _hasher: std::marker::PhantomData::<Hash>
                     };
@@ -122,7 +121,6 @@ impl Arbitrary for MmraAndMembershipProofs {
                         paths.into_iter().zip(indices_and_leafs_.iter())
                     {
                         membership_proofs[enumeration_index].authentication_path = path;
-                        membership_proofs[enumeration_index].leaf_index = mmr_index;
                         leaf_indices[enumeration_index] = mmr_index;
                     }
                 }
@@ -135,7 +133,7 @@ impl Arbitrary for MmraAndMembershipProofs {
                 {
                     let (_mti, _pi) =
                         leaf_index_to_mt_index_and_peak_index(*leaf_index, total_leaf_count);
-                    assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count));
+                    assert!(mmr_mp.verify(*leaf_index, *leaf, &peaks, total_leaf_count));
                 }
 
                 MmraAndMembershipProofs {
@@ -178,14 +176,15 @@ mod test {
         #[strategy(MmraAndMembershipProofs::arbitrary_with((#indices_and_leafs, #_total_leaf_count)))]
         mmra_and_membership_proofs: MmraAndMembershipProofs,
     ) {
-        for ((_index, leaf), mp) in indices_and_leafs
+        for ((index, leaf), mp) in indices_and_leafs
             .into_iter()
             .zip(mmra_and_membership_proofs.membership_proofs)
         {
             prop_assert!(mp.verify(
-                &mmra_and_membership_proofs.mmra.get_peaks(),
+                index,
                 leaf,
-                mmra_and_membership_proofs.mmra.count_leaves(),
+                &mmra_and_membership_proofs.mmra.peaks(),
+                mmra_and_membership_proofs.mmra.num_leafs(),
             ));
         }
     }

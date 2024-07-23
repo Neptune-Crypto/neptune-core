@@ -22,10 +22,7 @@ use tasm_lib::traits::function::{Function, FunctionInitialState};
 use tasm_lib::{rust_shadowing_helper_functions, InitVmState};
 use triton_vm::{prelude::BFieldElement, triton_asm};
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::{
-    math::{tip5::Digest, tip5::DIGEST_LENGTH},
-    util_types::algebraic_hasher::AlgebraicHasher,
-};
+use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
 /// Computes the mast hash of a transaction kernel object
 #[derive(Debug, Clone)]
@@ -385,11 +382,11 @@ impl Function for TransactionKernelMastHash {
         rust_shadowing_helper_functions::list::list_new(list_address, memory);
         rust_shadowing_helper_functions::list::list_set_length(list_address, 16, memory);
         for (i, node) in nodes.into_iter().enumerate().skip(1) {
-            for j in 0..DIGEST_LENGTH {
+            for j in 0..Digest::LEN {
                 memory.insert(
                     list_address
                         + BFieldElement::one()
-                        + BFieldElement::new((i * DIGEST_LENGTH + j) as u64),
+                        + BFieldElement::new((i * Digest::LEN + j) as u64),
                     node.values()[j],
                 );
             }

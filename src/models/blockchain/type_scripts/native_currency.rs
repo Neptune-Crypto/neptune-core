@@ -31,7 +31,7 @@ use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{field, field_with_size, DIGEST_LENGTH};
+use tasm_lib::{field, field_with_size};
 use tasm_lib::{twenty_first::math::b_field_element::BFieldElement, Digest};
 
 use super::neptune_coins::NeptuneCoins;
@@ -189,9 +189,9 @@ impl ConsensusProgram for NativeCurrency {
             library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAddU128));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
 
-        let own_program_digest_ptr_write = library.kmalloc(DIGEST_LENGTH as u32);
+        let own_program_digest_ptr_write = library.kmalloc(Digest::LEN as u32);
         let own_program_digest_ptr_read =
-            own_program_digest_ptr_write + bfe!(DIGEST_LENGTH as u32 - 1);
+            own_program_digest_ptr_write + bfe!(Digest::LEN as u32 - 1);
 
         let loop_utxos_add_amounts =
             "neptune_consensus_transaction_type_script_loop_utxos_add_amounts".to_string();
@@ -207,7 +207,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ [own_program_digest]
 
             push {own_program_digest_ptr_write}
-            write_mem {DIGEST_LENGTH}
+            write_mem {Digest::LEN}
             pop 1
             // _
         );
@@ -216,7 +216,7 @@ impl ConsensusProgram for NativeCurrency {
             // _
 
             push {own_program_digest_ptr_read}
-            read_mem {DIGEST_LENGTH}
+            read_mem {Digest::LEN}
             pop 1
             // _ [own_program_digest]
         };
@@ -265,7 +265,7 @@ impl ConsensusProgram for NativeCurrency {
             {&store_own_program_digest}
             // _
 
-            read_io {DIGEST_LENGTH}
+            read_io {Digest::LEN}
             hint txkmh: Digest = stack[0..5]
             // _ [txkmh]
 
@@ -502,7 +502,7 @@ impl ConsensusProgram for NativeCurrency {
                 hint type_script_hash_ptr = stack[0]
                 // _ M j *coins[j]_si [amount] *type_script_hash
 
-                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
                 hint type_script_hash : Digest = stack[0..5]
                 // _ M j *coins[j]_si [amount] [type_script_hash]
 

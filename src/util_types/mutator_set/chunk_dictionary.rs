@@ -55,10 +55,12 @@ impl ChunkDictionary {
             .collect_vec()
     }
 
-    pub fn membership_proofs_and_leafs(&self) -> Vec<(MmrMembershipProof<Hash>, Digest)> {
+    pub fn chunk_indices_and_membership_proofs_and_leafs(
+        &self,
+    ) -> Vec<(u64, MmrMembershipProof<Hash>, Digest)> {
         self.dictionary
             .iter()
-            .map(|(_k, (mp, ch))| (mp.clone(), Hash::hash(ch)))
+            .map(|(k, (mp, ch))| (*k, mp.clone(), Hash::hash(ch)))
             .collect_vec()
     }
 
@@ -165,7 +167,7 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
         dictionary.push((
             key,
             (
-                MmrMembershipProof::new(key, authpath),
+                MmrMembershipProof::new(authpath),
                 Chunk {
                     relative_indices: chunk,
                 },

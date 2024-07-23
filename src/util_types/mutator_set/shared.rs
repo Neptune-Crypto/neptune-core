@@ -3,6 +3,7 @@ use crate::prelude::twenty_first;
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use tasm_lib::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -56,7 +57,7 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 pub fn get_batch_mutation_argument_for_removal_record(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof<Hash>, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
     let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
         HashMap::new();
@@ -123,7 +124,10 @@ pub fn get_batch_mutation_argument_for_removal_record(
 
     (
         mutated_chunk_dictionaries,
-        batch_modification_hash_map.into_values().collect(),
+        batch_modification_hash_map
+            .into_iter()
+            .map(|(i, (p, l))| (i, p, l))
+            .collect(),
     )
 }
 
@@ -155,7 +159,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
 pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof<Hash>, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
     let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
         HashMap::new();
@@ -222,6 +226,9 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
 
     (
         mutated_chunk_dictionaries,
-        batch_modification_hash_map.into_values().collect(),
+        batch_modification_hash_map
+            .iter()
+            .map(|(i, (p, l))| (*i, p.clone(), *l))
+            .collect_vec(),
     )
 }

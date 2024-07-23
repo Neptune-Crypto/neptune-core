@@ -24,7 +24,7 @@ use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{field, field_with_size, Digest, DIGEST_LENGTH};
+use tasm_lib::{field, field_with_size, Digest};
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -229,7 +229,7 @@ impl ConsensusProgram for CollectTypeScripts {
             read_mem 1 push 2 add swap 1
             // _ *ctsw *type_script_hashes[0] len
 
-            push {DIGEST_LENGTH} mul
+            push {Digest::LEN} mul
             // _ *ctsw *type_script_hashes[0] size
 
             dup 1 add
@@ -288,7 +288,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 dup 7 dup 0 dup 2 {&field_type_script_hash}
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes *digest
 
-                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
                 // _ *type_script_hashes * * * len j size *coin[j] *type_script_hashes *type_script_hashes [digest]
 
                 call {contains}
@@ -317,7 +317,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 {&field_type_script_hash}
                 // _ *coin[j] *type_script_hashes *digest
 
-                push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH} pop 1
+                push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
                 // _ *coin[j] *type_script_hashes [digest]
 
                 call {push_digest}
@@ -336,10 +336,10 @@ impl ConsensusProgram for CollectTypeScripts {
                 skiz return
                 // _ *type_script_hashes[i] *type_script_hashes[N+1]
 
-                dup 1 push {DIGEST_LENGTH-1} add read_mem {DIGEST_LENGTH}
+                dup 1 push {Digest::LEN-1} add read_mem {Digest::LEN}
                 // _ *type_script_hashes[i] *type_script_hashes[N+1] [type_script_hashes[i]] (*type_script_hashes[i]-1)
 
-                push {DIGEST_LENGTH+1} add swap 7 pop 1
+                push {Digest::LEN+1} add swap 7 pop 1
                 // _ *type_script_hashes[i+1] *type_script_hashes[N+1] [type_script_hashes[i]]
 
                 write_io 5

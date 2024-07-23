@@ -77,7 +77,7 @@ impl Arbitrary for MsaAndRecords {
         let removable_commitments = removables
             .iter()
             .map(|(item, sender_randomness, receiver_preimage)| {
-                commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>())
+                commit(*item, *sender_randomness, receiver_preimage.hash())
             })
             .collect_vec();
 
@@ -128,7 +128,7 @@ impl Arbitrary for MsaAndRecords {
                 all_chunk_indices.dedup();
 
                 // filter by swbf mmr size
-                let swbf_mmr_size = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                let swbf_mmr_size = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
                 let mmr_chunk_indices = all_chunk_indices
                     .iter()
                     .cloned()
@@ -157,7 +157,7 @@ impl Arbitrary for MsaAndRecords {
                         let all_index_sets = all_index_sets.clone();
                         let aocl_membership_proofs = aocl_membership_proofs.clone();
                         let removables = removables.clone();
-                        let swbf_mmr_leaf_count = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                        let swbf_mmr_leaf_count = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
                         let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                         // unwrap random swbf mmra and membership proofs
@@ -215,8 +215,8 @@ impl Arbitrary for MsaAndRecords {
                                     .zip(personalized_chunk_dictionaries.iter())
                                     .zip(aocl_leaf_indices.iter())
                                     .map(|((((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks), aocl_leaf_index)| {
-                                        let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
-                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()));
+                                        let leaf = commit(*item, *sender_randomness, receiver_preimage.hash()).canonical_commitment;
+                                        assert!(aocl_auth_path.verify(*aocl_leaf_index, leaf, &aocl_mmra.peaks(), aocl_mmra.num_leafs()));
                                         (sender_randomness, receiver_preimage, aocl_auth_path, target_chunks, aocl_leaf_index)
                                     })
                                     .map(

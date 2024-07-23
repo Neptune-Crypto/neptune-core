@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -172,7 +173,7 @@ impl RemovalRecord {
         removal_records: &mut [&mut Self],
         mutator_set: &MutatorSetAccumulator,
     ) {
-        let new_item_index = mutator_set.aocl.count_leaves();
+        let new_item_index = mutator_set.aocl.num_leafs();
 
         // if window does not slide, do nothing
         if !MutatorSetAccumulator::window_slides(new_item_index) {
@@ -254,10 +255,12 @@ impl RemovalRecord {
         let mut mmr_membership_proofs_for_append: Vec<
             &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
         > = vec![];
+        let mut leaf_indices = vec![];
         for (i, rr) in removal_records.iter_mut().enumerate() {
             if rrs_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in rr.target_chunks.iter_mut() {
+                for (chunk_index, (mmr_mp, _chnk)) in rr.target_chunks.iter_mut() {
                     mmr_membership_proofs_for_append.push(mmr_mp);
+                    leaf_indices.push(*chunk_index);
                 }
             }
         }
@@ -265,9 +268,10 @@ impl RemovalRecord {
         // Perform the update of all the MMR membership proofs contained in the removal records
         mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
-            mutator_set.swbf_inactive.count_leaves(),
+            &leaf_indices,
+            mutator_set.swbf_inactive.num_leafs(),
             new_chunk_digest,
-            &mutator_set.swbf_inactive.get_peaks(),
+            &mutator_set.swbf_inactive.peaks(),
         );
     }
 
@@ -289,16 +293,22 @@ impl RemovalRecord {
 
         // Collect all the MMR membership proofs from the chunk dictionaries.
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut leaf_indices = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
-            for (_, (mp, _)) in chunk_dict.iter_mut() {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
             }
         }
 
         // Perform the batch mutation of the MMR membership proofs
         mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_mmr_mps,
-            mutation_argument,
+            &leaf_indices,
+            mutation_argument
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p))
+                .collect_vec(),
         );
     }
 
@@ -325,20 +335,16 @@ impl RemovalRecord {
             return false;
         }
 
-        let swbfi_peaks = mutator_set.swbf_inactive.get_peaks();
-        let swbfi_leaf_count = mutator_set.swbf_inactive.count_leaves();
+        let swbfi_peaks = mutator_set.swbf_inactive.peaks();
+        let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
         self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
             let leaf_digest = Hash::hash(chunk);
-
-            if *chunk_index != mmr_proof.leaf_index {
-                return false;
-            }
 
             // TODO: This in-bounds check can be removed after upstream
             // dependency twenty-first has been updated with
             // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
-            let in_bounds = swbfi_leaf_count > mmr_proof.leaf_index;
-            in_bounds && mmr_proof.verify(&swbfi_peaks, leaf_digest, swbfi_leaf_count)
+            let in_bounds = swbfi_leaf_count > *chunk_index;
+            in_bounds && mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
         })
     }
 
@@ -504,7 +510,7 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            commit(item, sender_randomness, receiver_preimage.hash());
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
         assert!(
@@ -533,7 +539,7 @@ mod removal_record_tests {
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            commit(item, sender_randomness, receiver_preimage.hash());
 
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
         accumulator.add(&addition_record);
@@ -566,7 +572,7 @@ mod removal_record_tests {
         for j in 0..initial_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record: AdditionRecord =
-                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
@@ -619,7 +625,7 @@ mod removal_record_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                    commit(item, sender_randomness, receiver_preimage.hash());
                 let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
                 // Update all removal records from addition, then add the element
@@ -702,7 +708,7 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             // Update all removal records and membership proofs from addition,

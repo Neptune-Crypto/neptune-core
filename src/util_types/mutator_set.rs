@@ -114,7 +114,7 @@ mod accumulation_scheme_tests {
 
         for i in 0..BATCH_SIZE {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             mutator_set.add(&addition_record);
             assert_eq!(
                 0,
@@ -125,7 +125,7 @@ mod accumulation_scheme_tests {
         }
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+        let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         mutator_set.add(&addition_record);
         assert_eq!(
             1,
@@ -256,7 +256,7 @@ mod accumulation_scheme_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof: MsMembershipProof =
                 mutator_set.prove(item, sender_randomness, receiver_preimage);
             mutator_set.add_helper(&addition_record);
@@ -275,7 +275,7 @@ mod accumulation_scheme_tests {
         let addition_record = commit(
             own_item,
             sender_randomness,
-            receiver_preimage.hash::<Hash>(),
+            receiver_preimage.hash(),
         );
         let mut membership_proof =
             mutator_set.prove(own_item, sender_randomness, receiver_preimage);
@@ -286,7 +286,7 @@ mod accumulation_scheme_tests {
         let new_addition_record = commit(
             new_item,
             new_sender_randomness,
-            new_receiver_preimage.hash::<Hash>(),
+            new_receiver_preimage.hash(),
         );
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -345,7 +345,7 @@ mod accumulation_scheme_tests {
 
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             // Update all membership proofs
@@ -377,7 +377,7 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::default();
         let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
 
-        let addition_record = commit(item0, sender_randomness0, receiver_preimage0.hash::<Hash>());
+        let addition_record = commit(item0, sender_randomness0, receiver_preimage0.hash());
         let membership_proof = mutator_set.prove(item0, sender_randomness0, receiver_preimage0);
 
         assert!(!mutator_set.verify(item0, &membership_proof));
@@ -388,7 +388,7 @@ mod accumulation_scheme_tests {
 
         // Insert a new item and verify that this still works
         let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
-        let new_ar = commit(item1, sender_randomness1, receiver_preimage1.hash::<Hash>());
+        let new_ar = commit(item1, sender_randomness1, receiver_preimage1.hash());
         let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1);
         assert!(!mutator_set.verify(item1, &new_mp));
 
@@ -401,7 +401,7 @@ mod accumulation_scheme_tests {
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let other_ar = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let other_ar = commit(item, sender_randomness, receiver_preimage.hash());
             let other_mp = mutator_set.prove(item, sender_randomness, receiver_preimage);
             assert!(!mutator_set.verify(item, &other_mp));
 
@@ -437,7 +437,7 @@ mod accumulation_scheme_tests {
                 let addition_record = commit(
                     new_item,
                     sender_randomness,
-                    receiver_preimage.hash::<Hash>(),
+                    receiver_preimage.hash(),
                 );
                 let membership_proof =
                     mutator_set.prove(new_item, sender_randomness, receiver_preimage);
@@ -505,7 +505,7 @@ mod accumulation_scheme_tests {
             let addition_record = commit(
                 new_item,
                 sender_randomness,
-                receiver_preimage.hash::<Hash>(),
+                receiver_preimage.hash(),
             );
             let membership_proof =
                 mutator_set.prove(new_item, sender_randomness, receiver_preimage);
@@ -611,7 +611,7 @@ mod accumulation_scheme_tests {
         let json_one_add = serde_json::to_string(&mutator_set).unwrap();
         println!("json_one_add = \n{}", json_one_add);
         let s_back_one_add = serde_json::from_str::<MutatorSetAccumulator>(&json_one_add).unwrap();
-        assert_eq!(1, s_back_one_add.aocl.count_leaves());
+        assert_eq!(1, s_back_one_add.aocl.num_leafs());
         assert!(s_back_one_add.swbf_inactive.is_empty());
         assert!(s_back_one_add.swbf_active.sbf.is_empty());
         assert!(s_back_one_add.verify(item, &mp));
@@ -624,7 +624,7 @@ mod accumulation_scheme_tests {
             serde_json::from_str::<MutatorSetAccumulator>(&json_one_add_one_remove).unwrap();
         assert_eq!(
             1,
-            s_back_one_add_one_remove.aocl.count_leaves(),
+            s_back_one_add_one_remove.aocl.num_leafs(),
             "AOCL must still have exactly one leaf"
         );
         assert!(

@@ -917,7 +917,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves()
+                .num_leafs()
                 .await,
             "Archival mutator set must be populated with premine outputs"
         );
@@ -1004,7 +1004,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().aocl.count_leaves().await);
+            assert_ne!(0, ams_ref.ams().aocl.num_leafs().await);
         }
 
         let now = mock_block_1.kernel.header.timestamp;
@@ -1205,7 +1205,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves()
+                .num_leafs()
                 .await as usize,
             "AOCL leaf count must agree with blockchain after rollback"
         );
@@ -1367,7 +1367,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves().await as usize,
+                .num_leafs().await as usize,
             "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
         );
 

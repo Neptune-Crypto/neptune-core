@@ -11,7 +11,7 @@ use neptune_core::database::NeptuneLevelDb;
 use neptune_core::util_types::mutator_set::archival_mmr::ArchivalMmr;
 use rand::random;
 use tasm_lib::twenty_first::math::tip5::Tip5;
-use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_count_to_node_count;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::num_leafs_to_num_nodes;
 use tasm_lib::Digest;
 
 fn main() {
@@ -86,7 +86,7 @@ async fn new_ammr(leaf_count: u64) -> (SimpleRustyStorage, ArchivalMmr<Tip5, Dbt
     // Add the dummy node since nodes are 1-indexed in AMMRs.
     nv.push(Digest::default()).await;
 
-    let num_nodes = leaf_count_to_node_count(leaf_count);
+    let num_nodes = num_leafs_to_num_nodes(leaf_count);
     for _ in 0..num_nodes {
         nv.push(random()).await;
     }
@@ -259,7 +259,7 @@ mod get_peaks {
 
             bencher.bench_local(|| {
                 rt.block_on(async {
-                    ammr.get_peaks().await;
+                    ammr.peaks().await;
                 });
             });
         }

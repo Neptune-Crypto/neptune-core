@@ -98,7 +98,6 @@ impl StorageWriter for RustyArchivalMutatorSet {
 mod tests {
     use itertools::Itertools;
     use rand::{random, thread_rng, RngCore};
-    use twenty_first::math::tip5::Tip5;
 
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::{
@@ -110,8 +109,6 @@ mod tests {
 
     #[tokio::test]
     async fn persist_test() {
-        type H = Tip5;
-
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
         let num_removals = 50usize;
         let mut rng = thread_rng();
@@ -131,12 +128,12 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let mp = rusty_mutator_set
                 .ams()
                 .prove(item, sender_randomness, receiver_preimage)
@@ -157,7 +154,7 @@ mod tests {
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         // Verify membership
@@ -196,7 +193,7 @@ mod tests {
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         // persist and drop
@@ -217,7 +214,7 @@ mod tests {
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set.ams().aocl.count_leaves().await
+            new_rusty_mutator_set.ams().aocl.num_leafs().await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
