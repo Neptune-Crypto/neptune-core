@@ -96,6 +96,18 @@ impl MsMembershipProof {
             "Function must be called with same number of membership proofs and items. Got {} items and {} membership proofs", own_items.len(), membership_proofs.len()
         );
 
+        assert!(membership_proofs
+            .iter()
+            .all(|msmp| msmp
+                .target_chunks
+                .iter()
+                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
+                    *chunk_index,
+                    Hash::hash(chunk),
+                    &mutator_set.swbf_inactive.peaks(),
+                    mutator_set.swbf_inactive.num_leafs()
+                ))));
+
         let new_item_index = mutator_set.aocl.num_leafs();
 
         // Update AOCL MMR membership proofs
@@ -118,6 +130,20 @@ impl MsMembershipProof {
         if !MutatorSetAccumulator::window_slides(new_item_index) {
             return Ok(indices_for_updated_mps);
         }
+
+        assert!(membership_proofs
+            .iter()
+            .all(|msmp| msmp
+                .target_chunks
+                .iter()
+                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
+                    *chunk_index,
+                    Hash::hash(chunk),
+                    &mutator_set.swbf_inactive.peaks(),
+                    mutator_set.swbf_inactive.num_leafs()
+                ))));
+
+        let new_item_index = mutator_set.aocl.num_leafs();
 
         // window does slide
         let batch_index = new_item_index / BATCH_SIZE as u64;
@@ -178,6 +204,20 @@ impl MsMembershipProof {
             }
         }
 
+        assert!(membership_proofs
+            .iter()
+            .all(|msmp| msmp
+                .target_chunks
+                .iter()
+                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
+                    *chunk_index,
+                    Hash::hash(chunk),
+                    &mutator_set.swbf_inactive.peaks(),
+                    mutator_set.swbf_inactive.num_leafs()
+                ))));
+
+        let new_item_index = mutator_set.aocl.num_leafs();
+
         // Perform the updates
 
         // First insert the new entry into the chunk dictionary for the membership
@@ -208,10 +248,21 @@ impl MsMembershipProof {
         // required to return the indices of the MS membership proofs that have been updated
         // by this function call.
         let mut mmr_membership_proof_index_to_membership_proof_index = vec![];
+        let mut mmr_membership_indices = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in mp.target_chunks.iter_mut() {
+                for (chunk_index, (mmr_mp, chunk)) in mp.target_chunks.iter_mut() {
+                    assert!(
+                        mmr_mp.verify(
+                            *chunk_index,
+                            Hash::hash(chunk),
+                            &mutator_set.swbf_inactive.peaks(),
+                            mutator_set.swbf_inactive.num_leafs()
+                        ),
+                        "sanity check before fails"
+                    );
                     mmr_membership_proofs_for_append.push(mmr_mp);
+                    mmr_membership_indices.push(*chunk_index);
                     mmr_membership_proof_index_to_membership_proof_index.push(i as u64);
                 }
             }
@@ -220,11 +271,27 @@ impl MsMembershipProof {
         let indices_for_mutated_values =
             mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
-                &mmr_membership_proof_index_to_membership_proof_index,
+                &mmr_membership_indices,
                 mutator_set.swbf_inactive.num_leafs(),
                 new_chunk_digest,
                 &mutator_set.swbf_inactive.peaks(),
             );
+
+        // sanity check
+        for mp in membership_proofs.iter() {
+            for (chunk_index, (mmr_mp, chunk)) in mp.target_chunks.iter() {
+                assert!(
+                    mmr_mp.verify(
+                        *chunk_index,
+                        Hash::hash(chunk),
+                        &mmra.peaks(),
+                        mmra.num_leafs()
+                    ),
+                    "sanity check after fails"
+                );
+            }
+        }
+
         let mut swbf_mutated_indices = vec![];
         for j in indices_for_mutated_values {
             swbf_mutated_indices
