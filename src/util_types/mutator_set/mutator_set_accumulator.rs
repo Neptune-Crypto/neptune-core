@@ -669,13 +669,13 @@ mod ms_accumulator_tests {
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
                     let previous_mps = membership_proofs_batch.clone();
-                    let update_result = MsMembershipProof::batch_update_from_addition(
+                    let indices_of_updated_mps = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
                         &accumulator,
                         &addition_record,
-                    );
-                    assert!(update_result.is_ok(), "Batch mutation must return OK");
+                    )
+                    .expect("Batch mutation must return OK");
 
                     // Update membership proofs sequentially
                     for (mp, &own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
@@ -689,10 +689,9 @@ mod ms_accumulator_tests {
                     archival_after_remove.add(&addition_record).await;
                     archival_before_remove.add(&addition_record).await;
 
-                    let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);
                     for j in 0..items.len() {
-                        if updated_mp_indices.contains(&j) {
+                        if indices_of_updated_mps.contains(&j) {
                             assert!(
                                 !accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",

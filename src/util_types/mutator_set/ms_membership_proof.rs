@@ -115,7 +115,7 @@ impl MsMembershipProof {
             .iter()
             .map(|msmp| msmp.aocl_leaf_index)
             .collect_vec();
-        let indices_for_updated_mps = MmrMembershipProof::batch_update_from_append(
+        let indices_for_mps_updated_from_append = MmrMembershipProof::batch_update_from_append(
             &mut membership_proofs
                 .iter_mut()
                 .map(|msmp| &mut msmp.auth_path_aocl)
@@ -128,7 +128,7 @@ impl MsMembershipProof {
 
         // if window does not slide, we are done
         if !MutatorSetAccumulator::window_slides(new_item_index) {
-            return Ok(indices_for_updated_mps);
+            return Ok(indices_for_mps_updated_from_append);
         }
 
         assert!(membership_proofs
@@ -190,7 +190,7 @@ impl MsMembershipProof {
 
         // Find the indices of the mutator set membership proofs whose
         // `target_chunks` field needs a new dictionary entry for the slid chunk.
-        let indices_for_new_chunk_dictionary_entry: Vec<usize> =
+        let indices_for_mps_with_new_chunk_dictionary_entry: Vec<usize> =
             match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
@@ -211,7 +211,7 @@ impl MsMembershipProof {
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in indices_for_new_chunk_dictionary_entry.iter() {
+        for i in indices_for_mps_with_new_chunk_dictionary_entry.iter() {
             membership_proofs.index_mut(*i).target_chunks.insert(
                 old_window_start_batch_index,
                 (new_chunk_auth_path.clone(), new_chunk.clone()),
@@ -259,23 +259,28 @@ impl MsMembershipProof {
                 &mutator_set.swbf_inactive.peaks(),
             );
 
-        let mut swbf_mutated_indices = vec![];
+        let mut indices_for_mps_with_updated_swbf_auth_paths = vec![];
         for j in indices_for_mutated_values {
-            swbf_mutated_indices
+            indices_for_mps_with_updated_swbf_auth_paths
                 .push(mmr_membership_proof_index_to_membership_proof_index[j] as usize);
         }
 
         // Gather the indices the are returned. These indices indicate which membership
         // proofs that have been mutated.
-        let mut all_mutated_mp_indices =
-            [swbf_mutated_indices, indices_for_new_chunk_dictionary_entry].concat();
+        let mut all_mutated_mp_indices = [
+            indices_for_mps_updated_from_append,
+            indices_for_mps_with_updated_swbf_auth_paths,
+            indices_for_mps_with_new_chunk_dictionary_entry,
+        ]
+        .concat();
         all_mutated_mp_indices.sort_unstable();
         all_mutated_mp_indices.dedup();
 
         Ok(all_mutated_mp_indices)
     }
 
-    /// Update a membership proof in anticipation of an addition to the set.
+    /// Update a membership proof in anticipation of an addition to the set and
+    /// return, wrapped in a `Result`, whether something was updated.
     pub fn update_from_addition(
         &mut self,
         own_item: Digest,
@@ -302,7 +307,7 @@ impl MsMembershipProof {
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
-        // Get indices by recalculating them. (We do not cache indices any more.)
+        // Get Bloom filter indices by recalculating them.
         let all_indices = get_swbf_indices(
             own_item,
             self.sender_randomness,
@@ -314,20 +319,20 @@ impl MsMembershipProof {
             .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
             .collect::<HashSet<u64>>();
 
-        // Get an accumulator-version of the MMR and insert the new SWBF leaf to get its
-        // authentication path.
-        // It's important to convert the MMR
-        // to an MMR Accumulator here, since we don't want to drag around or clone
-        // a whole archival MMR for this operation, as the archival MMR can be in the
-        // size of gigabytes, whereas the MMR accumulator should be in the size of
-        // kilobytes.
+        // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
+        // the new leaf's authentication path.
         let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
+        let new_leaf_index = mmra.num_leafs();
         let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
             mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
         let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
+        assert_eq!(
+            new_leaf_index, old_window_start_batch_index,
+            "new SWBFI leaf index does not match with `old_window_start_batch_index`"
+        );
         let new_window_start_batch_index = batch_index;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
             // Update for indices that are in the inactive part of the SWBF.
@@ -356,9 +361,7 @@ impl MsMembershipProof {
             }
 
             // if index is in the part that is becoming inactive, add a dictionary entry
-            if old_window_start_batch_index <= chunk_index
-                && chunk_index < new_window_start_batch_index
-            {
+            if chunk_index == new_leaf_index {
                 if self.target_chunks.contains_key(&chunk_index) {
                     return Err(Box::new(MembershipProofError::AlreadyExistingChunk(
                         chunk_index,
