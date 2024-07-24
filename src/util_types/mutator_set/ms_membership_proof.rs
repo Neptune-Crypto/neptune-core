@@ -333,7 +333,6 @@ impl MsMembershipProof {
             new_leaf_index, old_window_start_batch_index,
             "new SWBFI leaf index does not match with `old_window_start_batch_index`"
         );
-        let new_window_start_batch_index = batch_index;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
             // Update for indices that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.

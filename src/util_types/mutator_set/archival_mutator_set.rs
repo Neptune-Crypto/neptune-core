@@ -88,8 +88,8 @@ where
         self.accumulator().await.hash()
     }
 
-    /// Apply a list of removal records while keeping a list of mutator set membership proofs
-    /// up-to-date
+    /// Apply a list of removal records while keeping a list of mutator set
+    /// membership proofs up-to-date.
     pub async fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord>,
@@ -112,23 +112,13 @@ where
             .collect_vec();
         indices_and_new_leafs.sort_by_key(|(i, _d)| *i);
 
-        // compile list of MMR membership proofs to be preserved
-        let mut preserved_mmr_membership_proofs = preserved_membership_proofs
-            .iter_mut()
-            .flat_map(|msmp| {
-                msmp.target_chunks
-                    .iter_mut()
-                    .map(|(_index, (mmrmp, _chunk))| mmrmp)
-            })
-            .collect_vec();
-
-        // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        // This updates both the inactive part of the SWBF and the MMR membership proofs
+        // Apply the batch-update to the inactive part of the sliding window
+        // Bloom filter. The next line updates the inactive part of the SWBF
+        // only. We do *not* want to update the MMR membership proofs again;
+        // they were already updated in the call to
+        // `MutatorSetAccumulator::batch_remove`.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(
-                &mut preserved_mmr_membership_proofs,
-                indices_and_new_leafs,
-            )
+            .batch_mutate_leaf_and_update_mps(&mut [], indices_and_new_leafs)
             .await;
 
         self.chunks.set_many(chunk_index_to_chunk_new_state).await
@@ -1027,7 +1017,11 @@ mod archival_mutator_set_tests {
                 .zip_eq(skipped_removes.into_iter())
             {
                 // If this removal record was not applied, then the membership proof must verify
-                assert_eq!(skipped, archival_mutator_set.verify(item, mp).await);
+                assert_eq!(
+                    skipped,
+                    archival_mutator_set.verify(item, mp).await,
+                    "item was not removed but membership proof is invalid"
+                );
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
