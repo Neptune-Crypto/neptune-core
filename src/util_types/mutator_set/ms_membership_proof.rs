@@ -232,11 +232,11 @@ impl MsMembershipProof {
             &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
         > = vec![];
 
-        // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
-        // which parts of the MMR membership proofs that map to MS membership proofs. This is
+        // The `mmr_mp_index_to_ms_mp_index` variable remembers
+        // which MMR membership proofs that map to MS membership proofs. This is
         // required to return the indices of the MS membership proofs that have been updated
         // by this function call.
-        let mut mmr_membership_proof_index_to_membership_proof_index = vec![];
+        let mut mmr_mp_index_to_ms_mp_index = vec![];
         let mut mmr_membership_indices = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
@@ -244,13 +244,13 @@ impl MsMembershipProof {
                     if *chunk_index != old_window_start_batch_index {
                         mmr_membership_proofs_for_append.push(mmr_mp);
                         mmr_membership_indices.push(*chunk_index);
+                        mmr_mp_index_to_ms_mp_index.push(i as u64);
                     }
-                    mmr_membership_proof_index_to_membership_proof_index.push(i as u64);
                 }
             }
         }
 
-        let indices_for_mutated_values =
+        let indices_for_modified_paths =
             mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
                 &mmr_membership_indices,
@@ -260,9 +260,9 @@ impl MsMembershipProof {
             );
 
         let mut indices_for_mps_with_updated_swbf_auth_paths = vec![];
-        for j in indices_for_mutated_values {
+        for j in indices_for_modified_paths {
             indices_for_mps_with_updated_swbf_auth_paths
-                .push(mmr_membership_proof_index_to_membership_proof_index[j] as usize);
+                .push(mmr_mp_index_to_ms_mp_index[j] as usize);
         }
 
         // Gather the indices the are returned. These indices indicate which membership
