@@ -274,7 +274,7 @@ impl MutatorSetAccumulator {
         let current_batch_index: u64 = self.get_batch_index();
         let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
 
-        // Get all bloom filter indices
+        // Get all Bloom filter indices
         let all_indices = AbsoluteIndexSet::new(&get_swbf_indices(
             item,
             membership_proof.sender_randomness,
