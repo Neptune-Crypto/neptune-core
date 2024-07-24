@@ -259,8 +259,10 @@ impl RemovalRecord {
         for (i, rr) in removal_records.iter_mut().enumerate() {
             if rrs_for_batch_append.contains(&i) {
                 for (chunk_index, (mmr_mp, _chnk)) in rr.target_chunks.iter_mut() {
-                    mmr_membership_proofs_for_append.push(mmr_mp);
-                    leaf_indices.push(*chunk_index);
+                    if *chunk_index != old_window_start_batch_index {
+                        mmr_membership_proofs_for_append.push(mmr_mp);
+                        leaf_indices.push(*chunk_index);
+                    }
                 }
             }
         }
