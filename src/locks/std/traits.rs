@@ -1,4 +1,4 @@
-//! Traits that define the [`sync`](crate::sync) interface
+//! Traits that define the [`locks::std`](crate::locks::std) interface
 
 pub trait Atomic<T> {
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`

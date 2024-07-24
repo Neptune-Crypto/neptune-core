@@ -82,7 +82,7 @@ enum Command {
     OwnInstanceId,
     BlockHeight,
     BlockInfo {
-        /// one of: genesis, tip, height/<n>, digest/<hex>
+        /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
     Confirmations,
@@ -94,7 +94,7 @@ enum Command {
     },
     TipHeader,
     Header {
-        /// one of: genesis, tip, height/<n>, digest/<hex>
+        /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
     SyncedBalance,

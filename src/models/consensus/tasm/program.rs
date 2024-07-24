@@ -26,7 +26,7 @@ where
 {
     /// The canonical reference source code for the consensus program, written in the
     /// subset of rust that the tasm-lang compiler understands. To run this program, call
-    /// [`run`][`run`], which spawns a new thread, boots the environment, and executes
+    /// [ConsensusProgram::run()], which spawns a new thread, boots the environment, and executes
     /// the program.
     fn source(&self);
 

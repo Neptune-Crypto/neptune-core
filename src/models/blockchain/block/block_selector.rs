@@ -32,10 +32,12 @@ pub enum BlockSelector {
 }
 
 /// BlockSelector can be written out as any of:
+/// ```
 ///  genesis
 ///  tip
 ///  height/<N>
 ///  digest/<hex>
+/// ```
 ///
 /// This is intended to be easy for humans to read and also input, ie suitable
 /// for use as CLI argument.

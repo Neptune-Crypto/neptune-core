@@ -4,7 +4,7 @@ use serde::Serialize;
 use super::ordinary_vec_private::OrdinaryVecPrivate;
 use super::{traits::*, Index};
 
-/// Implements [`StorageVec`]` trait for an ordinary (in memory) `Vec`
+/// Implements [`StorageVec`] trait for an ordinary (in memory) `Vec`
 #[derive(Debug, Clone, Default)]
 pub struct OrdinaryVec<T>(OrdinaryVecPrivate<T>);
 

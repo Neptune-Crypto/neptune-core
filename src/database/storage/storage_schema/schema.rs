@@ -22,48 +22,8 @@ use std::{fmt::Display, sync::Arc};
 /// This can be achieved by placing the `table`s into a heterogenous
 /// container such as a `struct` or `tuple`. Then place an
 /// `Arc<Mutex<..>>` or `Arc<Mutex<RwLock<..>>` around the container.
-///
-/// # Example:
-///
-/// ```compile_fail
-/// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
-/// # tokio_test::block_on(async {
-/// # use database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
-/// use std::sync::Arc;
-/// use tokio::sync::RwLock;
-/// let mut storage = SimpleRustyStorage::new(db);
-///
-/// let tables = (
-///     storage.schema.new_vec::<u16>("ages").await,
-///     storage.schema.new_vec::<String>("names").await,
-///     storage.schema.new_singleton::<bool>("proceed").await
-/// );
-///
-/// let mut atomic_tables = Arc::new(RwLock::new(tables));
-///
-/// // these mutations happen atomically in mem.
-/// {
-///     let mut lock = atomic_tables.write().await;
-///     lock.0.push(5).await;
-///     lock.1.push("Sally".into()).await;
-///     lock.2.set(true).await;
-/// }
-///
-/// // all pending writes are persisted to DB in one atomic batch operation.
-/// storage.persist();
-/// # });
-/// ```
-///
-/// In the example, the `table` were placed in a `tuple` container.
-/// It works equally well to put them in a `struct`.  If the tables
-/// are all of the same type (including generics), they could be
-/// placed in a collection type such as `Vec`, or `HashMap`.
-///
-/// This crate provides [`AtomicRw`] and [`AtomicMutex`]
+/// This crate provides [`AtomicRw`] and [`AtomicMutex`](crate::locks::tokio::AtomicMutex)
 /// which are simple wrappers around `Arc<RwLock<T>>` and `Arc<Mutex<T>>`.
-/// `DbtSchema` provides helper methods for wrapping your `table`s with
-/// these.
 ///
 /// This is the recommended usage.
 ///
@@ -98,6 +58,11 @@ use std::{fmt::Display, sync::Arc};
 /// storage.persist();
 /// # });
 /// ```
+///
+/// In the example, the `table` were placed in a `tuple` container.
+/// It works equally well to put them in a `struct`.  If the tables
+/// are all of the same type (including generics), they could be
+/// placed in a collection type such as `Vec`, or `HashMap`.
 pub struct DbtSchema {
     /// Pending writes for all tables in this Schema.
     /// These get written/cleared by StorageWriter::persist()
@@ -110,7 +75,7 @@ pub struct DbtSchema {
 
     /// If present, the provided callback function will be called
     /// whenever a lock is acquired by a `DbTable` instantiated
-    /// by this `DbtSchema`.  See [AtomicRw](crate::sync::AtomicRw)
+    /// by this `DbtSchema`.  See [AtomicRw]
     pub lock_callback_fn: Option<LockCallbackFn>,
 
     /// indicates count of tables in this schema
@@ -120,7 +85,7 @@ pub struct DbtSchema {
 impl DbtSchema {
     /// Instantiate a `DbtSchema` from a `SimpleRustyReader` and
     /// optional `name` and lock acquisition callback.
-    /// See [AtomicRw](crate::sync::AtomicRw)
+    /// See [AtomicRw]
     pub fn new(
         reader: SimpleRustyReader,
         name: Option<&str>,

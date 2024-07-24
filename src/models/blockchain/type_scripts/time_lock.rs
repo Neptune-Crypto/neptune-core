@@ -493,7 +493,7 @@ impl From<transaction::primitive_witness::PrimitiveWitness> for TimeLockWitness 
 
 impl Arbitrary for TimeLockWitness {
     /// Parameters are:
-    ///  - release_dates : Vec<u64> One release date per input UTXO. 0 if the time lock
+    ///  - release_dates : `Vec<u64>` One release date per input UTXO. 0 if the time lock
     ///    coin is absent.
     ///  - num_outputs : usize Number of outputs.
     ///  - num_public_announcements : usize Number of public announcements.
