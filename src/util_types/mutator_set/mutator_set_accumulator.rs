@@ -692,6 +692,10 @@ mod ms_accumulator_tests {
                     println!("{}: Inserted", i);
                     for j in 0..items.len() {
                         if indices_of_updated_mps.contains(&j) {
+                            assert_ne!(
+                                previous_mps[j], membership_proofs_batch[j],
+                                "membership proof marked as updated but still identical"
+                            );
                             assert!(
                                 !accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
@@ -701,6 +705,10 @@ mod ms_accumulator_tests {
                                 membership_proofs_batch[j]
                             );
                         } else {
+                            assert_eq!(
+                                previous_mps[j], membership_proofs_batch[j],
+                                "membership proof underwent update but not marked as such"
+                            );
                             assert!(
                                 accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
