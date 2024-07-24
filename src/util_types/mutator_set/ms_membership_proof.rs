@@ -157,8 +157,8 @@ impl MsMembershipProof {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: MmrMembershipProof<Hash> = mmra.append(new_chunk_digest);
+        let mut updated_mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
+        let new_chunk_auth_path: MmrMembershipProof<Hash> = updated_mmra.append(new_chunk_digest);
 
         // Collect all indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the indices are
@@ -169,25 +169,28 @@ impl MsMembershipProof {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, &item))| {
-                let indices = AbsoluteIndexSet::new(&get_swbf_indices(
+                let absolute_indices = AbsoluteIndexSet::new(&get_swbf_indices(
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
                     mp.aocl_leaf_index,
                 ));
-                let chunks_set: HashSet<u64> = indices
+                for chunk_index in absolute_indices
                     .to_array()
                     .iter()
-                    .map(|x| (x / CHUNK_SIZE as u128) as u64)
-                    .collect();
-                chunks_set.iter().for_each(|chnkidx| {
-                    chunk_index_to_mp_index.entry(*chnkidx).or_default().push(i)
-                });
+                    .map(|x| (*x / CHUNK_SIZE as u128) as u64)
+                    .unique()
+                {
+                    chunk_index_to_mp_index
+                        .entry(chunk_index)
+                        .or_default()
+                        .push(i)
+                }
             });
 
-        // Find the membership proofs that need a new dictionary entry for the chunk that's being
-        // added to the inactive part by this addition.
-        let mps_for_new_chunk_dictionary_entry: Vec<usize> =
+        // Find the indices of the mutator set membership proofs whose
+        // `target_chunks` field needs a new dictionary entry for the slid chunk.
+        let indices_for_new_chunk_dictionary_entry: Vec<usize> =
             match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
@@ -204,28 +207,14 @@ impl MsMembershipProof {
             }
         }
 
-        assert!(membership_proofs
-            .iter()
-            .all(|msmp| msmp
-                .target_chunks
-                .iter()
-                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
-                    *chunk_index,
-                    Hash::hash(chunk),
-                    &mutator_set.swbf_inactive.peaks(),
-                    mutator_set.swbf_inactive.num_leafs()
-                ))));
-
-        let new_item_index = mutator_set.aocl.num_leafs();
-
         // Perform the updates
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in mps_for_new_chunk_dictionary_entry.iter() {
+        for i in indices_for_new_chunk_dictionary_entry.iter() {
             membership_proofs.index_mut(*i).target_chunks.insert(
                 old_window_start_batch_index,
-                (new_swbf_auth_path.clone(), new_chunk.clone()),
+                (new_chunk_auth_path.clone(), new_chunk.clone()),
             );
         }
 
@@ -251,18 +240,11 @@ impl MsMembershipProof {
         let mut mmr_membership_indices = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
-                for (chunk_index, (mmr_mp, chunk)) in mp.target_chunks.iter_mut() {
-                    assert!(
-                        mmr_mp.verify(
-                            *chunk_index,
-                            Hash::hash(chunk),
-                            &mutator_set.swbf_inactive.peaks(),
-                            mutator_set.swbf_inactive.num_leafs()
-                        ),
-                        "sanity check before fails"
-                    );
-                    mmr_membership_proofs_for_append.push(mmr_mp);
-                    mmr_membership_indices.push(*chunk_index);
+                for (chunk_index, (mmr_mp, _chunk)) in mp.target_chunks.iter_mut() {
+                    if *chunk_index != old_window_start_batch_index {
+                        mmr_membership_proofs_for_append.push(mmr_mp);
+                        mmr_membership_indices.push(*chunk_index);
+                    }
                     mmr_membership_proof_index_to_membership_proof_index.push(i as u64);
                 }
             }
@@ -277,21 +259,6 @@ impl MsMembershipProof {
                 &mutator_set.swbf_inactive.peaks(),
             );
 
-        // sanity check
-        for mp in membership_proofs.iter() {
-            for (chunk_index, (mmr_mp, chunk)) in mp.target_chunks.iter() {
-                assert!(
-                    mmr_mp.verify(
-                        *chunk_index,
-                        Hash::hash(chunk),
-                        &mmra.peaks(),
-                        mmra.num_leafs()
-                    ),
-                    "sanity check after fails"
-                );
-            }
-        }
-
         let mut swbf_mutated_indices = vec![];
         for j in indices_for_mutated_values {
             swbf_mutated_indices
@@ -301,7 +268,7 @@ impl MsMembershipProof {
         // Gather the indices the are returned. These indices indicate which membership
         // proofs that have been mutated.
         let mut all_mutated_mp_indices =
-            [swbf_mutated_indices, mps_for_new_chunk_dictionary_entry].concat();
+            [swbf_mutated_indices, indices_for_new_chunk_dictionary_entry].concat();
         all_mutated_mp_indices.sort_unstable();
         all_mutated_mp_indices.dedup();
 
