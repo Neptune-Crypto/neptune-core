@@ -418,15 +418,6 @@ impl ReceivingAddress {
             Err(e) => bail!("Could not decode bech32m address because of error: {e}"),
         }
     }
-
-    /// Verify the UTXO owner's assent to the transaction.
-    /// This is the rust reference implementation, but the version of
-    /// this logic that is proven is `lock_script`.
-    ///
-    /// This function mocks proof verification.
-    fn verify_unlock(&self, msg: Digest, witness_data: [BFieldElement; Digest::LEN]) -> bool {
-        self.spending_lock == Digest::new(witness_data).hash()
-    }
 }
 
 // note: copied from twenty_first::math::lattice::kem::shake256()
@@ -447,7 +438,7 @@ fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NU
 #[cfg(test)]
 mod test_generation_addresses {
     use rand::{random, thread_rng, Rng, RngCore};
-    use triton_vm::program::PublicInput;
+    use triton_vm::{program::PublicInput, proof::Claim, stark::Stark};
     use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
     use crate::{
@@ -535,8 +526,11 @@ mod test_generation_addresses {
         let receiving_address = ReceivingAddress::derive_from_seed(seed);
 
         let msg: Digest = rng.gen();
-        let witness_data = spending_key.binding_unlock(msg);
-        assert!(receiving_address.verify_unlock(msg, witness_data));
+        let lock_script_and_witness = spending_key.lock_script_and_witness();
+        let signature = lock_script_and_witness.prove(PublicInput::new(msg.values().to_vec()));
+        let claim =
+            Claim::new(receiving_address.lock_script().hash()).with_input(msg.values().to_vec());
+        assert!(triton_vm::verify(Stark::default(), &claim, &signature));
 
         let receiving_address_again = spending_key.to_address();
         assert_eq!(receiving_address, receiving_address_again);
