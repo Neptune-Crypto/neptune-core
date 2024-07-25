@@ -131,18 +131,6 @@ impl MsMembershipProof {
             return Ok(indices_for_mps_updated_from_append);
         }
 
-        assert!(membership_proofs
-            .iter()
-            .all(|msmp| msmp
-                .target_chunks
-                .iter()
-                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
-                    *chunk_index,
-                    Hash::hash(chunk),
-                    &mutator_set.swbf_inactive.peaks(),
-                    mutator_set.swbf_inactive.num_leafs()
-                ))));
-
         let new_item_index = mutator_set.aocl.num_leafs();
 
         // window does slide
