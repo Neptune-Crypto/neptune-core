@@ -272,11 +272,7 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::default();
         let (own_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-        let addition_record = commit(
-            own_item,
-            sender_randomness,
-            receiver_preimage.hash(),
-        );
+        let addition_record = commit(own_item, sender_randomness, receiver_preimage.hash());
         let mut membership_proof =
             mutator_set.prove(own_item, sender_randomness, receiver_preimage);
         mutator_set.add_helper(&addition_record);
@@ -434,11 +430,7 @@ mod accumulation_scheme_tests {
             for _ in 0..num_additions {
                 let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record = commit(
-                    new_item,
-                    sender_randomness,
-                    receiver_preimage.hash(),
-                );
+                let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
                 let membership_proof =
                     mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
@@ -502,11 +494,7 @@ mod accumulation_scheme_tests {
         for _ in 0..num_additions {
             let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = commit(
-                new_item,
-                sender_randomness,
-                receiver_preimage.hash(),
-            );
+            let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
             let membership_proof =
                 mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 

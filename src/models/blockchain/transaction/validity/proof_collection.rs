@@ -258,7 +258,7 @@ impl ProofCollection {
             output: self
                 .type_script_hashes
                 .iter()
-                .flat_map(|d| d.reversed().values())
+                .flat_map(|d| d.values())
                 .collect_vec(),
         };
         let lock_script_claims = self

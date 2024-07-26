@@ -406,11 +406,8 @@ mod wallet_state_tests {
         assert_eq!(1, ret_with_tx_containing_utxo.len());
 
         // Call scan but with another input. Verify that it returns the empty list
-        let another_addition_record = commit(
-            Hash::hash(&mock_utxo),
-            random(),
-            receiver_preimage.hash(),
-        );
+        let another_addition_record =
+            commit(Hash::hash(&mock_utxo), random(), receiver_preimage.hash());
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
         let ret_with_tx_without_utxo =
             notification_pool.scan_for_expected_utxos(&tx_without_utxo.kernel);
