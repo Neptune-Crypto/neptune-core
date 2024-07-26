@@ -1,3 +1,5 @@
+//! implements [Transaction] and some types it depends on.
+
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityTree, WitnessType};
@@ -47,7 +49,6 @@ pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UtxoNotification;
 pub use transaction_output::UtxoNotifyMethod;
-pub use transaction_output::UtxoNotifyMethodSpecifier;
 
 /// represents a utxo and secrets necessary for recipient to claim it.
 ///
@@ -95,6 +96,7 @@ impl PublicAnnouncement {
     }
 }
 
+/// represents a movement of [Utxo] on the blockchain
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct Transaction {
     pub kernel: TransactionKernel,

@@ -8,6 +8,10 @@ pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
+use self::address::generation_address;
+use self::address::symmetric_key;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::Hash;
 use anyhow::{bail, Context, Result};
 use bip39::Mnemonic;
 use itertools::Itertools;
@@ -18,20 +22,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self};
 use std::path::{Path, PathBuf};
 use tracing::info;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-
-use twenty_first::math::b_field_element::BFieldElement;
-
-use crate::models::blockchain::block::block_height::BlockHeight;
-
-use crate::Hash;
-
-use self::address::generation_address;
-use self::address::symmetric_key;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
@@ -187,25 +183,15 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
-    /// Get the next unused spending key.
+    /// derives a generation spending key at `index`
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
-    ///
-    /// Note that incrementing the counter requires &mut self.  Many areas of the
-    /// code presently take a shortcut and use nth_generation_spending_key(0)
-    /// which takes &self.  This will likely require a significant refactor in
-    /// the future to resolve.
-    ///
-    /// Whenever possible, it should be preferred to use this method over
-    /// nth_generation_spending_key(0), to lesson future refactoring headaches.
-    pub fn next_unused_generation_spending_key(&mut self) -> generation_address::SpendingKey {
-        self.nth_generation_spending_key(0)
-    }
-
-    pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
+    /// note: this is a read-only method and does not modify wallet state.  When
+    /// requesting a new key for purposes of a new wallet receiving address,
+    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    /// which takes &mut self.
+    pub fn nth_generation_spending_key(&self, index: u16) -> generation_address::SpendingKey {
         assert!(
-            counter.is_zero(),
+            index.is_zero(),
             "For now we only support one generation address per wallet"
         );
 
@@ -216,7 +202,7 @@ impl WalletSecret {
                 self.secret_seed.0.encode(),
                 vec![
                     generation_address::GENERATION_FLAG,
-                    BFieldElement::new(counter.into()),
+                    BFieldElement::new(index.into()),
                 ],
             ]
             .concat(),
@@ -224,35 +210,51 @@ impl WalletSecret {
         generation_address::SpendingKey::derive_from_seed(key_seed)
     }
 
-    /// Get the next unused symmetric key.
+    /// derives a symmetric key at `index`
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
-    ///
-    /// Note that incrementing the counter requires &mut self.
-    pub fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(0)
-    }
-
-    // note: this method is private to force/ensure that callers use
-    // next_unused_symmetric_key() which takes &mut self.
-    fn nth_symmetric_key(&self, counter: u64) -> symmetric_key::SymmetricKey {
+    /// note: this is a read-only method and does not modify wallet state.  When
+    /// requesting a new key for purposes of a new wallet receiving address,
+    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    /// which takes &mut self.
+    pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
         assert!(
-            counter.is_zero(),
+            index.is_zero(),
             "For now we only support one symmetric key per wallet"
         );
 
         let key_seed = Hash::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![
-                    symmetric_key::SYMMETRIC_KEY_FLAG,
-                    BFieldElement::new(counter),
-                ],
+                vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
             ]
             .concat(),
         );
         symmetric_key::SymmetricKey::from_seed(key_seed)
+    }
+
+    // note: legacy tests were written to call nth_generation_spending_key()
+    // when requesting a new address.  As such, they may be unprepared to mutate
+    // wallet state.  This method enables them to compile while making clear
+    // it is an improper usage.
+    //
+    // [wallet_state::WalletState::next_unused_generation_spending_key()] should be used
+    #[cfg(test)]
+    pub fn nth_generation_spending_key_for_tests(
+        &self,
+        counter: u16,
+    ) -> generation_address::SpendingKey {
+        self.nth_generation_spending_key(counter)
+    }
+
+    // note: legacy tests were written to call nth_symmetric_key()
+    // when requesting a new key.  As such, they may be unprepared to mutate
+    // wallet state.  This method enables them to compile while making clear
+    // it is an improper usage.
+    //
+    // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
+    #[cfg(test)]
+    pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
+        self.nth_symmetric_key(counter)
     }
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
@@ -459,7 +461,7 @@ mod wallet_tests {
         let mut next_block = genesis_block.clone();
         let other_wallet_secret = WalletSecret::new_random();
         let other_receiver_address = other_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
         for _ in 0..12 {
             let previous_block = next_block;
@@ -505,7 +507,7 @@ mod wallet_tests {
             mock_genesis_wallet_state(own_wallet_secret.clone(), network).await;
         let other_wallet_secret = WalletSecret::new_random();
         let other_recipient_address = other_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
 
         let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
@@ -515,7 +517,7 @@ mod wallet_tests {
         );
 
         let genesis_block = Block::genesis_block(network);
-        let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
+        let own_spending_key = own_wallet_secret.nth_generation_spending_key_for_tests(0);
         let own_recipient_address = own_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
             make_mock_block(&genesis_block, None, own_recipient_address, rng.gen());
@@ -639,7 +641,7 @@ mod wallet_tests {
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_generation_spending_key_for_tests(0);
         let genesis_block = Block::genesis_block(network);
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
@@ -783,8 +785,9 @@ mod wallet_tests {
         // This block spends two UTXOs and gives us none, so the new balance
         // becomes 2000
         let other_wallet = WalletSecret::new_random();
-        let other_wallet_recipient_address =
-            other_wallet.nth_generation_spending_key(0).to_address();
+        let other_wallet_recipient_address = other_wallet
+            .nth_generation_spending_key_for_tests(0)
+            .to_address();
         assert_eq!(
             Into::<BlockHeight>::into(22u64),
             next_block.kernel.header.height
@@ -801,7 +804,7 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
 
-        let tx_outputs = vec![TxOutput::fake_announcement(
+        let tx_outputs = vec![TxOutput::fake_address(
             Utxo {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
                 coins: NeptuneCoins::new(200).to_native_coins(),
@@ -853,7 +856,7 @@ mod wallet_tests {
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_generation_spending_key_for_tests(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block(network);
         let premine_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
@@ -877,7 +880,7 @@ mod wallet_tests {
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen());
 
-        let tx_outputs_12_to_other = TxOutput::fake_announcement(
+        let tx_outputs_12_to_other = TxOutput::fake_address(
             Utxo {
                 coins: NeptuneCoins::new(12).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -891,7 +894,7 @@ mod wallet_tests {
                 ),
             own_address.privacy_digest,
         );
-        let tx_outputs_one_to_other = TxOutput::fake_announcement(
+        let tx_outputs_one_to_other = TxOutput::fake_address(
             Utxo {
                 coins: NeptuneCoins::new(1).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -1071,7 +1074,7 @@ mod wallet_tests {
         let premine_wallet_spending_key = premine_receiver_global_state
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_generation_spending_key_for_tests(0);
         let (block_2_b, _, _) = make_mock_block(
             &block_1,
             None,
@@ -1168,7 +1171,7 @@ mod wallet_tests {
             "Block must be valid before merging txs"
         );
 
-        let tx_outputs_six = TxOutput::fake_announcement(
+        let tx_outputs_six = TxOutput::fake_address(
             Utxo {
                 coins: NeptuneCoins::new(4).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
@@ -1303,7 +1306,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn basic_wallet_secret_functionality_test() {
         let random_wallet_secret = WalletSecret::new_random();
-        let spending_key = random_wallet_secret.nth_generation_spending_key(0);
+        let spending_key = random_wallet_secret.nth_generation_spending_key_for_tests(0);
         let _address = spending_key.to_address();
         let _sender_randomness = random_wallet_secret
             .generate_sender_randomness(BFieldElement::new(10).into(), random());
@@ -1332,7 +1335,7 @@ mod wallet_tests {
     fn get_devnet_wallet_info() {
         // Helper function/test to print the public key associated with the authority signatures
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let spending_key = devnet_wallet.nth_generation_spending_key(0);
+        let spending_key = devnet_wallet.nth_generation_spending_key_for_tests(0);
         let address = spending_key.to_address();
         println!(
             "_authority_wallet address: {}",

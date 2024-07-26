@@ -621,14 +621,16 @@ mod tests {
             premine_receiver_global_state.lock_guard_mut().await;
 
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
-        let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_receiver_spending_key =
+            premine_wallet_secret.nth_generation_spending_key_for_tests(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
         let other_global_state_lock =
             mock_genesis_global_state(network, 2, other_wallet_secret.clone()).await;
         let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
-        let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
+        let other_receiver_spending_key =
+            other_wallet_secret.nth_generation_spending_key_for_tests(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
@@ -665,7 +667,7 @@ mod tests {
                 lock_script_hash: premine_receiver_address.lock_script().hash(),
             };
 
-            output_utxos_generated_by_me.push(TxOutput::fake_announcement(
+            output_utxos_generated_by_me.push(TxOutput::fake_address(
                 new_utxo,
                 random(),
                 premine_receiver_address.privacy_digest,
@@ -697,7 +699,7 @@ mod tests {
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let output_utxo_data_by_miner = vec![TxOutput::fake_announcement(
+        let output_utxo_data_by_miner = vec![TxOutput::fake_address(
             Utxo {
                 coins: NeptuneCoins::new(68).to_native_coins(),
                 lock_script_hash: other_receiver_address.lock_script().hash(),
@@ -833,19 +835,18 @@ mod tests {
         let premine_address = premine_receiver_global_state
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
         let other_wallet_secret = WalletSecret::new_random();
         let other_address = other_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
 
         let utxo = Utxo::new(
             premine_address.lock_script(),
             NeptuneCoins::new(1).to_native_coins(),
         );
-        let tx_tx_outputs =
-            TxOutput::fake_announcement(utxo, random(), premine_address.privacy_digest);
+        let tx_tx_outputs = TxOutput::fake_address(utxo, random(), premine_address.privacy_digest);
 
         let genesis_block = premine_receiver_global_state
             .chain
@@ -966,7 +967,7 @@ mod tests {
         let seven_months = Timestamp::months(7);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
-        let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_spending_key = premine_wallet_secret.nth_generation_spending_key_for_tests(0);
         let premine_address = premine_spending_key.to_address();
 
         // Create a transaction and insert it into the mempool
@@ -974,8 +975,7 @@ mod tests {
             coins: NeptuneCoins::new(1).to_native_coins(),
             lock_script_hash: premine_address.lock_script().hash(),
         };
-        let tx_outputs =
-            TxOutput::fake_announcement(utxo, random(), premine_address.privacy_digest);
+        let tx_outputs = TxOutput::fake_address(utxo, random(), premine_address.privacy_digest);
         let (tx_by_preminer_low_fee, expected_utxos_low_fee) = preminer_state
             .create_transaction_test_wrapper(
                 vec![tx_outputs.clone()],

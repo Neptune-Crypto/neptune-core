@@ -15,7 +15,6 @@ use super::blockchain::transaction::Transaction;
 use super::blockchain::transaction::TxInputList;
 use super::blockchain::transaction::TxOutput;
 use super::blockchain::transaction::TxOutputList;
-use super::blockchain::transaction::UtxoNotifyMethodSpecifier;
 use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::time_lock::TimeLock;
@@ -27,6 +26,7 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
+use crate::models::blockchain::transaction::UtxoNotifyMethod;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
@@ -42,6 +42,7 @@ use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use wallet::address::SpendingKeyType;
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -151,6 +152,11 @@ impl GlobalStateLock {
     // enable or disable mining
     pub async fn set_mining(&self, mining: bool) {
         self.lock_mut(|s| s.mining = mining).await
+    }
+
+    // persist wallet state to disk
+    pub async fn persist_wallet(&mut self) -> Result<()> {
+        self.lock_guard_mut().await.persist_wallet().await
     }
 
     // flush databases (persist to disk)
@@ -413,50 +419,56 @@ impl GlobalState {
         }
     }
 
-    /// generates `TxOutputList` from a list of address:amount pairs (outputs).
+    /// generates [TxOutputList] from a list of address:amount pairs (outputs).
     ///
     /// This is a helper method for generating the `TxOutputList` that
-    /// is required by create_transaction() and create_raw_transaction().
+    /// is required by [Self::create_transaction()] and [Self::create_raw_transaction()].
     ///
-    /// For each output, if a wallet key exists for the address then OffChain
-    /// notification will be used via `ExpectedUtxo`.  Otherwise OnChainPubKey
-    /// notification will be used via `PublicAnnouncement`.
+    /// Each output may use either `OnChain` or `OffChain` notifications.  See documentation of
+    /// of [TxOutput::auto()] for a description of the logic and the
+    /// `owned_utxo_notify_method` parameter.
     ///
     /// If a different behavior is desired, the TxOutputList can be
     /// constructed manually.
+    ///
+    /// future work:
+    ///
+    /// see future work comment in [TxOutput::auto()]
     pub fn generate_tx_outputs(
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddressType, NeptuneCoins)>,
+        owned_utxo_notify_method: UtxoNotifyMethod,
     ) -> Result<TxOutputList> {
-        let mut tx_outputs = TxOutputList::default();
         let block_height = self.chain.light_state().header().height;
 
         // Convert outputs.  [address:amount] --> TxOutputList
-        for (address, amount) in outputs.into_iter() {
-            let sender_randomness = self
-                .wallet_state
-                .wallet_secret
-                .generate_sender_randomness(block_height, address.privacy_digest());
+        let tx_outputs: Vec<_> = outputs
+            .into_iter()
+            .map(|(address, amount)| {
+                let sender_randomness = self
+                    .wallet_state
+                    .wallet_secret
+                    .generate_sender_randomness(block_height, address.privacy_digest());
 
-            // append to tx_outputs
-            //
-            // The UtxoNotifyType (Onchain or Offchain) is automatically detected
-            // based on whether the address belongs to our wallet or not.
-            tx_outputs.push(TxOutput::auto(
-                &self.wallet_state,
-                &address,
-                amount,
-                sender_randomness,
-            )?);
-        }
+                // The UtxoNotifyMethod (Onchain or Offchain) is auto-detected
+                // based on whether the address belongs to our wallet or not
+                TxOutput::auto(
+                    &self.wallet_state,
+                    &address,
+                    amount,
+                    sender_randomness,
+                    owned_utxo_notify_method,
+                )
+            })
+            .collect::<Result<_>>()?;
 
-        Ok(tx_outputs)
+        Ok(tx_outputs.into())
     }
 
     /// creates a Transaction.
     ///
     /// This API provides a simple-to-use interface for creating a transaction.
-    /// Utxo inputs are automatically chosen and a change output is
+    /// [Utxo] inputs are automatically chosen and a change output is
     /// automatically created, such that:
     ///
     ///   change = sum(inputs) - sum(outputs) - fee.
@@ -465,23 +477,24 @@ impl GlobalState {
     /// can be used instead.
     ///
     /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs].  This will generate OffChain
-    /// notifications for UTXOs destined for our wallet and OnChainPubKey
-    /// notifications for all other UTXOs.
+    /// [Self::generate_tx_outputs()] which determines which outputs should be
+    /// `OnChain` or `OffChain`.
     ///
-    /// It is the caller's responsibility to inform the wallet of any expected
-    /// utxos, ie offchain secret notifications, for utxos that match wallet
-    /// keys.
+    /// After this call returns it is the caller's responsibility to inform the
+    /// wallet of any returned [ExpectedUtxo], ie `OffChain` secret
+    /// notifications, for utxos that match wallet keys.  Failure to do so can
+    /// result in loss of funds!
     ///
     /// This function will modify the `tx_outputs` parameter by
     /// appending an element representing the change output, if change is
-    /// needed.  Expected utxos, including change can then be retrieved
+    /// needed.  Any [ExpectedUtxo], including change can then be retrieved
     /// with [TxOutputList::expected_utxos()].
     ///
     /// The `change_utxo_notify_method` parameter should normally be
-    /// UtxoNotifyMethod::OffChain in order to save blockchain space.
-    /// Note however there is a risk of losing funds with offchain
-    /// notification if local state is lost.
+    /// [UtxoNotifyMethod::OnChain] for safest transfer.
+    ///
+    /// The change_key should normally be a [SpendingKeyType::Symmetric] in
+    /// order to save blockchain space compared to a regular address.
     ///
     /// Note that `create_transaction()` does not modify any state and does not
     /// require acquiring write lock.  This is important becauce internally it
@@ -491,28 +504,36 @@ impl GlobalState {
     ///
     /// ```compile_fail
     ///
-    /// // we obtain a change_address first, as it requires modifying wallet state.
-    /// let change_spending_key = global_state_lock
+    /// // we obtain a change key first, as it requires modifying wallet state.
+    /// // note that this is a SymmetricKey, not a regular (Generation) address.
+    /// let change_key = global_state_lock
     ///     .lock_guard_mut()
     ///     .await
     ///     .wallet_state
     ///     .wallet_secret
-    ///     .next_unused_generation_spending_key();
+    ///     .next_unused_spending_key(KeyType::Symmetric);
+    ///
+    /// // we choose onchain notification for all utxos destined for our wallet.
+    /// let notify_method = UtxoNotifyMethod::OnChain;
     ///
     /// // obtain read lock
     /// let state = self.state.lock_guard().await;
-    /// let mut tx_outputs = state.generate_tx_outputs(outputs)?;
+    ///
+    /// // generate the tx_outputs
+    /// let mut tx_outputs = state.generate_tx_outputs(outputs, notify_method)?;
     ///
     /// // Create the transaction
     /// let transaction = state
     ///     .create_transaction(
-    ///         &mut tx_outputs,
-    ///         change_spending_key.into(),
-    ///         UtxoNotifyMethod::OffChain,   // notify change utxo offchain
+    ///         &mut tx_outputs,              // all outputs except `change`
+    ///         change_key,                   // send `change` to this key
+    ///         notify_method,                // how to notify about `change` utxo
     ///         NeptuneCoins::new(2),         // fee
     ///         Timestamp::now(),
     ///     )
     ///     .await?;
+    ///
+    /// // drop read lock.
     /// drop(state);
     ///
     /// // Inform wallet of any expected incoming utxos.
@@ -525,7 +546,8 @@ impl GlobalState {
     pub async fn create_transaction(
         &self,
         tx_outputs: &mut TxOutputList,
-        change_utxo_notify_method: UtxoNotifyMethodSpecifier,
+        change_key: SpendingKeyType,
+        change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -550,15 +572,28 @@ impl GlobalState {
             })?;
 
             let tx_output = {
-                let change = change_utxo_notify_method;
+                let utxo = Utxo::new_native_coin(change_key.to_address().lock_script(), amount);
+                let sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
+                    block_height,
+                    change_key.to_address().privacy_digest(),
+                );
 
-                let utxo = Utxo::new_native_coin(change.lock_script(), amount);
-                let sender_randomness = self
-                    .wallet_state
-                    .wallet_secret
-                    .generate_sender_randomness(block_height, change.privacy_digest());
-
-                change.tx_output(utxo, sender_randomness)?
+                match change_utxo_notify_method {
+                    UtxoNotifyMethod::OnChain => {
+                        let public_announcement = change_key
+                            .to_address()
+                            .generate_public_announcement(&utxo, sender_randomness)?;
+                        TxOutput::onchain(
+                            utxo,
+                            sender_randomness,
+                            change_key.to_address().privacy_digest(),
+                            public_announcement,
+                        )
+                    }
+                    UtxoNotifyMethod::OffChain => {
+                        TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
+                    }
+                }
             };
 
             tx_outputs.push(tx_output);
@@ -581,17 +616,17 @@ impl GlobalState {
     /// It is the caller's responsibility to provide inputs and outputs such
     /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
     ///
-    /// Note that this means the caller must calculate the change amount if any
+    /// Note that this means the caller must calculate the `change` amount if any
     /// and provide an output for the change.
     ///
     /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()].  This will generate OffChain
-    /// notifications for UTXOs destined for our wallet and OnChainPubKey
-    /// notifications for all other UTXOs.
+    /// [Self::generate_tx_outputs()] which determines which outputs should be
+    /// `OnChain` or `OffChain`.
     ///
-    /// It is the caller's responsibility to inform the wallet of any expected
-    /// utxos, ie offchain secret notifications, for utxos that match wallet
-    /// keys.
+    /// After this call returns it is the caller's responsibility to inform the
+    /// wallet of any returned [ExpectedUtxo], ie `OffChain` secret
+    /// notifications, for utxos that match wallet keys.  Failure to do so can
+    /// result in loss of funds!
     ///
     /// Note that `create_raw_transaction()` does not modify any state and does
     /// not require acquiring write lock.  This is important becauce internally
@@ -628,16 +663,17 @@ impl GlobalState {
 
         // note: should use next_unused_generation_spending_key()
         // but that requires &mut self.
-        let change_spending_key = self
+        let change_key = self
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_symmetric_key_for_tests(0);
 
         let len = tx_outputs.len();
         let transaction = self
             .create_transaction(
                 &mut tx_outputs,
-                UtxoNotifyMethodSpecifier::OffChain(change_spending_key.into()),
+                change_key.into(),
+                UtxoNotifyMethod::OffChain,
                 fee,
                 timestamp,
             )
@@ -1160,6 +1196,12 @@ impl GlobalState {
         Ok(removed_count)
     }
 
+    pub async fn persist_wallet(&mut self) -> Result<()> {
+        // flush wallet databases
+        self.wallet_state.wallet_db.persist().await;
+        Ok(())
+    }
+
     pub async fn flush_databases(&mut self) -> Result<()> {
         // flush wallet databases
         self.wallet_state.wallet_db.persist().await;
@@ -1385,18 +1427,21 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_neptune.to_native_coins();
-        let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
+        let recipient_address: ReceivingAddressType = other_wallet
+            .nth_generation_spending_key_for_tests(0)
+            .to_address()
+            .into();
         let main_lock_script = recipient_address.lock_script();
         let output_utxo = Utxo {
             coins: twenty_coins,
             lock_script_hash: main_lock_script.hash(),
         };
         let sender_randomness = Digest::default();
-        let receiver_privacy_digest = recipient_address.privacy_digest;
+        let receiver_privacy_digest = recipient_address.privacy_digest();
         let public_announcement = recipient_address
             .generate_public_announcement(&output_utxo, sender_randomness)
             .unwrap();
-        let tx_outputs = vec![TxOutput::onchain_pubkey(
+        let tx_outputs = vec![TxOutput::onchain(
             output_utxo.clone(),
             sender_randomness,
             receiver_privacy_digest,
@@ -1465,19 +1510,22 @@ mod global_state_tests {
         for i in 2..5 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
             let that_many_coins = amount.to_native_coins();
-            let receiving_address = other_wallet.nth_generation_spending_key(0).to_address();
+            let receiving_address: ReceivingAddressType = other_wallet
+                .nth_generation_spending_key_for_tests(0)
+                .to_address()
+                .into();
             let lock_script = receiving_address.lock_script();
             let utxo = Utxo {
                 coins: that_many_coins,
                 lock_script_hash: lock_script.hash(),
             };
             let other_sender_randomness = Digest::default();
-            let other_receiver_digest = receiving_address.privacy_digest;
+            let other_receiver_digest = receiving_address.privacy_digest();
             let other_public_announcement = receiving_address
                 .generate_public_announcement(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
-            other_tx_outputs.push(TxOutput::onchain_pubkey(
+            other_tx_outputs.push(TxOutput::onchain(
                 utxo,
                 other_sender_randomness,
                 other_receiver_digest,
@@ -1517,7 +1565,7 @@ mod global_state_tests {
         let global_state_lock = mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let other_receiver_address = WalletSecret::new_random()
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
         let genesis_block = Block::genesis_block(network);
         let (mock_block_1, _, _) =
@@ -1596,7 +1644,7 @@ mod global_state_tests {
 
         let other_receiver_wallet_secret = WalletSecret::new_random();
         let other_receiver_address = other_receiver_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
 
         // 1. Create new block 1 and store it to the DB
@@ -1666,7 +1714,7 @@ mod global_state_tests {
         let own_spending_key = global_state
             .wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_generation_spending_key_for_tests(0);
         let own_receiving_address = own_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
@@ -1696,7 +1744,7 @@ mod global_state_tests {
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
         let other_wallet_secret = WalletSecret::new_random();
         let other_receiving_address = other_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut parent_block = genesis_block;
         for _ in 0..5 {
@@ -1750,11 +1798,11 @@ mod global_state_tests {
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
-        let own_spending_key = wallet_secret.nth_generation_spending_key(0);
+        let own_spending_key = wallet_secret.nth_generation_spending_key_for_tests(0);
         let own_receiving_address = own_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new_random();
         let other_receiving_address = other_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
@@ -1938,16 +1986,16 @@ mod global_state_tests {
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
-            .nth_generation_spending_key(0);
+            .nth_generation_spending_key_for_tests(0);
         let genesis_state_lock =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
 
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
-        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
+        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
         let alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
         let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
-        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
+        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
         let bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
@@ -1965,7 +2013,7 @@ mod global_state_tests {
         let fee = NeptuneCoins::one();
         let sender_randomness: Digest = rng.gen();
         let tx_outputs_for_alice = vec![
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(41).to_native_coins(),
@@ -1973,7 +2021,7 @@ mod global_state_tests {
                 sender_randomness,
                 alice_spending_key.to_address().privacy_digest,
             ),
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(59).to_native_coins(),
@@ -1985,7 +2033,7 @@ mod global_state_tests {
 
         // Two outputs for Bob
         let tx_outputs_for_bob = vec![
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(141).to_native_coins(),
@@ -1993,7 +2041,7 @@ mod global_state_tests {
                 sender_randomness,
                 bob_spending_key.to_address().privacy_digest,
             ),
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(59).to_native_coins(),
@@ -2124,7 +2172,7 @@ mod global_state_tests {
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
         let tx_outputs_from_alice = vec![
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2132,7 +2180,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(49).to_native_coins(),
@@ -2162,7 +2210,7 @@ mod global_state_tests {
             .unwrap();
 
         let tx_outputs_from_bob = vec![
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2170,7 +2218,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
@@ -2178,7 +2226,7 @@ mod global_state_tests {
                 rng.gen(),
                 genesis_spending_key.to_address().privacy_digest,
             ),
-            TxOutput::fake_announcement(
+            TxOutput::fake_address(
                 Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(98).to_native_coins(),
@@ -2235,7 +2283,9 @@ mod global_state_tests {
         let now = genesis_block.kernel.header.timestamp;
 
         let wallet_secret = WalletSecret::new_random();
-        let receiving_address = wallet_secret.nth_generation_spending_key(0).to_address();
+        let receiving_address = wallet_secret
+            .nth_generation_spending_key_for_tests(0)
+            .to_address();
         let (block_1, _cb_utxo, _cb_output_randomness) =
             make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen());
 

@@ -32,7 +32,7 @@ pub enum BlockSelector {
 }
 
 /// BlockSelector can be written out as any of:
-/// ```
+/// ```text
 ///  genesis
 ///  tip
 ///  height/<N>

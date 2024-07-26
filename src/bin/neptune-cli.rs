@@ -6,6 +6,7 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::models::state::wallet::address::KeyType;
 use neptune_core::models::state::wallet::address::ReceivingAddressType;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
@@ -195,18 +196,12 @@ async fn main() -> Result<()> {
             let wallet_dir = data_dir.wallet_directory_path();
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let (wallet_secret, secret_file_paths) =
+            let (_, secret_file_paths) =
                 WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
 
             println!(
                 "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
                 secret_file_paths.wallet_secret_path.display()
-            );
-            let spending_key = wallet_secret.nth_generation_spending_key(0);
-            let receiver_address = spending_key.to_address();
-            println!(
-                "Wallet receiver address: {}",
-                receiver_address.to_bech32m(network).unwrap()
             );
 
             println!(
@@ -419,7 +414,9 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
         Command::OwnReceivingAddress => {
-            let rec_addr = client.next_receiving_address(ctx).await?;
+            let rec_addr = client
+                .next_receiving_address(ctx, KeyType::Generation)
+                .await?;
             println!("{}", rec_addr.to_bech32m(args.network).unwrap())
         }
         Command::MempoolTxCount => {
@@ -458,7 +455,7 @@ async fn main() -> Result<()> {
                     ctx,
                     amount,
                     receiving_address,
-                    UtxoNotifyMethod::OnChainSymmetricKey,
+                    UtxoNotifyMethod::OnChain,
                     fee,
                 )
                 .await?;
@@ -471,12 +468,7 @@ async fn main() -> Result<()> {
                 .collect::<Result<Vec<_>>>()?;
 
             client
-                .send_to_many(
-                    ctx,
-                    parsed_outputs,
-                    UtxoNotifyMethod::OnChainSymmetricKey,
-                    fee,
-                )
+                .send_to_many(ctx, parsed_outputs, UtxoNotifyMethod::OnChain, fee)
                 .await?;
             println!("Send completed.");
         }

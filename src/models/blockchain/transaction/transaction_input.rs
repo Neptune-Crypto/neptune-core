@@ -1,3 +1,5 @@
+//! provides an interface to transaction inputs
+
 use super::utxo::LockScript;
 use super::utxo::Utxo;
 use crate::models::blockchain::shared::Hash;
@@ -11,7 +13,7 @@ use std::ops::DerefMut;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 
 /// represents a transaction input, as accepted by
-/// `GlobalState::create_transaction()`
+/// [create_transaction()](crate::models::state::GlobalState::create_transaction())
 #[derive(Debug, Clone)]
 pub struct TxInput {
     pub spending_key: SpendingKeyType,
