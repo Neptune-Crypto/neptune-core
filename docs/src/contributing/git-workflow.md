@@ -74,7 +74,7 @@ The `master` branch can contain changes that are not compatible with whatever ne
    - `git push`
  - Consider making an announcement.
 
-# Conventional Commits
+## Conventional Commits
 
 It is preferred/requested that commit messages use the [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format.
 
@@ -89,6 +89,19 @@ git config --global commit.template /path/to/neptune-core/docs/src/contributing/
 ```
 
 It can also be added on a per-repository basis by omitting the `--global` flag.
+
+## Large File Support
+
+The `neptune-core` repository contains large files that are not version tracked. These files live in `test_data` and speed up tests. (In other words, they are not necessary for deploying a client.)
+
+In order to enable git with large file support, run the following commands. (These instructions assume you are running ubuntu. If it you are not, please figure out what to do and submit a PR to fix this doc page.)
+
+```
+curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+sudo apt update
+sudo apt install git-lfs
+git lfs install #only needs to be run *once* per user account on your machine
+```
 
 ## Cargo dependencies
 
