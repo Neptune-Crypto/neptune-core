@@ -1,5 +1,10 @@
 use tasm_lib::{
     structure::tasm_object::TasmObject,
+    triton_vm::{
+        self,
+        proof::{Claim, Proof},
+        stark::Stark,
+    },
     twenty_first::{
         math::{
             b_field_element::BFieldElement, bfield_codec::BFieldCodec,
@@ -245,4 +250,9 @@ impl Iterator for EnvironmentMemoryIter {
 pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
     let mut iterator = EnvironmentMemoryIter(start_address);
     *T::decode_iter(&mut iterator).unwrap()
+}
+
+// recufier
+pub fn verify(parameters: Stark, claim: Claim, proof: &Proof) -> bool {
+    triton_vm::verify(parameters, &claim, proof)
 }

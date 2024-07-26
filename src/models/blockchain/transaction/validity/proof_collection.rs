@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use tasm_lib::{
     triton_vm::{
         self,
         instruction::LabelledInstruction,
-        prelude::BFieldCodec,
+        prelude::{BFieldCodec, BFieldElement},
         program::{NonDeterminism, Program, PublicInput},
         proof::{Claim, Proof},
         stark::Stark,
@@ -340,7 +341,7 @@ impl SecretWitness for ProofCollection {
     }
 
     fn program(&self) -> Program {
-        StandardDecomposition.program()
+        Program::new(&self.code())
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
@@ -356,12 +357,134 @@ impl SecretWitness for ProofCollection {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct StandardDecomposition;
-
-impl ConsensusProgram for StandardDecomposition {
+impl ConsensusProgram for ProofCollection {
     fn source(&self) {
-        todo!()
+        let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+        let pc: ProofCollection = tasmlib::decode_from_memory(start_address);
+
+        assert_eq!(txk_digest, pc.kernel_mast_hash);
+
+        let txk_mast_hash_as_input: Vec<BFieldElement> = txk_digest.reversed().values().to_vec();
+        let salted_inputs_hash_as_input: Vec<BFieldElement> =
+            pc.salted_inputs_hash.reversed().values().to_vec();
+        let salted_inputs_hash_as_output: Vec<BFieldElement> =
+            pc.salted_inputs_hash.values().to_vec();
+        let salted_outputs_hash_as_input: Vec<BFieldElement> =
+            pc.salted_outputs_hash.reversed().values().to_vec();
+        let salted_outputs_hash_as_output: Vec<BFieldElement> =
+            pc.salted_outputs_hash.values().to_vec();
+
+        let removal_records_integrity_claim: Claim = Claim {
+            program_digest: RemovalRecordsIntegrity.program().hash::<Hash>(),
+            input: txk_mast_hash_as_input.clone(),
+            output: salted_inputs_hash_as_output.clone(),
+        };
+        let rri = tasmlib::verify(
+            Stark::default(),
+            removal_records_integrity_claim,
+            &pc.removal_records_integrity,
+        );
+        assert!(rri);
+
+        let kernel_to_outputs_claim: Claim = Claim {
+            program_digest: KernelToOutputs.program().hash::<Hash>(),
+            input: txk_mast_hash_as_input.clone(),
+            output: salted_outputs_hash_as_output.clone(),
+        };
+        let k2o = tasmlib::verify(
+            Stark::default(),
+            kernel_to_outputs_claim,
+            &pc.kernel_to_outputs,
+        );
+        assert!(k2o);
+
+        let mut lock_script_hashes_as_output: Vec<BFieldElement> = Vec::<BFieldElement>::new();
+        let mut i: usize = 0;
+        while i < pc.lock_script_hashes.len() {
+            let lock_script_hash: Digest = pc.lock_script_hashes[i];
+            let mut j: usize = 0;
+            while j < Digest::LEN {
+                lock_script_hashes_as_output.push(lock_script_hash.values()[j]);
+                j += 1;
+            }
+            i += 1;
+        }
+        let collect_lock_scripts_claim: Claim = Claim {
+            program_digest: CollectLockScripts.program().hash::<Hash>(),
+            input: salted_inputs_hash_as_input.clone(),
+            output: lock_script_hashes_as_output,
+        };
+        let cls: bool = tasmlib::verify(
+            Stark::default(),
+            collect_lock_scripts_claim,
+            &pc.collect_lock_scripts,
+        );
+        assert!(cls);
+
+        let mut type_script_hashes_as_output: Vec<BFieldElement> = Vec::<BFieldElement>::new();
+        let mut i: usize = 0;
+        while i < pc.type_script_hashes.len() {
+            let type_script_hash: Digest = pc.type_script_hashes[i];
+            let mut j: usize = 0;
+            while j < Digest::LEN {
+                type_script_hashes_as_output.push(type_script_hash.values()[j]);
+                j += 1;
+            }
+            i += 1;
+        }
+        let collect_type_scripts_claim: Claim = Claim {
+            program_digest: CollectTypeScripts.program().hash::<Hash>(),
+            input: [
+                salted_inputs_hash_as_input.clone(),
+                salted_outputs_hash_as_input.clone(),
+            ]
+            .concat(),
+            output: type_script_hashes_as_output,
+        };
+        let cts: bool = tasmlib::verify(
+            Stark::default(),
+            collect_type_scripts_claim,
+            &pc.collect_type_scripts,
+        );
+        assert!(cts);
+
+        let mut i: usize = 0;
+        while i < pc.lock_script_hashes.len() {
+            let lock_script_hash = pc.lock_script_hashes[i];
+            let claim: Claim = Claim {
+                program_digest: lock_script_hash,
+                input: txk_mast_hash_as_input.clone(),
+                output: Vec::<BFieldElement>::new(),
+            };
+            let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
+            let lock_script_halts: bool =
+                tasmlib::verify(Stark::default(), claim, lock_script_halts_proof);
+            assert!(lock_script_halts);
+
+            i += 1;
+        }
+
+        let type_script_input: Vec<BFieldElement> = [
+            txk_mast_hash_as_input,
+            salted_inputs_hash_as_input,
+            salted_outputs_hash_as_input,
+        ]
+        .concat();
+        let mut i = 0;
+        while i < pc.type_script_hashes.len() {
+            let type_script_hash = pc.type_script_hashes[i];
+            let claim: Claim = Claim {
+                program_digest: type_script_hash,
+                input: type_script_input.clone(),
+                output: Vec::<BFieldElement>::new(),
+            };
+            let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
+            let type_script_halts: bool =
+                tasmlib::verify(Stark::default(), claim, type_script_halts_proof);
+            assert!(type_script_halts);
+            i += 1;
+        }
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
@@ -394,5 +517,13 @@ pub mod test {
         let proof_collection = ProofCollection::produce(&primitive_witness);
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
         assert!(proof_collection.verify(txk_mast_hash));
+        let txk_mast_hash_as_input_as_public_input =
+            PublicInput::new(txk_mast_hash.reversed().values().encode());
+        proof_collection
+            .run_rust(
+                &txk_mast_hash_as_input_as_public_input,
+                proof_collection.nondeterminism(),
+            )
+            .expect("rust run failed");
     }
 }
