@@ -57,6 +57,40 @@ pub struct ProofCollection {
 }
 
 impl ProofCollection {
+    // The following const Digests should match with the like named program's
+    // hash. The test `test::const_subprogram_hashes_are_correct` tests for this
+    // equality, and if unequal, gives the right expression to be plopped in
+    // here.
+    // These consts are used as hardcoded values in the rust-simulated Triton
+    // environment and in the tasm code.
+    const REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST: Digest = Digest::new([
+        BFieldElement::new(10197736943087578891),
+        BFieldElement::new(2589769213358159759),
+        BFieldElement::new(12122773685110410087),
+        BFieldElement::new(8367354675667512484),
+        BFieldElement::new(16535400299838854923),
+    ]);
+    const KERNEL_TO_OUTPUTS_PROGRAM_DIGEST: Digest = Digest::new([
+        BFieldElement::new(9484121616554123823),
+        BFieldElement::new(15164679326249580050),
+        BFieldElement::new(4679237130163686053),
+        BFieldElement::new(363984525662568692),
+        BFieldElement::new(5520958396043760478),
+    ]);
+    const COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
+        BFieldElement::new(5187444292971315662),
+        BFieldElement::new(17273354872178271392),
+        BFieldElement::new(2636812070734160948),
+        BFieldElement::new(18034626495561690787),
+        BFieldElement::new(7006565901007114771),
+    ]);
+    const COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
+        BFieldElement::new(10915177323912360979),
+        BFieldElement::new(12776913432129457760),
+        BFieldElement::new(8007322389620416096),
+        BFieldElement::new(11496378975485667762),
+        BFieldElement::new(10952609886739350684),
+    ]);
     fn extract_specific_witnesses(
         primitive_witness: &PrimitiveWitness,
     ) -> (
@@ -376,7 +410,7 @@ impl ConsensusProgram for ProofCollection {
             pc.salted_outputs_hash.values().to_vec();
 
         let removal_records_integrity_claim: Claim = Claim {
-            program_digest: RemovalRecordsIntegrity.program().hash::<Hash>(),
+            program_digest: ProofCollection::REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST,
             input: txk_mast_hash_as_input.clone(),
             output: salted_inputs_hash_as_output.clone(),
         };
@@ -388,7 +422,7 @@ impl ConsensusProgram for ProofCollection {
         assert!(rri);
 
         let kernel_to_outputs_claim: Claim = Claim {
-            program_digest: KernelToOutputs.program().hash::<Hash>(),
+            program_digest: ProofCollection::KERNEL_TO_OUTPUTS_PROGRAM_DIGEST,
             input: txk_mast_hash_as_input.clone(),
             output: salted_outputs_hash_as_output.clone(),
         };
@@ -411,7 +445,7 @@ impl ConsensusProgram for ProofCollection {
             i += 1;
         }
         let collect_lock_scripts_claim: Claim = Claim {
-            program_digest: CollectLockScripts.program().hash::<Hash>(),
+            program_digest: ProofCollection::COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST,
             input: salted_inputs_hash_as_input.clone(),
             output: lock_script_hashes_as_output,
         };
@@ -434,7 +468,7 @@ impl ConsensusProgram for ProofCollection {
             i += 1;
         }
         let collect_type_scripts_claim: Claim = Claim {
-            program_digest: CollectTypeScripts.program().hash::<Hash>(),
+            program_digest: ProofCollection::COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST,
             input: [
                 salted_inputs_hash_as_input.clone(),
                 salted_outputs_hash_as_input.clone(),
@@ -525,5 +559,45 @@ pub mod test {
                 proof_collection.nondeterminism(),
             )
             .expect("rust run failed");
+    }
+
+    #[test]
+    fn const_subprogram_hashes_are_correct() {
+        let print_hash_nicely = |h: Digest| {
+            format!(
+                "Digest::new([{}])",
+                h.values()
+                    .iter()
+                    .map(|bfe| format!("BFieldElement::new({})", bfe.value()))
+                    .join(", ")
+            )
+        };
+        assert_eq!(
+            ProofCollection::REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST,
+            RemovalRecordsIntegrity.program().hash::<Hash>(),
+            "Removal Records Integrity: {}",
+            print_hash_nicely(RemovalRecordsIntegrity.program().hash::<Hash>())
+        );
+
+        assert_eq!(
+            ProofCollection::KERNEL_TO_OUTPUTS_PROGRAM_DIGEST,
+            KernelToOutputs.program().hash::<Hash>(),
+            "Kernel To Outputs: {}",
+            print_hash_nicely(KernelToOutputs.program().hash::<Hash>())
+        );
+
+        assert_eq!(
+            ProofCollection::COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST,
+            CollectLockScripts.program().hash::<Hash>(),
+            "Collect Lock Scripts: {}",
+            print_hash_nicely(CollectLockScripts.program().hash::<Hash>())
+        );
+
+        assert_eq!(
+            ProofCollection::COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST,
+            CollectTypeScripts.program().hash::<Hash>(),
+            "Collect Type Scripts: {}",
+            print_hash_nicely(CollectTypeScripts.program().hash::<Hash>())
+        );
     }
 }
