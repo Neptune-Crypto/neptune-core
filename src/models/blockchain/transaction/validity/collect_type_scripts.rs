@@ -372,11 +372,15 @@ mod test {
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::Hash;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::proof::Claim;
+    use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
@@ -441,5 +445,42 @@ mod test {
             .unwrap()
             .current();
         prop(primitive_witness).expect("");
+    }
+
+    #[test]
+    fn collect_type_scripts_failing_proof() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let collect_type_scripts = CollectTypeScriptsWitness::from(&primitive_witness);
+        let tasm_result = CollectTypeScripts
+            .run_tasm(
+                &collect_type_scripts.standard_input(),
+                collect_type_scripts.nondeterminism(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            collect_type_scripts.output(),
+            tasm_result.clone(),
+            "incorrect output"
+        );
+
+        let claim = Claim::new(CollectTypeScripts.program().hash::<Hash>())
+            .with_input(collect_type_scripts.standard_input().individual_tokens)
+            .with_output(tasm_result);
+        let proof = triton_vm::prove(
+            Stark::default(),
+            &claim,
+            &CollectTypeScripts.program(),
+            collect_type_scripts.nondeterminism(),
+        )
+        .expect("could not produce proof");
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &proof),
+            "proof fails"
+        );
     }
 }

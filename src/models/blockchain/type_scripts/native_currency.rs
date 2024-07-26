@@ -637,6 +637,9 @@ pub mod test {
         arbitrary::Arbitrary, collection::vec, strategy::Strategy, test_runner::TestRunner,
     };
     use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm;
+    use tasm_lib::triton_vm::proof::Claim;
+    use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -813,5 +816,46 @@ pub mod test {
             native_currency_witness,
             &[InstructionError::AssertionFailed],
         )?;
+    }
+
+    #[test]
+    fn native_currency_failing_proof() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+        let salted_input_utxos_hash = Hash::hash(&primitive_witness.input_utxos);
+        let salted_output_utxos_hash = Hash::hash(&primitive_witness.output_utxos);
+
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
+        let type_script_and_witness = TypeScriptAndWitness::new_with_nondeterminism(
+            NativeCurrency.program(),
+            native_currency_witness.nondeterminism(),
+        );
+        let tasm_halts = type_script_and_witness.halts_gracefully(
+            txk_mast_hash,
+            salted_input_utxos_hash,
+            salted_output_utxos_hash,
+        );
+
+        assert!(tasm_halts);
+
+        let claim = Claim::new(NativeCurrency.program().hash::<Hash>())
+            .with_input(native_currency_witness.standard_input().individual_tokens);
+        let proof = type_script_and_witness.prove(
+            txk_mast_hash,
+            salted_input_utxos_hash,
+            salted_output_utxos_hash,
+        );
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &proof),
+            "proof fails"
+        );
     }
 }

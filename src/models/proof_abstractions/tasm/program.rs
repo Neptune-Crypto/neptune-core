@@ -146,12 +146,6 @@ pub fn prove_consensus_program(
     assert_eq!(claim.program_digest, program.hash::<Hash>());
     assert_eq!(claim.output, vm_output.unwrap());
 
-    // assert!(tasm_lib::triton_vm::verify(
-    //     tasm_lib::triton_vm::stark::Stark::default(),
-    //     &claim,
-    //     &proof
-    // ));
-
     proof
 }
 
@@ -261,9 +255,10 @@ pub mod test {
         program: Program,
         nondeterminism: NonDeterminism,
     ) -> Proof {
+        let name = proof_filename(claim.clone());
         match load_proof_if_available(claim.clone()) {
             Some(proof) => {
-                println!(" - Loaded proof from disk.");
+                println!(" - Loaded proof from disk: {name}.");
                 proof
             }
             None => {
@@ -272,7 +267,10 @@ pub mod test {
                 let tick = SystemTime::now();
                 let proof = produce_and_save_proof(claim, program, nondeterminism);
                 let duration = SystemTime::now().duration_since(tick).unwrap();
-                println!("success! Proof time: {:?}. Proof stored to disk.", duration);
+                println!(
+                    "success! Proof time: {:?}. Proof stored to disk: {name}",
+                    duration
+                );
                 proof
             }
         }
