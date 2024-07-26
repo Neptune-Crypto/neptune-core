@@ -1,6 +1,14 @@
-use crate::prelude::{triton_vm, twenty_first};
-use crate::util_types::mutator_set::commit;
+//! provides an asymmetric key interface for sending and claiming [Utxo].
+//!
+//! The asymmetric key is based on [lattice::kem] and encrypts a symmetric key
+//! based on [aes_gcm::Aes256Gcm] which encrypts the actual payload.
 
+use super::common;
+use crate::config_models::network::Network;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::LockScript;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::prelude::twenty_first;
 use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
@@ -14,27 +22,14 @@ use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use sha3::digest::ExtendableOutput;
-use sha3::digest::Update;
-use sha3::Shake256;
-use tracing::warn;
-use triton_vm::triton_asm;
-use triton_vm::triton_instr;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
-use twenty_first::math::tip5::DIGEST_LENGTH;
-use twenty_first::{
-    math::{b_field_element::BFieldElement, lattice, tip5::Digest},
-    util_types::algebraic_hasher::AlgebraicHasher,
-};
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::{AnnouncedUtxo, PublicAnnouncement};
-
-pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
+pub(super) const GENERATION_FLAG_U8: u8 = 79;
+pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
 #[derive(Clone, Debug, Copy)]
 pub struct SpendingKey {
@@ -53,104 +48,9 @@ pub struct ReceivingAddress {
     pub spending_lock: Digest,
 }
 
-/// Determine if the public announcement is flagged to indicate it might be a generation
-/// address ciphertext.
-fn public_announcement_is_marked_generation(announcement: &PublicAnnouncement) -> bool {
-    matches!(announcement.message.first(), Some(&GENERATION_FLAG))
-}
-
-pub(super) fn derive_receiver_id(seed: Digest) -> BFieldElement {
-    Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
-}
-
-pub(super) fn receiver_identifier_from_public_announcement(
-    announcement: &PublicAnnouncement,
-) -> Result<BFieldElement> {
-    match announcement.message.get(1) {
-        Some(id) => Ok(*id),
-        None => bail!("Public announcement does not contain receiver ID"),
-    }
-}
-
-pub(super) fn ciphertext_from_public_announcement(
-    announcement: &PublicAnnouncement,
-) -> Result<Vec<BFieldElement>> {
-    if announcement.message.len() <= 2 {
-        bail!("Public announcement does not contain ciphertext.");
-    }
-    Ok(announcement.message[2..].to_vec())
-}
-
-/// Encodes a slice of bytes to a vec of BFieldElements. This
-/// encoding is injective but not uniform-to-uniform.
-pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
-    let mut padded_bytes = bytes.to_vec();
-    while padded_bytes.len() % 8 != 0 {
-        padded_bytes.push(0u8);
-    }
-    let mut bfes = vec![BFieldElement::new(bytes.len() as u64)];
-    for chunk in padded_bytes.chunks(8) {
-        let ch: [u8; 8] = chunk.try_into().unwrap();
-        let int = u64::from_be_bytes(ch);
-        if int < BFieldElement::P - 1 {
-            bfes.push(BFieldElement::new(int));
-        } else {
-            let rem = int & 0xffffffff;
-            bfes.push(BFieldElement::new(BFieldElement::P - 1));
-            bfes.push(BFieldElement::new(rem));
-        }
-    }
-    bfes
-}
-
-/// Decodes a slice of BFieldElements to a vec of bytes. This method
-/// computes the inverse of `bytes_to_bfes`.
-pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
-    if bfes.is_empty() {
-        bail!("Cannot decode empty byte stream");
-    }
-
-    let length = bfes[0].value() as usize;
-    if length > std::mem::size_of_val(bfes) {
-        bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
-    }
-
-    let mut bytes: Vec<u8> = Vec::with_capacity(length);
-    let mut skip_top = false;
-    for bfe in bfes.iter().skip(1) {
-        let bfe_bytes = bfe.value().to_be_bytes();
-        if skip_top {
-            bytes.append(&mut bfe_bytes[4..8].to_vec());
-            skip_top = false;
-        } else {
-            bytes.append(&mut bfe_bytes[0..4].to_vec());
-            if bfe_bytes[0..4] == [0xff, 0xff, 0xff, 0xff] {
-                skip_top = true;
-            } else {
-                bytes.append(&mut bfe_bytes[4..8].to_vec());
-            }
-        }
-    }
-
-    Ok(bytes[0..length].to_vec())
-}
-
-/// Verify the UTXO owner's assent to the transaction.
-/// This is the rust reference implementation, but the version of
-/// this logic that is proven is `lock_script`.
-///
-/// This function mocks proof verification.
-pub fn std_lockscript_reference_verify_unlock(
-    spending_lock: Digest,
-    _bind_to: Digest,
-    witness_data: [BFieldElement; DIGEST_LENGTH],
-) -> bool {
-    spending_lock == Digest::new(witness_data).hash::<Hash>()
-}
-
 impl SpendingKey {
     pub fn to_address(&self) -> ReceivingAddress {
-        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&self.seed).unwrap());
+        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = self.privacy_preimage.hash::<Hash>();
         ReceivingAddress {
@@ -161,74 +61,14 @@ impl SpendingKey {
         }
     }
 
-    /// scans public announcements in a [Transaction] and finds any that match this key
-    ///
-    /// note that a single [Transaction] may represent an entire block
-    ///
-    /// returns an iterator over [AnnouncedUtxo]
-    ///
-    /// side-effect: logs a warning for any announcement targeted at this key
-    /// that cannot be decypted.
-    pub fn scan_for_announced_utxos<'a>(
-        &'a self,
-        transaction: &'a Transaction,
-    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
-        // pre-compute receiver_digest
-        let receiver_preimage = self.privacy_preimage;
-        let receiver_digest = receiver_preimage.hash::<Hash>();
-
-        // for all public announcements
-        transaction
-            .kernel
-            .public_announcements
-            .iter()
-
-            // ... that are marked as symmetric key encrypted
-            .filter(|pa| public_announcement_is_marked_generation(pa))
-
-            // ... that match the receiver_id of this key
-            .filter(move |pa| {
-                matches!(receiver_identifier_from_public_announcement(pa), Ok(r) if r == self.receiver_identifier)
-            })
-
-            // ... that have a ciphertext field
-            .filter_map(|pa| self.ok_warn(ciphertext_from_public_announcement(pa)) )
-
-            // ... which can be decrypted with this key
-            .filter_map(|c| self.ok_warn(self.decrypt(&c)))
-
-            // ... map to AnnouncedUtxo
-            .map(move |(utxo, sender_randomness)| {
-                // and join those with the receiver digest to get a commitment
-                // Note: the commitment is computed in the same way as in the mutator set.
-                AnnouncedUtxo {
-                    addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
-                    utxo,
-                    sender_randomness,
-                    receiver_preimage,
-                }
-            })
-    }
-
-    /// converts a result into an Option and logs a warning on any error
-    fn ok_warn<T>(&self, result: Result<T>) -> Option<T> {
-        match result {
-            Ok(v) => Some(v),
-            Err(e) => {
-                warn!("possible loss of funds! skipping public announcement for symmetric key with receiver_identifier: {}.  error: {}", self.receiver_identifier, e.to_string());
-                None
-            }
-        }
-    }
-
     pub fn derive_from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
-        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&seed).unwrap());
+        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (sk, _pk) = lattice::kem::keygen(randomness);
-        let receiver_identifier = derive_receiver_id(seed);
+        let receiver_identifier = common::derive_receiver_id(seed);
 
         let spending_key = Self {
             receiver_identifier,
@@ -273,7 +113,7 @@ impl SpendingKey {
         let cipher = Aes256Gcm::new(&shared_key.into());
         let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
-        let ciphertext_bytes = bfes_to_bytes(dem_ctxt)?;
+        let ciphertext_bytes = common::bfes_to_bytes(dem_ctxt)?;
         let plaintext = match cipher.decrypt(nonce, ciphertext_bytes.as_ref()) {
             Ok(ptxt) => ptxt,
             Err(_) => bail!("Failed to decrypt symmetric payload."),
@@ -286,20 +126,13 @@ impl SpendingKey {
     fn generate_spending_lock(&self) -> Digest {
         self.unlock_key.hash::<Hash>()
     }
-
-    /// Unlock the UTXO binding it to some transaction by its kernel hash.
-    /// This function mocks proof generation.
-    pub fn binding_unlock(&self, _bind_to: Digest) -> [BFieldElement; DIGEST_LENGTH] {
-        let witness_data = self.unlock_key;
-        witness_data.values()
-    }
 }
 
 impl ReceivingAddress {
     pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
         let seed = spending_key.seed;
-        let receiver_identifier = derive_receiver_id(seed);
-        let randomness: [u8; 32] = shake256::<32>(&bincode::serialize(&seed).unwrap());
+        let receiver_identifier = common::derive_receiver_id(seed);
+        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = spending_key.privacy_preimage.hash::<Hash>();
         Self {
@@ -345,7 +178,7 @@ impl ReceivingAddress {
             Ok(ctxt) => ctxt,
             Err(_) => bail!("Could not encrypt payload."),
         };
-        let ciphertext_bfes = bytes_to_bfes(&ciphertext);
+        let ciphertext_bfes = common::bytes_to_bfes(&ciphertext);
 
         // concatenate and return
         Ok([
@@ -356,42 +189,7 @@ impl ReceivingAddress {
         .concat())
     }
 
-    /// Generate a public announcement, which is a ciphertext only the
-    /// recipient can decrypt, along with a pubscript that reads
-    /// some input of that length.
-    pub fn generate_public_announcement(
-        &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
-    ) -> Result<PublicAnnouncement> {
-        let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
-        ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
-
-        Ok(PublicAnnouncement::new(ciphertext))
-    }
-
-    /// Generate a lock script from the spending lock. Satisfaction
-    /// of this lock script establishes the UTXO owner's assent to
-    /// the transaction. The logic contained in here should be
-    /// identical to `verify_unlock`.
-    pub fn lock_script(&self) -> LockScript {
-        let mut push_spending_lock_digest_to_stack = vec![];
-        for elem in self.spending_lock.values().iter().rev() {
-            push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
-        }
-
-        let instructions = triton_asm!(
-            divine 5
-            hash
-            {&push_spending_lock_digest_to_stack}
-            assert_vector
-            read_io 5
-            halt
-        );
-
-        instructions.into()
-    }
-
+    /// returns human readable prefix (hrp) of an address.
     fn get_hrp(network: Network) -> String {
         // NOLGA: Neptune lattice-based generation address
         let mut hrp = "nolga".to_string();
@@ -433,209 +231,16 @@ impl ReceivingAddress {
         }
     }
 
-    /// Verify the UTXO owner's assent to the transaction.
-    /// This is the rust reference implementation, but the version of
-    /// this logic that is proven is `lock_script`.
+    /// generates a lock script from the spending lock.
     ///
-    /// This function mocks proof verification.
-    fn _reference_verify_unlock(
-        &self,
-        msg: Digest,
-        witness_data: [BFieldElement; DIGEST_LENGTH],
-    ) -> bool {
-        std_lockscript_reference_verify_unlock(self.spending_lock, msg, witness_data)
-    }
-}
-
-// note: copied from twenty_first::math::lattice::kem::shake256()
-//       which is not public
-pub(super) fn shake256<const NUM_OUT_BYTES: usize>(
-    randomness: impl AsRef<[u8]>,
-) -> [u8; NUM_OUT_BYTES] {
-    let mut hasher = Shake256::default();
-    hasher.update(randomness.as_ref());
-
-    let mut result = [0u8; NUM_OUT_BYTES];
-    hasher.finalize_xof_into(&mut result);
-    result
-}
-
-///
-/// Claim
-///  - (input: Hash(kernel), output: [], program: lock_script)
-
-#[cfg(test)]
-mod test_generation_addresses {
-    use itertools::Itertools;
-    use rand::{random, thread_rng, Rng, RngCore};
-    use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
-
-    use crate::{
-        config_models::network::Network,
-        models::blockchain::{
-            shared::Hash, transaction::utxo::Utxo, type_scripts::neptune_coins::NeptuneCoins,
-        },
-        tests::shared::make_mock_transaction,
-    };
-
-    use super::*;
-
-    #[test]
-    fn test_conversion_fixed_length() {
-        let mut rng = thread_rng();
-        const N: usize = 23;
-        let byte_array: [u8; N] = rng.gen();
-        let byte_vec = byte_array.to_vec();
-        let bfes = bytes_to_bfes(&byte_vec);
-        let bytes_again = bfes_to_bytes(&bfes).unwrap();
-
-        assert_eq!(byte_vec, bytes_again);
+    /// Satisfaction of this lock script establishes the UTXO owner's assent to
+    /// the transaction.
+    pub fn lock_script(&self) -> LockScript {
+        common::lock_script(self.spending_lock)
     }
 
-    #[test]
-    fn test_conversion_variable_length() {
-        let mut rng = thread_rng();
-        for _ in 0..1000 {
-            let n: usize = rng.gen_range(0..101);
-            let mut byte_vec: Vec<u8> = vec![0; n];
-            rng.try_fill_bytes(&mut byte_vec).unwrap();
-            let bfes = bytes_to_bfes(&byte_vec);
-            let bytes_again = bfes_to_bytes(&bfes).unwrap();
-
-            assert_eq!(byte_vec, bytes_again);
-        }
-    }
-
-    #[test]
-    fn test_conversion_cornercases() {
-        for test_case in [
-            vec![],
-            vec![0u8],
-            vec![0u8, 0u8],
-            vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8],
-            vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8],
-            vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8],
-            vec![1u8],
-            0xffffffff00000000u64.to_be_bytes().to_vec(),
-            0xffffffff00000001u64.to_be_bytes().to_vec(),
-            0xffffffff00000123u64.to_be_bytes().to_vec(),
-            0xffffffffffffffffu64.to_be_bytes().to_vec(),
-            [
-                0xffffffffffffffffu64.to_be_bytes().to_vec(),
-                0xffffffffffffffffu64.to_be_bytes().to_vec(),
-            ]
-            .concat(),
-        ] {
-            let bfes = bytes_to_bfes(&test_case);
-            let bytes_again = bfes_to_bytes(&bfes).unwrap();
-
-            assert_eq!(test_case, bytes_again);
-        }
-    }
-
-    #[test]
-    fn test_keygen_sign_verify() {
-        let mut rng = thread_rng();
-        let seed: Digest = rng.gen();
-        let spending_key = SpendingKey::derive_from_seed(seed);
-        let receiving_address = ReceivingAddress::derive_from_seed(seed);
-
-        let msg: Digest = rng.gen();
-        let witness_data = spending_key.binding_unlock(msg);
-        assert!(receiving_address._reference_verify_unlock(msg, witness_data));
-
-        let receiving_address_again = spending_key.to_address();
-        assert_eq!(receiving_address, receiving_address_again);
-    }
-
-    #[test]
-    fn test_bech32m_conversion() {
-        for _ in 0..100 {
-            let seed: Digest = thread_rng().gen();
-            let receiving_address = ReceivingAddress::derive_from_seed(seed);
-            let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
-            let receiving_address_again =
-                ReceivingAddress::from_bech32m(&encoded, Network::Testnet).unwrap();
-
-            assert_eq!(receiving_address, receiving_address_again);
-        }
-    }
-
-    #[test]
-    fn test_encrypt_decrypt() {
-        let mut rng = thread_rng();
-        let seed: Digest = rng.gen();
-        let spending_key = SpendingKey::derive_from_seed(seed);
-        let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
-
-        let amount = NeptuneCoins::new(rng.gen_range(0..42000000));
-        let coins = amount.to_native_coins();
-        let lock_script = receiving_address.lock_script();
-        let utxo = Utxo::new(lock_script, coins);
-
-        let sender_randomness: Digest = rng.gen();
-
-        let ciphertext = receiving_address.encrypt(&utxo, sender_randomness).unwrap();
-        println!("ciphertext.get_size() = {}", ciphertext.len() * 8);
-
-        let (utxo_again, sender_randomness_again) = spending_key.decrypt(&ciphertext).unwrap();
-
-        assert_eq!(utxo, utxo_again);
-
-        assert_eq!(sender_randomness, sender_randomness_again);
-    }
-
-    #[test]
-    fn scan_for_announced_utxos_test() {
-        // Mark a transaction as containing a generation address, and then verify that
-        // this is recognized by the receiver.
-        let mut rng = thread_rng();
-        let seed: Digest = rng.gen();
-        let spending_key = SpendingKey::derive_from_seed(seed);
-        let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
-        let utxo = Utxo {
-            lock_script_hash: receiving_address.lock_script().hash(),
-            coins: NeptuneCoins::new(10).to_native_coins(),
-        };
-        let sender_randomness: Digest = random();
-
-        let public_announcement = receiving_address
-            .generate_public_announcement(&utxo, sender_randomness)
-            .unwrap();
-        let mut mock_tx = make_mock_transaction(vec![], vec![]);
-
-        assert!(spending_key.scan_for_announced_utxos(&mock_tx).count() == 0);
-
-        // Add a pubscript for our keys and verify that they are recognized
-        assert!(public_announcement_is_marked_generation(
-            &public_announcement
-        ));
-        mock_tx
-            .kernel
-            .public_announcements
-            .push(public_announcement);
-
-        let announced_txs = spending_key
-            .scan_for_announced_utxos(&mock_tx)
-            .collect_vec();
-        assert_eq!(1, announced_txs.len());
-
-        let (read_ar, read_utxo, read_sender_randomness, returned_receiver_preimage) = (
-            announced_txs[0].addition_record,
-            announced_txs[0].utxo.clone(),
-            announced_txs[0].sender_randomness,
-            announced_txs[0].receiver_preimage,
-        );
-
-        assert_eq!(utxo, read_utxo);
-
-        let expected_addition_record = commit(
-            Hash::hash(&utxo),
-            sender_randomness,
-            receiving_address.privacy_digest,
-        );
-        assert_eq!(expected_addition_record, read_ar);
-        assert_eq!(sender_randomness, read_sender_randomness);
-        assert_eq!(returned_receiver_preimage, spending_key.privacy_preimage);
+    /// returns the privacy digest
+    pub fn privacy_digest(&self) -> Digest {
+        self.privacy_digest
     }
 }

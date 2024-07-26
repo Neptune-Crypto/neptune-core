@@ -9,6 +9,8 @@
   - [Syncing](./neptune-core/syncing.md)
   - [Sequences](./neptune-core/sequences.md)
   - [Reorganization](./neptune-core/reorganization.md)
+  - [Keys and Addresses](./neptune-core/keys.md)
+  - [Utxo Notification](./neptune-core/utxo_notification.md)
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)
   - [Git Message](./contributing/git-message.md)

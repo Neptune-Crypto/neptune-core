@@ -311,6 +311,13 @@ fn create_block_transaction(
         .iter()
         .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
 
+    // note: it is Ok to always use the same key here because:
+    //  1. if we find a block, the utxo will go to our wallet
+    //     and notification occurs offchain, so there is no privacy issue.
+    //  2. if we were to derive a new addr for each block then we would
+    //     have large gaps since an address only receives funds when
+    //     we actually win the mining lottery.
+    //  3. also this way we do not have to modify global/wallet state.
     let coinbase_recipient_spending_key = global_state
         .wallet_state
         .wallet_secret
@@ -324,7 +331,7 @@ fn create_block_transaction(
 
     let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
         &coinbase_utxo,
-        receiving_address.privacy_digest,
+        receiving_address.privacy_digest(),
         &global_state.wallet_state.wallet_secret,
         next_block_height,
         latest_block.kernel.body.mutator_set_accumulator.clone(),
@@ -575,7 +582,7 @@ mod mine_loop_tests {
         };
         let (tx_by_preminer, expected_utxos) = premine_receiver_global_state
             .create_transaction_test_wrapper(
-                vec![TxOutput::fake_announcement(
+                vec![TxOutput::fake_address(
                     tx_output,
                     sender_randomness,
                     receiver_privacy_digest,

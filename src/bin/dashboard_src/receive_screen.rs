@@ -10,7 +10,9 @@ use super::{
     screen::Screen,
 };
 use crossterm::event::{Event, KeyCode, KeyEventKind};
-use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
+use neptune_core::{
+    config_models::network::Network, models::state::wallet::address::KeyType, rpc_server::RPCClient,
+};
 use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Style},
@@ -65,7 +67,7 @@ impl ReceiveScreen {
             tokio::spawn(async move {
                 // TODO: change to receive most recent wallet
                 let receiving_address = rpc_client
-                    .next_receiving_address(context::current())
+                    .next_receiving_address(context::current(), KeyType::Generation)
                     .await
                     .unwrap();
                 *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
@@ -85,7 +87,7 @@ impl ReceiveScreen {
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
             let receiving_address = rpc_client
-                .next_receiving_address(context::current())
+                .next_receiving_address(context::current(), KeyType::Generation)
                 .await
                 .unwrap();
             *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());

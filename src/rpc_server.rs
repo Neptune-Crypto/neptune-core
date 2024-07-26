@@ -1,3 +1,10 @@
+//! implements an RPC server and client based on [tarpc]
+//!
+//! at present tarpc clients must also be written in rust.
+//!
+//! In the future we may want to explore adding an rpc layer that is friendly to
+//! other languages.
+
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -5,13 +12,13 @@ use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::UtxoNotifyMethod;
-use crate::models::blockchain::transaction::UtxoNotifyMethodSpecifier;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
+use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddressType;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
@@ -110,7 +117,7 @@ pub trait RPC {
     async fn wallet_status() -> WalletStatus;
 
     /// Return an address that this client can receive funds on
-    async fn next_receiving_address() -> ReceivingAddressType;
+    async fn next_receiving_address(key_type: KeyType) -> ReceivingAddressType;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -143,17 +150,47 @@ pub trait RPC {
     async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Send coins to a single recipient.
+    ///
+    /// See docs for [send_to_many()](Self::send_to_many())
     async fn send(
         amount: NeptuneCoins,
         address: ReceivingAddressType,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
+    ///
+    /// `outputs` is a list of transaction outputs in the format
+    /// `[(address:amount)]`.  The address may be any type supported by
+    /// [ReceivingAddressType].
+    ///
+    /// `owned_utxo_notify_method` specifies how our wallet will be notified of
+    /// any outputs destined for it. This includes the change output if one is
+    /// necessary. [UtxoNotifyMethod] defines `OnChain` and `OffChain` delivery
+    /// of notifications.
+    ///
+    /// `OffChain` delivery requires less blockchain space and may result in a
+    /// lower fee than `OnChain` delivery however there is more potential of
+    /// losing funds should the wallet files become corrupted or lost.
+    ///
+    /// tip: if using `OnChain` notification use a
+    /// [ReceivingAddressType::Symmetric] as the receiving address for any
+    /// outputs destined for your own wallet.  This happens automatically for
+    /// the Change output only.
+    ///
+    /// `fee` represents the fee in native coins to pay the miner who mines
+    /// the block that initially confirms the resulting transaction.
+    ///
+    /// a [Digest] of the resulting [Transaction](crate::models::blockchain::transaction::Transaction) is returned on success, else [None].
+    ///
+    /// todo: shouldn't we return `Transaction` instead?
+    ///
+    /// future work: add `unowned_utxo_notify_method` param.
+    ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
         outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -212,10 +249,12 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
+    // documented in trait. do not add doc-comment.
     async fn network(self, _: context::Context) -> Network {
         self.state.cli().network
     }
 
+    // documented in trait. do not add doc-comment.
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
         let listen_for_peers_ip = self.state.cli().listen_addr;
         let listen_for_peers_socket = self.state.cli().peer_port;
@@ -223,10 +262,12 @@ impl RPC for NeptuneRPCServer {
         Some(socket_address)
     }
 
+    // documented in trait. do not add doc-comment.
     async fn own_instance_id(self, _context: context::Context) -> InstanceId {
         self.state.lock_guard().await.net.instance_id
     }
 
+    // documented in trait. do not add doc-comment.
     async fn block_height(self, _: context::Context) -> BlockHeight {
         self.state
             .lock_guard()
@@ -238,10 +279,12 @@ impl RPC for NeptuneRPCServer {
             .height
     }
 
+    // documented in trait. do not add doc-comment.
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
         self.confirmations_internal().await
     }
 
+    // documented in trait. do not add doc-comment.
     async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
@@ -252,6 +295,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
+    // documented in trait. do not add doc-comment.
     async fn block_digest(
         self,
         _: context::Context,
@@ -267,6 +311,7 @@ impl RPC for NeptuneRPCServer {
             .map(|_| digest)
     }
 
+    // documented in trait. do not add doc-comment.
     async fn block_info(
         self,
         _: context::Context,
@@ -284,6 +329,7 @@ impl RPC for NeptuneRPCServer {
         ))
     }
 
+    // documented in trait. do not add doc-comment.
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let state = self.state.lock_guard().await;
 
@@ -296,6 +342,7 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
+    // documented in trait. do not add doc-comment.
     async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
         self.state
             .lock_guard()
@@ -307,7 +354,7 @@ impl RPC for NeptuneRPCServer {
             .collect()
     }
 
-    #[doc = r" Return info about all peers that have been sanctioned"]
+    // documented in trait. do not add doc-comment.
     async fn all_sanctioned_peers(
         self,
         _context: tarpc::context::Context,
@@ -335,6 +382,7 @@ impl RPC for NeptuneRPCServer {
         all_sanctions
     }
 
+    // documented in trait. do not add doc-comment.
     async fn validate_address(
         self,
         _ctx: context::Context,
@@ -354,6 +402,7 @@ impl RPC for NeptuneRPCServer {
         ret
     }
 
+    // documented in trait. do not add doc-comment.
     async fn validate_amount(
         self,
         _ctx: context::Context,
@@ -370,6 +419,7 @@ impl RPC for NeptuneRPCServer {
         Some(amount)
     }
 
+    // documented in trait. do not add doc-comment.
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
         let now = Timestamp::now();
         // test inequality
@@ -382,6 +432,7 @@ impl RPC for NeptuneRPCServer {
         amount <= wallet_status.synced_unspent_available_amount(now)
     }
 
+    // documented in trait. do not add doc-comment.
     async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
         let now = Timestamp::now();
         let wallet_status = self
@@ -393,6 +444,7 @@ impl RPC for NeptuneRPCServer {
         wallet_status.synced_unspent_available_amount(now)
     }
 
+    // documented in trait. do not add doc-comment.
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
         self.state
             .lock_guard()
@@ -401,6 +453,7 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
+    // documented in trait. do not add doc-comment.
     async fn header(
         self,
         _context: tarpc::context::Context,
@@ -418,28 +471,37 @@ impl RPC for NeptuneRPCServer {
     // future: this should perhaps take a param indicating what type
     //         of receiving address.  for now we just use/assume
     //         a Generation address.
+    //
+    // documented in trait. do not add doc-comment.
     async fn next_receiving_address(
         self,
         _context: tarpc::context::Context,
+        key_type: KeyType,
     ) -> ReceivingAddressType {
-        self.state
-            .lock_guard_mut()
-            .await
+        let mut global_state_mut = self.state.lock_guard_mut().await;
+
+        let address = global_state_mut
             .wallet_state
-            .wallet_secret
-            .next_unused_generation_spending_key()
-            .to_address()
-            .into()
+            .next_unused_spending_key(key_type)
+            .to_address();
+
+        // persist wallet state to disk
+        global_state_mut.persist_wallet().await.expect("flushed");
+
+        address
     }
 
+    // documented in trait. do not add doc-comment.
     async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
         self.state.lock_guard().await.mempool.len()
     }
 
+    // documented in trait. do not add doc-comment.
     async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
         self.state.lock_guard().await.mempool.get_size()
     }
 
+    // documented in trait. do not add doc-comment.
     async fn history(
         self,
         _context: tarpc::context::Context,
@@ -457,6 +519,7 @@ impl RPC for NeptuneRPCServer {
         display_history
     }
 
+    // documented in trait. do not add doc-comment.
     async fn dashboard_overview_data(
         self,
         _context: tarpc::context::Context,
@@ -494,8 +557,10 @@ impl RPC for NeptuneRPCServer {
     }
 
     /******** CHANGE THINGS ********/
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
+    // Locking:
+    //   * acquires `global_state_lock` for write
+    //
+    // documented in trait. do not add doc-comment.
     async fn clear_all_standings(self, _: context::Context) {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -515,8 +580,10 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
+    // Locking:
+    //   * acquires `global_state_lock` for write
+    //
+    // documented in trait. do not add doc-comment.
     async fn clear_standing_by_ip(self, _: context::Context, ip: IpAddr) {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -538,47 +605,48 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
+    // documented in trait. do not add doc-comment.
     async fn send(
         self,
         ctx: context::Context,
         amount: NeptuneCoins,
         address: ReceivingAddressType,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        self.send_to_many(ctx, vec![(address, amount)], change_utxo_notify_method, fee)
+        self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
             .await
     }
 
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    ///
+    // Locking:
+    //   * acquires `global_state_lock` for write
+    //
     // TODO: add an endpoint to get recommended fee density.
+    //
+    // documented in trait. do not add doc-comment.
     async fn send_to_many(
         self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
         let now = Timestamp::now();
 
-        // convert UtxoNotifyMethod to UtxoNotifyMethodSpecifier This will
-        // derive the next key of appropriate type for the change output.
-        // note that this (briefly) requires the global write lock.
-        let utxo_notify_method_specifier =
-            UtxoNotifyMethodSpecifier::from_utxo_notify_method_and_wallet(
-                change_utxo_notify_method,
-                &mut self.state.lock_guard_mut().await.wallet_state,
-            );
+        // obtain next unused symmetric key for change utxo
+        let change_key = {
+            let mut s = self.state.lock_guard_mut().await;
+            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
 
-        // write state to disk, as create_transaction() may take a long time.
-        self.state.flush_databases().await.expect("flushed DBs");
+            // write state to disk. create_transaction() may be slow.
+            s.persist_wallet().await.expect("flushed");
+            key
+        };
 
         let state = self.state.lock_guard().await;
-        let mut tx_outputs = match state.generate_tx_outputs(outputs) {
+        let mut tx_outputs = match state.generate_tx_outputs(outputs, owned_utxo_notify_method) {
             Ok(u) => u,
             Err(err) => {
                 tracing::error!("Could not generate tx outputs: {}", err);
@@ -595,7 +663,13 @@ impl RPC for NeptuneRPCServer {
         //
         // note: A change output will be added to tx_outputs if needed.
         let transaction = match state
-            .create_transaction(&mut tx_outputs, utxo_notify_method_specifier, fee, now)
+            .create_transaction(
+                &mut tx_outputs,
+                change_key,
+                owned_utxo_notify_method,
+                fee,
+                now,
+            )
             .await
         {
             Ok(tx) => tx,
@@ -606,21 +680,23 @@ impl RPC for NeptuneRPCServer {
         };
         drop(state);
 
-        // Inform wallet of any expected incoming utxos.
-        // note that this (briefly) mutates self.
-        if let Err(e) = self
-            .state
-            .lock_guard_mut()
-            .await
-            .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
-            .await
+        // acquire write-lock in a block
         {
-            tracing::error!("Could not add expected utxos to wallet: {}", e);
-            return None;
-        }
+            let mut gsm = self.state.lock_guard_mut().await;
 
-        // ensure we write new state out to disk.
-        self.state.flush_databases().await.expect("flushed DBs");
+            // Inform wallet of any expected incoming utxos.
+            // note that this (briefly) mutates self.
+            if let Err(e) = gsm
+                .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
+                .await
+            {
+                tracing::error!("Could not add expected utxos to wallet: {}", e);
+                return None;
+            }
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
 
         // Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
@@ -637,6 +713,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
+    // documented in trait. do not add doc-comment.
     async fn shutdown(self, _: context::Context) -> bool {
         // 1. Send shutdown message to main
         let response = self
@@ -648,6 +725,7 @@ impl RPC for NeptuneRPCServer {
         response.is_ok()
     }
 
+    // documented in trait. do not add doc-comment.
     async fn pause_miner(self, _context: tarpc::context::Context) {
         if self.state.cli().mine {
             let _ = self
@@ -659,6 +737,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
+    // documented in trait. do not add doc-comment.
     async fn restart_miner(self, _context: tarpc::context::Context) {
         if self.state.cli().mine {
             let _ = self
@@ -670,6 +749,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
+    // documented in trait. do not add doc-comment.
     async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
@@ -695,7 +775,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    #[doc = r" Generate a report of all owned and unspent coins, whether time-locked or not."]
+    // documented in trait. do not add doc-comment.
     async fn list_own_coins(
         self,
         _context: ::tarpc::context::Context,
@@ -708,7 +788,7 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    #[doc = r" Return the temperature of the CPU in degrees Celcius."]
+    // documented in trait. do not add doc-comment.
     async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f32> {
         Self::cpu_temp_inner()
     }
@@ -804,7 +884,10 @@ mod rpc_server_tests {
         let _ = rpc_server.clone().synced_balance(ctx).await;
         let _ = rpc_server.clone().history(ctx).await;
         let _ = rpc_server.clone().wallet_status(ctx).await;
-        let own_receiving_address = rpc_server.clone().next_receiving_address(ctx).await;
+        let own_receiving_address = rpc_server
+            .clone()
+            .next_receiving_address(ctx, KeyType::Generation)
+            .await;
         let _ = rpc_server.clone().mempool_tx_count(ctx).await;
         let _ = rpc_server.clone().mempool_size(ctx).await;
         let _ = rpc_server.clone().dashboard_overview_data(ctx).await;
@@ -1311,16 +1394,16 @@ mod rpc_server_tests {
         // --- Init.  get wallet spending key ---
         let genesis_block = Block::genesis_block(network);
         let wallet_spending_key = state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .get_known_generation_spending_keys()[0];
+            .next_unused_spending_key(KeyType::Generation);
 
         // --- Init.  generate a block, with coinbase going to our wallet ---
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
             &genesis_block,
             None,
-            wallet_spending_key.to_address(),
+            wallet_spending_key.to_address().try_into()?,
             rng.gen(),
         );
 
@@ -1333,7 +1416,7 @@ mod rpc_server_tests {
                 ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
-                    wallet_spending_key.privacy_preimage,
+                    wallet_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMiner,
                 ),
             )
@@ -1348,14 +1431,11 @@ mod rpc_server_tests {
         // --- Setup. generate an output that our wallet can claim. ---
         let output2 = {
             let spending_key = state_lock
-                .lock_guard()
+                .lock_guard_mut()
                 .await
                 .wallet_state
-                .get_known_generation_spending_keys()[0];
-            (
-                ReceivingAddressType::from(spending_key.to_address()),
-                NeptuneCoins::new(25),
-            )
+                .next_unused_spending_key(KeyType::Generation);
+            (spending_key.to_address(), NeptuneCoins::new(25))
         };
 
         // --- Setup. assemble outputs and fee ---

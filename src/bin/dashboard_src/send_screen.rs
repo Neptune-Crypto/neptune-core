@@ -137,7 +137,7 @@ impl SendScreen {
                 send_ctx,
                 valid_amount,
                 valid_address,
-                UtxoNotifyMethod::OnChainSymmetricKey,
+                UtxoNotifyMethod::OnChain,
                 fee,
             )
             .await
