@@ -38,20 +38,20 @@ pub enum KeyType {
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 }
 
-impl From<&ReceivingAddressType> for KeyType {
-    fn from(addr: &ReceivingAddressType) -> Self {
+impl From<&ReceivingAddress> for KeyType {
+    fn from(addr: &ReceivingAddress) -> Self {
         match addr {
-            ReceivingAddressType::Generation(_) => Self::Generation,
-            ReceivingAddressType::Symmetric(_) => Self::Symmetric,
+            ReceivingAddress::Generation(_) => Self::Generation,
+            ReceivingAddress::Symmetric(_) => Self::Symmetric,
         }
     }
 }
 
-impl From<&SpendingKeyType> for KeyType {
-    fn from(addr: &SpendingKeyType) -> Self {
+impl From<&SpendingKey> for KeyType {
+    fn from(addr: &SpendingKey) -> Self {
         match addr {
-            SpendingKeyType::Generation(_) => Self::Generation,
-            SpendingKeyType::Symmetric(_) => Self::Symmetric,
+            SpendingKey::Generation(_) => Self::Generation,
+            SpendingKey::Symmetric(_) => Self::Symmetric,
         }
     }
 }
@@ -87,50 +87,50 @@ impl KeyType {
 /// a method or struct may simply accept a `ReceivingAddressType` and be
 /// forward-compatible with new types of Address as they are implemented.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ReceivingAddressType {
+pub enum ReceivingAddress {
     /// a [generation_address]
-    Generation(Box<generation_address::ReceivingAddress>),
+    Generation(Box<generation_address::GenerationReceivingAddress>),
 
     /// a [symmetric_key] acting as an address.
     Symmetric(symmetric_key::SymmetricKey),
 }
 
-impl From<generation_address::ReceivingAddress> for ReceivingAddressType {
-    fn from(a: generation_address::ReceivingAddress) -> Self {
+impl From<generation_address::GenerationReceivingAddress> for ReceivingAddress {
+    fn from(a: generation_address::GenerationReceivingAddress) -> Self {
         Self::Generation(Box::new(a))
     }
 }
 
-impl From<&generation_address::ReceivingAddress> for ReceivingAddressType {
-    fn from(a: &generation_address::ReceivingAddress) -> Self {
+impl From<&generation_address::GenerationReceivingAddress> for ReceivingAddress {
+    fn from(a: &generation_address::GenerationReceivingAddress) -> Self {
         Self::Generation(Box::new(*a))
     }
 }
 
-impl From<symmetric_key::SymmetricKey> for ReceivingAddressType {
+impl From<symmetric_key::SymmetricKey> for ReceivingAddress {
     fn from(k: symmetric_key::SymmetricKey) -> Self {
         Self::Symmetric(k)
     }
 }
 
-impl From<&symmetric_key::SymmetricKey> for ReceivingAddressType {
+impl From<&symmetric_key::SymmetricKey> for ReceivingAddress {
     fn from(k: &symmetric_key::SymmetricKey) -> Self {
         Self::Symmetric(*k)
     }
 }
 
-impl TryFrom<ReceivingAddressType> for generation_address::ReceivingAddress {
+impl TryFrom<ReceivingAddress> for generation_address::GenerationReceivingAddress {
     type Error = anyhow::Error;
 
-    fn try_from(a: ReceivingAddressType) -> Result<Self> {
+    fn try_from(a: ReceivingAddress) -> Result<Self> {
         match a {
-            ReceivingAddressType::Generation(a) => Ok(*a),
+            ReceivingAddress::Generation(a) => Ok(*a),
             _ => bail!("not a generation address"),
         }
     }
 }
 
-impl ReceivingAddressType {
+impl ReceivingAddress {
     /// returns `receiver_identifer`
     pub fn receiver_identifier(&self) -> BFieldElement {
         match self {
@@ -204,7 +204,7 @@ impl ReceivingAddressType {
     ///       at present.  There is no need to give them out to 3rd parties
     ///       in a serialized form.
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        let addr = generation_address::ReceivingAddress::from_bech32m(encoded, network)?;
+        let addr = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)?;
         Ok(addr.into())
 
         // when future addr types are supported, we would attempt each type in
@@ -236,29 +236,29 @@ impl ReceivingAddressType {
 /// method or struct may simply accept a `SpendingKeyType` and be
 /// forward-compatible with new types of spending key as they are implemented.
 #[derive(Debug, Clone, Copy)]
-pub enum SpendingKeyType {
+pub enum SpendingKey {
     /// a key from [generation_address]
-    Generation(generation_address::SpendingKey),
+    Generation(generation_address::GenerationSpendingKey),
 
     /// a [symmetric_key]
     Symmetric(symmetric_key::SymmetricKey),
 }
 
-impl From<generation_address::SpendingKey> for SpendingKeyType {
-    fn from(key: generation_address::SpendingKey) -> Self {
+impl From<generation_address::GenerationSpendingKey> for SpendingKey {
+    fn from(key: generation_address::GenerationSpendingKey) -> Self {
         Self::Generation(key)
     }
 }
 
-impl From<symmetric_key::SymmetricKey> for SpendingKeyType {
+impl From<symmetric_key::SymmetricKey> for SpendingKey {
     fn from(key: symmetric_key::SymmetricKey) -> Self {
         Self::Symmetric(key)
     }
 }
 
-impl SpendingKeyType {
+impl SpendingKey {
     /// returns the address that corresponds to this spending key.
-    pub fn to_address(&self) -> ReceivingAddressType {
+    pub fn to_address(&self) -> ReceivingAddress {
         match self {
             Self::Generation(k) => k.to_address().into(),
             Self::Symmetric(k) => (*k).into(),
@@ -373,8 +373,8 @@ mod test {
 
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::tests::shared::make_mock_transaction;
-    use generation_address::ReceivingAddress;
-    use generation_address::SpendingKey;
+    use generation_address::GenerationReceivingAddress;
+    use generation_address::GenerationSpendingKey;
     use itertools::Itertools;
     use proptest_arbitrary_interop::arb;
     use rand::random;
@@ -392,7 +392,7 @@ mod test {
     /// tests scanning for announced utxos with an asymmetric (generation) key
     #[proptest]
     fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(SpendingKey::derive_from_seed(seed).into())
+        worker::scan_for_announced_utxos(GenerationSpendingKey::derive_from_seed(seed).into())
     }
 
     /// tests encrypting and decrypting with a symmetric key
@@ -404,7 +404,7 @@ mod test {
     /// tests encrypting and decrypting with an asymmetric (generation) key
     #[proptest]
     fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(SpendingKey::derive_from_seed(seed).into())
+        worker::test_encrypt_decrypt(GenerationSpendingKey::derive_from_seed(seed).into())
     }
 
     /// tests keygen, sign, and verify with a symmetric key
@@ -420,8 +420,8 @@ mod test {
     #[proptest]
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
         worker::test_keygen_sign_verify(
-            SpendingKey::derive_from_seed(seed).into(),
-            ReceivingAddress::derive_from_seed(seed).into(),
+            GenerationSpendingKey::derive_from_seed(seed).into(),
+            GenerationReceivingAddress::derive_from_seed(seed).into(),
         );
     }
 
@@ -435,7 +435,7 @@ mod test {
     /// tests bech32m serialize, deserialize with an asymmetric (generation) key
     #[proptest]
     fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(ReceivingAddress::derive_from_seed(seed).into());
+        worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
     }
 
     mod worker {
@@ -447,7 +447,7 @@ mod test {
         /// a PublicAnnouncement is created with generate_public_announcement() and
         /// added to a Tx.  It is then found by scanning for announced_utoxs.  Then
         /// we verify that the data matches the original/expected values.
-        pub fn scan_for_announced_utxos(key: SpendingKeyType) {
+        pub fn scan_for_announced_utxos(key: SpendingKey) {
             // 1. generate a utxo with amount = 10
             let utxo = Utxo::new_native_coin(key.to_address().lock_script(), NeptuneCoins::new(10));
 
@@ -500,7 +500,7 @@ mod test {
         }
 
         /// This tests encrypting and decrypting with a [SpendingKeyType]
-        pub fn test_encrypt_decrypt(key: SpendingKeyType) {
+        pub fn test_encrypt_decrypt(key: SpendingKey) {
             let mut rng = thread_rng();
 
             // 1. create utxo with random amount
@@ -528,8 +528,8 @@ mod test {
         /// spending_key and receiving_address must be independently derived from
         /// the same seed.
         pub fn test_keygen_sign_verify(
-            spending_key: SpendingKeyType,
-            receiving_address: ReceivingAddressType,
+            spending_key: SpendingKey,
+            receiving_address: ReceivingAddress,
         ) {
             // 1. prepare a (random) message and witness data.
             let msg: Digest = random();
@@ -550,13 +550,13 @@ mod test {
         }
 
         /// tests bech32m serialize, deserialize for [ReceivingAddressType]
-        pub fn test_bech32m_conversion(receiving_address: ReceivingAddressType) {
+        pub fn test_bech32m_conversion(receiving_address: ReceivingAddress) {
             // 1. serialize address to bech32m
             let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
 
             // 2. deserialize bech32m back into an address
             let receiving_address_again =
-                ReceivingAddressType::from_bech32m(&encoded, Network::Testnet).unwrap();
+                ReceivingAddress::from_bech32m(&encoded, Network::Testnet).unwrap();
 
             // 3. verify both addresses match
             assert_eq!(receiving_address, receiving_address_again);

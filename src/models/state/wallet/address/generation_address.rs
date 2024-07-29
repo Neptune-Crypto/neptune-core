@@ -2,6 +2,15 @@
 //!
 //! The asymmetric key is based on [lattice::kem] and encrypts a symmetric key
 //! based on [aes_gcm::Aes256Gcm] which encrypts the actual payload.
+//!
+//! ### Naming
+//!
+//! These are called "Generation" keys because they are quantum-secure and it is
+//! believed/hoped that the cryptography should be unbreakable for at least a
+//! generation and hopefully many generations.  If correct, it would be safe to
+//! put funds in a paper or metal wallet and ignore them for decades, perhaps
+//! until they are transferred to the original owner's children or
+//! grand-children.
 
 use super::common;
 use crate::config_models::network::Network;
@@ -32,7 +41,7 @@ pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
 #[derive(Clone, Debug, Copy)]
-pub struct SpendingKey {
+pub struct GenerationSpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
     pub privacy_preimage: Digest,
@@ -41,19 +50,19 @@ pub struct SpendingKey {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReceivingAddress {
+pub struct GenerationReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,
     pub privacy_digest: Digest,
     pub spending_lock: Digest,
 }
 
-impl SpendingKey {
-    pub fn to_address(&self) -> ReceivingAddress {
+impl GenerationSpendingKey {
+    pub fn to_address(&self) -> GenerationReceivingAddress {
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = self.privacy_preimage.hash::<Hash>();
-        ReceivingAddress {
+        GenerationReceivingAddress {
             receiver_identifier: self.receiver_identifier,
             encryption_key: pk,
             privacy_digest,
@@ -83,7 +92,7 @@ impl SpendingKey {
         let receiving_address = spending_key.to_address();
         let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
         let decoded_address =
-            ReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
+            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
         assert_eq!(
             receiving_address, decoded_address,
             "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
@@ -128,8 +137,8 @@ impl SpendingKey {
     }
 }
 
-impl ReceivingAddress {
-    pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
+impl GenerationReceivingAddress {
+    pub fn from_spending_key(spending_key: &GenerationSpendingKey) -> Self {
         let seed = spending_key.seed;
         let receiver_identifier = common::derive_receiver_id(seed);
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
@@ -144,7 +153,7 @@ impl ReceivingAddress {
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
-        let spending_key = SpendingKey::derive_from_seed(seed);
+        let spending_key = GenerationSpendingKey::derive_from_seed(seed);
         Self::from_spending_key(&spending_key)
     }
 

@@ -4,7 +4,7 @@ use super::utxo::LockScript;
 use super::utxo::Utxo;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::state::wallet::address::SpendingKeyType;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -16,7 +16,7 @@ use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 /// [create_transaction()](crate::models::state::GlobalState::create_transaction())
 #[derive(Debug, Clone)]
 pub struct TxInput {
-    pub spending_key: SpendingKeyType,
+    pub spending_key: SpendingKey,
     pub utxo: Utxo,
     pub lock_script: LockScript,
     pub ms_membership_proof: MsMembershipProof,
@@ -101,12 +101,12 @@ impl TxInputList {
     }
 
     /// retrieves spending keys
-    pub fn spending_keys_iter(&self) -> impl IntoIterator<Item = SpendingKeyType> + '_ {
+    pub fn spending_keys_iter(&self) -> impl IntoIterator<Item = SpendingKey> + '_ {
         self.0.iter().map(|u| u.spending_key)
     }
 
     /// retrieves spending keys
-    pub fn spending_keys(&self) -> Vec<SpendingKeyType> {
+    pub fn spending_keys(&self) -> Vec<SpendingKey> {
         self.spending_keys_iter().into_iter().collect()
     }
 

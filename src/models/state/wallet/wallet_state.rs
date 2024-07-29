@@ -1,4 +1,4 @@
-use super::address::{generation_address, symmetric_key, KeyType, SpendingKeyType};
+use super::address::{generation_address, symmetric_key, KeyType, SpendingKey};
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
@@ -290,14 +290,14 @@ impl WalletState {
 
     // returns Some(SpendingKeyType) if the utxo can be unlocked by one of the known
     // wallet keys.
-    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKeyType> {
+    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
             .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
     }
 
     /// returns all spending keys of all key types with derivation index less than current counter
-    pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKeyType> {
+    pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
         KeyType::all_types()
             .into_iter()
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
@@ -305,7 +305,7 @@ impl WalletState {
     }
 
     /// returns all spending keys of `key_type` with derivation index less than current counter
-    pub fn get_known_spending_keys(&self, key_type: KeyType) -> Vec<SpendingKeyType> {
+    pub fn get_known_spending_keys(&self, key_type: KeyType) -> Vec<SpendingKey> {
         match key_type {
             KeyType::Generation => self.get_known_generation_spending_keys(),
             KeyType::Symmetric => self.get_known_symmetric_keys(),
@@ -321,7 +321,7 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    fn get_known_generation_spending_keys(&self) -> Vec<SpendingKeyType> {
+    fn get_known_generation_spending_keys(&self) -> Vec<SpendingKey> {
         // for now we always return just the 1st key.
         vec![self.wallet_secret.nth_generation_spending_key(0).into()]
     }
@@ -335,7 +335,7 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    fn get_known_symmetric_keys(&self) -> Vec<SpendingKeyType> {
+    fn get_known_symmetric_keys(&self) -> Vec<SpendingKey> {
         // for now we always return just the 1st key.
         vec![self.wallet_secret.nth_symmetric_key(0).into()]
     }
@@ -349,7 +349,7 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKeyType {
+    pub fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
         match key_type {
             KeyType::Generation => self.next_unused_generation_spending_key().into(),
             KeyType::Symmetric => self.next_unused_symmetric_key().into(),
@@ -363,7 +363,7 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    fn next_unused_generation_spending_key(&mut self) -> generation_address::SpendingKey {
+    fn next_unused_generation_spending_key(&mut self) -> generation_address::GenerationSpendingKey {
         self.wallet_secret.nth_generation_spending_key(0)
     }
 

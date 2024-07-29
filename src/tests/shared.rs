@@ -795,7 +795,7 @@ pub fn make_mock_block(
     previous_block: &Block,
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::ReceivingAddress,
+    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -886,7 +886,7 @@ pub fn make_mock_block(
 pub fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::ReceivingAddress,
+    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -913,7 +913,7 @@ pub fn make_mock_block_with_valid_pow(
 pub fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::ReceivingAddress,
+    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);

@@ -1,7 +1,7 @@
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
-use self::wallet::address::ReceivingAddressType;
+use self::wallet::address::ReceivingAddress;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
@@ -42,7 +42,7 @@ use std::ops::{Deref, DerefMut};
 use tracing::{debug, info, warn};
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use wallet::address::SpendingKeyType;
+use wallet::address::SpendingKey;
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -436,7 +436,7 @@ impl GlobalState {
     /// see future work comment in [TxOutput::auto()]
     pub fn generate_tx_outputs(
         &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddressType, NeptuneCoins)>,
+        outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_method: UtxoNotifyMethod,
     ) -> Result<TxOutputList> {
         let block_height = self.chain.light_state().header().height;
@@ -546,7 +546,7 @@ impl GlobalState {
     pub async fn create_transaction(
         &self,
         tx_outputs: &mut TxOutputList,
-        change_key: SpendingKeyType,
+        change_key: SpendingKey,
         change_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
@@ -1427,7 +1427,7 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_neptune.to_native_coins();
-        let recipient_address: ReceivingAddressType = other_wallet
+        let recipient_address: ReceivingAddress = other_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address()
             .into();
@@ -1510,7 +1510,7 @@ mod global_state_tests {
         for i in 2..5 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
             let that_many_coins = amount.to_native_coins();
-            let receiving_address: ReceivingAddressType = other_wallet
+            let receiving_address: ReceivingAddress = other_wallet
                 .nth_generation_spending_key_for_tests(0)
                 .to_address()
                 .into();

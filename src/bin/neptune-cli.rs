@@ -7,7 +7,7 @@ use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::KeyType;
-use neptune_core::models::state::wallet::address::ReceivingAddressType;
+use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
@@ -65,9 +65,9 @@ impl TransactionOutput {
     pub fn to_receiving_address_amount_tuple(
         &self,
         network: Network,
-    ) -> Result<(ReceivingAddressType, NeptuneCoins)> {
+    ) -> Result<(ReceivingAddress, NeptuneCoins)> {
         Ok((
-            ReceivingAddressType::from_bech32m(&self.address, network)?,
+            ReceivingAddress::from_bech32m(&self.address, network)?,
             self.amount,
         ))
     }
@@ -448,7 +448,7 @@ async fn main() -> Result<()> {
             fee,
         } => {
             // Parse on client
-            let receiving_address = ReceivingAddressType::from_bech32m(&address, args.network)?;
+            let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
 
             client
                 .send(

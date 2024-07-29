@@ -4,8 +4,8 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::state::wallet::address::ReceivingAddressType;
-use crate::models::state::wallet::address::SpendingKeyType;
+use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
@@ -140,7 +140,7 @@ impl TxOutput {
     ///
     pub fn auto(
         wallet_state: &WalletState,
-        address: &ReceivingAddressType,
+        address: &ReceivingAddress,
         amount: NeptuneCoins,
         sender_randomness: Digest,
         owned_utxo_notify_method: UtxoNotifyMethod,
@@ -156,7 +156,7 @@ impl TxOutput {
             ))
         };
 
-        let offchain = |key: SpendingKeyType| {
+        let offchain = |key: SpendingKey| {
             let utxo = Utxo::new_native_coin(address.lock_script(), amount);
             Self::offchain(utxo, sender_randomness, key.privacy_preimage())
         };
@@ -216,10 +216,10 @@ impl TxOutput {
         sender_randomness: Digest,
         receiver_privacy_digest: Digest,
     ) -> Self {
-        use crate::models::state::wallet::address::generation_address::ReceivingAddress;
+        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 
-        let address: ReceivingAddressType =
-            ReceivingAddress::derive_from_seed(rand::random()).into();
+        let address: ReceivingAddress =
+            GenerationReceivingAddress::derive_from_seed(rand::random()).into();
         let announcement = address
             .generate_public_announcement(&utxo, sender_randomness)
             .unwrap();
@@ -348,7 +348,7 @@ mod tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::state::wallet::address::generation_address::ReceivingAddress;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
@@ -365,7 +365,7 @@ mod tests {
         // generate a new receiving address that is not from our wallet.
         let mut rng = rand::thread_rng();
         let seed: Digest = rng.gen();
-        let address = ReceivingAddress::derive_from_seed(seed);
+        let address = GenerationReceivingAddress::derive_from_seed(seed);
 
         let amount = NeptuneCoins::one();
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);

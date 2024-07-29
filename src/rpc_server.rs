@@ -19,7 +19,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::KeyType;
-use crate::models::state::wallet::address::ReceivingAddressType;
+use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
@@ -117,7 +117,7 @@ pub trait RPC {
     async fn wallet_status() -> WalletStatus;
 
     /// Return an address that this client can receive funds on
-    async fn next_receiving_address(key_type: KeyType) -> ReceivingAddressType;
+    async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -129,7 +129,7 @@ pub trait RPC {
     async fn dashboard_overview_data() -> DashBoardOverviewDataFromClient;
 
     /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(address: String, network: Network) -> Option<ReceivingAddressType>;
+    async fn validate_address(address: String, network: Network) -> Option<ReceivingAddress>;
 
     /// Determine whether the user-supplied string is a valid amount
     async fn validate_amount(amount: String) -> Option<NeptuneCoins>;
@@ -154,7 +154,7 @@ pub trait RPC {
     /// See docs for [send_to_many()](Self::send_to_many())
     async fn send(
         amount: NeptuneCoins,
-        address: ReceivingAddressType,
+        address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
@@ -189,7 +189,7 @@ pub trait RPC {
     /// future work: add `unowned_utxo_notify_method` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
-        outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
@@ -388,9 +388,8 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         address_string: String,
         network: Network,
-    ) -> Option<ReceivingAddressType> {
-        let ret = if let Ok(address) = ReceivingAddressType::from_bech32m(&address_string, network)
-        {
+    ) -> Option<ReceivingAddress> {
+        let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
             Some(address)
         } else {
             None
@@ -477,7 +476,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         key_type: KeyType,
-    ) -> ReceivingAddressType {
+    ) -> ReceivingAddress {
         let mut global_state_mut = self.state.lock_guard_mut().await;
 
         let address = global_state_mut
@@ -610,7 +609,7 @@ impl RPC for NeptuneRPCServer {
         self,
         ctx: context::Context,
         amount: NeptuneCoins,
-        address: ReceivingAddressType,
+        address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
@@ -627,7 +626,7 @@ impl RPC for NeptuneRPCServer {
     async fn send_to_many(
         self,
         _ctx: context::Context,
-        outputs: Vec<(ReceivingAddressType, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_method: UtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
@@ -797,7 +796,7 @@ impl RPC for NeptuneRPCServer {
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
-    use crate::models::state::wallet::address::generation_address::ReceivingAddress;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::Block;
@@ -814,7 +813,7 @@ mod rpc_server_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
-    use ReceivingAddressType;
+    use ReceivingAddress;
 
     async fn test_rpc_server(
         network: Network,
@@ -1424,7 +1423,7 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (
-            ReceivingAddressType::from(ReceivingAddress::derive_from_seed(rng.gen())),
+            ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
             NeptuneCoins::new(5),
         );
 
