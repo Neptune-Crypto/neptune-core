@@ -22,8 +22,10 @@ use super::proof_collection::ProofCollection;
 #[derive(Debug, Clone, BFieldCodec)]
 pub enum SingleProofWitness {
     Collection(ProofCollection),
-    // Upodate(Box<SingleProofWitness>),
+    // Update(Box<SingleProofWitness>),
     // Merger(MergerWitness)
+
+    // Wait for Hard Fork One:
     // IntegralMempool(IntegralMempoolMembershipWitness)
 }
 
