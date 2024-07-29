@@ -227,7 +227,7 @@ pub fn tasm_list_unsafeimplu32_multiset_equality(left: Vec<Digest>, right: Vec<D
     assert_eq!(left_sorted, right_sorted);
 }
 
-struct EnvironmentMemoryIter(pub BFieldElement);
+pub(crate) struct EnvironmentMemoryIter(pub BFieldElement);
 
 impl Iterator for EnvironmentMemoryIter {
     type Item = BFieldElement;
@@ -249,7 +249,7 @@ impl Iterator for EnvironmentMemoryIter {
 /// shadow, we decode the object that lives there.
 pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
     let mut iterator = EnvironmentMemoryIter(start_address);
-    *T::decode_iter(&mut iterator).unwrap()
+    *T::decode_iter(&mut iterator).expect("decode from memory failed")
 }
 
 // recufier
