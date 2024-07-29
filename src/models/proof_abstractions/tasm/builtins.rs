@@ -160,6 +160,35 @@ pub fn tasm_io_read_secin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
     ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop().unwrap())
 }
+#[allow(non_snake_case)]
+pub fn tasm_io_read_secin___digest() -> Digest {
+    let e4 = ND_INDIVIDUAL_TOKEN.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from secin -- input not long enough")
+    });
+    let e3 = ND_INDIVIDUAL_TOKEN.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from secin -- input not long enough")
+    });
+    let e2 = ND_INDIVIDUAL_TOKEN.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from secin -- input not long enough")
+    });
+    let e1 = ND_INDIVIDUAL_TOKEN.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from secin -- input not long enough")
+    });
+    let e0 = ND_INDIVIDUAL_TOKEN.with(|v| {
+        v.borrow_mut()
+            .pop()
+            .expect("cannot read digest from secin -- input not long enough")
+    });
+    Digest::new([e0, e1, e2, e3, e4])
+}
 
 /// Verify a Merkle tree membership claim using the nondeterministically supplied digests
 /// as authentication path.
