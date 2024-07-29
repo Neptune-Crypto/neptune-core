@@ -1,17 +1,20 @@
-use crate::models::blockchain::transaction::validity::tasm::compute_indices::ComputeIndices;
-use crate::triton_vm::triton_asm;
 use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde_derive::{Deserialize, Serialize};
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
 use std::collections::HashMap;
 use strum::EnumCount;
 use tasm_lib::arithmetic::u128::shift_right_static_u128::ShiftRightStaticU128;
 use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
@@ -20,7 +23,8 @@ use tasm_lib::list::contains::Contains;
 use tasm_lib::list::multiset_equality_u64s::MultisetEqualityU64s;
 use tasm_lib::list::new::New;
 use tasm_lib::list::push::Push;
-use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory;
 use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
@@ -29,20 +33,29 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::Digest;
-use tasm_lib::{field, field_with_size};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr};
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::validity::tasm::compute_indices::ComputeIndices;
+use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::prelude::{triton_vm, twenty_first};
+use crate::models::proof_abstractions::SecretWitness;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::triton_vm::triton_asm;
+use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::commit;
@@ -50,17 +63,8 @@ use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
-
-use crate::models::blockchain::transaction::utxo::Utxo;
-
-use crate::models::blockchain::shared::Hash;
-use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-
-use crate::models::blockchain::transaction::{
-    transaction_kernel::TransactionKernel, PrimitiveWitness,
-};
-use crate::models::proof_abstractions::SecretWitness;
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
 #[derive(
     Clone,
