@@ -1,24 +1,4 @@
-use std::collections::HashMap;
-
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use get_size::GetSize;
-use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
-    structure::tasm_object::TasmObject,
-    triton_vm::{
-        self,
-        instruction::LabelledInstruction,
-        prelude::{BFieldCodec, BFieldElement},
-        program::{NonDeterminism, Program, PublicInput},
-        proof::{Claim, Proof},
-        stark::Stark,
-    },
-    twenty_first::util_types::algebraic_hasher::AlgebraicHasher,
-    Digest,
-};
-
+use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::{
     blockchain::shared::Hash, proof_abstractions::tasm::program::ConsensusProgram,
@@ -34,6 +14,18 @@ use crate::models::{
         },
     },
     proof_abstractions::mast_hash::MastHash,
+};
+use crate::triton_vm::proof::Proof;
+use crate::BFieldElement;
+use get_size::GetSize;
+use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::{
+    triton_vm::{self, program::PublicInput, stark::Stark},
+    twenty_first::util_types::algebraic_hasher::AlgebraicHasher,
+    Digest,
 };
 
 use super::{
@@ -63,28 +55,28 @@ impl ProofCollection {
     // here.
     // These consts are used as hardcoded values in the rust-simulated Triton
     // environment and in the tasm code.
-    const REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST: Digest = Digest::new([
+    pub const REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST: Digest = Digest::new([
         BFieldElement::new(10197736943087578891),
         BFieldElement::new(2589769213358159759),
         BFieldElement::new(12122773685110410087),
         BFieldElement::new(8367354675667512484),
         BFieldElement::new(16535400299838854923),
     ]);
-    const KERNEL_TO_OUTPUTS_PROGRAM_DIGEST: Digest = Digest::new([
+    pub const KERNEL_TO_OUTPUTS_PROGRAM_DIGEST: Digest = Digest::new([
         BFieldElement::new(9484121616554123823),
         BFieldElement::new(15164679326249580050),
         BFieldElement::new(4679237130163686053),
         BFieldElement::new(363984525662568692),
         BFieldElement::new(5520958396043760478),
     ]);
-    const COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
+    pub const COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
         BFieldElement::new(5187444292971315662),
         BFieldElement::new(17273354872178271392),
         BFieldElement::new(2636812070734160948),
         BFieldElement::new(18034626495561690787),
         BFieldElement::new(7006565901007114771),
     ]);
-    const COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
+    pub const COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST: Digest = Digest::new([
         BFieldElement::new(10915177323912360979),
         BFieldElement::new(12776913432129457760),
         BFieldElement::new(8007322389620416096),
@@ -369,168 +361,10 @@ impl ProofCollection {
     }
 }
 
-impl SecretWitness for ProofCollection {
-    fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.kernel_mast_hash.reversed().values().to_vec())
-    }
-
-    fn program(&self) -> Program {
-        Program::new(&self.code())
-    }
-
-    fn nondeterminism(&self) -> NonDeterminism {
-        // set memory
-        let mut memory = HashMap::default();
-        encode_to_memory(
-            &mut memory,
-            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self.clone(),
-        );
-
-        NonDeterminism::default().with_ram(memory)
-    }
-}
-
-impl ConsensusProgram for ProofCollection {
-    fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let pc: ProofCollection = tasmlib::decode_from_memory(start_address);
-
-        assert_eq!(txk_digest, pc.kernel_mast_hash);
-
-        let txk_mast_hash_as_input: Vec<BFieldElement> = txk_digest.reversed().values().to_vec();
-        let salted_inputs_hash_as_input: Vec<BFieldElement> =
-            pc.salted_inputs_hash.reversed().values().to_vec();
-        let salted_inputs_hash_as_output: Vec<BFieldElement> =
-            pc.salted_inputs_hash.values().to_vec();
-        let salted_outputs_hash_as_input: Vec<BFieldElement> =
-            pc.salted_outputs_hash.reversed().values().to_vec();
-        let salted_outputs_hash_as_output: Vec<BFieldElement> =
-            pc.salted_outputs_hash.values().to_vec();
-
-        let removal_records_integrity_claim: Claim = Claim {
-            program_digest: ProofCollection::REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST,
-            input: txk_mast_hash_as_input.clone(),
-            output: salted_inputs_hash_as_output.clone(),
-        };
-        let rri = tasmlib::verify(
-            Stark::default(),
-            removal_records_integrity_claim,
-            &pc.removal_records_integrity,
-        );
-        assert!(rri);
-
-        let kernel_to_outputs_claim: Claim = Claim {
-            program_digest: ProofCollection::KERNEL_TO_OUTPUTS_PROGRAM_DIGEST,
-            input: txk_mast_hash_as_input.clone(),
-            output: salted_outputs_hash_as_output.clone(),
-        };
-        let k2o = tasmlib::verify(
-            Stark::default(),
-            kernel_to_outputs_claim,
-            &pc.kernel_to_outputs,
-        );
-        assert!(k2o);
-
-        let mut lock_script_hashes_as_output: Vec<BFieldElement> = Vec::<BFieldElement>::new();
-        let mut i: usize = 0;
-        while i < pc.lock_script_hashes.len() {
-            let lock_script_hash: Digest = pc.lock_script_hashes[i];
-            let mut j: usize = 0;
-            while j < Digest::LEN {
-                lock_script_hashes_as_output.push(lock_script_hash.values()[j]);
-                j += 1;
-            }
-            i += 1;
-        }
-        let collect_lock_scripts_claim: Claim = Claim {
-            program_digest: ProofCollection::COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST,
-            input: salted_inputs_hash_as_input.clone(),
-            output: lock_script_hashes_as_output,
-        };
-        let cls: bool = tasmlib::verify(
-            Stark::default(),
-            collect_lock_scripts_claim,
-            &pc.collect_lock_scripts,
-        );
-        assert!(cls);
-
-        let mut type_script_hashes_as_output: Vec<BFieldElement> = Vec::<BFieldElement>::new();
-        let mut i: usize = 0;
-        while i < pc.type_script_hashes.len() {
-            let type_script_hash: Digest = pc.type_script_hashes[i];
-            let mut j: usize = 0;
-            while j < Digest::LEN {
-                type_script_hashes_as_output.push(type_script_hash.values()[j]);
-                j += 1;
-            }
-            i += 1;
-        }
-        let collect_type_scripts_claim: Claim = Claim {
-            program_digest: ProofCollection::COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST,
-            input: [
-                salted_inputs_hash_as_input.clone(),
-                salted_outputs_hash_as_input.clone(),
-            ]
-            .concat(),
-            output: type_script_hashes_as_output,
-        };
-        let cts: bool = tasmlib::verify(
-            Stark::default(),
-            collect_type_scripts_claim,
-            &pc.collect_type_scripts,
-        );
-        assert!(cts);
-
-        let mut i: usize = 0;
-        while i < pc.lock_script_hashes.len() {
-            let lock_script_hash = pc.lock_script_hashes[i];
-            let claim: Claim = Claim {
-                program_digest: lock_script_hash,
-                input: txk_mast_hash_as_input.clone(),
-                output: Vec::<BFieldElement>::new(),
-            };
-            let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
-            let lock_script_halts: bool =
-                tasmlib::verify(Stark::default(), claim, lock_script_halts_proof);
-            assert!(lock_script_halts);
-
-            i += 1;
-        }
-
-        let type_script_input: Vec<BFieldElement> = [
-            txk_mast_hash_as_input,
-            salted_inputs_hash_as_input,
-            salted_outputs_hash_as_input,
-        ]
-        .concat();
-        let mut i = 0;
-        while i < pc.type_script_hashes.len() {
-            let type_script_hash = pc.type_script_hashes[i];
-            let claim: Claim = Claim {
-                program_digest: type_script_hash,
-                input: type_script_input.clone(),
-                output: Vec::<BFieldElement>::new(),
-            };
-            let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
-            let type_script_halts: bool =
-                tasmlib::verify(Stark::default(), claim, type_script_halts_proof);
-            assert!(type_script_halts);
-            i += 1;
-        }
-    }
-
-    fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
-    }
-}
-
 #[cfg(test)]
 pub mod test {
     use super::*;
     use proptest::prop_assert;
-    use proptest::{arbitrary::Arbitrary, strategy::Strategy, test_runner::TestRunner};
     use test_strategy::proptest;
 
     #[proptest(cases = 5)]
@@ -539,26 +373,6 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
-    }
-
-    #[test]
-    fn can_verify_valid_collection() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let proof_collection = ProofCollection::produce(&primitive_witness);
-        let txk_mast_hash = primitive_witness.kernel.mast_hash();
-        assert!(proof_collection.verify(txk_mast_hash));
-        let txk_mast_hash_as_input_as_public_input =
-            PublicInput::new(txk_mast_hash.reversed().values().encode());
-        proof_collection
-            .run_rust(
-                &txk_mast_hash_as_input_as_public_input,
-                proof_collection.nondeterminism(),
-            )
-            .expect("rust run failed");
     }
 
     #[test]
