@@ -409,31 +409,35 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             assert_eq!(index_set, removal_record.absolute_indices.to_array());
 
             // ensure the aocl leaf index is unique
-            let mut j: usize = 0;
-            while j < all_aocl_indices.len() {
-                assert_ne!(all_aocl_indices[j], aocl_leaf_index);
-                j += 1;
+            {
+                let mut j: usize = 0;
+                while j < all_aocl_indices.len() {
+                    assert_ne!(all_aocl_indices[j], aocl_leaf_index);
+                    j += 1;
+                }
             }
             all_aocl_indices.push(aocl_leaf_index);
 
             // derive inactive chunk indices from absolute index set
             let mut inactive_chunk_indices: Vec<u64> = Vec::new();
-            let mut j = 0;
-            while j < index_set.len() {
-                let absolute_index = index_set[j];
-                let chunk_index: u64 = (absolute_index / (CHUNK_SIZE as u128)) as u64;
-                if chunk_index < swbfi.num_leafs() && !inactive_chunk_indices.contains(&chunk_index)
-                {
-                    inactive_chunk_indices.push(chunk_index);
+            {
+                let mut j = 0;
+                while j < index_set.len() {
+                    let absolute_index = index_set[j];
+                    let chunk_index: u64 = (absolute_index / (CHUNK_SIZE as u128)) as u64;
+                    if chunk_index < swbfi.num_leafs()
+                        && !inactive_chunk_indices.contains(&chunk_index)
+                    {
+                        inactive_chunk_indices.push(chunk_index);
+                    }
+                    j += 1;
                 }
-                j += 1;
             }
 
             // authenticate chunks in dictionary
             let target_chunks: &ChunkDictionary = &removal_record.target_chunks;
             let mut visited_chunk_indices: Vec<u64> = vec![];
             for (chunk_index, (mmrmp, chunk)) in target_chunks.iter() {
-                assert_eq!(*chunk_index, *chunk_index);
                 assert!(mmrmp.verify(
                     *chunk_index,
                     Hash::hash(chunk),
