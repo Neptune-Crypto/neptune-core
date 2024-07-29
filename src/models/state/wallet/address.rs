@@ -6,11 +6,11 @@ pub mod symmetric_key;
 
 /// ReceivingAddressType abstracts over any address type and should be used
 /// wherever possible.
-pub use address_type::ReceivingAddressType;
+pub use address_type::ReceivingAddress;
 
 /// SpendingKeyType abstracts over any spending key type and should be used
 /// wherever possible.
-pub use address_type::SpendingKeyType;
+pub use address_type::SpendingKey;
 
 /// KeyType simply enumerates the known key types.
 pub use address_type::KeyType;
