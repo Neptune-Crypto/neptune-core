@@ -40,9 +40,11 @@ An equivalent API for obtaining the next unused spending key is available in the
 
 `Generation` keys are asymmetric keys, meaning that they use public-key cryptography to separate a secret key from a public key.
 
-They are primarily intended for sending funds to third party wallets.  They can also be used for sending funds back to the originating wallet but they waste unnecessary space when the encrypted ciphertext is stored on the blockchain.
+They are primarily intended for sending funds to third party wallets.  They can also be used for sending funds back to the originating wallet but when used in this context they waste unnecessary space and incur unnecessary fees on the part of the transaction initiator.
 
-|alan todo: describe generation keys/addresses|
+`Generation` keys and addresses use the lattice-based public key encryption scheme described in Section 2.7 of [this paper](https://eprint.iacr.org/2022/1041.pdf). This choice of cryptosystem was made because of its native compatibility with the Oxfoi prime, $2^{64} - 2^{32} + 1$, which is the field into which Neptune encodes all blockchain data. (It does this, in turn, because Triton VM only works over this field.) Furthermore, according to current understanding, the parameters and underlying mathematics guarantee security long into the future and, in particular, even against attacks mounted on quantum computers.
+
+The address encodes the public key using bech32m. The human readable prefix "nolga" stands for "Neptune oxfoi lattice-based generation address". The public announcement encodes a ciphertext which, when decrypted with the correct key, yields the UTXO information.
 
 ### `Symmetric` keys and addresses
 
