@@ -679,8 +679,9 @@ impl RPC for NeptuneRPCServer {
         };
         drop(state);
 
-        // acquire write-lock in a block
-        {
+        // if the tx created offchain expected_utxos we must inform wallet.
+        if tx_outputs.has_offchain() {
+            // acquire write-lock
             let mut gsm = self.state.lock_guard_mut().await;
 
             // Inform wallet of any expected incoming utxos.
