@@ -2,6 +2,7 @@ use tasm_lib::{
     structure::tasm_object::TasmObject,
     triton_vm::{
         self,
+        prelude::Tip5,
         proof::{Claim, Proof},
         stark::Stark,
     },
@@ -10,6 +11,7 @@ use tasm_lib::{
             b_field_element::BFieldElement, bfield_codec::BFieldCodec,
             x_field_element::XFieldElement,
         },
+        prelude::MmrMembershipProof,
         util_types::{
             merkle_tree::MerkleTreeInclusionProof,
             mmr::{
@@ -217,31 +219,20 @@ pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
     leaf_index: u64,
     leaf: Digest,
 ) -> bool {
-    let (merkle_node_index, peak_index) =
-        leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
+    let (_, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
     let peak_index = peak_index as usize;
     let peak_heights = get_peak_heights(num_leafs);
-
-    let root = peaks[peak_index];
     let tree_height = peak_heights[peak_index];
-    let merkle_leaf_index = merkle_node_index ^ (1 << tree_height);
 
-    let mut path: Vec<Digest> = vec![];
-
+    let mut auth_path: Vec<Digest> = vec![];
     ND_DIGESTS.with_borrow_mut(|nd_digests| {
         for _ in 0..tree_height {
-            path.push(nd_digests.pop().unwrap());
+            auth_path.push(nd_digests.pop().unwrap());
         }
     });
+    let mmr_mp = MmrMembershipProof::<Tip5>::new(auth_path);
 
-    let mt_inclusion_proof = MerkleTreeInclusionProof::<Hash> {
-        tree_height: tree_height as usize,
-        indexed_leafs: vec![(merkle_leaf_index as usize, leaf)],
-        authentication_structure: path,
-        _hasher: std::marker::PhantomData,
-    };
-
-    mt_inclusion_proof.verify(root)
+    mmr_mp.verify(leaf_index, leaf, peaks, num_leafs)
 }
 
 /// Test whether two lists of digests are equal, up to order.

@@ -394,12 +394,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 msmp.sender_randomness,
                 msmp.receiver_preimage.hash(),
             );
-            tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
+            assert!(tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
                 &aocl.peaks(),
                 aocl.num_leafs(),
                 msmp.aocl_leaf_index,
                 addition_record.canonical_commitment,
-            );
+            ));
 
             // calculate absolute index set
             let aocl_leaf_index = msmp.aocl_leaf_index;
