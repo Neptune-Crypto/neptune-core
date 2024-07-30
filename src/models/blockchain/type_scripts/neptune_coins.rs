@@ -36,7 +36,7 @@ use tasm_lib::{structure::tasm_object::TasmObject, twenty_first::math::bfield_co
 /// program related to block validity, it is important to use `safe_add` rather than `+` as
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
+#[derive(Clone, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
 pub struct NeptuneCoins(u128);
 
 impl NeptuneCoins {
@@ -241,6 +241,24 @@ impl Zero for NeptuneCoins {
     }
 }
 
+impl From<u32> for NeptuneCoins {
+    fn from(n: u32) -> NeptuneCoins {
+        Self::new(n)
+    }
+}
+
+impl From<u16> for NeptuneCoins {
+    fn from(n: u16) -> NeptuneCoins {
+        Self::new(n as u32)
+    }
+}
+
+impl From<u8> for NeptuneCoins {
+    fn from(n: u8) -> NeptuneCoins {
+        Self::new(n as u32)
+    }
+}
+
 impl FromStr for NeptuneCoins {
     type Err = anyhow::Error;
 
@@ -316,6 +334,14 @@ impl Display for NeptuneCoins {
                 write!(f, "{}{}.{}", sign_symbol, int, flo)
             }
         }
+    }
+}
+
+impl std::fmt::Debug for NeptuneCoins {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("NeptuneCoins")
+            .field(&self.to_string())
+            .finish()
     }
 }
 
