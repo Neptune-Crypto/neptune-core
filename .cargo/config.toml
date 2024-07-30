@@ -2,3 +2,8 @@
 # see: https://docs.rs/console-subscriber/latest/console_subscriber/
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
+
+# workaround for rustc 1.80 running out of stack space when building triton-vm
+[env]
+RUST_MIN_STACK="33554432"
+
