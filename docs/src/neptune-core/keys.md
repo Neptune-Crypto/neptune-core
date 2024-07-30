@@ -9,8 +9,8 @@ Three `enum` are provided for working with keys and addresses:
 | enum                   | description                                      |
 |------------------------| -------------------------------------------------|
 | `KeyType`              | enumerates available key/address implementations |
-| `SpendingKeyType`      | enumerates key types and provides methods        |
-| `ReceivingAddressType` | enumerates address types and provides methods    |
+| `SpendingKey`      | enumerates key types and provides methods        |
+| `ReceivingAddress` | enumerates address types and provides methods    |
 
 note: It was decided to use `enum` rather than traits because the enums can be
 used within our RPC layer while traits cannnot.
@@ -59,4 +59,4 @@ Data encrypted with `Symmetric` keys is smaller than data encrypted with asymmet
 For this reason change output notifications are encrypted with a `Symmetric` key by default and it is desirable to do the same for all outputs destined for the
 originating wallet.
 
-Note that the `Symmetric` variant of abstract types `SpendingKeyType` and `ReceivingAddressType` both use the same underlying `SymmetricKey`.  So they differ only in the methods available.  For this reason, it is important never to give an "address" of the `Symmetric` type to an untrusted third party, because it is also the spending key.
+Note that the `Symmetric` variant of abstract types `SpendingKey` and `ReceivingAddress` both use the same underlying `SymmetricKey`.  So they differ only in the methods available.  For this reason, it is important never to give an "address" of the `Symmetric` type to an untrusted third party, because it is also the spending key.

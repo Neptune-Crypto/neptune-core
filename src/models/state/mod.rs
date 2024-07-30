@@ -493,7 +493,7 @@ impl GlobalState {
     /// The `change_utxo_notify_method` parameter should normally be
     /// [UtxoNotifyMethod::OnChain] for safest transfer.
     ///
-    /// The change_key should normally be a [SpendingKeyType::Symmetric] in
+    /// The change_key should normally be a [SpendingKey::Symmetric] in
     /// order to save blockchain space compared to a regular address.
     ///
     /// Note that `create_transaction()` does not modify any state and does not
@@ -624,9 +624,8 @@ impl GlobalState {
     /// `OnChain` or `OffChain`.
     ///
     /// After this call returns it is the caller's responsibility to inform the
-    /// wallet of any returned [ExpectedUtxo], ie `OffChain` secret
-    /// notifications, for utxos that match wallet keys.  Failure to do so can
-    /// result in loss of funds!
+    /// wallet of any returned [ExpectedUtxo] for utxos that match wallet keys.
+    /// Failure to do so can result in loss of funds!
     ///
     /// Note that `create_raw_transaction()` does not modify any state and does
     /// not require acquiring write lock.  This is important becauce internally

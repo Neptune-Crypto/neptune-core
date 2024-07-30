@@ -48,6 +48,49 @@ pub const RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS: u64 = 3 * 24 * 60 * 
 /// blockchain space and may leak some privacy if a key is ever used more than
 /// once.
 ///
+/// ### about `receiver_preimage`
+///
+/// The `receiver_preimage` field in expected_utxo is not strictly necessary.
+/// It is an optimization and a compromise.
+///
+/// #### optimization
+///
+/// An `ExpectedUtxo` really only needs `utxo`, `sender_randomness` and
+/// `receiver_identifier`.  These match the fields used in `PublicAnnouncement`.
+///
+/// However it then becomes necessary to scan all known wallet keys (of all key
+/// types) in order to find the matching key, in order to obtain the preimage.
+///
+/// improvement: To avoid scanning a map of \[`receiver_identifier`\] -->
+/// `derivation_index` could be stored in local wallet state for all known keys.
+///
+/// However no such map presently exists, and so the most efficient and easy
+/// thing is to include the preimage in [ExpectedUtxo] instead of a
+/// `receiver_identifier`.  This buys us an equivalent optimization for little
+/// effort.
+///
+/// #### compromise
+///
+/// Because the preimage is necessary to create an [ExpectedUtxo]
+/// `create_transaction()` must accept a `change_key: SpendingKey` parameter
+/// rather than `change_address: ReceivingAddress`.  One would normally expect
+/// an output to require only an address.
+///
+/// Further if [ExpectedUtxo] and `PublicAnnouncement` use the same fields then
+/// they can share much of the same codepath when claiming.  At present, we have
+/// separate codepaths that perform largely the same function.
+///
+/// We may revisit this area in the future, as it seems ripe for improvement.
+/// In particular wallet receiver_identifier map idea indicates it is possible
+/// to do this efficiently.  As such it may be best to implement at least the
+/// scanning based approach before mainnet.
+///
+/// A branch with an implementation of the scanning approach exists:
+/// danda/symmetric_keys_and_expected_utxos_without_receiver_preimage
+///
+/// At time of writing many tests are not passing and need updating with the new
+/// field.
+///
 /// see [UtxoNotificationPool], [AnnouncedUtxo], [UtxoNotification](crate::models::blockchain::transaction::UtxoNotification)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize)]
 pub struct ExpectedUtxo {

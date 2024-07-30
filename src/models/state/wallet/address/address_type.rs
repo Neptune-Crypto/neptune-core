@@ -84,7 +84,7 @@ impl KeyType {
 /// Represents any type of Neptune receiving Address.
 ///
 /// This enum provides an abstraction API for Address types, so that
-/// a method or struct may simply accept a `ReceivingAddressType` and be
+/// a method or struct may simply accept a `ReceivingAddress` and be
 /// forward-compatible with new types of Address as they are implemented.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReceivingAddress {
@@ -170,7 +170,7 @@ impl ReceivingAddress {
     }
 
     /// returns a privacy digest which corresponds to the privacy_preimage
-    /// of the matching [SpendingKeyType]
+    /// of the matching [SpendingKey]
     pub fn privacy_digest(&self) -> Digest {
         match self {
             Self::Generation(a) => a.privacy_digest,
@@ -233,7 +233,7 @@ impl ReceivingAddress {
 /// Represents any type of Neptune spending key.
 ///
 /// This enum provides an abstraction API for spending key types, so that a
-/// method or struct may simply accept a `SpendingKeyType` and be
+/// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
 #[derive(Debug, Clone, Copy)]
 pub enum SpendingKey {
@@ -442,7 +442,7 @@ mod test {
         use super::*;
 
         /// this tests the generate_public_announcement() and
-        /// scan_for_announced_utxos() methods with a [SpendingKeyType]
+        /// scan_for_announced_utxos() methods with a [SpendingKey]
         ///
         /// a PublicAnnouncement is created with generate_public_announcement() and
         /// added to a Tx.  It is then found by scanning for announced_utoxs.  Then
@@ -499,7 +499,7 @@ mod test {
             assert_eq!(key.privacy_preimage(), announced_utxo.receiver_preimage);
         }
 
-        /// This tests encrypting and decrypting with a [SpendingKeyType]
+        /// This tests encrypting and decrypting with a [SpendingKey]
         pub fn test_encrypt_decrypt(key: SpendingKey) {
             let mut rng = thread_rng();
 
@@ -522,7 +522,7 @@ mod test {
             assert_eq!(sender_randomness, sender_randomness_again);
         }
 
-        /// tests key generation, signing, and decrypting with a [SpendingKeyType]
+        /// tests key generation, signing, and decrypting with a [SpendingKey]
         ///
         /// note: key generation is performed by the caller. Both the
         /// spending_key and receiving_address must be independently derived from
@@ -549,7 +549,7 @@ mod test {
             assert_eq!(receiving_address, receiving_address_again);
         }
 
-        /// tests bech32m serialize, deserialize for [ReceivingAddressType]
+        /// tests bech32m serialize, deserialize for [ReceivingAddress]
         pub fn test_bech32m_conversion(receiving_address: ReceivingAddress) {
             // 1. serialize address to bech32m
             let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();

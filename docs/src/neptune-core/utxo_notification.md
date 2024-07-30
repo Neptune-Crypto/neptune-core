@@ -38,7 +38,7 @@ This is where the `key-type` and `receiver_identifier` of the `PublicAnnouncemen
 
 Since these fields are plaintext we can use them to identify notifications intended for our wallet prior to attempting decryption.
 
-Each `SpendingKeyType` has a `receiver_identifier` field that is derived from the secret-key.  This uniquely identifies the key without giving away the secret.  As such, it can be shared in the public-announcement.
+Each `SpendingKey` has a `receiver_identifier` field that is derived from the secret-key.  This uniquely identifies the key without giving away the secret.  As such, it can be shared in the public-announcement.
 
 The algorithm looks like:
 
@@ -62,9 +62,9 @@ It is planned to address this privacy concern but it may not happen until after 
 
 ## OffChain Utxo transfers
 
-Many types of OffChain transfers are possible.  `neptune-core` aims to support the following types at launch:
+Many types of OffChain transfers are possible.  examples:
 
-1. Local state (never leaves source machine/wallet)
+1. Local state (never leaves source machine/wallet).
 
 2. Neptune p2p network
 
@@ -81,11 +81,15 @@ For example Bob performs an OffChain utxo transfer to Sally.  Everything goes fi
 
 For this reason, it becomes crucial to maintain ongoing backups/redundancy of wallet data when receiving payments via OffChain notification.  And/or to ensure that the OffChain mechanism can reasonably provide data storage indefinitely into the future.
 
-Wallet authors should have strategies in mind to help prevent funds loss for recipients if providing off-chain send functionality.  Using decentralized storage for encrypted wallet files might be one such strategy.
+Wallet authors should have strategies in mind to help prevent funds loss for
+recipients if providing off-chain send functionality.  Using decentralized cloud
+storage for encrypted wallet files might be one such strategy.
 
 With the scary stuff out of the way, let's look at some `OffChain` notification methods.
 
 ### Local state.
+
+note: `neptune-core` already supports `OffChain` notifications via local state.
 
 Local state transfers are useful when a wallet makes a payment to itself.
 Self-payments occur for almost every transaction when a change output is
@@ -104,22 +108,24 @@ claimed, and add it to the list of wallet-owned `Utxo` called `monitored_utxos`.
 
 ### Neptune p2p network
 
+note: concept only. not yet supported in `neptune-core`.
+
 `Utxo` secrets that are destined for 3rd party wallets can be distributed via the neptune P2P network. This would use the same p2p protocol that distributes transactions and blocks however the secrets would be stored in a separate `UtxoNotificationPool` inside each neptune-core node.
 
-|alan or sword-smith, please flesh this out.|
+There are challenges with keeping the data around in perpetuity as this would place a great storage burden on p2p nodes. A solution outside the p2p network might be required for that.
 
 ### External / Serialized
 
 note: this is a proposed mechanism.  It does not exist at time of writing.
 
-The idea here is that the transfer takes place completely outside of `neptune-core`.
+The idea here is that the transfer and ongoing storage takes place completely outside of `neptune-core`.
 
-1. When a transaction is sent `neptune-core` would provide a serialized `PublicAnnouncement` for each `OffChain` output.
+1. When a transaction is sent `neptune-core` would provide a serialized data structure, eg `OffchainUtxoNotification` containing fields: key_type, receiver_identifier, ciphertext(utxo, sender_randomness) for each `OffChain` output.   Note that these are the exact fields stored in `PublicAnnouncement` for notifications.
 
-2. Some external process then transfers the `PublicAnnouncement` to the intended recipient.
+2. Some external process then transfers the serialized data to the intended recipient.
 
-3. The recipient then invokes the `claim_utxos()` RPC api and passes in a list of serialized `PublicAnnouncement`.  `neptune-core` then attempts to recognize and claim each `PublicAnnouncement`, just as if it had been found on the blockchain.
+3. The recipient then invokes the `claim_utxos()` RPC api and passes in a list of serialized `OffchainUtxoNotification`.  `neptune-core` then attempts to recognize and claim each one, just as if it had been found on the blockchain.
 
-4. Optionally the recipient could pass a flag to `claim_utxos()` that would cause it to initiate a new OnChain payment into the recipient's wallet.  This could serve a couple purposes:
-    * using OnChain notification minimizes future data-loss risk for recipient.
+4. Optionally the recipient could pass a flag to `claim_utxos()` that would cause it to initiate a new `OnChain` payment into the recipient's wallet.  This could serve a couple purposes:
+    * using `OnChain` notification minimizes future data-loss risk for recipient.
     * if the funds were sent with a symmetric-key this prevents the sender from spending (stealing) the funds later.

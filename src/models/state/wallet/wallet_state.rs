@@ -288,7 +288,7 @@ impl WalletState {
         self.find_spending_key_for_utxo(utxo).is_some()
     }
 
-    // returns Some(SpendingKeyType) if the utxo can be unlocked by one of the known
+    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
     // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()

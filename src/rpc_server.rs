@@ -163,7 +163,7 @@ pub trait RPC {
     ///
     /// `outputs` is a list of transaction outputs in the format
     /// `[(address:amount)]`.  The address may be any type supported by
-    /// [ReceivingAddressType].
+    /// [ReceivingAddress].
     ///
     /// `owned_utxo_notify_method` specifies how our wallet will be notified of
     /// any outputs destined for it. This includes the change output if one is
@@ -175,7 +175,7 @@ pub trait RPC {
     /// losing funds should the wallet files become corrupted or lost.
     ///
     /// tip: if using `OnChain` notification use a
-    /// [ReceivingAddressType::Symmetric] as the receiving address for any
+    /// [ReceivingAddress::Symmetric] as the receiving address for any
     /// outputs destined for your own wallet.  This happens automatically for
     /// the Change output only.
     ///
