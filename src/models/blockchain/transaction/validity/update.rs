@@ -358,6 +358,7 @@ mod test {
             SingleProof.program().hash::<Hash>()
         );
     }
+
     #[test]
     fn can_verify_transaction_update() {
         let mut test_runner = TestRunner::deterministic();
