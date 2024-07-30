@@ -5,10 +5,10 @@
 ///
 /// This is a very simple example:
 ///   * A input box always focused. Every character you type is registered
-///   here
+///     here
 ///   * Pressing Backspace erases a character
 ///   * Pressing Enter pushes the current input in the history of previous
-///   messages
+///     messages
 ///
 use anyhow::{bail, Result};
 use clap::Parser;
