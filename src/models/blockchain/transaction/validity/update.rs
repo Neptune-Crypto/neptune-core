@@ -9,7 +9,6 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
@@ -36,8 +35,8 @@ pub struct UpdateWitness {
     old_kernel: TransactionKernel,
     new_kernel: TransactionKernel,
     old_proof: Proof,
-    new_aocl_bagged: Digest,
-    new_swbfi: MmrAccumulator<Hash>,
+    new_swbfi_bagged: Digest,
+    new_aocl: MmrAccumulator<Hash>,
     new_swbfa_hash: Digest,
     outputs_hash: Digest,
     public_announcements_hash: Digest,
@@ -54,8 +53,8 @@ impl UpdateWitness {
             old_kernel,
             new_kernel: new_kernel.clone(),
             old_proof,
-            new_aocl_bagged: msa.aocl.bag_peaks(),
-            new_swbfi: msa.swbf_inactive,
+            new_swbfi_bagged: msa.swbf_inactive.bag_peaks(),
+            new_aocl: msa.aocl,
             new_swbfa_hash: Hash::hash(&msa.swbf_active),
             outputs_hash: Hash::hash(&new_kernel.outputs),
             public_announcements_hash: Hash::hash(&new_kernel.public_announcements),
@@ -168,8 +167,9 @@ impl ConsensusProgram for Update {
         tasmlib::verify(Stark::default(), claim, proof);
 
         // authenticate the mutator set accumulator against the txk mast hash
-        let aocl_mmr_bagged: Digest = uw.new_aocl_bagged;
-        let inactive_swbf_bagged: Digest = uw.new_swbfi.bag_peaks();
+        let aocl_mmr: MmrAccumulator<Hash> = uw.new_aocl;
+        let aocl_mmr_bagged = aocl_mmr.bag_peaks();
+        let inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
         let left: Digest = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
         let active_swbf_digest: Digest = uw.new_swbfa_hash;
         let default: Digest = Digest::default();
@@ -215,32 +215,6 @@ impl ConsensusProgram for Update {
         old_index_set_digests.sort();
         new_index_set_digests.sort();
         assert_eq!(old_index_set_digests, new_index_set_digests);
-
-        // inputs' chunks are authentic
-        i = 0;
-        while i < new_inputs.len() {
-            let input: &RemovalRecord = &new_inputs[i];
-            let mut j: usize = 0;
-            while j < input.target_chunks.len() {
-                let (chunk_index, _authentication_path, chunk): &(
-                    u64,
-                    MmrMembershipProof<Hash>,
-                    Digest,
-                ) = &input
-                    .target_chunks
-                    .chunk_indices_and_membership_proofs_and_leafs()[i];
-                let chunk_digest = Hash::hash(chunk);
-                let chunk_is_authentic = tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
-                    &uw.new_swbfi.peaks(),
-                    uw.new_swbfi.num_leafs(),
-                    *chunk_index,
-                    chunk_digest,
-                );
-                assert!(chunk_is_authentic);
-                j += 1;
-            }
-            i += 1;
-        }
 
         // outputs are identical
         let outputs_hash: Digest = uw.outputs_hash;
@@ -321,10 +295,8 @@ impl ConsensusProgram for Update {
         );
         assert!(new_timestamp >= old_timestamp);
 
-        // mutator set can change
-        // so nothing to do here
-
-        // done!
+        // mutator set can change, but we only care about extensions of the AOCL MMR
+        // TODO: mmr_verify_extension(old_mmr, new_mmr, mmr_extension)
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
@@ -376,6 +348,7 @@ mod test {
 
         let mut new_kernel = primitive_witness.kernel.clone();
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
+        // todo: also update mutator set
         let update_witness = UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
             proof,
