@@ -337,6 +337,13 @@ impl TxOutputList {
         })
     }
 
+    /// indicates if any offchain notifications (ExpectedUtxo) exist
+    pub fn has_offchain(&self) -> bool {
+        self.0
+            .iter()
+            .any(|u| matches!(&u.utxo_notification, UtxoNotification::OffChain(_)))
+    }
+
     /// retrieves expected_utxos from possible sub-set of the list
     pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
         self.expected_utxos_iter().into_iter().collect()
