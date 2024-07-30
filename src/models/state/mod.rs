@@ -1386,8 +1386,9 @@ mod global_state_tests {
         },
     };
     use num_traits::{One, Zero};
-    use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use rand::{random, rngs::StdRng, thread_rng, Rng, SeedableRng};
     use tracing_test::traced_test;
+    use wallet::address::{generation_address::GenerationReceivingAddress, KeyType};
 
     use super::{wallet::WalletSecret, *};
 
@@ -2295,5 +2296,293 @@ mod global_state_tests {
             .chain
             .light_state()
             .is_valid(&genesis_block, now));
+    }
+
+    /// tests that pertain to restoring a wallet from seed-phrase
+    /// and comparing onchain vs offchain notification methods.
+    mod restore_wallet {
+        use super::*;
+
+        /// test scenario: onchain/symmetric.
+        /// pass outcome: no funds loss
+        ///
+        /// test described in [change_exists()]
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn onchain_symmetric_change_exists() -> Result<()> {
+            change_exists(UtxoNotifyMethod::OnChain, KeyType::Symmetric).await
+        }
+
+        /// test scenario: onchain/generation.
+        /// pass outcome: no funds loss
+        ///
+        /// test described in [change_exists()]
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn onchain_generation_change_exists() -> Result<()> {
+            change_exists(UtxoNotifyMethod::OnChain, KeyType::Generation).await
+        }
+
+        /// test scenario: offchain/symmetric.
+        /// pass outcome: all funds lost!
+        ///
+        /// test described in [change_exists()]
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn offchain_symmetric_change_exists() -> Result<()> {
+            change_exists(UtxoNotifyMethod::OffChain, KeyType::Symmetric).await
+        }
+
+        /// test scenario: offchain/generation.
+        /// pass outcome: all funds lost!
+        ///
+        /// test described in [change_exists()]
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn offchain_generation_change_exists() -> Result<()> {
+            change_exists(UtxoNotifyMethod::OffChain, KeyType::Generation).await
+        }
+
+        /// basic scenario:  alice receives 20,000 coins in the premine.  7 months
+        /// after launch she sends 20 coins to bob, plus 1 coin fee.  alice should
+        /// receive change of 19979.  Sometime after this block is mined alice's
+        /// hard drive crashes and she loses her wallet.  She still has her wallet
+        /// seed and uses it to create a new wallet and scan blockchain to recover
+        /// funds.  At the end alice checks her wallet balance, which should be
+        /// 19979.
+        ///
+        /// note: the pre-mine and 7-months aspects are unimportant.  This test
+        /// would have same results if alice were a coinbase recipient instead.
+        ///
+        /// variations:
+        ///   utxo_notify_method: alice can choose OnChain or OffChain utxo notification.
+        ///   change_key_type:    alice's change key can be Symmetric or Generation
+        ///
+        /// outcomes:
+        ///   onchain/symmetric:    balance: 19979.  no funds loss.
+        ///   onchain/generation:   balance: 19979.  no funds loss.
+        ///   offchain/symmetric:   balance: 0. all funds lost!
+        ///   offchain/generation:  balance: 0. all funds lost!
+        ///
+        /// this function expects the above possible outcomes.  ie, it passes when
+        /// it encounters those outcomes.
+        ///
+        /// These outcomes highlight the danger of using off-chain notification.
+        /// Even though alice stored her seed safely offline she still loses all her
+        /// funds.
+        ///
+        /// It is important to recognize that alice's hard drive may crash (or
+        /// device stolen, etc) at any moment after she sends the transaction.  If
+        /// it happens 10 minutes after the transaction its unlikely she would have
+        /// a wallet backup.  Or it could happen years after the transaction,
+        /// demonstrating that alice's wallet needs to be backed up in perpetuity.
+        ///
+        /// From this, we conclude that the only way alice could really use offchain
+        /// notification safely is if her wallet is stored on some kind of redundant
+        /// storage media that is expected to exist in perpetuity.
+        ///
+        /// Since most people do not have home raid arrays and regular backup
+        /// schedules it seems that offchain notifications are best suited for
+        /// scenarios where the wallet is stored encrypted on some kind of cloud
+        /// storage, whether centralized or decentralized.
+        ///
+        /// It may also be a business opportunity for hardware vendors to sell
+        /// redundant-storage-in-a-box to users that want to use offchain
+        /// notification but keep their wallets local.
+        async fn change_exists(
+            utxo_notify_method: UtxoNotifyMethod,
+            change_key_type: KeyType,
+        ) -> Result<()> {
+            // setup initial conditions
+            let network = Network::RegTest;
+            let genesis_block = Block::genesis_block(network);
+            let launch = genesis_block.kernel.header.timestamp;
+            let seven_months_post_launch = launch + Timestamp::months(7);
+            let miner_address = GenerationReceivingAddress::derive_from_seed(random());
+
+            // amounts used in alice-to-bob transaction.
+            let alice_to_bob_amount = NeptuneCoins::new(20);
+            let alice_to_bob_fee = NeptuneCoins::new(1);
+
+            // init global state for alice bob
+            let alice_state_lock =
+                mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
+            let bob_state_lock =
+                mock_genesis_global_state(network, 3, WalletSecret::new_random()).await;
+
+            // in bob wallet: create receiving address for bob
+            let bob_address = {
+                bob_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .to_address()
+            };
+
+            // in alice wallet: send pre-mined funds to bob
+            let block_1 = {
+                let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
+
+                // store and verify alice's initial balance from pre-mine.
+                let alice_initial_balance = alice_state_mut
+                    .get_wallet_status_for_tip()
+                    .await
+                    .synced_unspent_available_amount(seven_months_post_launch);
+                assert_eq!(alice_initial_balance, 20000u32.into());
+
+                // create change key for alice. change_key_type is a test param.
+                let alice_change_key = alice_state_mut
+                    .wallet_state
+                    .next_unused_spending_key(change_key_type);
+
+                // create an output for bob, worth 20.
+                let outputs = vec![(bob_address, alice_to_bob_amount)];
+                let mut tx_outputs =
+                    alice_state_mut.generate_tx_outputs(outputs, utxo_notify_method)?;
+
+                // create tx.  utxo_notify_method is a test param.
+                let alice_to_bob_tx = alice_state_mut
+                    .create_transaction(
+                        &mut tx_outputs,
+                        alice_change_key,
+                        utxo_notify_method,
+                        alice_to_bob_fee,
+                        seven_months_post_launch,
+                    )
+                    .await?;
+
+                // Inform alice wallet of any expected incoming utxos.
+                // note: no-op when all utxo notifications are sent on-chain.
+                alice_state_mut
+                    .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
+                    .await?;
+
+                // the block gets mined.
+                let (mut block_1, ..) =
+                    make_mock_block_with_valid_pow(&genesis_block, None, miner_address, random());
+
+                // add tx to block.  (weird this can happen)
+                block_1
+                    .accumulate_transaction(
+                        alice_to_bob_tx,
+                        &alice_state_mut
+                            .chain
+                            .archival_state()
+                            .genesis_block()
+                            .kernel
+                            .body
+                            .mutator_set_accumulator,
+                    )
+                    .await;
+
+                // alice's node learns of the new block.
+                alice_state_mut.set_new_tip(block_1.clone()).await?;
+
+                // alice should have 2 monitored utxos.
+                assert_eq!(
+                        2,
+                        alice_state_mut
+                            .wallet_state
+                            .wallet_db
+                            .monitored_utxos()
+                            .len().await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
+                    );
+
+                // Now alice should have a balance of 19979.
+                // 20000 from premine - 21 (20 to Bob + 1 fee)
+                let alice_calculated_balance = alice_initial_balance
+                    .checked_sub(&alice_to_bob_amount)
+                    .unwrap()
+                    .checked_sub(&alice_to_bob_fee)
+                    .unwrap();
+                assert_eq!(alice_calculated_balance, 19979u32.into());
+
+                assert_eq!(
+                    alice_calculated_balance,
+                    alice_state_mut
+                        .get_wallet_status_for_tip()
+                        .await
+                        .synced_unspent_available_amount(seven_months_post_launch)
+                );
+
+                block_1
+            };
+
+            // in bob's wallet
+            {
+                let mut bob_state_mut = bob_state_lock.lock_guard_mut().await;
+
+                // bob's node adds block1 to the chain.
+                bob_state_mut.set_new_tip(block_1.clone()).await?;
+
+                // Now Bob should have a balance of 20, from Alice
+                assert_eq!(
+                    alice_to_bob_amount, // 20
+                    bob_state_mut
+                        .get_wallet_status_for_tip()
+                        .await
+                        .synced_unspent_available_amount(seven_months_post_launch)
+                );
+            }
+
+            // some time in the future.  minutes, months, or years...
+
+            // oh no!  alice's hard-drive crashes and she loses her wallet.
+            drop(alice_state_lock);
+
+            // Fortunately alice still has her seed that she can restore from.
+            {
+                // devnet_wallet() stands in for alice's seed.
+                let alice_restored_state_lock =
+                    mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
+
+                let mut alice_state_mut = alice_restored_state_lock.lock_guard_mut().await;
+
+                // check alice's initial balance after genesis.
+                let alice_initial_balance = alice_state_mut
+                    .get_wallet_status_for_tip()
+                    .await
+                    .synced_unspent_available_amount(seven_months_post_launch);
+
+                // lucky alice's wallet begins with 20000 balance from premine.
+                assert_eq!(alice_initial_balance, 20000u32.into());
+
+                // now alice must replay old blocks.  (there's only one so far)
+                alice_state_mut.set_new_tip(block_1).await?;
+
+                // Now alice should have a balance of 19979.
+                // 20000 from premine - 21 (20 to Bob + 1 fee)
+                let alice_calculated_balance = alice_initial_balance
+                    .checked_sub(&alice_to_bob_amount)
+                    .unwrap()
+                    .checked_sub(&alice_to_bob_fee)
+                    .unwrap();
+
+                assert_eq!(alice_calculated_balance, 19979u32.into());
+
+                // For onchain notification the balance will be 19979.
+                // For offchain notification, it will be 0.  Funds are lost!!!
+                let alice_expected_balance_by_method = match utxo_notify_method {
+                    UtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
+                    UtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
+                };
+
+                // verify that our on/offchain prediction is correct.
+                assert_eq!(
+                    alice_expected_balance_by_method,
+                    alice_state_mut
+                        .get_wallet_status_for_tip()
+                        .await
+                        .synced_unspent_available_amount(seven_months_post_launch)
+                );
+            }
+
+            Ok(())
+        }
     }
 }
