@@ -46,6 +46,16 @@ They are primarily intended for sending funds to third party wallets.  They can 
 
 The address encodes the public key using bech32m. The human readable prefix "nolga" stands for "Neptune oxfoi lattice-based generation address". The public announcement encodes a ciphertext which, when decrypted with the correct key, yields the UTXO information.
 
+#### Naming
+
+These are called "Generation" keys because they are designed to be
+quantum-secure and it is believed/hoped that the cryptography should be
+unbreakable for at least a generation and hopefully many generations.  If
+correct, it would be safe to put funds in a paper or metal wallet and ignore
+them for decades, perhaps until they are transferred to the original owner's
+children or grand-children.
+
+
 ### `Symmetric` keys and addresses
 
 `Symmetric` keys are implemented with aes-256-gcm, a type of symmetric key,
