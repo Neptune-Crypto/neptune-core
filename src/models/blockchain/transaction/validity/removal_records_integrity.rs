@@ -59,26 +59,6 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
-/// An Ms membership proof without any authentication paths
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject, Arbitrary,
-)]
-struct PartialMsMembershipProof {
-    pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
-    pub aocl_leaf_index: u64,
-}
-
-impl From<&MsMembershipProof> for PartialMsMembershipProof {
-    fn from(value: &MsMembershipProof) -> Self {
-        PartialMsMembershipProof {
-            sender_randomness: value.sender_randomness,
-            receiver_preimage: value.receiver_preimage,
-            aocl_leaf_index: value.aocl_leaf_index,
-        }
-    }
-}
-
 #[derive(
     Clone,
     Debug,
@@ -93,7 +73,7 @@ impl From<&MsMembershipProof> for PartialMsMembershipProof {
 )]
 pub struct RemovalRecordsIntegrityWitness {
     input_utxos: SaltedUtxos,
-    partial_membership_proofs: Vec<PartialMsMembershipProof>,
+    membership_proofs: Vec<MsMembershipProof>,
     aocl_auth_paths: Vec<MmrMembershipProof<Hash>>,
     removal_records: Vec<RemovalRecord>,
     aocl: MmrAccumulator<Hash>,
@@ -108,11 +88,7 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
     fn from(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
-            partial_membership_proofs: primitive_witness
-                .input_membership_proofs
-                .iter()
-                .map(|x| x.into())
-                .collect(),
+            membership_proofs: primitive_witness.input_membership_proofs.clone(),
             aocl_auth_paths: primitive_witness
                 .input_membership_proofs
                 .iter()
@@ -141,22 +117,18 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]
 struct RemovalRecordsIntegrityWitnessMemory {
     input_utxos: SaltedUtxos,
-    partial_membership_proofs: Vec<PartialMsMembershipProof>,
     removal_records: Vec<RemovalRecord>,
     aocl: MmrAccumulator<Hash>,
     swbfi: MmrAccumulator<Hash>,
-    swbfa_hash: Digest,
 }
 
 impl From<&RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrityWitnessMemory {
     fn from(value: &RemovalRecordsIntegrityWitness) -> Self {
         Self {
             input_utxos: value.input_utxos.to_owned(),
-            partial_membership_proofs: value.partial_membership_proofs.to_owned(),
             removal_records: value.removal_records.to_owned(),
             aocl: value.aocl.to_owned(),
             swbfi: value.swbfi.to_owned(),
-            swbfa_hash: value.swbfa_hash.to_owned(),
         }
     }
 }
@@ -173,6 +145,16 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
             memory_part,
         );
 
+        let mut nd_stream: Vec<BFieldElement> = self.swbfa_hash.reversed().values().to_vec();
+        for msmp in self.membership_proofs.iter() {
+            let mut u64_as_stream = msmp.aocl_leaf_index.encode();
+            u64_as_stream.reverse();
+            nd_stream.extend(&u64_as_stream);
+
+            nd_stream.extend(&msmp.receiver_preimage.reversed().values());
+            nd_stream.extend(&msmp.sender_randomness.reversed().values());
+        }
+
         // set digests
         let digests = [
             self.mast_path_mutator_set.clone(),
@@ -184,7 +166,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         ]
         .concat();
 
-        NonDeterminism::default()
+        NonDeterminism::new(nd_stream)
             .with_ram(memory)
             .with_digests(digests)
     }
@@ -409,7 +391,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let aocl_mmr_bagged: Digest = aocl.bag_peaks();
         let inactive_swbf_bagged: Digest = swbfi.bag_peaks();
         let left = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
-        let active_swbf_digest: Digest = rriw.swbfa_hash;
+        let active_swbf_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
         let default = Digest::default();
         let right = Hash::hash_pair(active_swbf_digest, default);
         let msah: Digest = Hash::hash_pair(left, right);
@@ -434,29 +416,27 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         while input_index < input_utxos.len() {
             let utxo: &Utxo = &input_utxos[input_index];
             let utxo_hash = Hash::hash(utxo);
-            let msmp: &PartialMsMembershipProof = &rriw.partial_membership_proofs[input_index];
             let claimed_absolute_indices: &AbsoluteIndexSet =
                 &rriw.removal_records[input_index].absolute_indices;
 
             // verify AOCL membership
-            let addition_record: AdditionRecord = commit(
-                utxo_hash,
-                msmp.sender_randomness,
-                msmp.receiver_preimage.hash(),
-            );
+            let aocl_leaf_index: u64 = tasmlib::tasmlib_io_read_secin___u64();
+            let receiver_preimage: Digest = tasmlib::tasmlib_io_read_secin___digest();
+            let sender_randomness: Digest = tasmlib::tasmlib_io_read_secin___digest();
+            let addition_record: AdditionRecord =
+                commit(utxo_hash, sender_randomness, receiver_preimage.hash());
             assert!(tasmlib::mmr_verify_from_secret_in_leaf_index_on_stack(
                 &aocl.peaks(),
                 aocl.num_leafs(),
-                msmp.aocl_leaf_index,
+                aocl_leaf_index,
                 addition_record.canonical_commitment,
             ));
 
             // calculate absolute index set
-            let aocl_leaf_index: u64 = msmp.aocl_leaf_index;
             let index_set = get_swbf_indices(
                 utxo_hash,
-                msmp.sender_randomness,
-                msmp.receiver_preimage,
+                sender_randomness,
+                receiver_preimage,
                 aocl_leaf_index,
             );
 
@@ -493,15 +473,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_swbfi = field!(RemovalRecordsIntegrityWitnessMemory::swbfi);
         type MmrAccumulatorTip5 = MmrAccumulator<Hash>;
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
-        let field_swbfa_hash = field!(RemovalRecordsIntegrityWitnessMemory::swbfa_hash);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
         let field_with_size_removal_records =
             field_with_size!(RemovalRecordsIntegrityWitnessMemory::removal_records);
         let field_with_size_input_utxos =
             field_with_size!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
-        let field_ms_membership_proofs =
-            field!(RemovalRecordsIntegrityWitnessMemory::partial_membership_proofs);
         let field_removal_records = field!(RemovalRecordsIntegrityWitnessMemory::removal_records);
 
         let for_all_utxos = "for_all_utxos".to_string();
@@ -535,10 +512,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             push 0
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default]
 
-            dup 10 {&field_swbfa_hash}
-            // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] *swbfa_hash
-
-            push {Digest::LEN-1} add read_mem {Digest::LEN} pop 1
+            divine {Digest::LEN}
             // _ [txk_mast_hash] *witness [txk_mast_hash] h *witness [padding] [default] [swbfa_hash]
 
             hash
@@ -637,26 +611,22 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             read_mem 1 push 2 add push 0 swap 1
             // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si
 
-            dup 4 {&field_ms_membership_proofs} push 1 add
-            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *msmp[0]_si
+            dup 4 {&field_removal_records} push 1 add
+            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *removal_records[0]_si
 
-            dup 5 {&field_removal_records} push 1 add
-            // _ [txk_mast_hash] *witness *aocl num_utxos 0 *utxos[0]_si *msmp[0]_si *removal_records[0]_si
-
-            swap 5
+            swap 4
             hint aocl = stack[0]
-            hint msmp_i = stack[1]
-            hint utxos_i_si = stack[2]
-            hint i = stack[3]
-            hint num_utxos = stack[4]
-            hint removal_records_i_si = stack[5]
-            // _ [txk_mast_hash] *witness *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0] *aocl
+            hint utxos_i_si = stack[1]
+            hint i = stack[2]
+            hint num_utxos = stack[3]
+            hint removal_records_i_si = stack[4]
+            // _ [txk_mast_hash] *witness *removal_records[0]_si num_utxos 0 *utxos[0]_si *aocl
 
-            // INVARIANT: _ *witness *removal_records[0]_si num_utxos 0 *utxos[0]_si *msmp[0] *aocl
+            // INVARIANT: _ *witness *removal_records[0]_si num_utxos 0 *utxos[0]_si *aocl
             call {for_all_utxos}
-            // _ [txk_mast_hash] *witness *removal_records[num_utxos]_si num_utxos num_utxos *utxos[num_utxos]_si *msmp[num_utxos] *aocl
+            // _ [txk_mast_hash] *witness *removal_records[num_utxos]_si num_utxos num_utxos *utxos[num_utxos]_si *aocl
 
-            pop 5 pop 1
+            pop 5
             // _ [txk_mast_hash] *witness
 
             /* compute and output hash of salted input UTXOs */
@@ -672,15 +642,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             halt
         };
 
-        let field_receiver_preimage = field!(PartialMsMembershipProof::receiver_preimage);
-        let field_sender_randomness = field!(PartialMsMembershipProof::sender_randomness);
         let field_mmr_num_leafs = field!(MmrAccumulatorTip5::leaf_count);
-        let field_aocl_leaf_index = field!(PartialMsMembershipProof::aocl_leaf_index);
         let field_indices = field!(RemovalRecord::absolute_indices);
 
         let compare_digests = DataType::Digest.compare();
-
-        let partial_msmp_size = PartialMsMembershipProof::static_length().unwrap();
 
         let u64_stack_size: u32 = DataType::U64.stack_size().try_into().unwrap();
         let aocl_leaf_index_write_pointer = library.kmalloc(u64_stack_size);
@@ -697,7 +662,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let utxo_hash_read_pointer = utxo_hash_write_pointer + bfe!(digest_stack_size - 1);
 
         let for_all_utxos_loop = triton_asm! {
-            // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+            // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
             {for_all_utxos}:
                 /*
                     1. Check loop stop-condition
@@ -714,80 +679,64 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
 
                 /* 1. */
-                dup 4 dup 4 eq
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl(num_utxos == i)
+                dup 3 dup 3 eq
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl(num_utxos == i)
 
                 skiz return
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 2. */
-                dup 2
+                dup 1
                 read_mem 1
                 push 2
                 add
                 swap 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *utxos[i] utxos[i]_size
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *utxos[i] utxos[i]_size
 
                 call {hash_varlen}
                 hint utxo_hash = stack[0..5]
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [utxo_hash]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [utxo_hash]
 
                 push {utxo_hash_write_pointer}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 3. */
-                dup 1 {&field_aocl_leaf_index}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_leaf_index
-
-                push 1 add read_mem {u64_stack_size} pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [aocl_leaf_index]
+                divine {u64_stack_size}
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
                 push {aocl_leaf_index_write_pointer}
                 write_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 4. */
-                dup 1 {&field_receiver_preimage}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *receiver_preimage
-
-                push {Digest::LEN - 1}
-                add
-                read_mem {Digest::LEN}
-                pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [receiver_preimage]
+                divine {Digest::LEN}
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [receiver_preimage]
 
                 push {receiver_preimage_write_pointer}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
 
                 /* 5. */
-                dup 1 {&field_sender_randomness}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *sender_randomness
-
-                push {Digest::LEN - 1}
-                add
-                read_mem {Digest::LEN}
-                pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [sender_randomness]
+                divine {Digest::LEN}
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [sender_randomness]
 
                 push {sender_randomness_write_pointer}
                 write_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
-
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 6. */
                 dup 0
                 {&field_peaks}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks
 
                 push 0
                 push 0
@@ -797,114 +746,109 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 push {receiver_preimage_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [default] [receiver_preimage]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [default] [receiver_preimage]
 
                 hash
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [receiver_digest]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest]
 
                 push {sender_randomness_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [receiver_digest] [sender_randomness]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
                 push {utxo_hash_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
 
                 call {ms_commit}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [canonical_commitment]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment]
 
 
                 /* 7. */
                 dup 6 {&field_mmr_num_leafs}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [canonical_commitment] *num_leafs
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] *num_leafs
 
                 push 1 add read_mem {u64_stack_size} pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [canonical_commitment] [num_leafs]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
                 push {aocl_leaf_index_read_pointer}
                 read_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *aocl_peaks [canonical_commitment] [num_leafs_aocl] [aocl_leaf_index]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
 
                 call {mmr_verify}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 8. */
                 push {aocl_leaf_index_read_pointer}
                 read_mem {u64_stack_size}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [aocl_leaf_index]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
                 push {receiver_preimage_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [aocl_leaf_index] [receiver_preimage]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage]
 
                 push {sender_randomness_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness]
 
                 push {utxo_hash_read_pointer}
                 read_mem {Digest::LEN}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]
 
                 call {swbf_indices}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl *computed_bloom_indices
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *computed_bloom_indices
 
                 push 1 add
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl (*computed_bloom_indices as array)
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (*computed_bloom_indices as array)
 
                 call {hash_index_array}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [computed_bloom_indices]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices]
 
                 /* 9. */
-                dup 10
+                dup 9
                 push 1
                 add
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [computed_bloom_indices] *rrs[i]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *rrs[i]
 
                 {&field_indices}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [computed_bloom_indices] *claimed_indices[i]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices] *claimed_indices[i]
 
                 call {hash_index_array}
                 pop 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl [computed_bloom_indices_h] [claimed_indices_h]
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [computed_bloom_indices_h] [claimed_indices_h]
 
                 {&compare_digests}
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl (computed_bloom_indices_h == claimed_indices_h)
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (computed_bloom_indices_h == claimed_indices_h)
 
                 assert
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 10. */
                 swap 1
-                push {partial_msmp_size} add
+                read_mem 1
+                push 2 add
+                add
                 swap 1
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *msmp[i + 1] *aocl
+                // _ *witness *rrs[i]_si num_utxos i *utxos[i + 1]_si *aocl
 
                 swap 2
-                read_mem 1
-                push 2 add
-                add
-                swap 2
-                // _ *witness *rrs[i]_si num_utxos i *utxos[i + 1]_si *msmp[i + 1] *aocl
-
-                swap 3
                 push 1 add
-                swap 3
-                // _ *witness *rrs[i]_si num_utxos (i + 1) *utxos[i + 1]_si *msmp[i + 1] *aocl
+                swap 2
+                // _ *witness *rrs[i]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
-                swap 5
+                swap 4
                 read_mem 1
                 push 2 add
                 add
-                swap 5
-                // _ *witness *rrs[i + 1]_si num_utxos (i + 1) *utxos[i + 1]_si *msmp[i + 1] *aocl
+                swap 4
+                // _ *witness *rrs[i + 1]_si num_utxos (i + 1) *utxos[i + 1]_si *aocl
 
                 recurse
         };
@@ -988,7 +932,6 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
         let salted_utxos = SaltedUtxos::new(input_utxos);
 
-        let partial_membership_proofs = membership_proofs.iter().map(|x| x.into()).collect();
         let aocl_auth_paths = membership_proofs
             .iter()
             .map(|x| x.auth_path_aocl.to_owned())
@@ -996,7 +939,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
         Ok(RemovalRecordsIntegrityWitness {
             input_utxos: salted_utxos,
-            partial_membership_proofs,
+            membership_proofs,
             aocl_auth_paths,
             aocl,
             swbfi,

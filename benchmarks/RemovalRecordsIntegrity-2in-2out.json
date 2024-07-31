@@ -2,11 +2,11 @@
   {
     "name": "RemovalRecordsIntegrity-2in-2out",
     "benchmark_result": {
-      "clock_cycle_count": 31383,
-      "hash_table_height": 19511,
+      "clock_cycle_count": 31257,
+      "hash_table_height": 19415,
       "u32_table_height": 13123,
-      "op_stack_table_height": 21923,
-      "ram_table_height": 29438
+      "op_stack_table_height": 21807,
+      "ram_table_height": 29403
     },
     "case": "CommonCase"
   }
