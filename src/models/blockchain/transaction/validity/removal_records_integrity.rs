@@ -342,7 +342,7 @@ impl RemovalRecordsIntegrityWitness {
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
     fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let rriw: RemovalRecordsIntegrityWitness = tasmlib::decode_from_memory(start_address);
@@ -363,7 +363,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let default = Digest::default();
         let right = Hash::hash_pair(active_swbf_digest, default);
         let msah: Digest = Hash::hash_pair(left, right);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&msah),
@@ -372,7 +372,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         // authenticate divined removal records against txk mast hash
         let removal_records_digest = Hash::hash(&rriw.removal_records);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::Inputs as u32,
             removal_records_digest,
@@ -461,7 +461,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         // compute and output hash of salted input UTXOs
         let hash_of_inputs = Hash::hash(salted_input_utxos);
-        tasmlib::tasm_io_write_to_stdout___digest(hash_of_inputs);
+        tasmlib::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {

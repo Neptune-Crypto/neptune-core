@@ -66,24 +66,24 @@ impl ConsensusProgram for TimeLock {
         //  - input salted utxos digest
         //  - output salted utxos digest
         // (All type scripts take this triple as input.)
-        let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let _output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+        let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+        let _output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
 
         // divine the timestamp and authenticate it against the kernel mast hash
         let leaf_index: u32 = 5;
-        let timestamp: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let timestamp: BFieldElement = tasm::tasmlib_io_read_secin___bfe();
         let leaf: Digest = Hash::hash_varlen(&timestamp.encode());
         let tree_height: u32 = 3;
-        tasm::tasm_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
+        tasm::tasmlib_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
 
         // get pointers to objects living in nondeterministic memory:
         //  - input Salted UTXOs
-        let input_utxos_pointer: u64 = tasm::tasm_io_read_secin___bfe().value();
+        let input_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
 
         // it's important to read the outputs digest too, but we actually don't care about
         // the output UTXOs (in this type script)
-        let _output_utxos_pointer: u64 = tasm::tasm_io_read_secin___bfe().value();
+        let _output_utxos_pointer: u64 = tasm::tasmlib_io_read_secin___bfe().value();
 
         // authenticate salted input UTXOs against the digest that was read from stdin
         let input_salted_utxos: SaltedUtxos =

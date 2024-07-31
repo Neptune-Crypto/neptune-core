@@ -172,17 +172,17 @@ impl Merge {
 impl ConsensusProgram for Merge {
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
-        let new_txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         // divine the witness for this proof
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let mw: MergeWitness = tasmlib::decode_from_memory(start_address);
 
         // divine the left and right kernels of the operand transactions
-        let left_txk_digest: Digest = tasmlib::tasm_io_read_secin___digest();
+        let left_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
         let left_txk_digest_as_input: Vec<BFieldElement> =
             left_txk_digest.reversed().values().to_vec();
-        let right_txk_digest: Digest = tasmlib::tasm_io_read_secin___digest();
+        let right_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
         let right_txk_digest_as_input: Vec<BFieldElement> =
             right_txk_digest.reversed().values().to_vec();
 
@@ -204,7 +204,7 @@ impl ConsensusProgram for Merge {
 
         // new inputs are a permutation of the operands' inputs' concatenation
         let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::Inputs as u32,
             Hash::hash(left_inputs),
@@ -217,7 +217,7 @@ impl ConsensusProgram for Merge {
             i += 1;
         }
         let right_inputs: &Vec<RemovalRecord> = &mw.right_kernel.inputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::Inputs as u32,
             Hash::hash(right_inputs),
@@ -229,7 +229,7 @@ impl ConsensusProgram for Merge {
             i += 1;
         }
         let new_inputs: &Vec<RemovalRecord> = &mw.new_kernel.inputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Inputs as u32,
             Hash::hash(new_inputs),
@@ -246,7 +246,7 @@ impl ConsensusProgram for Merge {
 
         // new outputs are a permutation of the operands' outputs' concatenation
         let left_outputs: &Vec<AdditionRecord> = &mw.left_kernel.outputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::Outputs as u32,
             Hash::hash(left_outputs),
@@ -259,7 +259,7 @@ impl ConsensusProgram for Merge {
             i += 1;
         }
         let right_outputs: &Vec<AdditionRecord> = &mw.right_kernel.outputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::Outputs as u32,
             Hash::hash(right_outputs),
@@ -271,7 +271,7 @@ impl ConsensusProgram for Merge {
             i += 1;
         }
         let new_outputs: &Vec<AdditionRecord> = &mw.new_kernel.outputs;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Outputs as u32,
             Hash::hash(new_outputs),
@@ -290,7 +290,7 @@ impl ConsensusProgram for Merge {
         // announcements' concatenation
         let left_public_announcements: &Vec<PublicAnnouncement> =
             &mw.left_kernel.public_announcements;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             Hash::hash(left_public_announcements),
@@ -304,7 +304,7 @@ impl ConsensusProgram for Merge {
         }
         let right_public_announcements: &Vec<PublicAnnouncement> =
             &mw.right_kernel.public_announcements;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             Hash::hash(right_public_announcements),
@@ -317,7 +317,7 @@ impl ConsensusProgram for Merge {
         }
         let new_public_announcements: &Vec<PublicAnnouncement> =
             &mw.new_kernel.public_announcements;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             Hash::hash(new_public_announcements),
@@ -337,21 +337,21 @@ impl ConsensusProgram for Merge {
 
         // new fee is sum of operand fees
         let left_fee: NeptuneCoins = mw.left_kernel.fee;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::Fee as u32,
             Hash::hash(&left_fee),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
         let right_fee: NeptuneCoins = mw.right_kernel.fee;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::Fee as u32,
             Hash::hash(&right_fee),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
         let new_fee: NeptuneCoins = left_fee + right_fee;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Fee as u32,
             Hash::hash(&new_fee),
@@ -360,14 +360,14 @@ impl ConsensusProgram for Merge {
 
         // at most one coinbase is set
         let left_coinbase: Option<NeptuneCoins> = mw.left_kernel.coinbase;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::Coinbase as u32,
             Hash::hash(&left_coinbase),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
         let right_coinbase: Option<NeptuneCoins> = mw.right_kernel.coinbase;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::Coinbase as u32,
             Hash::hash(&right_coinbase),
@@ -383,7 +383,7 @@ impl ConsensusProgram for Merge {
         } else {
             None
         };
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Coinbase as u32,
             Hash::hash(&new_coinbase),
@@ -392,14 +392,14 @@ impl ConsensusProgram for Merge {
 
         // new timestamp is whichever is larger
         let left_timestamp: Timestamp = mw.left_kernel.timestamp;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::Timestamp as u32,
             Hash::hash(&left_timestamp),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
         let right_timestamp: Timestamp = mw.right_kernel.timestamp;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::Timestamp as u32,
             Hash::hash(&right_timestamp),
@@ -410,7 +410,7 @@ impl ConsensusProgram for Merge {
         } else {
             left_timestamp
         };
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Timestamp as u32,
             Hash::hash(&new_timestamp),
@@ -419,19 +419,19 @@ impl ConsensusProgram for Merge {
 
         // mutator set hash is identical
         let mutator_set_hash: Digest = mw.left_kernel.mutator_set_hash;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             left_txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&mutator_set_hash),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             right_txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&mutator_set_hash),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&mutator_set_hash),

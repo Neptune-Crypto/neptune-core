@@ -33,13 +33,13 @@ pub fn own_program_digest() -> Digest {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___bfe() -> BFieldElement {
+pub fn tasmlib_io_read_stdin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
     PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap())
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___xfe() -> XFieldElement {
+pub fn tasmlib_io_read_stdin___xfe() -> XFieldElement {
     let x2 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
     let x1 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
     let x0 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
@@ -47,7 +47,7 @@ pub fn tasm_io_read_stdin___xfe() -> XFieldElement {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___u32() -> u32 {
+pub fn tasmlib_io_read_stdin___u32() -> u32 {
     #[allow(clippy::unwrap_used)]
     let val: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop().unwrap())
@@ -57,7 +57,7 @@ pub fn tasm_io_read_stdin___u32() -> u32 {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___u64() -> u64 {
+pub fn tasmlib_io_read_stdin___u64() -> u64 {
     #[allow(clippy::unwrap_used)]
     let hi: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop().unwrap())
@@ -71,7 +71,7 @@ pub fn tasm_io_read_stdin___u64() -> u64 {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___u128() -> u128 {
+pub fn tasmlib_io_read_stdin___u128() -> u128 {
     #[allow(clippy::unwrap_used)]
     let e3: u32 = PUB_INPUT
         .with(|v| v.borrow_mut().pop().unwrap())
@@ -93,7 +93,7 @@ pub fn tasm_io_read_stdin___u128() -> u128 {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_stdin___digest() -> Digest {
+pub fn tasmlib_io_read_stdin___digest() -> Digest {
     let e4 = PUB_INPUT.with(|v| {
         v.borrow_mut()
             .pop()
@@ -123,47 +123,47 @@ pub fn tasm_io_read_stdin___digest() -> Digest {
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___bfe(x: BFieldElement) {
+pub fn tasmlib_io_write_to_stdout___bfe(x: BFieldElement) {
     PUB_OUTPUT.with(|v| v.borrow_mut().push(x));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___xfe(x: XFieldElement) {
+pub fn tasmlib_io_write_to_stdout___xfe(x: XFieldElement) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.coefficients.to_vec()));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___digest(x: Digest) {
+pub fn tasmlib_io_write_to_stdout___digest(x: Digest) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.values().to_vec()));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___bool(x: bool) {
+pub fn tasmlib_io_write_to_stdout___bool(x: bool) {
     PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(x as u64)));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___u32(x: u32) {
+pub fn tasmlib_io_write_to_stdout___u32(x: u32) {
     PUB_OUTPUT.with(|v| v.borrow_mut().push(BFieldElement::new(x as u64)));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___u64(x: u64) {
+pub fn tasmlib_io_write_to_stdout___u64(x: u64) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.encode()));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_write_to_stdout___u128(x: u128) {
+pub fn tasmlib_io_write_to_stdout___u128(x: u128) {
     PUB_OUTPUT.with(|v| v.borrow_mut().extend(x.encode()));
 }
 
 #[allow(non_snake_case)]
-pub fn tasm_io_read_secin___bfe() -> BFieldElement {
+pub fn tasmlib_io_read_secin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
     ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop().unwrap())
 }
 #[allow(non_snake_case)]
-pub fn tasm_io_read_secin___digest() -> Digest {
+pub fn tasmlib_io_read_secin___digest() -> Digest {
     let e4 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
             .pop()
@@ -194,7 +194,12 @@ pub fn tasm_io_read_secin___digest() -> Digest {
 
 /// Verify a Merkle tree membership claim using the nondeterministically supplied digests
 /// as authentication path.
-pub fn tasm_hashing_merkle_verify(root: Digest, leaf_index: u32, leaf: Digest, tree_height: u32) {
+pub fn tasmlib_hashing_merkle_verify(
+    root: Digest,
+    leaf_index: u32,
+    leaf: Digest,
+    tree_height: u32,
+) {
     let mut path: Vec<Digest> = vec![];
 
     ND_DIGESTS.with_borrow_mut(|nd_digests| {
@@ -236,7 +241,7 @@ pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
 }
 
 /// Test whether two lists of digests are equal, up to order.
-pub fn tasm_list_unsafeimplu32_multiset_equality(left: Vec<Digest>, right: Vec<Digest>) {
+pub fn tasmlib_list_unsafeimplu32_multiset_equality(left: Vec<Digest>, right: Vec<Digest>) {
     assert_eq!(left.len(), right.len());
     let mut left_sorted = left.clone();
     left_sorted.sort();

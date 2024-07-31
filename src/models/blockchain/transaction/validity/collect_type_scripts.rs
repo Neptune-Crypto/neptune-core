@@ -85,8 +85,8 @@ pub struct CollectTypeScripts;
 
 impl ConsensusProgram for CollectTypeScripts {
     fn source(&self) {
-        let siu_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
-        let sou_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
+        let sou_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let ctsw: CollectTypeScriptsWitness = tasmlib::decode_from_memory(start_address);
 
@@ -144,7 +144,7 @@ impl ConsensusProgram for CollectTypeScripts {
         // output all type script hashes
         i = 0;
         while i < type_script_hashes.len() {
-            tasmlib::tasm_io_write_to_stdout___digest(type_script_hashes[i]);
+            tasmlib::tasmlib_io_write_to_stdout___digest(type_script_hashes[i]);
             i += 1;
         }
     }

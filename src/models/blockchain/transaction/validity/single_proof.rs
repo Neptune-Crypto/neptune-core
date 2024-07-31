@@ -126,7 +126,7 @@ pub struct SingleProof;
 
 impl ConsensusProgram for SingleProof {
     fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let spw: SingleProofWitness = tasmlib::decode_from_memory(start_address);
 

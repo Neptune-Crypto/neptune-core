@@ -99,7 +99,7 @@ pub struct KernelToOutputs;
 
 impl ConsensusProgram for KernelToOutputs {
     fn source(&self) {
-        let txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let ktow: KernelToOutputsWitness = tasmlib::decode_from_memory(start_address);
 
@@ -126,7 +126,7 @@ impl ConsensusProgram for KernelToOutputs {
 
         // authenticate the addition records against the txk mast hash
         let addition_records_hash: Digest = Hash::hash(&addition_records);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::Outputs as u32,
             addition_records_hash,
@@ -135,7 +135,7 @@ impl ConsensusProgram for KernelToOutputs {
 
         // output hash of salted output UTXOs
         let salted_output_utxos_hash: Digest = Hash::hash(salted_output_utxos);
-        tasmlib::tasm_io_write_to_stdout___digest(salted_output_utxos_hash);
+        tasmlib::tasmlib_io_write_to_stdout___digest(salted_output_utxos_hash);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {

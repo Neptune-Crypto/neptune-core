@@ -146,14 +146,14 @@ impl Update {
 impl ConsensusProgram for Update {
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
-        let new_txk_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         // divine the witness for this proof
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let uw: UpdateWitness = tasmlib::decode_from_memory(start_address);
 
         // divine the kernel of the out-of-date transaction
-        let old_txk_digest: Digest = tasmlib::tasm_io_read_secin___digest();
+        let old_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
         let old_txk_digest_as_input: Vec<BFieldElement> =
             old_txk_digest.reversed().values().to_vec();
 
@@ -175,7 +175,7 @@ impl ConsensusProgram for Update {
         let default: Digest = Digest::default();
         let right: Digest = Hash::hash_pair(active_swbf_digest, default);
         let msah: Digest = Hash::hash_pair(left, right);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
             Hash::hash(&msah),
@@ -189,13 +189,13 @@ impl ConsensusProgram for Update {
         let new_inputs: Vec<RemovalRecord> = uw.new_kernel.inputs;
         let old_inputs_hash: Digest = Hash::hash(&old_inputs);
         let new_inputs_hash: Digest = Hash::hash(&new_inputs);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Inputs as u32,
             old_inputs_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Inputs as u32,
             new_inputs_hash,
@@ -218,13 +218,13 @@ impl ConsensusProgram for Update {
 
         // outputs are identical
         let outputs_hash: Digest = uw.outputs_hash;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Outputs as u32,
             outputs_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Outputs as u32,
             outputs_hash,
@@ -233,13 +233,13 @@ impl ConsensusProgram for Update {
 
         // public announcements are identical
         let public_announcements_hash: Digest = uw.public_announcements_hash;
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             public_announcements_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             public_announcements_hash,
@@ -248,13 +248,13 @@ impl ConsensusProgram for Update {
 
         // fees are identical
         let fee_hash: Digest = Hash::hash(&uw.new_kernel.fee);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Fee as u32,
             fee_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Fee as u32,
             fee_hash,
@@ -263,13 +263,13 @@ impl ConsensusProgram for Update {
 
         // coinbases are identical
         let coinbase_hash: Digest = Hash::hash(&uw.new_kernel.fee);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Coinbase as u32,
             coinbase_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Coinbase as u32,
             coinbase_hash,
@@ -281,13 +281,13 @@ impl ConsensusProgram for Update {
         let new_timestamp_hash: Digest = Hash::hash(&new_timestamp);
         let old_timestamp: Timestamp = uw.old_kernel.timestamp;
         let old_timestamp_hash: Digest = Hash::hash(&new_timestamp);
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Timestamp as u32,
             old_timestamp_hash,
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
-        tasmlib::tasm_hashing_merkle_verify(
+        tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Timestamp as u32,
             new_timestamp_hash,
