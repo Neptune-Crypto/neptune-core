@@ -70,7 +70,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - hash the list of removal record sets and authenticate it against the given transaction kernel MAST hash
    - output the hash of the salted input UTXOs.
 
-   Checks ensuring that each AOCL index is unique and that the published authentication paths are valid are delegated to the miner and do, for performance reasons, not belong here. Checks that the removal record has not already been applied (i.e. no double-spend) is also delegated to the miner.
+   Checks ensuring that each AOCL index is unique and that the published authentication paths are valid, are delegated to the miner and do, for performance reasons, not belong here. Checks that the removal record has not already been applied (i.e. no double-spend) is also delegated to the miner.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
    - divine the output UTXOs
    - divine the salt
