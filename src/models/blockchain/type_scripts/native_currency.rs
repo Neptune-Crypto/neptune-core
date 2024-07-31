@@ -60,9 +60,9 @@ impl ConsensusProgram for NativeCurrency {
         //  - input salted utxos digest
         //  - output salted utxos digest
         // (All type scripts take this triple as input.)
-        let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+        let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+        let output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
 
         // divine witness from memory
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -77,7 +77,7 @@ impl ConsensusProgram for NativeCurrency {
         let coinbase_leaf_index: u32 = 4;
         let coinbase_leaf: Digest = Hash::hash(&coinbase);
         let kernel_tree_height: u32 = 3;
-        tasm::tasm_hashing_merkle_verify(
+        tasm::tasmlib_hashing_merkle_verify(
             tx_kernel_digest,
             coinbase_leaf_index,
             coinbase_leaf,
@@ -93,7 +93,7 @@ impl ConsensusProgram for NativeCurrency {
         // authenticate fee against kernel mast hash
         let fee_leaf_index: u32 = 3;
         let fee_leaf: Digest = Hash::hash(&fee);
-        tasm::tasm_hashing_merkle_verify(
+        tasm::tasmlib_hashing_merkle_verify(
             tx_kernel_digest,
             fee_leaf_index,
             fee_leaf,

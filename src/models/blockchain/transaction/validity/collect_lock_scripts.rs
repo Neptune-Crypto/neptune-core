@@ -70,7 +70,7 @@ pub struct CollectLockScripts;
 
 impl ConsensusProgram for CollectLockScripts {
     fn source(&self) {
-        let siu_digest: Digest = tasmlib::tasm_io_read_stdin___digest();
+        let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let clsw: CollectLockScriptsWitness = tasmlib::decode_from_memory(start_address);
 
@@ -85,7 +85,7 @@ impl ConsensusProgram for CollectLockScripts {
         // iterate over all input UTXOs and output the lock script hashes
         let mut i = 0;
         while i < input_utxos.len() {
-            tasmlib::tasm_io_write_to_stdout___digest(input_utxos[i].lock_script_hash);
+            tasmlib::tasmlib_io_write_to_stdout___digest(input_utxos[i].lock_script_hash);
             i += 1;
         }
     }
