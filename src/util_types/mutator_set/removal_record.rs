@@ -30,7 +30,7 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-#[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
@@ -396,6 +396,33 @@ mod removal_record_tests {
         let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
         (item, mp, removal_record)
+    }
+
+    impl AbsoluteIndexSet {
+        /// Test-function used for negative tests of removal records
+        pub(crate) fn increment_bloom_filter_index(&mut self, index: usize) {
+            self.0[index] = self.0[index].wrapping_add(1);
+        }
+
+        /// Test-function used for negative tests of removal records
+        pub(crate) fn decrement_bloom_filter_index(&mut self, index: usize) {
+            self.0[index] = self.0[index].wrapping_sub(1);
+        }
+    }
+
+    #[test]
+    fn increment_bloom_filter_index_behaves_as_expected() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let original_index_set = removal_record.absolute_indices;
+        for i in 0..NUM_TRIALS as usize {
+            let mut mutated_index_set = original_index_set;
+            mutated_index_set.increment_bloom_filter_index(i);
+
+            assert_ne!(original_index_set, mutated_index_set);
+
+            mutated_index_set.decrement_bloom_filter_index(i);
+            assert_eq!(original_index_set, mutated_index_set);
+        }
     }
 
     #[test]
