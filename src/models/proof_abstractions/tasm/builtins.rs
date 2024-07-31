@@ -162,6 +162,21 @@ pub fn tasmlib_io_read_secin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
     ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop().unwrap())
 }
+
+#[allow(non_snake_case)]
+pub fn tasmlib_io_read_secin___u64() -> u64 {
+    #[allow(clippy::unwrap_used)]
+    let hi: u32 = ND_INDIVIDUAL_TOKEN
+        .with(|v| v.borrow_mut().pop().unwrap())
+        .try_into()
+        .unwrap();
+    let lo: u32 = ND_INDIVIDUAL_TOKEN
+        .with(|v| v.borrow_mut().pop().unwrap())
+        .try_into()
+        .unwrap();
+    ((hi as u64) << 32) + lo as u64
+}
+
 #[allow(non_snake_case)]
 pub fn tasmlib_io_read_secin___digest() -> Digest {
     let e4 = ND_INDIVIDUAL_TOKEN.with(|v| {
