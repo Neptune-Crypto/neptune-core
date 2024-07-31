@@ -136,14 +136,41 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
     }
 }
 
+/// The parts of the [`RemovalRecordsIntegrityWitness`] that are initialized in
+/// memory at the start of each execution.
+#[derive(Clone, Debug, BFieldCodec, TasmObject)]
+struct RemovalRecordsIntegrityWitnessMemory {
+    input_utxos: SaltedUtxos,
+    partial_membership_proofs: Vec<PartialMsMembershipProof>,
+    removal_records: Vec<RemovalRecord>,
+    aocl: MmrAccumulator<Hash>,
+    swbfi: MmrAccumulator<Hash>,
+    swbfa_hash: Digest,
+}
+
+impl From<&RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrityWitnessMemory {
+    fn from(value: &RemovalRecordsIntegrityWitness) -> Self {
+        Self {
+            input_utxos: value.input_utxos.to_owned(),
+            partial_membership_proofs: value.partial_membership_proofs.to_owned(),
+            removal_records: value.removal_records.to_owned(),
+            aocl: value.aocl.to_owned(),
+            swbfi: value.swbfi.to_owned(),
+            swbfa_hash: value.swbfa_hash.to_owned(),
+        }
+    }
+}
+
 impl SecretWitness for RemovalRecordsIntegrityWitness {
     fn nondeterminism(&self) -> NonDeterminism {
         // set memory
+        let memory_part: RemovalRecordsIntegrityWitnessMemory = self.into();
+
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self.clone(),
+            memory_part,
         );
 
         // set digests
@@ -368,7 +395,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let rriw: RemovalRecordsIntegrityWitness = tasmlib::decode_from_memory(start_address);
+        let rriw: RemovalRecordsIntegrityWitnessMemory = tasmlib::decode_from_memory(start_address);
 
         // divine in the salted input UTXOs with hash
         let salted_input_utxos: &SaltedUtxos = &rriw.input_utxos;
@@ -462,20 +489,20 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             size: NUM_TRIALS as usize * size_of_u128,
         }));
 
-        let field_aocl = field!(RemovalRecordsIntegrityWitness::aocl);
-        let field_swbfi = field!(RemovalRecordsIntegrityWitness::swbfi);
+        let field_aocl = field!(RemovalRecordsIntegrityWitnessMemory::aocl);
+        let field_swbfi = field!(RemovalRecordsIntegrityWitnessMemory::swbfi);
         type MmrAccumulatorTip5 = MmrAccumulator<Hash>;
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
-        let field_swbfa_hash = field!(RemovalRecordsIntegrityWitness::swbfa_hash);
-        let field_input_utxos = field!(RemovalRecordsIntegrityWitness::input_utxos);
+        let field_swbfa_hash = field!(RemovalRecordsIntegrityWitnessMemory::swbfa_hash);
+        let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
         let field_with_size_removal_records =
-            field_with_size!(RemovalRecordsIntegrityWitness::removal_records);
+            field_with_size!(RemovalRecordsIntegrityWitnessMemory::removal_records);
         let field_with_size_input_utxos =
-            field_with_size!(RemovalRecordsIntegrityWitness::input_utxos);
+            field_with_size!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_ms_membership_proofs =
-            field!(RemovalRecordsIntegrityWitness::partial_membership_proofs);
-        let field_removal_records = field!(RemovalRecordsIntegrityWitness::removal_records);
+            field!(RemovalRecordsIntegrityWitnessMemory::partial_membership_proofs);
+        let field_removal_records = field!(RemovalRecordsIntegrityWitnessMemory::removal_records);
 
         let for_all_utxos = "for_all_utxos".to_string();
 
