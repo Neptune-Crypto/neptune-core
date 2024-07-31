@@ -394,7 +394,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         );
 
         // authenticate divined removal records against txk mast hash
-        let removal_records_digest = Hash::hash(&rriw.removal_records);
+        let removal_records_digest: Digest = Hash::hash(&rriw.removal_records);
         tasmlib::tasmlib_hashing_merkle_verify(
             txk_digest,
             TransactionKernelField::Inputs as u32,
@@ -407,8 +407,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         while input_index < input_utxos.len() {
             let utxo: &Utxo = &input_utxos[input_index];
             let utxo_hash = Hash::hash(utxo);
-            let msmp = &rriw.partial_membership_proofs[input_index];
-            let claimed_absolute_indices = &rriw.removal_records[input_index].absolute_indices;
+            let msmp: &PartialMsMembershipProof = &rriw.partial_membership_proofs[input_index];
+            let claimed_absolute_indices: &AbsoluteIndexSet =
+                &rriw.removal_records[input_index].absolute_indices;
 
             // verify AOCL membership
             let addition_record: AdditionRecord = commit(
@@ -424,7 +425,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             ));
 
             // calculate absolute index set
-            let aocl_leaf_index = msmp.aocl_leaf_index;
+            let aocl_leaf_index: u64 = msmp.aocl_leaf_index;
             let index_set = get_swbf_indices(
                 utxo_hash,
                 msmp.sender_randomness,
@@ -438,7 +439,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         }
 
         // compute and output hash of salted input UTXOs
-        let hash_of_inputs = Hash::hash(salted_input_utxos);
+        let hash_of_inputs: Digest = Hash::hash(salted_input_utxos);
         tasmlib::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
     }
 
