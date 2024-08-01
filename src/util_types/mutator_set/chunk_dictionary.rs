@@ -64,6 +64,13 @@ impl ChunkDictionary {
             .collect_vec()
     }
 
+    pub fn authentication_paths(&self) -> Vec<MmrMembershipProof<Hash>> {
+        self.dictionary
+            .iter()
+            .map(|(_, (mp, _))| mp.to_owned())
+            .collect()
+    }
+
     pub fn all_chunk_indices(&self) -> Vec<ChunkIndex> {
         self.dictionary.iter().map(|(ci, _)| *ci).collect_vec()
     }

@@ -23,7 +23,7 @@ Transaction validity is designed to check four conditions:
 A transaction is *valid* if (any of):
 
  - ***a)*** it has a valid witness (including spending keys and mutator set membership proofs)
- - ***b)*** it has valid proofs for each subprogram (subprograms establish things like the owners consent to this transaction, there is no inflation, etc.) 
+ - ***b)*** it has valid proofs for each subprogram (subprograms establish things like the owners consent to this transaction, there is no inflation, etc.)
  - ***c)*** it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
  - ***d)*** it has a single valid proof that the transaction originates from merging two valid transactions
  - ***e)*** it has a single valid proof that the transaction belongs to an integral mempool, *i.e.*, one to which only valid transactions were added
@@ -62,16 +62,15 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
    - for each input UTXO:
      - divine the receiver preimage
-     - divine the sender randomness 
+     - divine the sender randomness
      - compute the canonical commitment
      - verify the membership of the canonical commitment to the AOCL
      - compute the removal record index set
-     - read the removal record chunks dictionary from memory
-     - for each entry in this dictionary, verify that the chunk belongs to the SWBF MMR from the mutator set accumulator (authentication paths are either read from memory or divined in -- to be decided)
-     - for all indices in the index set, verify that if it is in the inactive part of the SWBF, then it lives in some dictionary entry (chunk)
-     - verify that its AOCL leaf index is unique
-   - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
+     - verify that the calculated removal record index set matches the claimed index set
+   - hash the list of removal record sets and authenticate it against the given transaction kernel MAST hash
    - output the hash of the salted input UTXOs.
+
+   Checks ensuring that each AOCL index is unique and that the published authentication paths are valid, are delegated to the miner and do, for performance reasons, not belong here. Checks that the removal record has not already been applied (i.e. no double-spend) is also delegated to the miner.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
    - divine the output UTXOs
    - divine the salt
@@ -106,7 +105,7 @@ Diagram 1 shows how the explicit inputs and outputs of all the subprograms relat
 
 | ![Transaction Validity Diagram](./transaction-validity-diagram.svg) |
 |:-------------------------------------------------------------------:|
-|             **Diagram 1:** Transaction validity.                    |
+|                **Diagram 1:** Transaction validity.                 |
 
 All subprograms can be proven individually given access to the transaction's witness. The next table shows which fields of the `TransactionPrimitiveWitness` are (potentially) used in which subprogram.
 
@@ -153,7 +152,7 @@ Two transactions can be merged into one. Among other things, this operation repl
 
 ### E: Proof of Integral Mempool Operation
 
-A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one 
+A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one
 
 An integral mempool is an MMR containing transactions *kernels*, along with a proof of integral history. The integral mempool can be updated in only one way: by appending a valid transaction.
  - `append : (old_mmr : Mmr<TransactionKernel>) × (old_history_proof: StarkProof) × (tx : Transaction) ⟶ (new_mmr : Mmr<TransactionKernel>) × (new_history_proof : StarkProof)`
