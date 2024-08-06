@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# This hook was defined by sword-smith <thor@neptune.cash>
+# It's intended to be copied to `.git/hooks/` by `cargo-husky`.
+
+set -e
+
+echo '+cargo clippy --all-targets -- -D warnings'
+cargo clippy --all-targets -- -D warnings
+echo '+cargo fmt --all -- --check'
+cargo fmt --all -- --check

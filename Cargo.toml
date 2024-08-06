@@ -73,9 +73,9 @@ blake3 = "1.5.1"
 divan = "0.1.14"
 
 [dev-dependencies.cargo-husky]
-default-features = false
-features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
+default-features = false
+features = ["user-hooks"]
 
 # needed because it otherwise takes too long to sign transaction with STARK proofs
 [profile.dev.package.triton-vm]
