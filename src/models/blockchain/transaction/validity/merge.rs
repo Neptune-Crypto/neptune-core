@@ -376,12 +376,10 @@ impl ConsensusProgram for Merge {
         assert!(left_coinbase.is_none() || right_coinbase.is_none());
 
         // new coinbase is whichever is set, or none
-        let new_coinbase: Option<NeptuneCoins> = if let Some(cb) = left_coinbase {
-            Some(cb)
-        } else if let Some(cb) = right_coinbase {
-            Some(cb)
+        let new_coinbase: Option<NeptuneCoins> = if left_coinbase.is_some() {
+            left_coinbase
         } else {
-            None
+            right_coinbase
         };
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,

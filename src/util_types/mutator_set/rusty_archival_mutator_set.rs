@@ -3,7 +3,6 @@ use crate::database::storage::storage_schema::{
 };
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
-use crate::Hash;
 
 use twenty_first::math::tip5::Digest;
 
@@ -40,8 +39,8 @@ impl RustyArchivalMutatorSet {
 
         let ams = ArchivalMutatorSet::<AmsMmrStorage, AmsChunkStorage> {
             chunks,
-            aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl).await,
-            swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi).await,
+            aocl: ArchivalMmr::<AmsMmrStorage>::new(aocl).await,
+            swbf_inactive: ArchivalMmr::<AmsMmrStorage>::new(swbfi).await,
             swbf_active: ActiveWindow::new(),
         };
 

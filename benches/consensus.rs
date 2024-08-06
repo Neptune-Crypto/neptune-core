@@ -73,7 +73,7 @@ mod transaction {
         let (_aet, _output) = program
             .trace_execution(input.clone(), nondeterminism.clone())
             .unwrap();
-        let profile = generate_full_profile(&name, program, input, &nondeterminism);
+        let profile = generate_full_profile(name, program, input, &nondeterminism);
         write_profile(name.to_string(), profile);
     }
 
@@ -85,7 +85,7 @@ mod transaction {
         path.push(Path::new(&name).with_extension("profile"));
         let mut output_file = File::create(&path).expect("open file for writing");
         output_file
-            .write(profile.as_bytes())
+            .write_all(profile.as_bytes())
             .expect("cannot write to file");
     }
 

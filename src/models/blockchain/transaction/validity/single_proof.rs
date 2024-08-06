@@ -192,7 +192,7 @@ impl ConsensusProgram for SingleProof {
 
                 let mut type_script_hashes_as_output: Vec<BFieldElement> =
                     Vec::<BFieldElement>::new();
-                let mut i: usize = 0;
+                i = 0;
                 while i < pc.type_script_hashes.len() {
                     let type_script_hash: Digest = pc.type_script_hashes[i];
                     let mut j: usize = 0;
@@ -218,7 +218,7 @@ impl ConsensusProgram for SingleProof {
                 );
                 assert!(cts);
 
-                let mut i: usize = 0;
+                i = 0;
                 while i < pc.lock_script_hashes.len() {
                     let lock_script_hash = pc.lock_script_hashes[i];
                     let claim: Claim = Claim {
@@ -240,7 +240,7 @@ impl ConsensusProgram for SingleProof {
                     salted_outputs_hash_as_input,
                 ]
                 .concat();
-                let mut i = 0;
+                i = 0;
                 while i < pc.type_script_hashes.len() {
                     let type_script_hash = pc.type_script_hashes[i];
                     let claim: Claim = Claim {

@@ -235,7 +235,7 @@ impl WalletState {
         let confirmed_absolute_index_sets = transaction_kernel
             .inputs
             .iter()
-            .map(|rr| rr.absolute_indices.clone())
+            .map(|rr| rr.absolute_indices)
             .collect_vec();
 
         let monitored_utxos = self.wallet_db.monitored_utxos();

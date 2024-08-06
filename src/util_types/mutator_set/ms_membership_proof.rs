@@ -130,10 +130,10 @@ impl MsMembershipProof {
             return Ok(indices_for_mps_updated_from_append);
         }
 
-        let new_item_index = mutator_set.aocl.num_leafs();
+        let new_item_index2 = mutator_set.aocl.num_leafs();
 
         // window does slide
-        let batch_index = new_item_index / BATCH_SIZE as u64;
+        let batch_index = new_item_index2 / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);

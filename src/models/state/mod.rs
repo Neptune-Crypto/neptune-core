@@ -2256,11 +2256,11 @@ mod global_state_tests {
                 public_announcement: PublicAnnouncement::default(),
             },
         ];
-        let now = genesis_block.kernel.header.timestamp;
+        let now2 = genesis_block.kernel.header.timestamp;
         let tx_from_alice = alice_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1), now)
+            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1), now2)
             .await
             .unwrap();
         let receiver_data_from_bob = vec![
@@ -2295,22 +2295,22 @@ mod global_state_tests {
         let tx_from_bob = bob_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2), now)
+            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2), now2)
             .await
             .unwrap();
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (coinbase_transaction, _expected_utxo) = genesis_state_lock
+        let (coinbase_transaction2, _expected_utxo) = genesis_state_lock
             .lock_guard()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction = coinbase_transaction
+        let block_transaction2 = coinbase_transaction2
             .merge_with(tx_from_alice)
             .merge_with(tx_from_bob);
         let block_2 =
-            Block::new_block_from_template(&block_1, block_transaction, Timestamp::now(), None);
+            Block::new_block_from_template(&block_1, block_transaction2, Timestamp::now(), None);
 
         assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());

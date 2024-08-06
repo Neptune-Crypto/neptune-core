@@ -99,9 +99,9 @@ impl ConsensusProgram for CollectLockScripts {
         let field_lock_script_hash = field!(Utxo::lock_script_hash);
         let hash_varlen = library.import(Box::new(HashVarlen));
         let eq_digest = library.import(Box::new(EqDigest));
-        let write_all_lock_script_digests = format!(
+        let write_all_lock_script_digests =
             "neptune_consensus_transaction_collect_lock_scripts_write_all_lock_script_digests"
-        );
+                .to_string();
         let payload = triton_asm! {
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
