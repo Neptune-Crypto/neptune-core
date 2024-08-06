@@ -9,6 +9,7 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
@@ -38,6 +39,10 @@ pub struct UpdateWitness {
     new_swbfi_bagged: Digest,
     new_aocl: MmrAccumulator,
     new_swbfa_hash: Digest,
+    old_swbfi_bagged: Digest,
+    old_aocl: MmrAccumulator,
+    old_swbfa_hash: Digest,
+    aocl_successor_proof: MmrSuccessorProof,
     outputs_hash: Digest,
     public_announcements_hash: Digest,
 }
@@ -46,16 +51,22 @@ impl UpdateWitness {
     pub fn from_old_transaction(
         old_kernel: TransactionKernel,
         old_proof: Proof,
+        old_msa: MutatorSetAccumulator,
         new_kernel: TransactionKernel,
-        msa: MutatorSetAccumulator,
+        new_msa: MutatorSetAccumulator,
+        aocl_successor_proof: MmrSuccessorProof,
     ) -> Self {
         Self {
             old_kernel,
             new_kernel: new_kernel.clone(),
             old_proof,
-            new_swbfi_bagged: msa.swbf_inactive.bag_peaks(),
-            new_aocl: msa.aocl,
-            new_swbfa_hash: Hash::hash(&msa.swbf_active),
+            new_swbfi_bagged: new_msa.swbf_inactive.bag_peaks(),
+            new_aocl: new_msa.aocl,
+            new_swbfa_hash: Hash::hash(&new_msa.swbf_active),
+            old_swbfi_bagged: old_msa.swbf_inactive.bag_peaks(),
+            old_aocl: old_msa.aocl,
+            old_swbfa_hash: Hash::hash(&old_msa.swbf_active),
+            aocl_successor_proof,
             outputs_hash: Hash::hash(&new_kernel.outputs),
             public_announcements_hash: Hash::hash(&new_kernel.public_announcements),
         }
@@ -166,19 +177,34 @@ impl ConsensusProgram for Update {
         let proof: &Proof = &uw.old_proof;
         tasmlib::verify(Stark::default(), claim, proof);
 
-        // authenticate the mutator set accumulator against the txk mast hash
-        let aocl_mmr: MmrAccumulator = uw.new_aocl;
-        let aocl_mmr_bagged = aocl_mmr.bag_peaks();
-        let inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
-        let left: Digest = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
-        let active_swbf_digest: Digest = uw.new_swbfa_hash;
+        // authenticate the new mutator set accumulator against the txk mast hash
+        let new_aocl_mmr: MmrAccumulator = uw.new_aocl;
+        let new_aocl_mmr_bagged = new_aocl_mmr.bag_peaks();
+        let new_inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
+        let new_left: Digest = Hash::hash_pair(new_aocl_mmr_bagged, new_inactive_swbf_bagged);
+        let new_active_swbf_digest: Digest = uw.new_swbfa_hash;
         let default: Digest = Digest::default();
-        let right: Digest = Hash::hash_pair(active_swbf_digest, default);
-        let msah: Digest = Hash::hash_pair(left, right);
+        let new_right: Digest = Hash::hash_pair(new_active_swbf_digest, default);
+        let new_msah: Digest = Hash::hash_pair(new_left, new_right);
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&msah),
+            Hash::hash(&new_msah),
+            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+        );
+
+        // authenticate the old mutator set accumulator against the txk mast hash
+        let old_aocl_mmr: MmrAccumulator = uw.old_aocl;
+        let old_aocl_mmr_bagged = old_aocl_mmr.bag_peaks();
+        let old_inactive_swbf_bagged: Digest = uw.old_swbfi_bagged;
+        let old_left: Digest = Hash::hash_pair(old_aocl_mmr_bagged, old_inactive_swbf_bagged);
+        let old_active_swbf_digest: Digest = uw.old_swbfa_hash;
+        let old_right: Digest = Hash::hash_pair(old_active_swbf_digest, default);
+        let old_msah: Digest = Hash::hash_pair(old_left, old_right);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            old_txk_digest,
+            TransactionKernelField::MutatorSetHash as u32,
+            Hash::hash(&old_msah),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
 
@@ -296,7 +322,7 @@ impl ConsensusProgram for Update {
         assert!(new_timestamp >= old_timestamp);
 
         // mutator set can change, but we only care about extensions of the AOCL MMR
-        // TODO: mmr_verify_extension(old_mmr, new_mmr, mmr_extension)
+        assert!(uw.aocl_successor_proof.verify(&old_aocl_mmr, &new_aocl_mmr));
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
@@ -306,8 +332,11 @@ impl ConsensusProgram for Update {
 
 #[cfg(test)]
 mod test {
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use tasm_lib::triton_vm::program::PublicInput;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
+    use tasm_lib::Digest;
 
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
@@ -317,8 +346,11 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use proptest::arbitrary::Arbitrary;
+    use proptest::collection::vec;
     use proptest::strategy::Strategy;
+    use proptest_arbitrary_interop::arb;
 
     use super::UpdateWitness;
 
@@ -337,6 +369,10 @@ mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        let newly_confirmed_records = vec(arb::<Digest>(), 0usize..100)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
 
         let proof_collection = ProofCollection::produce(&primitive_witness);
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
@@ -346,13 +382,24 @@ mod test {
         );
 
         let mut new_kernel = primitive_witness.kernel.clone();
+        let mut new_msa = primitive_witness.mutator_set_accumulator.clone();
+        for canonical_commitment in newly_confirmed_records.iter().copied() {
+            new_msa.add(&AdditionRecord::new(canonical_commitment));
+        }
+        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
+            &primitive_witness.mutator_set_accumulator.aocl,
+            &newly_confirmed_records,
+        );
+
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
         // todo: also update mutator set
         let update_witness = UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
             proof,
-            new_kernel,
             primitive_witness.mutator_set_accumulator,
+            new_kernel,
+            new_msa,
+            aocl_successor_proof,
         );
 
         let claim = update_witness.claim();
