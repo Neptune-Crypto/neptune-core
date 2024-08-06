@@ -36,7 +36,7 @@ pub struct UpdateWitness {
     new_kernel: TransactionKernel,
     old_proof: Proof,
     new_swbfi_bagged: Digest,
-    new_aocl: MmrAccumulator<Hash>,
+    new_aocl: MmrAccumulator,
     new_swbfa_hash: Digest,
     outputs_hash: Digest,
     public_announcements_hash: Digest,
@@ -167,7 +167,7 @@ impl ConsensusProgram for Update {
         tasmlib::verify(Stark::default(), claim, proof);
 
         // authenticate the mutator set accumulator against the txk mast hash
-        let aocl_mmr: MmrAccumulator<Hash> = uw.new_aocl;
+        let aocl_mmr: MmrAccumulator = uw.new_aocl;
         let aocl_mmr_bagged = aocl_mmr.bag_peaks();
         let inactive_swbf_bagged: Digest = uw.new_swbfi_bagged;
         let left: Digest = Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged);
@@ -317,7 +317,6 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
-    use crate::Hash;
     use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
 
@@ -327,7 +326,7 @@ mod test {
     fn const_single_proof_program_digest_matches_with_hashed_code() {
         assert_eq!(
             Update::SINGLE_PROOF_PROGRAM_HASH,
-            SingleProof.program().hash::<Hash>()
+            SingleProof.program().hash()
         );
     }
 

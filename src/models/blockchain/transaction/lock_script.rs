@@ -2,7 +2,6 @@ use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::prelude::{triton_vm, twenty_first};
 use arbitrary::Arbitrary;
 
-use crate::models::blockchain::shared::Hash;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -53,7 +52,7 @@ impl LockScript {
     }
 
     pub fn hash(&self) -> Digest {
-        self.program.hash::<Hash>()
+        self.program.hash()
     }
 }
 
@@ -135,8 +134,7 @@ impl LockScriptAndWitness {
 
     /// Assuming the lock script halts gracefully, prove it.
     pub fn prove(&self, public_input: PublicInput) -> Proof {
-        let claim =
-            Claim::new(self.program.hash::<Hash>()).with_input(public_input.individual_tokens);
+        let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
         prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
     }
 }

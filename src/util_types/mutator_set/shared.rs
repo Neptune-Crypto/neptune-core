@@ -57,9 +57,9 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 pub fn get_batch_mutation_argument_for_removal_record(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =
         HashMap::new();
     // `mutated_chunk_dictionaries` records the indices into the
     // input `chunk_dictionaries` slice that shows which elements
@@ -159,9 +159,9 @@ pub fn get_batch_mutation_argument_for_removal_record(
 pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =
         HashMap::new();
 
     // `mutated_chunk_dictionaries` records the indices in `chunk_dictionaries`

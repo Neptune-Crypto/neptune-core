@@ -16,7 +16,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use super::chunk::Chunk;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-type AuthenticatedChunk = (MmrMembershipProof<Hash>, Chunk);
+type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
 
 #[derive(
@@ -27,7 +27,7 @@ pub struct ChunkDictionary {
     // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
     // don't care about the cost of reallocation when `insert`ing or
     // `remove`ing.
-    dictionary: Vec<(u64, (MmrMembershipProof<Hash>, Chunk))>,
+    dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
 }
 
 impl ChunkDictionary {
@@ -57,14 +57,14 @@ impl ChunkDictionary {
 
     pub fn chunk_indices_and_membership_proofs_and_leafs(
         &self,
-    ) -> Vec<(u64, MmrMembershipProof<Hash>, Digest)> {
+    ) -> Vec<(u64, MmrMembershipProof, Digest)> {
         self.dictionary
             .iter()
             .map(|(k, (mp, ch))| (*k, mp.clone(), Hash::hash(ch)))
             .collect_vec()
     }
 
-    pub fn authentication_paths(&self) -> Vec<MmrMembershipProof<Hash>> {
+    pub fn authentication_paths(&self) -> Vec<MmrMembershipProof> {
         self.dictionary
             .iter()
             .map(|(_, (mp, _))| mp.to_owned())
@@ -192,15 +192,13 @@ mod chunk_dict_tests {
     use super::super::archival_mmr::mmr_test::mock;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::math::other::random_elements;
-    use twenty_first::math::tip5::{Digest, Tip5};
+    use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
 
     #[tokio::test]
     async fn hash_test() {
-        type H = Tip5;
-
         let chunkdict0 = ChunkDictionary::default();
         let chunkdict00 = ChunkDictionary::default();
         assert_eq!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict00));
@@ -208,10 +206,10 @@ mod chunk_dict_tests {
         // Insert elements
         let num_leaves = 3;
         let leaf_hashes: Vec<Digest> = random_elements(num_leaves);
-        let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes).await;
 
         let key1: u64 = 898989;
-        let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await;
+        let mp1: MmrMembershipProof = archival_mmr.prove_membership_async(1).await;
         let chunk1: Chunk = {
             Chunk {
                 relative_indices: (0..CHUNK_SIZE).collect(),
@@ -223,7 +221,7 @@ mod chunk_dict_tests {
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
         let key2: u64 = 8989;
-        let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership_async(2).await;
+        let mp2: MmrMembershipProof = archival_mmr.prove_membership_async(2).await;
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
@@ -266,7 +264,6 @@ mod chunk_dict_tests {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        type H = Tip5;
         let s_empty: ChunkDictionary = ChunkDictionary::empty();
         let json = serde_json::to_string(&s_empty).unwrap();
         println!("json = {}", json);
@@ -276,8 +273,8 @@ mod chunk_dict_tests {
         // Build a non-empty chunk dict and verify that it still works
         let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
-        let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes).await;
-        let mp: MmrMembershipProof<H> = archival_mmr.prove_membership_async(1).await;
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes).await;
+        let mp: MmrMembershipProof = archival_mmr.prove_membership_async(1).await;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };

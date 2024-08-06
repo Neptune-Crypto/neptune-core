@@ -29,16 +29,16 @@ use super::{
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct MutatorSetAccumulator {
-    pub aocl: MmrAccumulator<Hash>,
-    pub swbf_inactive: MmrAccumulator<Hash>,
+    pub aocl: MmrAccumulator,
+    pub swbf_inactive: MmrAccumulator,
     pub swbf_active: ActiveWindow,
 }
 
 impl Default for MutatorSetAccumulator {
     fn default() -> Self {
         Self {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
+            aocl: MmrAccumulator::new_from_leafs(vec![]),
+            swbf_inactive: MmrAccumulator::new_from_leafs(vec![]),
             swbf_active: Default::default(),
         }
     }
@@ -164,7 +164,7 @@ impl MutatorSetAccumulator {
             &[],
             mutation_data
                 .iter()
-                .map(|(i, p, l)| LeafMutation::new(*i, *l, p))
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
                 .collect_vec(),
         );
 
@@ -294,7 +294,7 @@ impl MutatorSetAccumulator {
                 break;
             }
 
-            let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof<Hash>, Chunk) =
+            let (swbf_inactive_mp, swbf_inactive_chunk): &(MmrMembershipProof, Chunk) =
                 membership_proof.target_chunks.get(&chunk_index).unwrap();
             let valid_auth_path = swbf_inactive_mp.verify(
                 chunk_index,
@@ -400,7 +400,7 @@ impl MutatorSetAccumulator {
 
             // Collect all affected chunks as they look before these removal records are applied
             // These chunks are part of the removal records, so we fetch them there.
-            let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<Hash>)> =
+            let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof)> =
                 HashMap::new();
             for removal_record in removal_records.iter_mut() {
                 for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.iter_mut() {
@@ -451,7 +451,7 @@ impl MutatorSetAccumulator {
                 .iter()
                 .flat_map(|msmp| msmp.target_chunks.iter().map(|(i, _)| *i).collect_vec())
                 .collect_vec();
-            let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<Hash>> =
+            let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof> =
                 preserved_membership_proofs
                     .iter_mut()
                     .flat_map(|x| {
@@ -469,7 +469,7 @@ impl MutatorSetAccumulator {
                 &preseved_mmr_leaf_indices,
                 swbf_inactive_mutation_data
                     .iter()
-                    .map(|(i, l, p)| LeafMutation::<Hash>::new(*i, *l, p))
+                    .map(|(i, l, p)| LeafMutation::new(*i, *l, p.clone()))
                     .collect_vec(),
             );
 

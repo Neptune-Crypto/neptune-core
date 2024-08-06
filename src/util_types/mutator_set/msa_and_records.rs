@@ -167,7 +167,7 @@ impl Arbitrary for MsaAndRecords {
                                 let swbf_mmra = swbf_mmr_and_paths.mmra;
                                 let swbf_membership_proofs = swbf_mmr_and_paths.membership_proofs;
 
-                                let universal_chunk_dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)> =
+                                let universal_chunk_dictionary: HashMap<u64, (MmrMembershipProof, Chunk)> =
                                     swbf_chunk_indices
                                         .iter()
                                         .cloned()

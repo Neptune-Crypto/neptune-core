@@ -14,8 +14,6 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::blockchain::shared::Hash;
-
 use super::environment;
 
 #[derive(Debug, Clone)]
@@ -47,7 +45,7 @@ where
 
     /// Get the program hash digest.
     fn hash(&self) -> Digest {
-        self.program().hash::<Hash>()
+        self.program().hash()
     }
 
     /// Run the source program natively in rust, but with the emulated TritonVM
@@ -125,7 +123,7 @@ pub fn prove_consensus_program(
     claim: Claim,
     nondeterminism: NonDeterminism,
 ) -> Proof {
-    assert_eq!(program.hash::<Hash>(), claim.program_digest);
+    assert_eq!(program.hash(), claim.program_digest);
     #[cfg(test)]
     let proof = test::load_proof_or_produce_and_save(
         claim.clone(),
@@ -143,7 +141,7 @@ pub fn prove_consensus_program(
 
     let vm_output = program.run(PublicInput::new(claim.input.clone()), nondeterminism);
     assert!(vm_output.is_ok());
-    assert_eq!(claim.program_digest, program.hash::<Hash>());
+    assert_eq!(claim.program_digest, program.hash());
     assert_eq!(claim.output, vm_output.unwrap());
 
     proof

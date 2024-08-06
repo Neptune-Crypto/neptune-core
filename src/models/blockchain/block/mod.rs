@@ -211,7 +211,7 @@ impl Block {
         let block_body: BlockBody = BlockBody {
             transaction_kernel: transaction.kernel,
             mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-            lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+            lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
             block_mmr_accumulator: block_mmra,
             uncle_blocks: vec![],
         };
@@ -361,8 +361,8 @@ impl Block {
         let body: BlockBody = BlockBody {
             transaction_kernel: genesis_txk,
             mutator_set_accumulator: genesis_mutator_set.clone(),
-            block_mmr_accumulator: MmrAccumulator::new(vec![]),
-            lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
+            block_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
+            lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
             uncle_blocks: vec![],
         };
 
@@ -858,7 +858,7 @@ mod block_tests {
         let (mut block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
-        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
         let timestamp = genesis_block.kernel.header.timestamp;
 
         assert!(!block_1.is_valid(&genesis_block, timestamp));
@@ -914,7 +914,7 @@ mod block_tests {
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
         let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
         ammr.append(genesis_block.hash()).await;
-        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
+        let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 
         for i in 0..55 {
             let wallet_secret = WalletSecret::new_random();

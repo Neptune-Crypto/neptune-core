@@ -11,14 +11,12 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::blockchain::shared::Hash;
-
 use super::root_and_paths::RootAndPaths;
 
 #[derive(Debug, Clone)]
 pub struct MmraAndMembershipProofs {
-    pub mmra: MmrAccumulator<Hash>,
-    pub membership_proofs: Vec<MmrMembershipProof<Hash>>,
+    pub mmra: MmrAccumulator,
+    pub membership_proofs: Vec<MmrMembershipProof>,
     pub leaf_indices: Vec<u64>,
 }
 
@@ -105,7 +103,6 @@ impl Arbitrary for MmraAndMembershipProofs {
                 let mut membership_proofs = vec![
                     MmrMembershipProof {
                         authentication_path: vec![],
-                        _hasher: std::marker::PhantomData::<Hash>
                     };
                     num_paths as usize
                 ];

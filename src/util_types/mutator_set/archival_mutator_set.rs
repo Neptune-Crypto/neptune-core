@@ -152,7 +152,7 @@ where
     pub async fn get_aocl_authentication_path(
         &self,
         index: u64,
-    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
+    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof, Box<dyn Error>> {
         if self.aocl.num_leafs().await <= index {
             return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
                 (index, self.aocl.num_leafs().await),
@@ -166,14 +166,14 @@ where
     pub async fn get_chunk_and_auth_path(
         &self,
         chunk_index: u64,
-    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk), Box<dyn Error>> {
+    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof, Chunk), Box<dyn Error>> {
         if self.swbf_inactive.num_leafs().await <= chunk_index {
             return Err(Box::new(MutatorSetError::RequestedSwbfAuthPathOutOfBounds(
                 (chunk_index, self.swbf_inactive.num_leafs().await),
             )));
         }
 
-        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
             self.swbf_inactive.prove_membership_async(chunk_index).await;
 
         // This check should never fail. It would mean that chunks are missing but that the
@@ -224,7 +224,7 @@ where
                 self.chunks.len().await > chunk_index,
                 "Chunks must be known if its authentication path is known."
             );
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof =
                 self.swbf_inactive.prove_membership_async(chunk_index).await;
             target_chunks.insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
         }

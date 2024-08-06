@@ -190,8 +190,8 @@ impl RemovalRecord {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        let mut mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
+        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
             mmra.append(new_chunk_digest);
 
         // Collect all indices for all removal records that are being updated
@@ -253,7 +253,7 @@ impl RemovalRecord {
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
+            &mut mmr::mmr_membership_proof::MmrMembershipProof,
         > = vec![];
         let mut leaf_indices = vec![];
         for (i, rr) in removal_records.iter_mut().enumerate() {
@@ -268,7 +268,7 @@ impl RemovalRecord {
         }
 
         // Perform the update of all the MMR membership proofs contained in the removal records
-        mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
             &leaf_indices,
             mutator_set.swbf_inactive.num_leafs(),
@@ -294,7 +294,7 @@ impl RemovalRecord {
             );
 
         // Collect all the MMR membership proofs from the chunk dictionaries.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
         let mut leaf_indices = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
             for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
@@ -309,7 +309,7 @@ impl RemovalRecord {
             &leaf_indices,
             mutation_argument
                 .iter()
-                .map(|(i, p, l)| LeafMutation::new(*i, *l, p))
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
                 .collect_vec(),
         );
     }

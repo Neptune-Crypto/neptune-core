@@ -367,7 +367,6 @@ mod test {
     }
     use crate::triton_vm::proof::Claim;
     use crate::triton_vm::stark::Stark;
-    use crate::Hash;
     use tasm_lib::triton_vm;
 
     #[test]
@@ -391,7 +390,7 @@ mod test {
             "incorrect output"
         );
 
-        let claim = Claim::new(KernelToOutputs.program().hash::<Hash>())
+        let claim = Claim::new(KernelToOutputs.program().hash())
             .with_input(kernel_to_outputs_witness.standard_input().individual_tokens)
             .with_output(tasm_result);
         let proof = triton_vm::prove(

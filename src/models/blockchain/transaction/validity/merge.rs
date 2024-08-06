@@ -457,7 +457,6 @@ mod test {
     use crate::models::blockchain::transaction::ProofCollection;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use crate::Hash;
     use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -468,7 +467,7 @@ mod test {
     fn const_single_proof_program_digest_matches_with_hashed_code() {
         assert_eq!(
             Merge::SINGLE_PROOF_PROGRAM_HASH,
-            SingleProof.program().hash::<Hash>()
+            SingleProof.program().hash()
         );
     }
 

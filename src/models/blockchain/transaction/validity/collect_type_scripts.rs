@@ -372,7 +372,6 @@ mod test {
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use crate::Hash;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -468,7 +467,7 @@ mod test {
             "incorrect output"
         );
 
-        let claim = Claim::new(CollectTypeScripts.program().hash::<Hash>())
+        let claim = Claim::new(CollectTypeScripts.program().hash())
             .with_input(collect_type_scripts.standard_input().individual_tokens)
             .with_output(tasm_result);
         let proof = triton_vm::prove(
