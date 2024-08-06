@@ -10,7 +10,6 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::blockchain::shared::Hash;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, EnumCount)]
@@ -40,12 +39,12 @@ pub struct BlockBody {
     pub mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
-    pub lock_free_mmr_accumulator: MmrAccumulator<Hash>,
+    pub lock_free_mmr_accumulator: MmrAccumulator,
 
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
-    pub block_mmr_accumulator: MmrAccumulator<Hash>,
+    pub block_mmr_accumulator: MmrAccumulator,
 
     /// All blocks that lost the block race to an ancestor of this block and have not been
     /// listed as uncle before. The miner will need to prove that between his block and

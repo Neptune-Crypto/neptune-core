@@ -159,7 +159,7 @@
 //         let witness_to_kernel = tasm_lib::field!(RemovalRecordsIntegrityWitness::kernel);
 //         let witness_to_swbfa_hash = tasm_lib::field!(RemovalRecordsIntegrityWitness::swbfa_hash);
 //         let witness_to_swbfi = tasm_lib::field!(RemovalRecordsIntegrityWitness::swbfi);
-//         type MmraH = MmrAccumulator<Hash>;
+//         type MmraH = MmrAccumulator;
 //         let swbfi_to_peaks = tasm_lib::field!(MmraH::peaks);
 //         let witness_to_aocl = tasm_lib::field!(RemovalRecordsIntegrityWitness::aocl);
 //         let kernel_to_mutator_set_hash = tasm_lib::field!(TransactionKernel::mutator_set_hash);

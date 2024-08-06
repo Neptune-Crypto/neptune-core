@@ -846,7 +846,7 @@ pub mod test {
 
         assert!(tasm_halts);
 
-        let claim = Claim::new(NativeCurrency.program().hash::<Hash>())
+        let claim = Claim::new(NativeCurrency.program().hash())
             .with_input(native_currency_witness.standard_input().individual_tokens);
         let proof = type_script_and_witness.prove(
             txk_mast_hash,

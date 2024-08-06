@@ -74,10 +74,10 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 pub struct RemovalRecordsIntegrityWitness {
     input_utxos: SaltedUtxos,
     membership_proofs: Vec<MsMembershipProof>,
-    aocl_auth_paths: Vec<MmrMembershipProof<Hash>>,
+    aocl_auth_paths: Vec<MmrMembershipProof>,
     removal_records: Vec<RemovalRecord>,
-    aocl: MmrAccumulator<Hash>,
-    swbfi: MmrAccumulator<Hash>,
+    aocl: MmrAccumulator,
+    swbfi: MmrAccumulator,
     swbfa_hash: Digest,
     mast_path_mutator_set: Vec<Digest>,
     mast_path_inputs: Vec<Digest>,
@@ -118,8 +118,8 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
 struct RemovalRecordsIntegrityWitnessMemory {
     input_utxos: SaltedUtxos,
     removal_records: Vec<RemovalRecord>,
-    aocl: MmrAccumulator<Hash>,
-    swbfi: MmrAccumulator<Hash>,
+    aocl: MmrAccumulator,
+    swbfi: MmrAccumulator,
 }
 
 impl From<&RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrityWitnessMemory {
@@ -244,7 +244,7 @@ impl RemovalRecordsIntegrityWitness {
     pub fn pseudorandom_mmra_with_mps(
         seed: [u8; 32],
         leafs: &[Digest],
-    ) -> (MmrAccumulator<Hash>, Vec<(u64, MmrMembershipProof<Hash>)>) {
+    ) -> (MmrAccumulator, Vec<(u64, MmrMembershipProof)>) {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // sample size of MMR
@@ -334,10 +334,7 @@ impl RemovalRecordsIntegrityWitness {
                         (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
                         authentication_path,
                     )| {
-                        (
-                            mmr_index,
-                            MmrMembershipProof::<Hash>::new(authentication_path),
-                        )
+                        (mmr_index, MmrMembershipProof::new(authentication_path))
                     },
                 )
                 .collect_vec();
@@ -361,7 +358,7 @@ impl RemovalRecordsIntegrityWitness {
             }
         }
 
-        let mmra = MmrAccumulator::<Hash>::init(peaks, leaf_count);
+        let mmra = MmrAccumulator::init(peaks, leaf_count);
 
         // sanity check
         for (&leaf, (mmr_leaf_index, mp)) in leafs.iter().zip(mps.iter()) {
@@ -384,8 +381,8 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let input_utxos: &[Utxo] = &salted_input_utxos.utxos;
 
         // divine in the mutator set accumulator
-        let aocl: MmrAccumulator<Hash> = rriw.aocl;
-        let swbfi: MmrAccumulator<Hash> = rriw.swbfi;
+        let aocl: MmrAccumulator = rriw.aocl;
+        let swbfi: MmrAccumulator = rriw.swbfi;
 
         // authenticate the mutator set accumulator against the txk mast hash
         let aocl_mmr_bagged: Digest = aocl.bag_peaks();
@@ -471,7 +468,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
         let field_aocl = field!(RemovalRecordsIntegrityWitnessMemory::aocl);
         let field_swbfi = field!(RemovalRecordsIntegrityWitnessMemory::swbfi);
-        type MmrAccumulatorTip5 = MmrAccumulator<Hash>;
+        type MmrAccumulatorTip5 = MmrAccumulator;
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_input_utxos = field!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
@@ -904,7 +901,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         for (ms_mp, (_idx, mmr_mp)) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
             ms_mp.auth_path_aocl = mmr_mp.clone();
         }
-        let swbfi: MmrAccumulator<Hash> = u.arbitrary()?;
+        let swbfi: MmrAccumulator = u.arbitrary()?;
         let swbfa_hash: Digest = u.arbitrary()?;
         let mut kernel: TransactionKernel = u.arbitrary()?;
         kernel.mutator_set_hash = Hash::hash_pair(

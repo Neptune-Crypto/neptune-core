@@ -1,10 +1,9 @@
-use crate::Hash;
+/// This file contains abstractions for verifying consensus logic using TritonVM STARK
+/// proofs. The concrete logic is specified in the directories `transaction` and `block`.
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
-/// This file contains abstractions for verifying consensus logic using TritonVM STARK
-/// proofs. The concrete logic is specified in the directories `transaction` and `block`.
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::program::Program;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -84,7 +83,7 @@ pub trait SecretWitness {
     fn program(&self) -> Program;
 
     fn claim(&self) -> Claim {
-        Claim::new(self.program().hash::<Hash>())
+        Claim::new(self.program().hash())
             .with_input(self.standard_input().individual_tokens)
             .with_output(self.output())
     }

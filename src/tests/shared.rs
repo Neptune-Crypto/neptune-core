@@ -774,7 +774,7 @@ pub fn make_mock_block(
     let block_body: BlockBody = BlockBody {
         transaction_kernel: tx_kernel,
         mutator_set_accumulator: next_mutator_set.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
         block_mmr_accumulator: block_mmr,
         uncle_blocks: vec![],
     };

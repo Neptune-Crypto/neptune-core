@@ -68,7 +68,7 @@ impl TypeScript {
     }
 
     pub fn hash(&self) -> Digest {
-        self.program.hash::<Hash>()
+        self.program.hash()
     }
 
     pub fn native_currency() -> Self {
@@ -186,7 +186,7 @@ impl TypeScriptAndWitness {
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect_vec();
-        let claim = Claim::new(self.program.hash::<Hash>()).with_input(input);
+        let claim = Claim::new(self.program.hash()).with_input(input);
         prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
     }
 }

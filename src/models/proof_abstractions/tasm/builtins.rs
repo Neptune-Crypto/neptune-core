@@ -2,7 +2,6 @@ use tasm_lib::{
     structure::tasm_object::TasmObject,
     triton_vm::{
         self,
-        prelude::Tip5,
         proof::{Claim, Proof},
         stark::Stark,
     },
@@ -250,7 +249,7 @@ pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
             auth_path.push(nd_digests.pop().unwrap());
         }
     });
-    let mmr_mp = MmrMembershipProof::<Tip5>::new(auth_path);
+    let mmr_mp = MmrMembershipProof::new(auth_path);
 
     mmr_mp.verify(leaf_index, leaf, peaks, num_leafs)
 }

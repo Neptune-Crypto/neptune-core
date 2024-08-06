@@ -112,12 +112,9 @@ impl SecretWitness for SingleProofWitness {
     }
 
     fn claim(&self) -> tasm_lib::triton_vm::prelude::Claim {
-        tasm_lib::triton_vm::prelude::Claim::new(
-            self.program()
-                .hash::<crate::models::blockchain::shared::Hash>(),
-        )
-        .with_input(self.standard_input().individual_tokens)
-        .with_output(self.output())
+        tasm_lib::triton_vm::prelude::Claim::new(self.program().hash())
+            .with_input(self.standard_input().individual_tokens)
+            .with_output(self.output())
     }
 }
 

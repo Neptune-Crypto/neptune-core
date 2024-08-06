@@ -292,7 +292,7 @@ impl PrimitiveWitness {
         let mut type_script_dictionary = HashMap::<Digest, TypeScript>::new();
         for tsaw in self.type_scripts_and_witnesses.iter() {
             let ts = TypeScript::from(tsaw);
-            type_script_dictionary.insert(tsaw.program.hash::<Hash>(), ts);
+            type_script_dictionary.insert(tsaw.program.hash(), ts);
         }
         if !type_script_hashes
             .clone()

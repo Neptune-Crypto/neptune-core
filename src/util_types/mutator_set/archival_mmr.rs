@@ -37,7 +37,7 @@ where
     /// Calculate the root for the entire MMR
     pub async fn bag_peaks(&self) -> Digest {
         let peaks: Vec<Digest> = self.peaks().await;
-        bag_peaks::<H>(&peaks)
+        bag_peaks(&peaks)
     }
 
     /// Return the digests of the peaks of the MMR
@@ -60,7 +60,7 @@ where
     }
 
     /// Append an element to the archival MMR, return the membership proof of the newly added leaf.
-    pub async fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
+    pub async fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof {
         let mut node_index = self.digests.len().await;
         let leaf_index = node_index_to_leaf_index(node_index).unwrap();
         let right_lineage_length = right_lineage_length_from_leaf_index(leaf_index);
@@ -81,7 +81,6 @@ where
 
         MmrMembershipProof {
             authentication_path: returned_auth_path,
-            _hasher: PhantomData,
         }
     }
 
@@ -126,7 +125,7 @@ where
     /// a list of membership proofs.
     pub async fn batch_mutate_leaf_and_update_mps(
         &mut self,
-        membership_proofs: &mut [&mut MmrMembershipProof<H>],
+        membership_proofs: &mut [&mut MmrMembershipProof],
         mutation_data: Vec<(u64, Digest)>,
     ) -> Vec<usize> {
         assert!(
@@ -155,17 +154,17 @@ where
         modified_mps
     }
 
-    pub async fn verify_batch_update<'a>(
+    pub async fn verify_batch_update(
         &self,
         new_peaks: &[Digest],
         appended_leafs: &[Digest],
-        leaf_mutations: &[LeafMutation<'a, H>],
+        leaf_mutations: &[LeafMutation],
     ) -> bool {
-        let accumulator: MmrAccumulator<H> = self.to_accumulator_async().await;
+        let accumulator: MmrAccumulator = self.to_accumulator_async().await;
         accumulator.verify_batch_update(new_peaks, appended_leafs, leaf_mutations.to_vec())
     }
 
-    pub async fn to_accumulator_async(&self) -> MmrAccumulator<H> {
+    pub async fn to_accumulator_async(&self) -> MmrAccumulator {
         MmrAccumulator::init(self.peaks().await, self.num_leafs().await)
     }
 }
@@ -199,7 +198,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     }
 
     /// Return membership proof
-    pub async fn prove_membership_async(&self, leaf_index: u64) -> MmrMembershipProof<H> {
+    pub async fn prove_membership_async(&self, leaf_index: u64) -> MmrMembershipProof {
         // A proof consists of an authentication path
         // and a list of peaks
         let num_leafs = self.num_leafs().await;
@@ -257,6 +256,8 @@ pub(crate) mod mmr_test {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::storage::storage_vec::OrdinaryVec;
     use crate::database::NeptuneLevelDb;
+    use crate::Hash;
+
     use twenty_first::math::b_field_element::BFieldElement;
     use twenty_first::math::other::*;
     use twenty_first::math::tip5::Tip5;
@@ -274,15 +275,12 @@ pub(crate) mod mmr_test {
         /// Does *not* have a unique ID, so you can't expect multiple of these
         /// instances to behave independently unless you understand the
         /// underlying data structure.
-        pub async fn get_empty_ammr<H: AlgebraicHasher>() -> ArchivalMmr<H, Storage> {
+        pub async fn get_empty_ammr() -> ArchivalMmr<Hash, Storage> {
             let pv: Storage = Default::default();
             ArchivalMmr::new(pv).await
         }
 
-        pub async fn get_ammr_from_digests<H>(digests: Vec<Digest>) -> ArchivalMmr<H, Storage>
-        where
-            H: AlgebraicHasher,
-        {
+        pub async fn get_ammr_from_digests(digests: Vec<Digest>) -> ArchivalMmr<Hash, Storage> {
             let mut ammr = get_empty_ammr().await;
             for digest in digests {
                 ammr.append(digest).await;
@@ -299,7 +297,7 @@ pub(crate) mod mmr_test {
         #[derive(Debug, Clone, test_strategy::Arbitrary)]
         pub(crate) struct MerkleTreeToTest {
             #[strategy(arb())]
-            pub tree: MerkleTree<Tip5>,
+            pub tree: MerkleTree<Hash>,
         }
     }
 
@@ -323,7 +321,7 @@ pub(crate) mod mmr_test {
             trees.push(tree);
         }
         let roots = trees.iter().map(|t| t.root()).collect_vec();
-        bag_peaks::<H>(&roots)
+        bag_peaks(&roots)
     }
 
     /// A block can contain an empty list of addition or removal records.
@@ -345,7 +343,7 @@ pub(crate) mod mmr_test {
         type H = Tip5;
 
         let mut archival_mmr: ArchivalMmr<H, Storage> = mock::get_empty_ammr().await;
-        let mut accumulator_mmr: MmrAccumulator<H> = MmrAccumulator::<H>::new(vec![]);
+        let mut accumulator_mmr: MmrAccumulator = MmrAccumulator::new_from_leafs(vec![]);
 
         assert_eq!(0, archival_mmr.num_leafs().await);
         assert_eq!(0, accumulator_mmr.num_leafs());
@@ -385,7 +383,7 @@ pub(crate) mod mmr_test {
                         &[LeafMutation::new(
                             leaf_index,
                             new_leaf,
-                            &archival_membership_proof
+                            archival_membership_proof
                         )]
                     )
                     .await
@@ -423,8 +421,6 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn verify_against_correct_peak_test() {
-        type H = Tip5;
-
         // This test addresses a bug that was discovered late in the development process
         // where it was possible to fake a verification proof by providing a valid leaf
         // and authentication path but lying about the data index. This error occurred
@@ -434,7 +430,7 @@ pub(crate) mod mmr_test {
         let leaf_hashes: Vec<Digest> = random_elements(3);
 
         // let archival_mmr = ArchivalMmr::<Hasher>::new(leaf_hashes.clone());
-        let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
         let peaks = archival_mmr.peaks().await;
         let membership_proof = archival_mmr.prove_membership_async(0).await;
 
@@ -444,7 +440,7 @@ pub(crate) mod mmr_test {
         assert!(!membership_proof.verify(2, leaf_hashes[0], &peaks, 3,));
 
         // verify the same behavior in the accumulator MMR
-        let accumulator_mmr = MmrAccumulator::<H>::new(leaf_hashes.clone());
+        let accumulator_mmr = MmrAccumulator::new_from_leafs(leaf_hashes.clone());
         assert!(membership_proof.verify(
             0,
             leaf_hashes[0],
@@ -467,7 +463,7 @@ pub(crate) mod mmr_test {
 
         let leaf_count = 3;
         let leaf_hashes: Vec<Digest> = random_elements(leaf_count);
-        let mut archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
+        let mut archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
 
         let leaf_index: u64 = 2;
         let old_peaks = archival_mmr.peaks().await;
@@ -486,7 +482,7 @@ pub(crate) mod mmr_test {
         // Create copy of ArchivalMmr, recreate membership proof
 
         let mut other_archival_mmr: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
+            mock::get_ammr_from_digests(leaf_hashes.clone()).await;
 
         let mp2 = other_archival_mmr.prove_membership_async(leaf_index).await;
 
@@ -530,7 +526,7 @@ pub(crate) mod mmr_test {
         // modified MMR, and verify that the two MMRs are equivalent
 
         let archival_mmr_new: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(leaf_hashes).await;
+            mock::get_ammr_from_digests(leaf_hashes).await;
         assert_eq!(
             archival_mmr.digests.len().await,
             archival_mmr_new.digests.len().await
@@ -544,19 +540,19 @@ pub(crate) mod mmr_test {
         }
     }
 
-    async fn bag_peaks_gen<H: AlgebraicHasher>() {
+    async fn bag_peaks_gen() {
         // Verify that archival and accumulator MMR produce the same root
         let leaf_hashes_tip5: Vec<Digest> = random_elements(3);
-        let archival_mmr_small: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
-        let accumulator_mmr_small = MmrAccumulator::<H>::new(leaf_hashes_tip5);
+        let archival_mmr_small: ArchivalMmr<Hash, Storage> =
+            mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
+        let accumulator_mmr_small = MmrAccumulator::new_from_leafs(leaf_hashes_tip5);
         assert_eq!(
             archival_mmr_small.bag_peaks().await,
             accumulator_mmr_small.bag_peaks()
         );
         assert_eq!(
             archival_mmr_small.bag_peaks().await,
-            bag_peaks::<H>(&accumulator_mmr_small.peaks())
+            bag_peaks(&accumulator_mmr_small.peaks())
         );
         assert!(!accumulator_mmr_small
             .peaks()
@@ -566,7 +562,7 @@ pub(crate) mod mmr_test {
 
     #[tokio::test]
     async fn bag_peaks_tip5_test() {
-        bag_peaks_gen::<Tip5>().await;
+        bag_peaks_gen().await;
     }
 
     #[tokio::test]
@@ -578,8 +574,8 @@ pub(crate) mod mmr_test {
         for size in 0..25 {
             let init_digests = random_elements(size);
             let mut archival_batch_mut: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(init_digests.clone()).await;
-            let mut archival_individual_mut = mock::get_ammr_from_digests::<H>(init_digests).await;
+                mock::get_ammr_from_digests(init_digests.clone()).await;
+            let mut archival_individual_mut = mock::get_ammr_from_digests(init_digests).await;
 
             for max_mutation_count in 0..size {
                 let all_indices = (0..size as u64).collect_vec();
@@ -620,15 +616,15 @@ pub(crate) mod mmr_test {
             let new_leaf: Digest = random();
             let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
 
-            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
+            let mut acc = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
             let mut archival: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
+                mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
             let archival_end_state: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
+                mock::get_ammr_from_digests(vec![new_leaf; size]).await;
             for i in 0..size {
                 let i = i as u64;
                 let mp = archival.prove_membership_async(i).await;
-                acc.mutate_leaf(LeafMutation::new(i, new_leaf, &mp));
+                acc.mutate_leaf(LeafMutation::new(i, new_leaf, mp));
                 archival.mutate_leaf(i, new_leaf).await;
                 let new_archival_peaks = archival.peaks().await;
                 assert_eq!(new_archival_peaks, acc.peaks());
@@ -646,11 +642,11 @@ pub(crate) mod mmr_test {
             let new_leaf: Digest = random();
             let bad_leaf: Digest = random();
             let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
-            let mut acc = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
+            let mut acc = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
             let mut archival: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
+                mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
             let archival_end_state: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
+                mock::get_ammr_from_digests(vec![new_leaf; size]).await;
             for i in 0..size {
                 let i = i as u64;
                 let peaks_before_update = archival.peaks().await;
@@ -663,7 +659,7 @@ pub(crate) mod mmr_test {
                     acc.verify_batch_update(
                         &archival.peaks().await,
                         &[],
-                        vec![LeafMutation::new(i, new_leaf, &mp)]
+                        vec![LeafMutation::new(i, new_leaf, mp.clone())]
                     ),
                     "Valid batch update parameters must succeed"
                 );
@@ -671,12 +667,12 @@ pub(crate) mod mmr_test {
                     !acc.verify_batch_update(
                         &archival.peaks().await,
                         &[],
-                        vec![LeafMutation::new(i, bad_leaf, &mp)]
+                        vec![LeafMutation::new(i, bad_leaf, mp.clone())]
                     ),
                     "Inalid batch update parameters must fail"
                 );
 
-                acc.mutate_leaf(LeafMutation::new(i, new_leaf, &mp));
+                acc.mutate_leaf(LeafMutation::new(i, new_leaf, mp));
                 let new_archival_peaks = archival.peaks().await;
                 assert_eq!(new_archival_peaks, acc.peaks());
                 assert_eq!(size as u64, archival.num_leafs().await);
@@ -694,11 +690,11 @@ pub(crate) mod mmr_test {
         for size in 1..260 {
             let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
             let mut archival_iterative: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(vec![]).await;
+                mock::get_ammr_from_digests(vec![]).await;
             let archival_batch: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(leaf_hashes_tip5.clone()).await;
-            let mut accumulator_iterative = MmrAccumulator::<H>::new(vec![]);
-            let accumulator_batch = MmrAccumulator::<H>::new(leaf_hashes_tip5.clone());
+                mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
+            let mut accumulator_iterative = MmrAccumulator::new_from_leafs(vec![]);
+            let accumulator_batch = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
             for leaf_hash in leaf_hashes_tip5.clone().into_iter() {
                 let leaf_index = archival_iterative.num_leafs().await;
                 let archival_membership_proof = archival_iterative.append(leaf_hash).await;
@@ -736,7 +732,7 @@ pub(crate) mod mmr_test {
             );
 
             // Run a batch-append verification on the entire mutation of the MMR and verify that it succeeds
-            let empty_accumulator = MmrAccumulator::<H>::new(vec![]);
+            let empty_accumulator = MmrAccumulator::new_from_leafs(vec![]);
             assert!(empty_accumulator.verify_batch_update(
                 &archival_batch.peaks().await,
                 &leaf_hashes_tip5,
@@ -751,12 +747,11 @@ pub(crate) mod mmr_test {
 
         let input_hash = H::hash(&BFieldElement::new(14));
         let new_input_hash = H::hash(&BFieldElement::new(201));
-        let mut mmr: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(vec![input_hash]).await;
+        let mut mmr: ArchivalMmr<H, Storage> = mock::get_ammr_from_digests(vec![input_hash]).await;
         let original_mmr: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(vec![input_hash]).await;
+            mock::get_ammr_from_digests(vec![input_hash]).await;
         let mmr_after_append: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(vec![input_hash, new_input_hash]).await;
+            mock::get_ammr_from_digests(vec![input_hash, new_input_hash]).await;
         assert_eq!(1, mmr.num_leafs().await);
         assert_eq!(1, mmr.count_nodes().await);
 
@@ -801,7 +796,7 @@ pub(crate) mod mmr_test {
         let leaf_mutations = leaf_mutation_data
             .iter()
             .map(|(leaf_index, new_leaf, membership_proof)| {
-                LeafMutation::new(*leaf_index, *new_leaf, &membership_proof)
+                LeafMutation::new(*leaf_index, *new_leaf, membership_proof.clone())
             })
             .collect_vec();
 
@@ -830,7 +825,7 @@ pub(crate) mod mmr_test {
         let input_digests: Vec<Digest> = random_elements(num_leaves as usize);
 
         let mut mmr: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
+            mock::get_ammr_from_digests(input_digests.clone()).await;
         assert_eq!(num_leaves, mmr.num_leafs().await);
         assert_eq!(1 + num_leaves, mmr.count_nodes().await);
 
@@ -889,7 +884,7 @@ pub(crate) mod mmr_test {
         for (leaf_count, node_count, peak_count) in izip!(leaf_counts, node_counts, peak_counts) {
             let input_hashes: Vec<Digest> = random_elements(leaf_count as usize);
             let mut mmr: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(input_hashes.clone()).await;
+                mock::get_ammr_from_digests(input_hashes.clone()).await;
 
             assert_eq!(leaf_count, mmr.num_leafs().await);
             assert_eq!(node_count, mmr.count_nodes().await);
@@ -945,7 +940,7 @@ pub(crate) mod mmr_test {
 
         let input_digests: Vec<Digest> = random_elements(12);
         let mut mmr: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
+            mock::get_ammr_from_digests(input_digests.clone()).await;
         assert_eq!(22, mmr.count_nodes().await);
         assert_eq!(Some(input_digests[11]), mmr.remove_last_leaf_async().await);
         assert_eq!(19, mmr.count_nodes().await);
@@ -985,9 +980,9 @@ pub(crate) mod mmr_test {
         let input_digests_small: Vec<Digest> = input_digests_big[0..small_size].to_vec();
 
         let mut mmr_small: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(input_digests_small).await;
+            mock::get_ammr_from_digests(input_digests_small).await;
         let mut mmr_big: ArchivalMmr<H, Storage> =
-            mock::get_ammr_from_digests::<H>(input_digests_big).await;
+            mock::get_ammr_from_digests(input_digests_big).await;
 
         for _ in 0..(big_size - small_size) {
             mmr_big.remove_last_leaf_async().await;
@@ -1016,9 +1011,9 @@ pub(crate) mod mmr_test {
             let size = leaf_count as u64;
             let input_digests: Vec<Digest> = random_elements(leaf_count);
             let mut mmr: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
+                mock::get_ammr_from_digests(input_digests.clone()).await;
             let mmr_original: ArchivalMmr<H, Storage> =
-                mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
+                mock::get_ammr_from_digests(input_digests.clone()).await;
             assert_eq!(size, mmr.num_leafs().await);
             assert_eq!(node_count, mmr.count_nodes().await);
             let original_peaks: Vec<Digest> = mmr.peaks().await;

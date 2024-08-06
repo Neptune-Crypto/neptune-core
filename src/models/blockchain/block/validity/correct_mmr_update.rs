@@ -1,4 +1,4 @@
-use crate::{models::proof_abstractions::tasm::program::ConsensusProgram, Hash};
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
@@ -12,7 +12,7 @@ use crate::models::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMmrUpdateWitness {
-    pub previous_mmr_accumulator: MmrAccumulator<Hash>,
+    pub previous_mmr_accumulator: MmrAccumulator,
 }
 
 impl SecretWitness for CorrectMmrUpdateWitness {

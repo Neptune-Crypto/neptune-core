@@ -2,7 +2,6 @@ use crate::models::blockchain::block::BFieldCodec;
 use crate::models::blockchain::block::Deserialize;
 use crate::models::blockchain::block::GetSize;
 use crate::models::blockchain::block::Serialize;
-use crate::models::blockchain::shared::Hash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
@@ -12,7 +11,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MmrMembershipWitness {
-    pub membership_proof: MmrMembershipProof<Hash>,
+    pub membership_proof: MmrMembershipProof,
 }
 
 impl SecretWitness for MmrMembershipWitness {

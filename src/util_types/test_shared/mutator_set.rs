@@ -1,8 +1,8 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
 
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -30,7 +30,6 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
-use crate::Hash;
 
 pub fn random_chunk_dictionary() -> ChunkDictionary {
     let mut rng = thread_rng();
@@ -109,11 +108,11 @@ pub fn random_mutator_set_accumulator() -> MutatorSetAccumulator {
 }
 
 /// Generate a random MMRA. For testing. Might not be a consistent or valid object.
-pub fn random_mmra<H: AlgebraicHasher>() -> MmrAccumulator<H> {
+pub fn random_mmra() -> MmrAccumulator {
     pseudorandom_mmra(thread_rng().gen())
 }
 
-pub fn pseudorandom_mmra<H: AlgebraicHasher>(seed: [u8; 32]) -> MmrAccumulator<H> {
+pub fn pseudorandom_mmra(seed: [u8; 32]) -> MmrAccumulator {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_count = rng.next_u32() as u64;
     let num_peaks = rng.next_u32() % 10;
@@ -121,10 +120,10 @@ pub fn pseudorandom_mmra<H: AlgebraicHasher>(seed: [u8; 32]) -> MmrAccumulator<H
     MmrAccumulator::init(peaks, leaf_count)
 }
 
-pub fn pseudorandom_mmra_with_mp_and_index<H: AlgebraicHasher>(
+pub fn pseudorandom_mmra_with_mp_and_index(
     seed: [u8; 32],
     leaf: Digest,
-) -> (MmrAccumulator<H>, MmrMembershipProof<H>, u64) {
+) -> (MmrAccumulator, MmrMembershipProof, u64) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_count = rng.next_u64();
     let num_peaks = leaf_count.count_ones();
@@ -132,7 +131,7 @@ pub fn pseudorandom_mmra_with_mp_and_index<H: AlgebraicHasher>(
     let (inner_index, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, leaf_count);
     let tree_height = (inner_index as u128 + 1u128).next_power_of_two().ilog2() - 1;
 
-    let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
+    let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths(
         rng.gen(),
         tree_height as usize,
         &[(leaf, inner_index)],
@@ -141,7 +140,7 @@ pub fn pseudorandom_mmra_with_mp_and_index<H: AlgebraicHasher>(
 
     assert_eq!(authentication_path.len(), tree_height as usize);
     assert!(
-        merkle_verify_tester_helper::<H>(root, inner_index, &authentication_path, leaf),
+        merkle_verify_tester_helper(root, inner_index, &authentication_path, leaf),
         "root: ({root})\nindex: {inner_index}\nauth path len: {}\nauth path: ({})",
         authentication_path.len(),
         authentication_path.iter().join("), (")
@@ -150,18 +149,17 @@ pub fn pseudorandom_mmra_with_mp_and_index<H: AlgebraicHasher>(
     let peaks: Vec<Digest> = (0..num_peaks)
         .map(|i| if i == peak_index { root } else { rng.gen() })
         .collect_vec();
-    let membership_proof = MmrMembershipProof::<H> {
+    let membership_proof = MmrMembershipProof {
         authentication_path,
-        _hasher: PhantomData,
     };
-    let mmr_accumulator = MmrAccumulator::<H>::init(peaks, leaf_count);
+    let mmr_accumulator = MmrAccumulator::init(peaks, leaf_count);
     (mmr_accumulator, membership_proof, leaf_index)
 }
 
-pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
+pub fn pseudorandom_mmra_with_mps_and_indices(
     seed: [u8; 32],
     leafs: &[Digest],
-) -> (MmrAccumulator<H>, Vec<MmrMembershipProof<H>>, Vec<u64>) {
+) -> (MmrAccumulator, Vec<MmrMembershipProof>, Vec<u64>) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     // sample size of MMR
@@ -214,7 +212,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
         // generate root and authentication paths
         let tree_height =
             (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128).ilog2() as usize;
-        let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
+        let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths(
             rng.gen(),
             tree_height,
             &leafs_and_mt_indices
@@ -227,7 +225,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
         for ((leaf, mt_index, _original_index), auth_path) in
             leafs_and_mt_indices.iter().zip(authentication_paths.iter())
         {
-            assert!(merkle_verify_tester_helper::<H>(
+            assert!(merkle_verify_tester_helper(
                 root, *mt_index, auth_path, *leaf
             ));
         }
@@ -247,9 +245,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
                 |(
                     (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
                     authentication_path,
-                )| {
-                    (mmr_index, MmrMembershipProof::<H>::new(authentication_path))
-                },
+                )| { (mmr_index, MmrMembershipProof::new(authentication_path)) },
             )
             .collect_vec();
 
@@ -274,7 +270,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
         }
     }
 
-    let mmra = MmrAccumulator::<H>::init(peaks, leaf_count);
+    let mmra = MmrAccumulator::init(peaks, leaf_count);
 
     // sanity check
     for ((&leaf, mp), li) in leafs.iter().zip(mps.iter()).zip(mmr_leaf_indices.iter()) {
@@ -284,7 +280,7 @@ pub fn pseudorandom_mmra_with_mps_and_indices<H: AlgebraicHasher>(
     (mmra, mps, mmr_leaf_indices)
 }
 
-pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
+pub fn pseudorandom_merkle_root_with_authentication_paths(
     seed: [u8; 32],
     tree_height: usize,
     leafs_and_indices: &[(Digest, u64)],
@@ -313,7 +309,7 @@ pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
             nodes.entry(wi_odd).or_insert_with(|| rng.gen::<Digest>());
             let wi_even = wi_odd ^ 1;
             nodes.entry(wi_even).or_insert_with(|| rng.gen::<Digest>());
-            let hash = H::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
+            let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
             nodes.insert(wi >> 1, hash);
         }
         depth -= 1;
@@ -357,18 +353,13 @@ pub fn random_removal_record() -> RemovalRecord {
     pseudorandom_removal_record(rng.gen::<[u8; 32]>())
 }
 
-fn merkle_verify_tester_helper<H: AlgebraicHasher>(
-    root: Digest,
-    index: u64,
-    path: &[Digest],
-    leaf: Digest,
-) -> bool {
+fn merkle_verify_tester_helper(root: Digest, index: u64, path: &[Digest], leaf: Digest) -> bool {
     let mut acc = leaf;
     for (shift, &p) in path.iter().enumerate() {
         if (index >> shift) & 1 == 1 {
-            acc = H::hash_pair(p, acc);
+            acc = Hash::hash_pair(p, acc);
         } else {
-            acc = H::hash_pair(acc, p);
+            acc = Hash::hash_pair(acc, p);
         }
     }
     acc == root
@@ -395,7 +386,7 @@ mod shared_tests_test {
     fn test_pseudorandom_mmra_with_single_mp() {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
-        let (mmra, mp, index) = pseudorandom_mmra_with_mp_and_index::<Hash>(rng.gen(), leaf);
+        let (mmra, mp, index) = pseudorandom_mmra_with_mp_and_index(rng.gen(), leaf);
         assert!(mp.verify(index, leaf, &mmra.peaks(), mmra.num_leafs()));
     }
 
@@ -419,14 +410,14 @@ mod shared_tests_test {
             }
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
             let leafs_and_indices = leafs.into_iter().zip(indices.into_iter()).collect_vec();
-            let (root, paths) = pseudorandom_merkle_root_with_authentication_paths::<Hash>(
+            let (root, paths) = pseudorandom_merkle_root_with_authentication_paths(
                 inner_rng.gen(),
                 tree_height,
                 &leafs_and_indices,
             );
             for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths.into_iter()) {
                 assert!(
-                    merkle_verify_tester_helper::<Hash>(root, index, &path, leaf),
+                    merkle_verify_tester_helper(root, index, &path, leaf),
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }
@@ -442,8 +433,7 @@ mod shared_tests_test {
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
-            let (mmra, mps, lis) =
-                pseudorandom_mmra_with_mps_and_indices::<Hash>(inner_rng.gen(), &leafs);
+            let (mmra, mps, lis) = pseudorandom_mmra_with_mps_and_indices(inner_rng.gen(), &leafs);
             for ((leaf, mp), li) in leafs.into_iter().zip(mps).zip(lis) {
                 assert!(
                     mp.verify(li, leaf, &mmra.peaks(), mmra.num_leafs()),

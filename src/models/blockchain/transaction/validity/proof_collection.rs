@@ -220,12 +220,12 @@ impl ProofCollection {
         let lock_script_hashes = primitive_witness
             .lock_scripts_and_witnesses
             .iter()
-            .map(|lsaw| lsaw.program.hash::<Hash>())
+            .map(|lsaw| lsaw.program.hash())
             .collect_vec();
         let type_script_hashes = primitive_witness
             .type_scripts_and_witnesses
             .iter()
-            .map(|tsaw| tsaw.program.hash::<Hash>())
+            .map(|tsaw| tsaw.program.hash())
             .collect_vec();
 
         // assemble data into struct and return
@@ -258,17 +258,17 @@ impl ProofCollection {
 
         // compile claims
         let removal_records_integrity_claim = Claim {
-            program_digest: RemovalRecordsIntegrity.program().hash::<Hash>(),
+            program_digest: RemovalRecordsIntegrity.program().hash(),
             input: self.kernel_mast_hash.reversed().values().to_vec(),
             output: self.salted_inputs_hash.values().to_vec(),
         };
         let kernel_to_outputs_claim = Claim {
-            program_digest: KernelToOutputs.program().hash::<Hash>(),
+            program_digest: KernelToOutputs.program().hash(),
             input: self.kernel_mast_hash.reversed().values().to_vec(),
             output: self.salted_outputs_hash.values().to_vec(),
         };
         let collect_lock_scripts_claim = Claim {
-            program_digest: CollectLockScripts.program().hash::<Hash>(),
+            program_digest: CollectLockScripts.program().hash(),
             input: self.salted_inputs_hash.reversed().values().to_vec(),
             output: self
                 .lock_script_hashes
@@ -277,7 +277,7 @@ impl ProofCollection {
                 .collect_vec(),
         };
         let collect_type_scripts_claim = Claim {
-            program_digest: CollectTypeScripts.program().hash::<Hash>(),
+            program_digest: CollectTypeScripts.program().hash(),
             input: [self.salted_inputs_hash, self.salted_outputs_hash]
                 .into_iter()
                 .flat_map(|d| d.reversed().values())
@@ -388,30 +388,30 @@ pub mod test {
         };
         assert_eq!(
             ProofCollection::REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST,
-            RemovalRecordsIntegrity.program().hash::<Hash>(),
+            RemovalRecordsIntegrity.program().hash(),
             "Removal Records Integrity: {}",
-            print_hash_nicely(RemovalRecordsIntegrity.program().hash::<Hash>())
+            print_hash_nicely(RemovalRecordsIntegrity.program().hash())
         );
 
         assert_eq!(
             ProofCollection::KERNEL_TO_OUTPUTS_PROGRAM_DIGEST,
-            KernelToOutputs.program().hash::<Hash>(),
+            KernelToOutputs.program().hash(),
             "Kernel To Outputs: {}",
-            print_hash_nicely(KernelToOutputs.program().hash::<Hash>())
+            print_hash_nicely(KernelToOutputs.program().hash())
         );
 
         assert_eq!(
             ProofCollection::COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST,
-            CollectLockScripts.program().hash::<Hash>(),
+            CollectLockScripts.program().hash(),
             "Collect Lock Scripts: {}",
-            print_hash_nicely(CollectLockScripts.program().hash::<Hash>())
+            print_hash_nicely(CollectLockScripts.program().hash())
         );
 
         assert_eq!(
             ProofCollection::COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST,
-            CollectTypeScripts.program().hash::<Hash>(),
+            CollectTypeScripts.program().hash(),
             "Collect Type Scripts: {}",
-            print_hash_nicely(CollectTypeScripts.program().hash::<Hash>())
+            print_hash_nicely(CollectTypeScripts.program().hash())
         );
     }
 }
