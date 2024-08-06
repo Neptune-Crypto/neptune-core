@@ -445,14 +445,14 @@ mod mine_loop_tests {
         assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
         // Build and verify block template
-        let (block_header_template, block_body, block_proof) = Block::make_block_template(
+        let (block_header_template, block_body, new_block_proof) = Block::make_block_template(
             &genesis_block,
             transaction_non_empty_mempool,
             now + Timestamp::months(7),
             None,
         );
         let block_template_non_empty_mempool =
-            Block::new(block_header_template, block_body, block_proof);
+            Block::new(block_header_template, block_body, new_block_proof);
         assert!(
             block_template_non_empty_mempool.is_valid(
                 &genesis_block,

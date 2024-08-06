@@ -240,7 +240,7 @@ pub mod test {
             .collect_vec();
         let mut output_file = File::create(&path).expect("cannot open file for writing");
         output_file
-            .write(&proof_data)
+            .write_all(&proof_data)
             .expect("cannot write to file");
 
         proof

@@ -740,11 +740,13 @@ mod tests {
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
         );
 
-        let (coinbase_transaction, _expected_utxo) = premine_receiver_global_state
+        let (coinbase_transaction2, _expected_utxo2) = premine_receiver_global_state
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction = tx_by_other_updated.clone().merge_with(coinbase_transaction);
+        let block_transaction2 = tx_by_other_updated
+            .clone()
+            .merge_with(coinbase_transaction2);
         let block_3 =
-            Block::new_block_from_template(&block_2, block_transaction, Timestamp::now(), None);
+            Block::new_block_from_template(&block_2, block_transaction2, Timestamp::now(), None);
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
@@ -774,12 +776,12 @@ mod tests {
         }
 
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
-        let (coinbase_transaction, _expected_utxo) =
+        let (coinbase_transaction3, _expected_utxo3) =
             other_global_state.make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction = coinbase_transaction.merge_with(tx_by_other_updated);
+        let block_transaction3 = coinbase_transaction3.merge_with(tx_by_other_updated);
         let block_14 = Block::new_block_from_template(
             &previous_block,
-            block_transaction,
+            block_transaction3,
             Timestamp::now(),
             None,
         );

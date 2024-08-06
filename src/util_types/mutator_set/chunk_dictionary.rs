@@ -78,8 +78,7 @@ impl ChunkDictionary {
     pub fn contains_key(&self, key: &ChunkIndex) -> bool {
         self.dictionary
             .iter()
-            .find(|(chunk_index, _)| *chunk_index == *key)
-            .is_some()
+            .any(|(chunk_index, _)| *chunk_index == *key)
     }
 
     pub fn get(&self, key: &ChunkIndex) -> Option<&AuthenticatedChunk> {
@@ -103,10 +102,6 @@ impl ChunkDictionary {
 
     pub fn len(&self) -> usize {
         self.dictionary.len()
-    }
-
-    pub fn into_iter(self) -> IntoIter<(ChunkIndex, AuthenticatedChunk)> {
-        self.dictionary.into_iter()
     }
 
     pub fn iter_mut(&mut self) -> IterMut<(ChunkIndex, AuthenticatedChunk)> {
@@ -154,10 +149,20 @@ impl ChunkDictionary {
             .map(|(i, _)| i);
         if let Some(definite_position) = maybe_position {
             let (_chunk_index, authenticated_chunk) = self.dictionary.remove(definite_position);
-            return Some(authenticated_chunk);
+            Some(authenticated_chunk)
         } else {
-            return None;
+            None
         }
+    }
+}
+
+impl IntoIterator for ChunkDictionary {
+    type Item = (ChunkIndex, AuthenticatedChunk);
+
+    type IntoIter = IntoIter<(ChunkIndex, AuthenticatedChunk)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.dictionary.into_iter()
     }
 }
 

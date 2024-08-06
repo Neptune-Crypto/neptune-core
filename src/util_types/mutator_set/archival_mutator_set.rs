@@ -27,8 +27,8 @@ where
     MmrStorage: StorageVec<Digest> + Send + Sync,
     ChunkStorage: StorageVec<Chunk> + Send + Sync,
 {
-    pub aocl: ArchivalMmr<Hash, MmrStorage>,
-    pub swbf_inactive: ArchivalMmr<Hash, MmrStorage>,
+    pub aocl: ArchivalMmr<MmrStorage>,
+    pub swbf_inactive: ArchivalMmr<MmrStorage>,
     pub swbf_active: ActiveWindow,
     pub chunks: ChunkStorage,
 }
@@ -138,8 +138,8 @@ where
         assert_eq!(0, aocl.len().await);
         assert_eq!(0, swbf_inactive.len().await);
         assert_eq!(0, chunks.len().await);
-        let aocl: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(aocl).await;
-        let swbf_inactive: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(swbf_inactive).await;
+        let aocl: ArchivalMmr<MmrStorage> = ArchivalMmr::new(aocl).await;
+        let swbf_inactive: ArchivalMmr<MmrStorage> = ArchivalMmr::new(swbf_inactive).await;
         Self {
             aocl,
             swbf_inactive,

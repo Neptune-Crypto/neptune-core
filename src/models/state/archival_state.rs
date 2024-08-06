@@ -221,15 +221,12 @@ impl ArchivalState {
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
-        let mut last_rec: LastFileRecord = match self
+        let mut last_rec: LastFileRecord = self
             .block_index_db
             .get(BlockIndexKey::LastFile)
             .await
             .map(|x| x.as_last_file_record())
-        {
-            Some(rec) => rec,
-            None => LastFileRecord::default(),
-        };
+            .unwrap_or_default();
 
         // Open the file that was last used for storing a block
         let mut block_file_path = self.data_dir.block_file_path(last_rec.last_file);
@@ -1672,19 +1669,19 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (cbtx, cb_expected) = genesis_state_lock
+        let (cbtx2, cb_expected2) = genesis_state_lock
             .lock_guard()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), launch + seven_months);
-        let block_tx = cbtx.merge_with(tx_from_alice).merge_with(tx_from_bob);
+        let block_tx2 = cbtx2.merge_with(tx_from_alice).merge_with(tx_from_bob);
         let block_2 =
-            Block::new_block_from_template(&block_1, block_tx, launch + seven_months, None);
+            Block::new_block_from_template(&block_1, block_tx2, launch + seven_months, None);
 
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
-        let now = block_1.kernel.header.timestamp;
-        assert!(block_2.is_valid(&block_1, now));
+        let now2 = block_1.kernel.header.timestamp;
+        assert!(block_2.is_valid(&block_1, now2));
 
         // Expect incoming UTXOs
         for rec_data in receiver_data_from_alice {
@@ -1723,8 +1720,8 @@ mod archival_state_tests {
             .wallet_state
             .expected_utxos
             .add_expected_utxo(
-                cb_expected.utxo,
-                cb_expected.sender_randomness,
+                cb_expected2.utxo,
+                cb_expected2.sender_randomness,
                 genesis_spending_key.privacy_preimage,
                 UtxoNotifier::Cli,
             )

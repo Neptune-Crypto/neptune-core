@@ -57,7 +57,7 @@ impl MutatorSetUpdate {
 
             RemovalRecord::batch_update_from_remove(removal_records, applied_removal_record);
 
-            if !ms_accumulator.can_remove(&applied_removal_record) {
+            if !ms_accumulator.can_remove(applied_removal_record) {
                 bail!("Cannot remove item from mutator set.");
             }
             ms_accumulator.remove(applied_removal_record);

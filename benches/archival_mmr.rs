@@ -10,7 +10,6 @@ use neptune_core::database::storage::storage_vec::traits::StorageVecBase;
 use neptune_core::database::NeptuneLevelDb;
 use neptune_core::util_types::mutator_set::archival_mmr::ArchivalMmr;
 use rand::random;
-use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::num_leafs_to_num_nodes;
 use tasm_lib::Digest;
 
@@ -65,7 +64,7 @@ fn db_options() -> Option<Options> {
     })
 }
 
-async fn new_ammr(leaf_count: u64) -> (SimpleRustyStorage, ArchivalMmr<Tip5, DbtVec<Digest>>) {
+async fn new_ammr(leaf_count: u64) -> (SimpleRustyStorage, ArchivalMmr<DbtVec<Digest>>) {
     let db = NeptuneLevelDb::open_new_test_database(
         false,
         db_options(),

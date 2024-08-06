@@ -170,11 +170,11 @@ impl ConsensusProgram for CollectTypeScripts {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let eq_digest = library.import(Box::new(EqDigest));
         let collect_type_script_hashes_from_utxos =
-            format!("neptune_consensus_transaction_collect_type_script_hashes_from_utxo");
+            "neptune_consensus_transaction_collect_type_script_hashes_from_utxo".to_string();
         let collect_type_script_hashes_from_coins =
-            format!("neptune_consensus_transaction_collect_type_script_hashes_from_coin");
-        let push_digest_to_list = format!("neptune_consensus_transaction_push_digest_to_list");
-        let write_all_digests = format!("netpune_consensus_transaction_write_all_digests");
+            "neptune_consensus_transaction_collect_type_script_hashes_from_coin".to_string();
+        let push_digest_to_list = "neptune_consensus_transaction_push_digest_to_list".to_string();
+        let write_all_digests = "netpune_consensus_transaction_write_all_digests".to_string();
         let authenticate_salted_utxos_and_collect_hashes = triton_asm! {
             // BEFORE:
             // _ *ctsw *type_script_hashes *salted_utxos size
