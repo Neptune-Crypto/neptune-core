@@ -9,12 +9,17 @@ use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 
+use super::expected_utxo::ExpectedUtxo;
 use super::monitored_utxo::MonitoredUtxo;
 
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
 
+    // list of utxos we have already received in a block
     monitored_utxos: DbtVec<MonitoredUtxo>,
+
+    // list of off-chain utxos we are expecting to receive in a future block
+    expected_utxos: DbtVec<ExpectedUtxo>,
 
     // records which block the database is synced to
     sync_label: DbtSingleton<Digest>,
@@ -31,18 +36,25 @@ impl RustyWalletDatabase {
             crate::LOG_LOCK_EVENT_CB,
         );
 
-        let monitored_utxos_storage = storage
+        let monitored_utxos = storage
             .schema
             .new_vec::<MonitoredUtxo>("monitored_utxos")
             .await;
-        let sync_label_storage = storage.schema.new_singleton::<Digest>("sync_label").await;
-        let counter_storage = storage.schema.new_singleton::<u64>("counter").await;
+
+        let expected_utxos = storage
+            .schema
+            .new_vec::<ExpectedUtxo>("expected_utxos")
+            .await;
+
+        let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
+        let counter = storage.schema.new_singleton::<u64>("counter").await;
 
         Self {
             storage,
-            monitored_utxos: monitored_utxos_storage,
-            sync_label: sync_label_storage,
-            counter: counter_storage,
+            monitored_utxos,
+            expected_utxos,
+            sync_label,
+            counter,
         }
     }
 
@@ -54,6 +66,16 @@ impl RustyWalletDatabase {
     /// get mutable monitored_utxos.
     pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
         &mut self.monitored_utxos
+    }
+
+    /// get expected_utxos.
+    pub fn expected_utxos(&self) -> &DbtVec<ExpectedUtxo> {
+        &self.expected_utxos
+    }
+
+    /// get mutable expected_utxos.
+    pub fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
+        &mut self.expected_utxos
     }
 
     /// Get the hash of the block to which this database is synced.

@@ -47,7 +47,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::ValidityTree;
 use crate::models::consensus::WitnessType;
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::triton_vm;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;

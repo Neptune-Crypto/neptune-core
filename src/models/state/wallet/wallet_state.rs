@@ -25,7 +25,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_vec::traits::*;
+use crate::database::storage::storage_vec::{traits::*, Index};
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -51,9 +51,10 @@ use super::address::symmetric_key;
 use super::address::KeyType;
 use super::address::SpendingKey;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use super::expected_utxo;
+use super::expected_utxo::ExpectedUtxo;
+use super::expected_utxo::UtxoNotifier;
 use super::rusty_wallet_database::RustyWalletDatabase;
-use super::utxo_notification_pool::UtxoNotificationPool;
-use super::utxo_notification_pool::UtxoNotifier;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
@@ -64,10 +65,6 @@ pub struct WalletState {
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
 
-    // Any task may read from expected_utxos, only main task may write
-    pub expected_utxos: UtxoNotificationPool,
-
-    /// Path to directory containing wallet files
     wallet_directory_path: PathBuf,
 }
 
@@ -101,7 +98,6 @@ impl Debug for WalletState {
         f.debug_struct("WalletState")
             .field("wallet_secret", &self.wallet_secret)
             .field("number_of_mps_per_utxo", &self.number_of_mps_per_utxo)
-            .field("expected_utxos", &self.expected_utxos)
             .field("wallet_directory_path", &self.wallet_directory_path)
             .finish()
     }
@@ -204,10 +200,6 @@ impl WalletState {
             wallet_db: rusty_wallet_database,
             wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
-            expected_utxos: UtxoNotificationPool::new(
-                cli_args.max_utxo_notification_size,
-                cli_args.max_unconfirmed_utxo_notification_count_per_peer,
-            ),
             wallet_directory_path: data_dir.wallet_directory_path(),
         };
 
@@ -223,14 +215,13 @@ impl WalletState {
             for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash == own_receiving_address.lock_script().hash() {
                     wallet_state
-                        .expected_utxos
-                        .add_expected_utxo(
+                        .add_expected_utxo(ExpectedUtxo::new(
                             utxo,
-                            Digest::default(),
+                            Digest::default(), // sender_randomness
                             own_spending_key.privacy_preimage(),
                             UtxoNotifier::Premine,
-                        )
-                        .unwrap();
+                        ))
+                        .await;
                 }
             }
 
@@ -245,6 +236,14 @@ impl WalletState {
         }
 
         wallet_state
+    }
+
+    // note: does not verify we do not have any dups.
+    pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
+        self.wallet_db
+            .expected_utxos_mut()
+            .push(expected_utxo)
+            .await;
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
@@ -301,6 +300,74 @@ impl WalletState {
                     false
                 }
             })
+    }
+
+    /// Scan the transaction for outputs that match with list of expected
+    /// incoming UTXOs, and returns expected UTXOs that are present in the
+    /// transaction.
+    /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
+    pub async fn scan_for_expected_utxos<'a>(
+        &'a self,
+        transaction: &'a Transaction,
+    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
+
+        transaction.kernel.outputs.iter().filter_map(move |a| {
+            expected_utxos
+                .iter()
+                .find(|eu| eu.addition_record == *a)
+                .map(|eu| eu.into())
+        })
+    }
+
+    /// Delete all ExpectedUtxo that exceed a certain age
+    ///
+    /// note: It is questionable if this method should ever be called
+    ///       as presently implemented.
+    ///
+    /// issues:
+    ///   1. expiration does not consider if utxo has been
+    ///      claimed by wallet or not.
+    ///   2. expiration thresholds are based on time, not
+    ///      # of blocks.
+    ///   3. what if a deep re-org occurs after ExpectedUtxo
+    ///      have been expired?  possible loss of funds.
+    ///
+    /// Fundamentally, any time we remove an ExpectedUtxo we risk a possible
+    /// loss of funds in the future.
+    ///
+    /// for now, it may be best to simply leave all ExpectedUtxo in the wallet
+    /// database forever.  This is the safest way to prevent a possible loss of
+    /// funds.
+    ///
+    /// note: DbtVec does not have a remove().
+    ///       So it is implemented by clearing all ExpectedUtxo from DB and
+    ///       adding back those that are not stale.
+    pub async fn prune_stale_expected_utxos(&mut self) {
+        let cutoff_for_unreceived = Timestamp::now()
+            - Timestamp::seconds(expected_utxo::UNRECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
+        let cutoff_for_received = Timestamp::now()
+            - Timestamp::seconds(expected_utxo::RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
+
+        let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
+
+        let keep_indexes = expected_utxos
+            .iter()
+            .enumerate()
+            .filter(|(_, eu)| match eu.mined_in_block {
+                Some((_bh, registered_timestamp)) => registered_timestamp >= cutoff_for_received,
+                None => eu.notification_received >= cutoff_for_unreceived,
+            })
+            .map(|(idx, _)| idx);
+
+        self.wallet_db.expected_utxos_mut().clear().await;
+
+        for idx in keep_indexes.rev() {
+            self.wallet_db
+                .expected_utxos_mut()
+                .push(expected_utxos[idx].clone())
+                .await;
+        }
     }
 
     // returns true if the utxo can be unlocked by one of the
@@ -414,8 +481,8 @@ impl WalletState {
         let onchain_received_outputs = self.scan_for_announced_utxos(&transaction);
 
         let offchain_received_outputs = self
-            .expected_utxos
             .scan_for_expected_utxos(&transaction)
+            .await
             .collect_vec();
 
         let all_received_outputs =
@@ -727,11 +794,23 @@ impl WalletState {
         }
 
         // Mark all expected UTXOs that were received in this block as received
-        offchain_received_outputs.into_iter().for_each(|au| {
-            self.expected_utxos
-                .mark_as_received(au.addition_record, new_block.hash())
-                .expect("Expected UTXO must be present when marking it as received")
-        });
+        let updates = self
+            .wallet_db
+            .expected_utxos()
+            .get_all()
+            .await
+            .into_iter()
+            .enumerate()
+            .filter(|(_, eu)| {
+                offchain_received_outputs
+                    .iter()
+                    .any(|au| au.addition_record == eu.addition_record)
+            })
+            .map(|(idx, mut eu)| {
+                eu.mined_in_block = Some((new_block.hash(), new_block.kernel.header.timestamp));
+                (idx as Index, eu)
+            });
+        self.wallet_db.expected_utxos_mut().set_many(updates).await;
 
         self.wallet_db.set_sync_label(new_block.hash()).await;
         self.wallet_db.persist().await;
@@ -907,7 +986,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use crate::config_models::network::Network;
-    use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -1196,18 +1275,126 @@ mod tests {
     }
 
     mod expected_utxos {
+        use crate::models::blockchain::transaction::utxo::LockScript;
+        use crate::tests::shared::make_mock_transaction;
+        use crate::util_types::mutator_set::commit;
+
         use super::*;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn insert_and_scan() {
+            let mut wallet =
+                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+
+            assert!(wallet.wallet_db.expected_utxos().is_empty().await);
+            assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
+
+            let mock_utxo =
+                Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(10));
+
+            let sender_randomness: Digest = rand::random();
+            let receiver_preimage: Digest = rand::random();
+            let expected_addition_record = commit(
+                Hash::hash(&mock_utxo),
+                sender_randomness,
+                receiver_preimage.hash::<Hash>(),
+            );
+            wallet
+                .add_expected_utxo(ExpectedUtxo::new(
+                    mock_utxo.clone(),
+                    sender_randomness,
+                    receiver_preimage,
+                    UtxoNotifier::Myself,
+                ))
+                .await;
+            assert!(!wallet.wallet_db.expected_utxos().is_empty().await);
+            assert_eq!(1, wallet.wallet_db.expected_utxos().len().await);
+
+            let mock_tx_containing_expected_utxo =
+                make_mock_transaction(vec![], vec![expected_addition_record]);
+
+            let ret_with_tx_containing_utxo = wallet
+                .scan_for_expected_utxos(&mock_tx_containing_expected_utxo)
+                .await
+                .collect_vec();
+            assert_eq!(1, ret_with_tx_containing_utxo.len());
+
+            // Call scan but with another input. Verify that it returns the empty list
+            let another_addition_record = commit(
+                Hash::hash(&mock_utxo),
+                rand::random(),
+                receiver_preimage.hash::<Hash>(),
+            );
+            let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
+            let ret_with_tx_without_utxo = wallet
+                .scan_for_expected_utxos(&tx_without_utxo)
+                .await
+                .collect_vec();
+            assert!(ret_with_tx_without_utxo.is_empty());
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn prune_stale() {
+            let mut wallet =
+                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+
+            let mock_utxo =
+                Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
+
+            // Add a UTXO notification
+            let mut addition_records = vec![];
+            let ar = wallet
+                .add_expected_utxo(ExpectedUtxo::new(
+                    mock_utxo.clone(),
+                    rand::random(),
+                    rand::random(),
+                    UtxoNotifier::Myself,
+                ))
+                .await;
+            addition_records.push(ar);
+
+            // Add three more
+            for _ in 0..3 {
+                let ar_new = wallet
+                    .add_expected_utxo(ExpectedUtxo::new(
+                        mock_utxo.clone(),
+                        rand::random(),
+                        rand::random(),
+                        UtxoNotifier::Myself,
+                    ))
+                    .await;
+                addition_records.push(ar_new);
+            }
+
+            // Test with a UTXO that was received
+            // Manipulate the time this entry was inserted
+            let two_weeks_as_sec = 60 * 60 * 24 * 7 * 2;
+            let eu_idx = 0;
+            let mut eu = wallet.wallet_db.expected_utxos().get(eu_idx).await;
+
+            // modify mined_in_block field.
+            eu.mined_in_block = Some((
+                Digest::default(),
+                Timestamp::now() - Timestamp::seconds(two_weeks_as_sec),
+            ));
+
+            // update db
+            wallet.wallet_db.expected_utxos_mut().set(eu_idx, eu).await;
+
+            assert_eq!(4, wallet.wallet_db.expected_utxos().len().await);
+            wallet.prune_stale_expected_utxos().await;
+            assert_eq!(3, wallet.wallet_db.expected_utxos().len().await);
+        }
 
         /// demonstrates/tests that if wallet-db is not persisted after an
         /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
         /// wallet is dropped from RAM and re-created from disk.
         ///
-        /// note: this test presently FAILS, which demonstrates validity of
-        /// issue #172.
+        /// This is a regression test for issue #172.
         ///
         /// https://github.com/Neptune-Crypto/neptune-core/issues/172
-        ///
-        /// A future commit/pr will fix the issue so that this test passes.
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
@@ -1226,7 +1413,6 @@ mod tests {
         }
 
         mod worker {
-            use crate::models::blockchain::transaction::utxo::LockScript;
             use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
             use crate::tests::shared::unit_test_data_directory;
 
@@ -1251,7 +1437,7 @@ mod tests {
                 let wallet_secret = WalletSecret::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
 
-                // create initial wallet in a new directory.
+                // create initial wallet in a new directory
                 let mut wallet = mock_genesis_wallet_state_with_data_dir(
                     wallet_secret.clone(),
                     network,
@@ -1262,20 +1448,19 @@ mod tests {
                 let mock_utxo =
                     Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
 
-                assert!(wallet.expected_utxos.is_empty());
+                assert!(wallet.wallet_db.expected_utxos().is_empty().await);
 
-                // Add a UTXO notification
+                // Add an ExpectedUtxo to the wallet.
                 wallet
-                    .expected_utxos
-                    .add_expected_utxo(
+                    .add_expected_utxo(ExpectedUtxo::new(
                         mock_utxo.clone(),
                         rand::random(),
                         rand::random(),
                         UtxoNotifier::Myself,
-                    )
-                    .unwrap();
+                    ))
+                    .await;
 
-                assert_eq!(1, wallet.expected_utxos.len());
+                assert_eq!(1, wallet.wallet_db.expected_utxos().len().await);
 
                 // persist wallet-db to disk, if testing that case.
                 if persist {
@@ -1294,7 +1479,10 @@ mod tests {
                 // if wallet state was persisted to DB then we should have
                 // 1 (restored) ExpectedUtxo, else 0.
                 let expect = if persist { 1 } else { 0 };
-                assert_eq!(expect, restored_wallet.expected_utxos.len());
+                assert_eq!(
+                    expect,
+                    restored_wallet.wallet_db.expected_utxos().len().await
+                );
             }
         }
     }

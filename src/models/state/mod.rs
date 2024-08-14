@@ -24,7 +24,7 @@ use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
-use wallet::utxo_notification_pool::UtxoNotifier;
+use wallet::expected_utxo::UtxoNotifier;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -35,8 +35,8 @@ use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::UtxoNotifyMethod;
 use crate::models::peer::HandshakeData;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -814,12 +814,14 @@ impl GlobalState {
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
     ) -> Result<()> {
         for expected_utxo in expected_utxos.into_iter() {
-            self.wallet_state.expected_utxos.add_expected_utxo(
-                expected_utxo.utxo,
-                expected_utxo.sender_randomness,
-                expected_utxo.receiver_preimage,
-                expected_utxo.received_from,
-            )?;
+            self.wallet_state
+                .add_expected_utxo(ExpectedUtxo::new(
+                    expected_utxo.utxo,
+                    expected_utxo.sender_randomness,
+                    expected_utxo.receiver_preimage,
+                    expected_utxo.received_from,
+                ))
+                .await;
         }
         Ok(())
     }
@@ -1291,14 +1293,13 @@ impl GlobalState {
                 // Notify wallet to expect the coinbase UTXO, as we mined this block
                 myself
                     .wallet_state
-                    .expected_utxos
-                    .add_expected_utxo(
+                    .add_expected_utxo(ExpectedUtxo::new(
                         coinbase_info.utxo,
                         coinbase_info.sender_randomness,
                         coinbase_info.receiver_preimage,
                         UtxoNotifier::OwnMiner,
-                    )
-                    .expect("UTXO notification from miner must be accepted");
+                    ))
+                    .await;
             }
 
             // Get parent of tip for mutator-set data needed for various updates. Parent of the
@@ -1398,7 +1399,7 @@ mod global_state_tests {
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
-    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::tests::shared::add_block_to_light_state;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
@@ -2111,14 +2112,13 @@ mod global_state_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
                     alice_spending_key.privacy_preimage,
                     UtxoNotifier::Cli,
-                )
-                .unwrap();
+                ))
+                .await;
         }
 
         for rec_data in tx_outputs_for_bob {
@@ -2126,14 +2126,13 @@ mod global_state_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
                     bob_spending_key.privacy_preimage,
                     UtxoNotifier::Cli,
-                )
-                .unwrap();
+                ))
+                .await;
         }
 
         genesis_state_lock

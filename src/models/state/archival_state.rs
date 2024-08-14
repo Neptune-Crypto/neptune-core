@@ -861,7 +861,8 @@ mod archival_state_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
-    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::make_mock_block_with_valid_pow;
@@ -1587,28 +1588,26 @@ mod archival_state_tests {
             let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
             genesis_state
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
-                )
-                .unwrap();
+                ))
+                .await;
         }
         {
             let mut alice_state = alice_state_lock.lock_guard_mut().await;
             for rec_data in tx_outputs_for_alice {
                 alice_state
                     .wallet_state
-                    .expected_utxos
-                    .add_expected_utxo(
+                    .add_expected_utxo(ExpectedUtxo::new(
                         rec_data.utxo.clone(),
                         rec_data.sender_randomness,
                         alice_spending_key.privacy_preimage,
                         UtxoNotifier::Cli,
-                    )
-                    .unwrap();
+                    ))
+                    .await;
             }
         }
 
@@ -1617,14 +1616,13 @@ mod archival_state_tests {
             for rec_data in tx_outputs_for_bob {
                 bob_state
                     .wallet_state
-                    .expected_utxos
-                    .add_expected_utxo(
+                    .add_expected_utxo(ExpectedUtxo::new(
                         rec_data.utxo.clone(),
                         rec_data.sender_randomness,
                         bob_spending_key.privacy_preimage,
                         UtxoNotifier::Cli,
-                    )
-                    .unwrap();
+                    ))
+                    .await;
             }
         }
 
@@ -1783,14 +1781,13 @@ mod archival_state_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::Cli,
-                )
-                .unwrap();
+                ))
+                .await;
         }
 
         for rec_data in tx_outputs_from_bob {
@@ -1798,28 +1795,26 @@ mod archival_state_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::Cli,
-                )
-                .unwrap();
+                ))
+                .await;
         }
 
         genesis_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo_block_2,
                 cb_sender_randomness_block_2,
                 genesis_spending_key.privacy_preimage,
                 UtxoNotifier::Cli,
-            )
-            .unwrap();
+            ))
+            .await;
 
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {

@@ -814,10 +814,11 @@ mod rpc_server_tests {
     use ReceivingAddress;
 
     use crate::config_models::network::Network;
+    use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
     use crate::tests::shared::make_mock_block_with_valid_pow;
@@ -1458,8 +1459,10 @@ mod rpc_server_tests {
             .lock_guard()
             .await
             .wallet_state
-            .expected_utxos
-            .len();
+            .wallet_db
+            .expected_utxos()
+            .len()
+            .await;
 
         // --- Operation: perform send_to_many
         let result = rpc_server
@@ -1477,8 +1480,10 @@ mod rpc_server_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .expected_utxos
-                .len(),
+                .wallet_db
+                .expected_utxos()
+                .len()
+                .await,
             num_expected_utxo + 2
         );
 
