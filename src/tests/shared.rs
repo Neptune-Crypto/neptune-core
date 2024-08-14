@@ -943,13 +943,21 @@ pub async fn mock_genesis_wallet_state(
     wallet_secret: WalletSecret,
     network: Network,
 ) -> WalletState {
+    let data_dir = unit_test_data_directory(network).unwrap();
+    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir).await
+}
+
+pub async fn mock_genesis_wallet_state_with_data_dir(
+    wallet_secret: WalletSecret,
+    network: Network,
+    data_dir: &DataDirectory,
+) -> WalletState {
     let cli_args: cli_args::Args = cli_args::Args {
         number_of_mps_per_utxo: 30,
         network,
         ..Default::default()
     };
-    let data_dir = unit_test_data_directory(network).unwrap();
-    WalletState::new_from_wallet_secret(&data_dir, wallet_secret.clone(), &cli_args).await
+    WalletState::new_from_wallet_secret(data_dir, wallet_secret, &cli_args).await
 }
 
 /// Return an archival state populated with the genesis block

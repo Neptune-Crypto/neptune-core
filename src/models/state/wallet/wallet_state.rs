@@ -1172,4 +1172,108 @@ mod tests {
                 .verify(Hash::hash(&utxo), &ms_membership_proof));
         }
     }
+
+    mod expected_utxos {
+        use super::*;
+
+        /// demonstrates/tests that if wallet-db is not persisted after an
+        /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
+        /// wallet is dropped from RAM and re-created from disk.
+        ///
+        /// note: this test presently FAILS, which demonstrates validity of
+        /// issue #172.
+        ///
+        /// https://github.com/Neptune-Crypto/neptune-core/issues/172
+        ///
+        /// A future commit/pr will fix the issue so that this test passes.
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn persisted_exists_after_wallet_restored() {
+            worker::restore_wallet(true).await
+        }
+
+        /// demonstrates/tests that if wallet-db is not persisted after an
+        /// ExpectedUtxo is added, then the ExpectedUtxo will not exist after
+        /// wallet is dropped from RAM and re-created from disk.
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn unpersisted_gone_after_wallet_restored() {
+            worker::restore_wallet(false).await
+        }
+
+        mod worker {
+            use crate::models::blockchain::transaction::utxo::LockScript;
+            use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
+            use crate::tests::shared::unit_test_data_directory;
+
+            use super::*;
+
+            /// implements a test with 2 variations via `persist` param.
+            ///
+            /// The basic test is to add an ExpectedUtxo to a wallet, drop and
+            /// re-create the wallet, and then check if the ExpectedUtxo still
+            /// exists.
+            ///
+            /// Variations:
+            ///   persist = true:
+            ///    the wallet db is persisted to disk after the ExpectedUtxo
+            ///    is added. asserts that the restored wallet has 1 ExpectedUtxo.
+            ///
+            ///   persist = false:
+            ///    the wallet db is NOT persisted to disk after the ExpectedUtxo
+            ///    is added. asserts that the restored wallet has 0 ExpectedUtxo.
+            pub(super) async fn restore_wallet(persist: bool) {
+                let network = Network::RegTest;
+                let wallet_secret = WalletSecret::new_random();
+                let data_dir = unit_test_data_directory(network).unwrap();
+
+                // create initial wallet in a new directory.
+                let mut wallet = mock_genesis_wallet_state_with_data_dir(
+                    wallet_secret.clone(),
+                    network,
+                    &data_dir,
+                )
+                .await;
+
+                let mock_utxo =
+                    Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
+
+                assert!(wallet.expected_utxos.is_empty());
+
+                // Add a UTXO notification
+                wallet
+                    .expected_utxos
+                    .add_expected_utxo(
+                        mock_utxo.clone(),
+                        rand::random(),
+                        rand::random(),
+                        UtxoNotifier::Myself,
+                    )
+                    .unwrap();
+
+                assert_eq!(1, wallet.expected_utxos.len());
+
+                // persist wallet-db to disk, if testing that case.
+                if persist {
+                    wallet.wallet_db.persist().await;
+                }
+
+                // drop wallet state.  this simulates the node being stopped,
+                // crashing, power outage, etc.
+                drop(wallet);
+
+                // re-create wallet state from same seed and same directory
+                let restored_wallet =
+                    mock_genesis_wallet_state_with_data_dir(wallet_secret, network, &data_dir)
+                        .await;
+
+                // if wallet state was persisted to DB then we should have
+                // 1 (restored) ExpectedUtxo, else 0.
+                let expect = if persist { 1 } else { 0 };
+                assert_eq!(expect, restored_wallet.expected_utxos.len());
+            }
+        }
+    }
 }
