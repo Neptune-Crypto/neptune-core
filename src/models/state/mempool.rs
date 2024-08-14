@@ -456,7 +456,8 @@ mod tests {
     use crate::models::blockchain::transaction::TxOutput;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
-    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_wallet;
@@ -644,14 +645,13 @@ mod tests {
         // Update both states with block 1
         other_global_state
             .wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
                 other_receiver_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            )
-            .expect("UTXO notification from miner must be accepted");
+            ))
+            .await;
         other_global_state
             .set_new_tip(block_1.clone())
             .await

@@ -1,8 +1,8 @@
 pub mod address;
 pub mod coin_with_possible_timelock;
+pub mod expected_utxo;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
-pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
@@ -407,6 +407,7 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
+    use expected_utxo::ExpectedUtxo;
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
@@ -423,7 +424,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::TxOutput;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
-    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_generation_key;
     use crate::tests::shared::mock_genesis_global_state;
@@ -535,17 +536,16 @@ mod wallet_tests {
             make_mock_block(&genesis_block, None, own_recipient_address, rng.gen());
 
         own_wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            )
-            .unwrap();
+            ))
+            .await;
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.len(),
+            own_wallet_state.wallet_db.expected_utxos().len().await,
             "Expected UTXO list must have length 1 before block registration"
         );
         own_wallet_state
@@ -556,9 +556,10 @@ mod wallet_tests {
             .await?;
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.len(),
+            own_wallet_state.wallet_db.expected_utxos().len().await,
             "A: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
-        let expected_utxos = own_wallet_state.expected_utxos.get_all_expected_utxos();
+        let expected_utxos = own_wallet_state.wallet_db.expected_utxos().get_all().await;
+
         assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
         assert_eq!(
             block_1.hash(),
@@ -665,14 +666,13 @@ mod wallet_tests {
 
         // Add block to wallet state
         own_wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo,
                 cb_output_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            )
-            .unwrap();
+            ))
+            .await;
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &genesis_block.kernel.body.mutator_set_accumulator,
@@ -726,14 +726,13 @@ mod wallet_tests {
                 rng.gen(),
             );
             own_wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo_prime,
                     cb_output_randomness_prime,
                     own_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
-                )
-                .unwrap();
+                ))
+                .await;
             own_wallet_state
                 .update_wallet_state_with_new_block(
                     &previous_block.kernel.body.mutator_set_accumulator,
@@ -954,14 +953,13 @@ mod wallet_tests {
         // Expect the UTXO outputs
         for receive_data in tx_outputs_to_other {
             own_wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     receive_data.utxo,
                     receive_data.sender_randomness,
                     own_spending_key.privacy_preimage,
                     UtxoNotifier::Cli,
-                )
-                .unwrap();
+                ))
+                .await;
         }
         premine_receiver_global_state
             .set_new_tip(block_1.clone())
@@ -1014,14 +1012,13 @@ mod wallet_tests {
             let ret = make_mock_block(&previous_block, None, own_address, rng.gen());
             next_block = ret.0;
             own_wallet_state
-                .expected_utxos
-                .add_expected_utxo(
+                .add_expected_utxo(ExpectedUtxo::new(
                     ret.1,
                     ret.2,
                     own_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
-                )
-                .unwrap();
+                ))
+                .await;
             own_wallet_state
                 .update_wallet_state_with_new_block(
                     &previous_block.kernel.body.mutator_set_accumulator,
@@ -1217,23 +1214,21 @@ mod wallet_tests {
             "Block must be valid after accumulating txs"
         );
         own_wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            )
-            .unwrap();
+            ))
+            .await;
         own_wallet_state
-            .expected_utxos
-            .add_expected_utxo(
+            .add_expected_utxo(ExpectedUtxo::new(
                 tx_outputs_six.utxo,
                 tx_outputs_six.sender_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::Cli,
-            )
-            .unwrap();
+            ))
+            .await;
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_2_b.kernel.body.mutator_set_accumulator,

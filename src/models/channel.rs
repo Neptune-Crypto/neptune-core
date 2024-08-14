@@ -10,7 +10,7 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
 use super::peer::TransactionNotification;
-use super::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use super::state::wallet::expected_utxo::ExpectedUtxo;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {

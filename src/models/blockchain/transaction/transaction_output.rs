@@ -6,8 +6,8 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
 use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -277,7 +277,7 @@ impl From<&TxOutputList> for Vec<Utxo> {
 
 impl From<&TxOutputList> for Vec<ExpectedUtxo> {
     fn from(list: &TxOutputList) -> Self {
-        list.expected_utxos_iter().into_iter().collect()
+        list.expected_utxos_iter().collect()
     }
 }
 
@@ -330,7 +330,7 @@ impl TxOutputList {
     }
 
     /// retrieves expected_utxos from possible sub-set of the list
-    pub fn expected_utxos_iter(&self) -> impl IntoIterator<Item = ExpectedUtxo> + '_ {
+    pub fn expected_utxos_iter(&self) -> impl Iterator<Item = ExpectedUtxo> + '_ {
         self.0.iter().filter_map(|u| match &u.utxo_notification {
             UtxoNotification::OffChain(eu) => Some(*eu.clone()),
             _ => None,
@@ -346,7 +346,7 @@ impl TxOutputList {
 
     /// retrieves expected_utxos from possible sub-set of the list
     pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
-        self.expected_utxos_iter().into_iter().collect()
+        self.expected_utxos_iter().collect()
     }
 }
 

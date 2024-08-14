@@ -44,7 +44,7 @@ const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
-const UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
+const EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
@@ -821,7 +821,7 @@ impl MainLoopHandler {
 
         // Set removal of stale notifications for incoming UTXOs
         let utxo_notification_cleanup_timer_interval =
-            Duration::from_secs(UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS);
+            Duration::from_secs(EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS);
         let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_timer_interval);
         tokio::pin!(utxo_notification_cleanup_timer);
 
@@ -979,7 +979,15 @@ impl MainLoopHandler {
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
                     debug!("Timer: UTXO notification pool cleanup job");
-                    self.global_state_lock.lock_mut(|s| s.wallet_state.expected_utxos.prune_stale_utxo_notifications()).await;
+
+                    // Danger: possible loss of funds.
+                    //
+                    // See description of prune_stale_expected_utxos().
+                    //
+                    // This call is disabled until such time as a thorough
+                    // evaluation and perhaps reimplementation determines that
+                    // it can be called safely without possible loss of funds.
+                    // self.global_state_lock.lock_mut(|s| s.wallet_state.prune_stale_expected_utxos()).await;
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }
