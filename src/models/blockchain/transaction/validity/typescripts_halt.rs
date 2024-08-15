@@ -1,66 +1,13 @@
-use crate::models::{
-    blockchain::{
-        transaction,
-        type_scripts::{native_currency::NativeCurrencyWitness, TypeScript, TypeScriptWitness},
-    },
-    consensus::{ValidationLogic, ValidityAstType, ValidityTree, WitnessType},
-};
-
 use itertools::Itertools;
 
-// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-// pub struct BasicTypeScriptWitness {
-//     type_script: TypeScript,
-//     input_utxos: SaltedUtxos,
-//     output_utxos: SaltedUtxos,
-//     transaction_kernel: TransactionKernel,
-// }
-
-// impl TypeScriptWitness for BasicTypeScriptWitness {
-//     fn transaction_kernel(&self) -> TransactionKernel {
-//         self.transaction_kernel.clone()
-//     }
-
-//     fn salted_input_utxos(&self) -> SaltedUtxos {
-//         self.input_utxos.clone()
-//     }
-
-//     fn salted_output_utxos(&self) -> SaltedUtxos {
-//         self.output_utxos.clone()
-//     }
-
-//     fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self {
-//         Self {
-//             type_script: TypeScript::new(NativeCurrency.program()),
-//             input_utxos: primitive_transaction_witness.input_utxos.clone(),
-//             output_utxos: primitive_transaction_witness.output_utxos.clone(),
-//             transaction_kernel: primitive_transaction_witness.kernel.clone(),
-//         }
-//     }
-// }
-
-// impl SecretWitness for BasicTypeScriptWitness {
-//     fn standard_input(&self) -> PublicInput {
-//         self.type_script_standard_input()
-//     }
-
-//     fn nondeterminism(&self) -> NonDeterminism {
-//         todo!()
-//     }
-// }
-
-// impl ValidationLogic for BasicTypeScriptWitness {
-//     fn vast(&self) -> ValidityAST {
-//         ValidityAST::new(
-//             ValidityAstType::Atomic(
-//                 self.type_script.program,
-//                 Claim::new(self.type_script.hash())
-//                     .with_input(self.type_script_standard_input().individual_tokens),
-//             ),
-//             WitnessType::RawWitness(self.nondeterminism().into()),
-//         )
-//     }
-// }
+use crate::models::blockchain::transaction;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
+use crate::models::blockchain::type_scripts::TypeScript;
+use crate::models::blockchain::type_scripts::TypeScriptWitness;
+use crate::models::consensus::ValidationLogic;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WitnessType;
 
 pub struct TypeScriptsHalt {
     pub type_scripts: Vec<TypeScript>,

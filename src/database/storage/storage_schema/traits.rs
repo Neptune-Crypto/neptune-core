@@ -3,8 +3,10 @@
 //! It is recommended to wildcard import these with
 //! `use crate::database::storage::storage_vec::traits::*`
 
-use super::{RustyKey, RustyValue};
 pub use leveldb::database::key::IntoLevelDBKey;
+
+use super::RustyKey;
+use super::RustyValue;
 
 /// Defines table interface for types used by [`super::DbtSchema`]
 #[allow(async_fn_in_trait)]

@@ -1,17 +1,14 @@
-use crate::prelude::{triton_vm, twenty_first};
-
-use crate::{
-    models::blockchain::shared::Hash,
-    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
-};
 use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
 use tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-
 use triton_vm::triton_asm;
-
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 /// Given a membership proof and a canonical commitment, verify membership in the AOCL.
 /// Note that the AOCL MMR accumulator is given deep in the stack, accounting for a 3-wide
@@ -107,25 +104,26 @@ impl BasicSnippet for VerifyAoclMembership {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
-
-    use rand::RngCore;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::empty_stack;
-    use tasm_lib::traits::function::ShadowedFunction;
-    use tasm_lib::traits::function::{Function, FunctionInitialState};
-    use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
-
-    use itertools::Itertools;
-
     use std::collections::HashMap;
 
-    use triton_vm::prelude::{BFieldElement, Digest};
+    use itertools::Itertools;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
+    use tasm_lib::empty_stack;
+    use tasm_lib::traits::function::Function;
+    use tasm_lib::traits::function::FunctionInitialState;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use triton_vm::prelude::BFieldElement;
+    use triton_vm::prelude::Digest;
 
     use crate::util_types::mutator_set::archival_mmr::mmr_test::mock;
+    use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+
+    use super::*;
 
     impl Function for VerifyAoclMembership {
         fn rust_shadow(

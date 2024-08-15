@@ -2,7 +2,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::ordinary_vec_private::OrdinaryVecPrivate;
-use super::{traits::*, Index};
+use super::traits::*;
+use super::Index;
 
 /// Implements [`StorageVec`] trait for an ordinary (in memory) `Vec`
 #[derive(Debug, Clone, Default)]

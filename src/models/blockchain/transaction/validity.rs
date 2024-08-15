@@ -1,33 +1,34 @@
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::models::consensus::{
-    ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-};
-use crate::prelude::twenty_first;
-
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_type_scripts;
 pub mod lockscripts_halt;
 pub mod removal_records_integrity;
 pub mod tasm;
 pub mod typescripts_halt;
-use crate::models::blockchain::transaction;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
+use kernel_to_lock_scripts::KernelToLockScripts;
+use kernel_to_type_scripts::KernelToTypeScripts;
+use lockscripts_halt::LockScriptsHalt;
+use removal_records_integrity::RemovalRecordsIntegrity;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use typescripts_halt::TypeScriptsHalt;
 
-use self::lockscripts_halt::LockScriptsHalt;
-use self::removal_records_integrity::RemovalRecordsIntegrity;
-use self::{
-    kernel_to_lock_scripts::KernelToLockScripts, kernel_to_type_scripts::KernelToTypeScripts,
-    typescripts_halt::TypeScriptsHalt,
-};
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::transaction;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::models::consensus::ValidationLogic;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WhichProgram;
+use crate::models::consensus::WitnessType;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::transaction_kernel::TransactionKernel;

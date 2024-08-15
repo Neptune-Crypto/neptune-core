@@ -1,15 +1,17 @@
-// This module contains functions for interacting with the input/output monad
-// implicit in a VM execution. It contains functions for mutating and verifying
-// the correct content of the input/output while executing a Rust function
-// on the host machine's native architecture (i.e. your machine).
-// It has been shamelessly copied from greenhat's omnizk compiler project:
-// https://github.com/greenhat/omnizk
+//! This module contains functions for interacting with the input/output monad
+//! implicit in a VM execution. It contains functions for mutating and verifying
+//! the correct content of the input/output while executing a Rust function
+//! on the host machine's native architecture (i.e. your machine).
+//!
+//! It has been shamelessly copied from greenhat's omnizk compiler project:
+//! https://github.com/greenhat/omnizk
 
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
-use tasm_lib::{
-    triton_vm::program::NonDeterminism, twenty_first::math::b_field_element::BFieldElement, Digest,
-};
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::Digest;
 
 thread_local! {
     pub(super) static PUB_INPUT: RefCell<Vec<BFieldElement>> = const {RefCell::new(vec![])};

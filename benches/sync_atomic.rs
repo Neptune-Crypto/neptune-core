@@ -29,7 +29,8 @@
 //!     which seems acceptable for most uses.
 
 use divan::Bencher;
-use neptune_core::locks::std::{AtomicMutex, AtomicRw};
+use neptune_core::locks::std::AtomicMutex;
+use neptune_core::locks::std::AtomicRw;
 
 fn main() {
     divan::main();

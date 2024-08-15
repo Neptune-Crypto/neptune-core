@@ -1,8 +1,17 @@
-use super::{LockAcquisition, LockCallbackFn, LockCallbackInfo, LockEvent, LockType};
-use futures::future::BoxFuture;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use futures::future::BoxFuture;
+use tokio::sync::RwLock;
+use tokio::sync::RwLockReadGuard;
+use tokio::sync::RwLockWriteGuard;
+
+use super::LockAcquisition;
+use super::LockCallbackFn;
+use super::LockCallbackInfo;
+use super::LockEvent;
+use super::LockType;
 
 /// An `Arc<RwLock<T>>` wrapper to make data thread-safe and easy to work with.
 ///

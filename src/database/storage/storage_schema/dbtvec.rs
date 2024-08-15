@@ -1,9 +1,17 @@
-use super::super::storage_vec::{traits::*, Index};
-use super::dbtvec_private::DbtVecPrivate;
-use super::{traits::*, PendingWrites, SimpleRustyReader};
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use crate::locks::tokio::AtomicRw;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, sync::Arc};
+
+use super::super::storage_vec::traits::*;
+use super::super::storage_vec::Index;
+use super::dbtvec_private::DbtVecPrivate;
+use super::traits::*;
+use super::PendingWrites;
+use super::SimpleRustyReader;
 
 use futures::Stream;
 
@@ -142,7 +150,6 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
 
 #[cfg(test)]
 mod tests {
-
     use super::super::SimpleRustyStorage;
     use super::*;
     use crate::database::NeptuneLevelDb;

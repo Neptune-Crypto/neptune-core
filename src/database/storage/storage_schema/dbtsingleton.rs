@@ -1,10 +1,15 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
+use std::sync::Arc;
 
-use super::{
-    dbtsingleton_private::DbtSingletonPrivate, traits::*, PendingWrites, SimpleRustyReader,
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use crate::locks::tokio::AtomicRw;
-use serde::{de::DeserializeOwned, Serialize};
+
+use super::dbtsingleton_private::DbtSingletonPrivate;
+use super::traits::*;
+use super::PendingWrites;
+use super::SimpleRustyReader;
 
 /// Singleton type created by [`super::DbtSchema`]
 ///

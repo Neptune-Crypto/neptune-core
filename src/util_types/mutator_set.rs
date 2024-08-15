@@ -1,21 +1,3 @@
-use std::{error::Error, fmt};
-
-use itertools::Itertools;
-use tasm_lib::{
-    twenty_first::{
-        math::bfield_codec::BFieldCodec,
-        util_types::algebraic_hasher::{AlgebraicHasher, Sponge},
-    },
-    Digest,
-};
-
-use crate::models::blockchain::shared::Hash;
-
-use self::{
-    addition_record::AdditionRecord,
-    shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
-};
-
 pub mod active_window;
 pub mod addition_record;
 pub mod archival_mmr;
@@ -31,6 +13,22 @@ pub mod removal_record;
 pub mod root_and_paths;
 pub mod rusty_archival_mutator_set;
 pub mod shared;
+
+use std::error::Error;
+use std::fmt;
+
+use addition_record::AdditionRecord;
+use itertools::Itertools;
+use shared::BATCH_SIZE;
+use shared::CHUNK_SIZE;
+use shared::NUM_TRIALS;
+use shared::WINDOW_SIZE;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::Sponge;
+use tasm_lib::Digest;
+
+use crate::models::blockchain::shared::Hash;
 
 impl Error for MutatorSetError {}
 

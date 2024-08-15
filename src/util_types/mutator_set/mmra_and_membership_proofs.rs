@@ -1,15 +1,12 @@
 use itertools::Itertools;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{BoxedStrategy, Just, Strategy},
-};
+use proptest::arbitrary::Arbitrary;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Just;
+use proptest::strategy::Strategy;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use tasm_lib::{
-    twenty_first::util_types::mmr::{
-        mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
-    },
-    Digest,
-};
+use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -144,7 +141,6 @@ impl Arbitrary for MmraAndMembershipProofs {
 
 #[cfg(test)]
 mod test {
-
     use super::*;
     use crate::twenty_first::math::tip5::Digest;
     use proptest::collection::vec;
@@ -167,7 +163,9 @@ mod test {
         #[strategy(0..u64::MAX)] _total_leaf_count: u64,
         #[strategy(indices_and_leafs_strategy(#_total_leaf_count, #_num_paths))]
         indices_and_leafs: Vec<(u64, Digest)>,
-        #[strategy(MmraAndMembershipProofs::arbitrary_with((#indices_and_leafs, #_total_leaf_count)))]
+        #[strategy(
+            MmraAndMembershipProofs::arbitrary_with((#indices_and_leafs, #_total_leaf_count))
+        )]
         mmra_and_membership_proofs: MmraAndMembershipProofs,
     ) {
         for ((_index, leaf), mp) in indices_and_leafs

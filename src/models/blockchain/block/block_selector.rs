@@ -13,14 +13,18 @@
 //! Public API's such as RPCs should accept a BlockSelector rather than a Digest
 //! or Height.
 
-use super::block_height::BlockHeight;
+use std::num::ParseIntError;
+use std::str::FromStr;
+
+use serde::Deserialize;
+use serde::Serialize;
+use thiserror::Error;
+
 use crate::models::state::GlobalState;
 use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
-use serde::{Deserialize, Serialize};
-use std::num::ParseIntError;
-use std::str::FromStr;
-use thiserror::Error;
+
+use super::block_height::BlockHeight;
 
 /// Provides alternatives for looking up a block.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

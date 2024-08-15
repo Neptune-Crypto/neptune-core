@@ -1,31 +1,3 @@
-use crate::config_models::network::Network;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
-use crate::models::state::wallet::address::ReceivingAddress;
-use crate::prelude::twenty_first;
-
-use get_size::GetSize;
-use itertools::Itertools;
-use num_bigint::BigUint;
-use num_traits::{abs, Zero};
-
-use serde::{Deserialize, Serialize};
-use std::cmp::max;
-use std::sync::OnceLock;
-use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::math::bfield_codec::BFieldCodec;
-
-use tracing::{debug, error, warn};
-
-use twenty_first::amount::u32s::U32s;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::digest::Digest;
-use twenty_first::math::tip5::DIGEST_LENGTH;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
 pub mod block_body;
 pub mod block_header;
 pub mod block_height;
@@ -36,24 +8,58 @@ pub mod mutator_set_update;
 pub mod transfer_block;
 pub mod validity;
 
-use self::block_body::BlockBody;
-use self::block_header::{
-    BlockHeader, MINIMUM_DIFFICULTY, TARGET_BLOCK_INTERVAL, TARGET_DIFFICULTY_U32_SIZE,
-};
-use self::block_height::BlockHeight;
-use self::block_kernel::BlockKernel;
-use self::mutator_set_update::MutatorSetUpdate;
-use self::transfer_block::{ProofType, TransferBlock};
+use std::cmp::max;
+use std::sync::OnceLock;
+
+use block_body::BlockBody;
+use block_header::BlockHeader;
+use block_header::MINIMUM_DIFFICULTY;
+use block_header::TARGET_BLOCK_INTERVAL;
+use block_header::TARGET_DIFFICULTY_U32_SIZE;
+use block_height::BlockHeight;
+use block_kernel::BlockKernel;
+use get_size::GetSize;
+use itertools::Itertools;
+use mutator_set_update::MutatorSetUpdate;
+use num_bigint::BigUint;
+use num_traits::abs;
+use num_traits::Zero;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tracing::debug;
+use tracing::error;
+use tracing::warn;
+use transfer_block::ProofType;
+use transfer_block::TransferBlock;
+use twenty_first::amount::u32s::U32s;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::digest::Digest;
+use twenty_first::math::tip5::DIGEST_LENGTH;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::config_models::network::Network;
+use crate::models::blockchain::shared::Hash;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WitnessType;
+use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::WalletSecret;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::validity::TransactionValidationLogic;
 use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
-use crate::models::blockchain::shared::Hash;
-use crate::models::state::wallet::WalletSecret;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
@@ -706,22 +712,23 @@ impl Block {
 
 #[cfg(test)]
 mod block_tests {
-
-    use crate::{
-        config_models::network::Network,
-        database::{storage::storage_schema::SimpleRustyStorage, NeptuneLevelDb},
-        models::{blockchain::transaction::TxOutput, state::wallet::WalletSecret},
-        tests::shared::{
-            make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
-        },
-        util_types::mutator_set::archival_mmr::ArchivalMmr,
-    };
+    use rand::random;
+    use rand::thread_rng;
+    use rand::Rng;
     use strum::IntoEnumIterator;
+    use tracing_test::traced_test;
+
+    use crate::config_models::network::Network;
+    use crate::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::database::NeptuneLevelDb;
+    use crate::models::blockchain::transaction::TxOutput;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
     use super::*;
-
-    use rand::{random, thread_rng, Rng};
-    use tracing_test::traced_test;
 
     async fn merge_transaction() -> (Block, Block, Block) {
         let mut rng = thread_rng();
@@ -835,10 +842,10 @@ mod block_tests {
                 .body
                 .mutator_set_accumulator
                 .hash(),
-                block_1.kernel
-                    .body
-                    .mutator_set_accumulator
-                    .hash()
+            block_1.kernel
+                .body
+                .mutator_set_accumulator
+                .hash()
         );
 
         // Sanity checks

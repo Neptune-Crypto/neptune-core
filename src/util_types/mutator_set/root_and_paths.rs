@@ -2,13 +2,14 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{BoxedStrategy, Just, Strategy},
-};
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Just;
+use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use tasm_lib::{twenty_first::util_types::algebraic_hasher::AlgebraicHasher, Digest};
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -48,7 +49,7 @@ impl Arbitrary for RootAndPaths {
             vec_digest_strategy,
         )
             .prop_map(|(tree_height, indices_and_leafs, mut digests)| {
-                assert!(indices_and_leafs.iter().all(|(i,_l)| (*i as u128) < (1u128 << tree_height)), "indices too large for tree of height: {}", tree_height);
+                assert!(indices_and_leafs.iter().all(|(i, _l)| (*i as u128) < (1u128 << tree_height)), "indices too large for tree of height: {}", tree_height);
                 // populate nodes dictionary with leafs
                 let mut nodes = HashMap::new();
                 for &(index, leaf) in &indices_and_leafs {
@@ -56,7 +57,7 @@ impl Arbitrary for RootAndPaths {
                     nodes.insert(node_index, leaf);
                 }
 
-                let by_layer = |index : u128, layer : usize| {
+                let by_layer = |index: u128, layer: usize| {
                     let sub_tree_height = tree_height - layer;
                     let layer_start = 1u128 << sub_tree_height;
                     let layer_stop = 1u128 << (sub_tree_height + 1);

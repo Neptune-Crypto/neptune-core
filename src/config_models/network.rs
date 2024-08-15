@@ -1,7 +1,10 @@
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
+use serde::Deserialize;
+use serde::Serialize;
 use strum::EnumIter;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 

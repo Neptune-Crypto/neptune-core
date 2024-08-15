@@ -1,17 +1,24 @@
-use std::{
-    fmt::Display,
-    ops::{Add, Sub},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::fmt::Display;
+use std::ops::Add;
+use std::ops::Sub;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use arbitrary::Arbitrary;
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use chrono::DateTime;
+use chrono::Local;
+use chrono::NaiveDateTime;
+use chrono::Utc;
 use get_size::GetSize;
 use num_traits::Zero;
-use proptest::strategy::{BoxedStrategy, Strategy};
-use rand::distributions::{Distribution, Standard};
-use serde::{Deserialize, Serialize};
-use tasm_lib::twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
+use rand::distributions::Distribution;
+use rand::distributions::Standard;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 /// Dedicated struct for timestamps (and durations). Counts the number of
 /// milliseconds elapsed since the Unix epoch (00:00 UTC on 1 Jan 1970) using

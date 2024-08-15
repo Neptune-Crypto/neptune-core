@@ -1,28 +1,27 @@
-use crate::{
-    models::consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram, ValidationLogic},
-    Hash,
-};
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{Program, PublicInput},
-    },
-    twenty_first::{
-        math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
-    },
-    Digest,
-};
-
-use self::native_currency::NativeCurrency;
-
-use super::transaction::{primitive_witness::SaltedUtxos, transaction_kernel::TransactionKernel};
-
 pub mod native_currency;
 pub mod neptune_coins;
 pub mod time_lock;
+
+use get_size::GetSize;
+use native_currency::NativeCurrency;
+use serde::Deserialize;
+use serde::Serialize;
+use std::hash::Hash as StdHash;
+use std::hash::Hasher as StdHasher;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
+
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::ValidationLogic;
+use crate::Hash;
+
+use super::transaction::primitive_witness::SaltedUtxos;
+use super::transaction::transaction_kernel::TransactionKernel;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {

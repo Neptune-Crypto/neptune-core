@@ -1,8 +1,15 @@
-use super::{PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
-use crate::locks::tokio::AtomicRw;
-use serde::Serialize;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::sync::Arc;
+
+use serde::Serialize;
+
+use crate::locks::tokio::AtomicRw;
+
+use super::PendingWrites;
+use super::RustyValue;
+use super::SimpleRustyReader;
+use super::WriteOperation;
 
 // note: no locking is required in `DbtSingletonPrivate` because locking
 // is performed in the `DbtSingleton` public wrapper.

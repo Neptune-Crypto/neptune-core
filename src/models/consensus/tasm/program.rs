@@ -1,14 +1,12 @@
-use std::panic::{catch_unwind, RefUnwindSafe};
+use std::panic::catch_unwind;
+use std::panic::RefUnwindSafe;
 
 use itertools::Itertools;
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, Program},
-    },
-    twenty_first::math::b_field_element::BFieldElement,
-    Digest,
-};
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 

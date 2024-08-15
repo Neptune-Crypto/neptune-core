@@ -1,9 +1,12 @@
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
 
-use super::{block_body::BlockBody, block_header::BlockHeader};
 use crate::models::blockchain::block::BFieldCodec;
+
+use super::block_body::BlockBody;
+use super::block_header::BlockHeader;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Eq, BFieldCodec, GetSize)]
 pub enum ProofType {

@@ -1,28 +1,31 @@
-use crate::{
-    models::{
-        blockchain::type_scripts::neptune_coins::{pseudorandom_amount, NeptuneCoins},
-        consensus::{
-            mast_hash::{HasDiscriminant, MastHash},
-            timestamp::Timestamp,
-        },
-    },
-    prelude::twenty_first,
-};
-
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
+use rand::rngs::StdRng;
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest};
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
 
-use super::{primitive_witness::PrimitiveWitness, PublicAnnouncement};
-use crate::util_types::mutator_set::{
-    addition_record::{pseudorandom_addition_record, AdditionRecord},
-    removal_record::{pseudorandom_removal_record, RemovalRecord},
-};
+use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::mast_hash::HasDiscriminant;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+use super::primitive_witness::PrimitiveWitness;
+use super::PublicAnnouncement;
 
 pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -178,13 +181,15 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
 
 #[cfg(test)]
 pub mod transaction_kernel_tests {
+    use rand::random;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
 
-    use rand::{random, thread_rng, Rng, RngCore};
-
-    use crate::{
-        tests::shared::{random_public_announcement, random_transaction_kernel},
-        util_types::mutator_set::{removal_record::AbsoluteIndexSet, shared::NUM_TRIALS},
-    };
+    use crate::tests::shared::random_public_announcement;
+    use crate::tests::shared::random_transaction_kernel;
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     use super::*;
 

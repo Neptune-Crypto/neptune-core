@@ -1,16 +1,17 @@
-use crate::models::consensus::timestamp::Timestamp;
-use crate::prelude::twenty_first;
-
-use crate::models::consensus::mast_hash::HasDiscriminant;
-use crate::models::consensus::mast_hash::MastHash;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+
+use get_size::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use twenty_first::amount::u32s::U32s;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
-use twenty_first::amount::u32s::U32s;
-use twenty_first::math::b_field_element::BFieldElement;
+use crate::models::consensus::mast_hash::HasDiscriminant;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::prelude::twenty_first;
 
 use super::block_height::BlockHeight;
 
@@ -101,7 +102,8 @@ impl MastHash for BlockHeader {
 
 #[cfg(test)]
 mod block_header_tests {
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
+    use rand::Rng;
 
     use super::*;
 

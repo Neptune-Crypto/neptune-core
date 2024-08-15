@@ -5,6 +5,24 @@
 //! In the future we may want to explore adding an rpc layer that is friendly to
 //! other languages.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::str::FromStr;
+
+use anyhow::Result;
+use get_size::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use systemstat::Platform;
+use systemstat::System;
+use tarpc::context;
+use tokio::sync::mpsc::error::SendError;
+use tracing::error;
+use tracing::info;
+use twenty_first::math::digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -24,19 +42,6 @@ use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleT
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use anyhow::Result;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::net::SocketAddr;
-use std::str::FromStr;
-use systemstat::{Platform, System};
-use tarpc::context;
-use tokio::sync::mpsc::error::SendError;
-use tracing::{error, info};
-use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -796,25 +801,31 @@ impl RPC for NeptuneRPCServer {
 
 #[cfg(test)]
 mod rpc_server_tests {
-    use super::*;
-    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
-    use crate::tests::shared::make_mock_block_with_valid_pow;
-    use crate::Block;
-    use crate::{
-        config_models::network::Network,
-        models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
-        rpc_server::NeptuneRPCServer,
-        tests::shared::mock_genesis_global_state,
-        RPC_CHANNEL_CAPACITY,
-    };
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::SocketAddr;
+
     use anyhow::Result;
-    use num_traits::{One, Zero};
+    use num_traits::One;
+    use num_traits::Zero;
     use rand::Rng;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
     use ReceivingAddress;
+
+    use crate::config_models::network::Network;
+    use crate::models::peer::PeerSanctionReason;
+    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::Block;
+    use crate::RPC_CHANNEL_CAPACITY;
+
+    use super::*;
 
     async fn test_rpc_server(
         network: Network,

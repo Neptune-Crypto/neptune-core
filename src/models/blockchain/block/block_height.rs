@@ -1,14 +1,17 @@
-use crate::prelude::twenty_first;
+use std::cmp::Ordering;
+use std::fmt::Display;
+use std::ops::Add;
+use std::ops::Sub;
 
 use get_size::GetSize;
-use num_traits::{One, Zero};
-use serde::{Deserialize, Serialize};
-use std::{
-    cmp::Ordering,
-    fmt::Display,
-    ops::{Add, Sub},
-};
-use twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use num_traits::One;
+use num_traits::Zero;
+use serde::Deserialize;
+use serde::Serialize;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::prelude::twenty_first;
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,

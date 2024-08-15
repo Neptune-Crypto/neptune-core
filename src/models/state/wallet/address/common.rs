@@ -148,7 +148,10 @@ pub fn lock_script(spending_lock: Digest) -> LockScript {
 #[cfg(test)]
 pub(super) mod test {
     use super::*;
-    use rand::{thread_rng, Rng, RngCore};
+
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
     use tasm_lib::DIGEST_LENGTH;
 
     #[test]

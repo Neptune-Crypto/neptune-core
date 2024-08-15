@@ -1,9 +1,12 @@
-use super::network::Network;
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
 use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
-use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+
+use super::network::Network;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]

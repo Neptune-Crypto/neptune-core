@@ -1,7 +1,13 @@
 //! provides an abstraction over key and address types.
 
-use super::common;
-use super::{generation_address, symmetric_key};
+use anyhow::bail;
+use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::Digest;
+use tracing::warn;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
@@ -12,11 +18,10 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::BFieldElement;
-use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
-use tasm_lib::triton_vm::prelude::Digest;
-use tracing::warn;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use super::common;
+use super::generation_address;
+use super::symmetric_key;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
 // that we get a compiler verification that values do not conflict.  which is
@@ -158,6 +163,7 @@ impl ReceivingAddress {
             self.encrypt(utxo, sender_randomness)?.as_slice(),
         ]
         .concat();
+
         Ok(PublicAnnouncement::new(ciphertext))
     }
 
@@ -332,7 +338,7 @@ impl SpendingKey {
             })
 
             // ... that have a ciphertext field
-            .filter_map(|pa| self.ok_warn(common::ciphertext_from_public_announcement(pa)) )
+            .filter_map(|pa| self.ok_warn(common::ciphertext_from_public_announcement(pa)))
 
             // ... which can be decrypted with this key
             .filter_map(|c| self.ok_warn(self.decrypt(&c)))

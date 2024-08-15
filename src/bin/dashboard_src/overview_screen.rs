@@ -1,13 +1,9 @@
-use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use neptune_core::prelude::twenty_first;
-
+use std::cmp::min;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 use std::time::SystemTime;
-use std::{
-    cmp::min,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
 
 use bytesize::ByteSize;
 use chrono::DateTime;
@@ -15,15 +11,23 @@ use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
+use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::prelude::twenty_first;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
-use ratatui::{
-    layout::{Margin, Rect},
-    style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, Widget},
-};
+use ratatui::layout::Margin;
+use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::List;
+use ratatui::widgets::ListItem;
+use ratatui::widgets::Widget;
 use tarpc::context;
-use tokio::{select, task::JoinHandle, time};
+use tokio::select;
+use tokio::task::JoinHandle;
+use tokio::time;
 use twenty_first::prelude::Digest;
 
 use super::dashboard_app::DashboardEvent;

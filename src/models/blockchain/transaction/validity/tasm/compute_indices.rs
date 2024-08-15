@@ -1,27 +1,27 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
-use tasm_lib::traits::function::{Function, FunctionInitialState};
-
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
 use triton_vm::triton_asm;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use crate::util_types::mutator_set::ms_membership_proof::{
-    pseudorandom_mutator_set_membership_proof, MsMembershipProof,
-};
-use crate::util_types::mutator_set::shared::{NUM_TRIALS, WINDOW_SIZE};
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Given a mutator set item and its membership proof, compute its removal record indices.
 #[derive(Debug, Clone)]
@@ -235,22 +235,27 @@ impl Function for ComputeIndices {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::HashMap, rc::Rc};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
 
     use itertools::Itertools;
-    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
-    use tasm_lib::{
-        empty_stack,
-        linker::link_for_isolated_run,
-        list::higher_order::{inner_function::InnerFunction, map::Map},
-        maybe_write_debuggable_program_to_disk, rust_shadowing_helper_functions,
-        test_helpers::link_and_run_tasm_for_test,
-        traits::{function::ShadowedFunction, rust_shadow::RustShadow},
-        triton_vm::{
-            program::{Program, PublicInput},
-            vm::VMState,
-        },
-    };
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
+    use tasm_lib::empty_stack;
+    use tasm_lib::linker::link_for_isolated_run;
+    use tasm_lib::list::higher_order::inner_function::InnerFunction;
+    use tasm_lib::list::higher_order::map::Map;
+    use tasm_lib::maybe_write_debuggable_program_to_disk;
+    use tasm_lib::rust_shadowing_helper_functions;
+    use tasm_lib::test_helpers::link_and_run_tasm_for_test;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::triton_vm::program::Program;
+    use tasm_lib::triton_vm::program::PublicInput;
+    use tasm_lib::triton_vm::vm::VMState;
     use triton_vm::prelude::NonDeterminism;
     use twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -422,7 +427,8 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
 

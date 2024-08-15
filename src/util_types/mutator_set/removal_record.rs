@@ -1,33 +1,40 @@
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::ops::IndexMut;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde::de::{SeqAccess, Visitor};
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 use serde::ser::SerializeTuple;
 use serde::Deserialize;
 use serde_derive::Serialize;
-use std::collections::{HashMap, HashSet};
-use std::marker::PhantomData;
-use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
-use super::mutator_set_accumulator::MutatorSetAccumulator;
-use super::shared::{
-    get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
-    NUM_TRIALS,
-};
-use super::MutatorSetError;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
+
+use super::chunk_dictionary::pseudorandom_chunk_dictionary;
+use super::chunk_dictionary::ChunkDictionary;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
+use super::shared::get_batch_mutation_argument_for_removal_record;
+use super::shared::indices_to_hash_map;
+use super::shared::BATCH_SIZE;
+use super::shared::CHUNK_SIZE;
+use super::shared::NUM_TRIALS;
+use super::MutatorSetError;
 
 #[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
@@ -367,14 +374,17 @@ pub fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
 mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
     use test_strategy::proptest;
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;

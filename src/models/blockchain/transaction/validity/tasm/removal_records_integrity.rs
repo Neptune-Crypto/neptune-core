@@ -1,55 +1,49 @@
-use crate::models::consensus::mast_hash::MastHash;
-use crate::prelude::{triton_vm, twenty_first};
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
-
 use std::collections::HashSet;
 
 use itertools::Itertools;
 use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
+use tasm_lib::list::contiguous_list::get_pointer_list::GetPointerList;
+use tasm_lib::list::higher_order::all::All;
+use tasm_lib::list::higher_order::inner_function::InnerFunction;
+use tasm_lib::list::higher_order::map::Map;
+use tasm_lib::list::higher_order::zip::Zip;
+use tasm_lib::list::multiset_equality::MultisetEquality;
+use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
-use tasm_lib::{
-    list::{
-        contiguous_list::get_pointer_list::GetPointerList,
-        higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
-        multiset_equality::MultisetEquality,
-    },
-    mmr::bag_peaks::BagPeaks,
-    DIGEST_LENGTH,
-};
+use tasm_lib::DIGEST_LENGTH;
 use triton_vm::instruction::LabelledInstruction;
-use triton_vm::prelude::{triton_asm, BFieldElement, NonDeterminism, PublicInput};
-use twenty_first::{
-    math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-    },
-};
+use triton_vm::prelude::triton_asm;
+use triton_vm::prelude::BFieldElement;
+use triton_vm::prelude::NonDeterminism;
+use triton_vm::prelude::PublicInput;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use crate::models::blockchain::transaction::validity::removal_records_integrity::{
-    RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness,
-};
-use crate::{
-    models::blockchain::{
-        shared::Hash,
-        transaction::{
-            transaction_kernel::TransactionKernel,
-            validity::tasm::transaction_kernel_mast_hash::TransactionKernelMastHash,
-        },
-    },
-    util_types::mutator_set::removal_record::AbsoluteIndexSet,
-};
-use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
+use crate::models::blockchain::transaction::validity::tasm::transaction_kernel_mast_hash::TransactionKernelMastHash;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 
-use super::{
-    compute_canonical_commitment::ComputeCanonicalCommitment, compute_indices::ComputeIndices,
-    hash_index_list::HashIndexList, hash_removal_record_indices::HashRemovalRecordIndices,
-    hash_utxo::HashUtxo, verify_aocl_membership::VerifyAoclMembership,
-};
+use super::compute_canonical_commitment::ComputeCanonicalCommitment;
+use super::compute_indices::ComputeIndices;
+use super::hash_index_list::HashIndexList;
+use super::hash_removal_record_indices::HashRemovalRecordIndices;
+use super::hash_utxo::HashUtxo;
+use super::verify_aocl_membership::VerifyAoclMembership;
 
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
@@ -351,34 +345,17 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 mod tests {
     use std::collections::HashMap;
 
-    use super::*;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::traits::compiled_program::test_rust_shadow;
+    use triton_vm::prelude::Claim;
+    use triton_vm::prelude::Stark;
+
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{memory::encode_to_memory, traits::compiled_program::test_rust_shadow};
-    use triton_vm::prelude::{Claim, Stark};
 
-    // #[test]
-    // fn test_validation_logic() {
-    //     let mut rng = thread_rng();
-    //     let tx_kernel = &pseudorandom_transaction_kernel(rng.gen(), 2, 2, 2);
-    //     let prrriw =
-    //         pseudorandom_removal_record_integrity_witness(rng.gen());
-    //     let input_utxos = prrriw.input_utxos;
-    //     let input_lock_scripts = prrriw.input_utxos.iter().map(|x| x.)
-
-    //     // pub struct PrimitiveWitness {
-    //     // pub input_utxos: Vec<Utxo>,
-    //     // pub input_lock_scripts: Vec<LockScript>,
-    //     // pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    //     // pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
-    //     // pub output_utxos: Vec<Utxo>,
-    //     // pub pubscripts: Vec<PubScript>,
-    //     // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
-    //     // }
-
-    //     // let primitive_witness = pseudorandom_pri
-    //     let rriw = RemovalRecordsIntegrity::new_from_witness(primitive_witness, tx_kernel);
-    // }
+    use super::*;
 
     #[test]
     fn test_graceful_halt() {
@@ -464,19 +441,22 @@ mod tests {
 mod bench {
     use std::collections::HashMap;
 
-    use crate::{models::consensus::mast_hash::MastHash, prelude::triton_vm};
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
+    use tasm_lib::traits::compiled_program::bench_and_profile_program;
+    use triton_vm::prelude::BFieldElement;
+    use triton_vm::prelude::NonDeterminism;
+    use triton_vm::prelude::PublicInput;
 
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{
-        memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
-        snippet_bencher::BenchmarkCase,
-    };
-    use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
-
+    use crate::models::consensus::mast_hash::MastHash;
+    use crate::prelude::triton_vm;
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 
     use super::RemovalRecordsIntegrity;
-    use tasm_lib::traits::compiled_program::bench_and_profile_program;
 
     #[test]
     fn benchmark() {

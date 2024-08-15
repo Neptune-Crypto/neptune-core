@@ -1,22 +1,16 @@
-use crate::models::blockchain::transaction;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::prelude::{triton_vm, twenty_first};
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
-use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
-
-use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde_derive::{Deserialize, Serialize};
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
 use std::collections::HashMap;
-use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
@@ -24,21 +18,33 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::NonDeterminism;
-use twenty_first::{
-    math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
-};
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::models::consensus::{
-    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-};
-use crate::{
-    models::blockchain::{
-        shared::Hash,
-        transaction::{transaction_kernel::TransactionKernel, utxo::Utxo, PrimitiveWitness},
-    },
-    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
-};
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PrimitiveWitness;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::SecretWitness;
+use crate::models::consensus::ValidationLogic;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WhichProgram;
+use crate::models::consensus::WitnessType;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::get_swbf_indices;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(
     Clone,

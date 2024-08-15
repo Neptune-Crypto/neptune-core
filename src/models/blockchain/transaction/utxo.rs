@@ -1,29 +1,33 @@
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::time_lock::TimeLock;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::prelude::{triton_vm, twenty_first};
+use std::hash::Hash as StdHash;
+use std::hash::Hasher as StdHasher;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-
-use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
@@ -261,12 +265,14 @@ impl<'a> Arbitrary<'a> for LockScript {
 
 #[cfg(test)]
 mod utxo_tests {
+    use rand::thread_rng;
+    use rand::Rng;
+    use tracing_test::traced_test;
+    use twenty_first::math::other::random_elements;
+
     use crate::models::blockchain::type_scripts::TypeScript;
 
     use super::*;
-    use rand::{thread_rng, Rng};
-    use tracing_test::traced_test;
-    use twenty_first::math::other::random_elements;
 
     fn make_random_utxo() -> Utxo {
         let mut rng = thread_rng();

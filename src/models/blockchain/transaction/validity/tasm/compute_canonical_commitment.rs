@@ -1,23 +1,30 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
-use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
-use num_traits::{One, Zero};
+use num_traits::One;
+use num_traits::Zero;
+use rand::rngs::StdRng;
+use rand::Rng;
 use rand::RngCore;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
 use tasm_lib::empty_stack;
 use tasm_lib::library::Library;
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use tasm_lib::neptune::mutator_set::commit::Commit;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-use tasm_lib::traits::function::{Function, FunctionInitialState};
-use triton_vm::prelude::{triton_asm, BFieldElement, Digest};
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
+use triton_vm::prelude::triton_asm;
+use triton_vm::prelude::BFieldElement;
+use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::util_types::mutator_set::{commit, ms_membership_proof::MsMembershipProof};
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 /// Compute a canonical commitment from an item and its membership proof.
 #[derive(Debug, Clone)]
@@ -193,7 +200,8 @@ impl Function for ComputeCanonicalCommitment {
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
 
@@ -205,7 +213,8 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
 

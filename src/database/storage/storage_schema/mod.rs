@@ -46,20 +46,22 @@ pub use simple_rusty_storage::*;
 
 #[cfg(test)]
 mod tests {
-
-    use super::traits::*;
-    use super::*;
-
     use std::sync::Arc;
 
-    use super::super::storage_vec::{traits::*, Index};
-    use rand::{random, Rng, RngCore};
-    use serde::{Deserialize, Serialize};
+    use itertools::Itertools;
+    use rand::random;
+    use rand::Rng;
+    use rand::RngCore;
+    use serde::Deserialize;
+    use serde::Serialize;
 
     use crate::database::NeptuneLevelDb;
     use crate::twenty_first::math::other::random_elements;
 
-    use itertools::Itertools;
+    use super::super::storage_vec::traits::*;
+    use super::super::storage_vec::Index;
+    use super::traits::*;
+    use super::*;
 
     #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     struct S(Vec<u8>);

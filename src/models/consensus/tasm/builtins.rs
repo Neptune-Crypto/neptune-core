@@ -1,18 +1,18 @@
-use tasm_lib::{
-    structure::tasm_object::TasmObject,
-    twenty_first::{
-        math::{
-            b_field_element::BFieldElement, bfield_codec::BFieldCodec,
-            x_field_element::XFieldElement,
-        },
-        util_types::merkle_tree::MerkleTreeInclusionProof,
-    },
-    Digest,
-};
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::x_field_element::XFieldElement;
+use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof;
+use tasm_lib::Digest;
 
-use crate::models::{blockchain::shared::Hash, consensus::tasm::environment::ND_DIGESTS};
+use crate::models::blockchain::shared::Hash;
+use crate::models::consensus::tasm::environment::ND_DIGESTS;
 
-use super::environment::{ND_INDIVIDUAL_TOKEN, ND_MEMORY, PROGRAM_DIGEST, PUB_INPUT, PUB_OUTPUT};
+use super::environment::ND_INDIVIDUAL_TOKEN;
+use super::environment::ND_MEMORY;
+use super::environment::PROGRAM_DIGEST;
+use super::environment::PUB_INPUT;
+use super::environment::PUB_OUTPUT;
 
 /// Get the hash digest of the program that's currently running.
 pub fn own_program_digest() -> Digest {

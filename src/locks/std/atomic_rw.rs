@@ -1,8 +1,16 @@
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::RwLockReadGuard;
+use std::sync::RwLockWriteGuard;
+
 use super::shared::LockAcquisition;
 use super::traits::Atomic;
-use super::{LockCallbackFn, LockCallbackInfo, LockEvent, LockType};
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use super::LockCallbackFn;
+use super::LockCallbackInfo;
+use super::LockEvent;
+use super::LockType;
 
 /// An `Arc<RwLock<T>>` wrapper to make data thread-safe and easy to work with.
 ///

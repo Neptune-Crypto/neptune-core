@@ -1,28 +1,36 @@
-use anyhow::{bail, Result};
-use futures::{FutureExt, SinkExt, TryStreamExt};
-use std::{fmt::Debug, net::SocketAddr};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::{broadcast, mpsc},
-};
-use tokio_serde::{
-    formats::{Bincode, SymmetricalBincode},
-    SymmetricallyFramed,
-};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info, warn};
+use std::fmt::Debug;
+use std::net::SocketAddr;
 
-use crate::{
-    models::{
-        channel::{MainToPeerTask, PeerTaskToMain},
-        peer::{
-            ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage, PeerStanding,
-        },
-        state::GlobalStateLock,
-    },
-    peer_loop::PeerLoopHandler,
-    MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
-};
+use anyhow::bail;
+use anyhow::Result;
+use futures::FutureExt;
+use futures::SinkExt;
+use futures::TryStreamExt;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio_serde::formats::Bincode;
+use tokio_serde::formats::SymmetricalBincode;
+use tokio_serde::SymmetricallyFramed;
+use tokio_util::codec::Framed;
+use tokio_util::codec::LengthDelimitedCodec;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
+
+use crate::models::channel::MainToPeerTask;
+use crate::models::channel::PeerTaskToMain;
+use crate::models::peer::ConnectionRefusedReason;
+use crate::models::peer::ConnectionStatus;
+use crate::models::peer::HandshakeData;
+use crate::models::peer::PeerMessage;
+use crate::models::peer::PeerStanding;
+use crate::models::state::GlobalStateLock;
+use crate::peer_loop::PeerLoopHandler;
+use crate::MAGIC_STRING_REQUEST;
+use crate::MAGIC_STRING_RESPONSE;
 
 // Max peer message size is 2000MB
 pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 2000 * 1024 * 1024;
@@ -457,26 +465,30 @@ pub async fn close_peer_connected_callback(
 
 #[cfg(test)]
 mod connect_tests {
-    use crate::prelude::twenty_first;
-
     use std::time::SystemTime;
 
-    use super::*;
-
-    use anyhow::{bail, Result};
+    use anyhow::bail;
+    use anyhow::Result;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
     use twenty_first::math::digest::Digest;
 
     use crate::config_models::network::Network;
-    use crate::models::peer::{
-        ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
-    };
-    use crate::tests::shared::{
-        get_dummy_handshake_data_for_genesis, get_dummy_peer_connection_data_genesis,
-        get_dummy_socket_address, get_test_genesis_setup, to_bytes,
-    };
-    use crate::{MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE};
+    use crate::models::peer::ConnectionStatus;
+    use crate::models::peer::PeerInfo;
+    use crate::models::peer::PeerMessage;
+    use crate::models::peer::PeerSanctionReason;
+    use crate::models::peer::PeerStanding;
+    use crate::prelude::twenty_first;
+    use crate::tests::shared::get_dummy_handshake_data_for_genesis;
+    use crate::tests::shared::get_dummy_peer_connection_data_genesis;
+    use crate::tests::shared::get_dummy_socket_address;
+    use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::to_bytes;
+    use crate::MAGIC_STRING_REQUEST;
+    use crate::MAGIC_STRING_RESPONSE;
+
+    use super::*;
 
     #[traced_test]
     #[tokio::test]

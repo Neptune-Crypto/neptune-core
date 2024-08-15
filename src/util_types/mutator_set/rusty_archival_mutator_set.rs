@@ -1,16 +1,19 @@
-use crate::database::storage::storage_schema::{
-    traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
-};
+use twenty_first::math::tip5::Digest;
+
+use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_schema::DbtSingleton;
+use crate::database::storage::storage_schema::DbtVec;
+use crate::database::storage::storage_schema::RustyKey;
+use crate::database::storage::storage_schema::RustyValue;
+use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
-use twenty_first::math::tip5::Digest;
-
-use super::{
-    active_window::ActiveWindow, archival_mmr::ArchivalMmr,
-    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
-};
+use super::active_window::ActiveWindow;
+use super::archival_mmr::ArchivalMmr;
+use super::archival_mutator_set::ArchivalMutatorSet;
+use super::chunk::Chunk;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
@@ -97,13 +100,14 @@ impl StorageWriter for RustyArchivalMutatorSet {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use rand::{random, thread_rng, RngCore};
+    use rand::random;
+    use rand::thread_rng;
+    use rand::RngCore;
     use twenty_first::math::tip5::Tip5;
 
     use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::{
-        ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
-    };
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;

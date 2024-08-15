@@ -1,3 +1,28 @@
+use std::ops::Deref;
+use std::time::Duration;
+
+use anyhow::Context;
+use anyhow::Result;
+use futures::channel::oneshot;
+use num_traits::identities::Zero;
+use primitive_witness::SaltedUtxos;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tokio::select;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tracing::*;
+use twenty_first::amount::u32s::U32s;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::math::digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -14,34 +39,14 @@ use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::*;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::{GlobalState, GlobalStateLock};
+use crate::models::state::GlobalState;
+use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use anyhow::{Context, Result};
-use futures::channel::oneshot;
-use num_traits::identities::Zero;
-use rand::rngs::StdRng;
-use rand::thread_rng;
-use rand::Rng;
-use rand::SeedableRng;
-use std::ops::Deref;
-use std::time::Duration;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tokio::select;
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
-use tracing::*;
-use twenty_first::amount::u32s::U32s;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use self::primitive_witness::SaltedUtxos;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
@@ -525,10 +530,9 @@ pub async fn mine(
 mod mine_loop_tests {
     use tracing_test::traced_test;
 
-    use crate::{
-        config_models::network::Network, models::consensus::timestamp::Timestamp,
-        tests::shared::mock_genesis_global_state,
-    };
+    use crate::config_models::network::Network;
+    use crate::models::consensus::timestamp::Timestamp;
+    use crate::tests::shared::mock_genesis_global_state;
 
     use super::*;
 

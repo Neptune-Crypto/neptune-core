@@ -1,23 +1,14 @@
-/// A simple example demonstrating how to handle user input. This is
-/// a bit out of the scope of the library as it does not provide any
-/// input handling out of the box. However, it may helps some to get
-/// started.
-///
-/// This is a very simple example:
-///   * A input box always focused. Every character you type is registered
-///     here
-///   * Pressing Backspace erases a character
-///   * Pressing Enter pushes the current input in the history of previous
-///     messages
-///
-use anyhow::{bail, Result};
-use clap::Parser;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 
+use anyhow::bail;
+use anyhow::Result;
+use clap::Parser;
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_core::rpc_server::RPCClient;
-use std::net::{Ipv4Addr, SocketAddr};
+use tarpc::client;
+use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
-use tarpc::{client, context};
 
 pub mod dashboard_src;
 

@@ -233,11 +233,12 @@ pub trait StorageVec<T: Send>: StorageVecBase<T> + StorageVecStream<T> {}
 #[cfg(test)]
 pub(in super::super) mod tests {
     use super::*;
-    // use itertools::Itertools;
 
     pub mod streams {
+        use futures::pin_mut;
+        use futures::StreamExt;
+
         use super::*;
-        use futures::{pin_mut, StreamExt};
 
         pub async fn prepare_streams_test_vec(vec: &mut impl StorageVecBase<u64>) {
             vec.clear().await;

@@ -1,24 +1,33 @@
-use crate::models::{
-    blockchain::transaction::utxo::Coin, consensus::tasm::program::ConsensusProgram,
-};
+use std::fmt::Display;
+use std::iter::Sum;
+use std::ops::Add;
+use std::ops::Mul;
+use std::ops::Neg;
+use std::ops::Sub;
+use std::str::FromStr;
 
-use super::native_currency::NativeCurrency;
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{CheckedSub, FromPrimitive, One, Zero};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use num_traits::CheckedSub;
+use num_traits::FromPrimitive;
+use num_traits::One;
+use num_traits::Zero;
+use rand::rngs::StdRng;
+use rand::Rng;
+use rand::SeedableRng;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Display,
-    iter::Sum,
-    ops::{Add, Mul, Neg, Sub},
-    str::FromStr,
-};
-use tasm_lib::{structure::tasm_object::TasmObject, twenty_first::math::bfield_codec::BFieldCodec};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+
+use super::native_currency::NativeCurrency;
 
 /// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented
 /// by an atomic unit called Neptune atomic units (nau), which itself is represented as a 128
@@ -360,14 +369,19 @@ impl<'a> Arbitrary<'a> for NeptuneCoins {
 
 #[cfg(test)]
 mod amount_tests {
-    use arbitrary::{Arbitrary, Unstructured};
+    use std::ops::ShlAssign;
+    use std::str::FromStr;
+
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
     use get_size::GetSize;
     use itertools::Itertools;
     use num_bigint::Sign;
     use num_traits::FromPrimitive;
     use proptest_arbitrary_interop::arb;
-    use rand::{thread_rng, Rng, RngCore};
-    use std::{ops::ShlAssign, str::FromStr};
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
     use test_strategy::proptest;
 
     use super::*;

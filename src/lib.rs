@@ -17,20 +17,57 @@ pub mod prelude;
 pub mod rpc_server;
 pub mod util_types;
 
-// needed by TasmObject derive macro
-use prelude::{tasm_lib, triton_vm, twenty_first};
-use triton_vm::prelude::BFieldElement;
-
 #[cfg(test)]
 pub mod tests;
 
+use std::collections::HashMap;
+use std::env;
+use std::net::SocketAddr;
+
+use anyhow::Context;
+use anyhow::Result;
+use chrono::DateTime;
+use chrono::Local;
+use chrono::NaiveDateTime;
+use chrono::Utc;
+use config_models::cli_args;
+use futures::future;
+use futures::Future;
+use futures::StreamExt;
+use models::blockchain::block::Block;
+use models::blockchain::shared::Hash;
+use models::peer::PeerInfo;
+use prelude::tasm_lib;
+use prelude::triton_vm;
+use prelude::twenty_first;
+use tarpc::server;
+use tarpc::server::incoming::Incoming;
+use tarpc::server::Channel;
+use tarpc::tokio_serde::formats::*;
+use tokio::net::TcpListener;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
+use tokio::time::Instant;
+use tracing::info;
+use tracing::trace;
+use triton_vm::prelude::BFieldElement;
+
 use crate::config_models::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer_wrapper;
+use crate::locks::tokio as sync_tokio;
+use crate::locks::tokio::LockCallbackFn;
+use crate::locks::tokio::LockEvent;
 use crate::main_loop::MainLoopHandler;
+use crate::models::channel::MainToMiner;
+use crate::models::channel::MainToPeerTask;
+use crate::models::channel::MinerToMain;
+use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::RPCServerToMain;
-
+use crate::models::peer::HandshakeData;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::{BlockchainArchivalState, BlockchainState};
+use crate::models::state::blockchain_state::BlockchainArchivalState;
+use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
@@ -38,33 +75,6 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
-use anyhow::{Context, Result};
-use config_models::cli_args;
-
-use crate::locks::tokio as sync_tokio;
-use crate::locks::tokio::{LockCallbackFn, LockEvent};
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use futures::future;
-use futures::Future;
-use futures::StreamExt;
-
-use models::blockchain::block::Block;
-use models::blockchain::shared::Hash;
-use models::peer::PeerInfo;
-use std::collections::HashMap;
-use std::env;
-use std::net::SocketAddr;
-use tarpc::server;
-use tarpc::server::incoming::Incoming;
-use tarpc::server::Channel;
-use tarpc::tokio_serde::formats::*;
-use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc, watch};
-use tokio::time::Instant;
-use tracing::{info, trace};
-
-use crate::models::channel::{MainToMiner, MainToPeerTask, MinerToMain, PeerTaskToMain};
-use crate::models::peer::HandshakeData;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -113,8 +123,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
-    .await
-    .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
+        .await
+        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
     info!("Now listening for incoming transactions");
 
     let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();

@@ -1,29 +1,29 @@
-use crate::{
-    models::{
-        blockchain::transaction,
-        consensus::{
-            mast_hash::MastHash, tasm::program::ConsensusProgram, RawWitness, ValidationLogic,
-            ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-        },
-    },
-    prelude::{triton_vm, twenty_first},
-};
-
 use get_size::GetSize;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{Program, PublicInput},
-        proof::Claim,
-    },
-    Digest,
-};
-use triton_vm::prelude::{BFieldElement, NonDeterminism};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::Digest;
+use triton_vm::prelude::BFieldElement;
+use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::{blockchain::transaction::utxo::LockScript, consensus::SecretWitness};
+use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::utxo::LockScript;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::RawWitness;
+use crate::models::consensus::SecretWitness;
+use crate::models::consensus::ValidationLogic;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WhichProgram;
+use crate::models::consensus::WitnessType;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 pub struct LockScriptHalts {
     pub program: Program,

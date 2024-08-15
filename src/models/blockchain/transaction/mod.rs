@@ -1,11 +1,5 @@
 //! implements [Transaction] and some types it depends on.
 
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::{ValidityTree, WitnessType};
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-use crate::prelude::{triton_vm, twenty_first};
-
 pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
@@ -14,34 +8,10 @@ pub mod validity;
 mod transaction_input;
 mod transaction_output;
 
-use anyhow::{bail, Result};
-use arbitrary::Arbitrary;
-use get_size::GetSize;
-use itertools::Itertools;
-use num_bigint::BigInt;
-use num_rational::BigRational;
-use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::HashMap;
-use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use tasm_lib::Digest;
-use tracing::{debug, error, warn};
-use triton_vm::prelude::NonDeterminism;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use utxo::Utxo;
-
-use self::primitive_witness::PrimitiveWitness;
-use self::transaction_kernel::TransactionKernel;
-use self::validity::TransactionValidationLogic;
-use super::block::Block;
-use super::shared::Hash;
-use super::type_scripts::TypeScript;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use std::hash::Hash as StdHash;
+use std::hash::Hasher as StdHasher;
 
 pub use transaction_input::TxInput;
 pub use transaction_input::TxInputList;
@@ -49,6 +19,45 @@ pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UtxoNotification;
 pub use transaction_output::UtxoNotifyMethod;
+
+use anyhow::bail;
+use anyhow::Result;
+use arbitrary::Arbitrary;
+use get_size::GetSize;
+use itertools::Itertools;
+use num_bigint::BigInt;
+use num_rational::BigRational;
+use primitive_witness::PrimitiveWitness;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::Digest;
+use tracing::debug;
+use tracing::error;
+use tracing::warn;
+use transaction_kernel::TransactionKernel;
+
+use triton_vm::prelude::NonDeterminism;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use utxo::Utxo;
+use validity::TransactionValidationLogic;
+
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WitnessType;
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+use super::block::Block;
+use super::shared::Hash;
+use super::type_scripts::TypeScript;
 
 /// represents a utxo and secrets necessary for recipient to claim it.
 ///
@@ -672,16 +681,15 @@ mod witness_tests {
 mod transaction_tests {
     use rand::random;
     use tracing_test::traced_test;
-    use transaction_tests::utxo::{LockScript, Utxo};
+    use transaction_tests::utxo::LockScript;
+    use transaction_tests::utxo::Utxo;
+
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::consensus::timestamp::Timestamp;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::util_types::mutator_set::commit;
 
     use super::*;
-    use crate::{
-        models::{
-            blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
-        },
-        tests::shared::make_mock_transaction,
-        util_types::mutator_set::commit,
-    };
 
     #[traced_test]
     #[test]

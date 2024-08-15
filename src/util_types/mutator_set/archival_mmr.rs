@@ -1,6 +1,5 @@
-use crate::database::storage::storage_vec::traits::*;
-use crate::prelude::twenty_first;
-
+use itertools::Itertools;
+use std::marker::PhantomData;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
@@ -8,16 +7,14 @@ use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_inde
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::mmr::shared_advanced;
 use twenty_first::util_types::shared::bag_peaks;
 
-use std::marker::PhantomData;
-
-use itertools::Itertools;
-
-use twenty_first::util_types::mmr::{
-    mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
-    shared_advanced,
-};
+use crate::database::storage::storage_vec::traits::*;
+use crate::prelude::twenty_first;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -241,7 +238,6 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
 
 #[cfg(test)]
 pub(crate) mod mmr_test {
-
     use super::*;
 
     use itertools::*;

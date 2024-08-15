@@ -1,4 +1,5 @@
-use super::{archival_state::ArchivalState, light_state::LightState};
+use super::archival_state::ArchivalState;
+use super::light_state::LightState;
 
 /// `BlockChainState` provides an `Archival` variant
 /// for full nodes and a `Light` variant for light nodes.

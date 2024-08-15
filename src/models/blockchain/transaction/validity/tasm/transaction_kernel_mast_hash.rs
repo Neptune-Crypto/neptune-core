@@ -1,14 +1,9 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::transaction_kernel::{
-    pseudorandom_transaction_kernel, TransactionKernel,
-};
 use num_traits::One;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
@@ -16,16 +11,24 @@ use tasm_lib::list::get::Get;
 use tasm_lib::list::new::New;
 use tasm_lib::list::set::Set;
 use tasm_lib::list::set_length::SetLength;
+use tasm_lib::rust_shadowing_helper_functions;
 use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-use tasm_lib::traits::function::{Function, FunctionInitialState};
-use tasm_lib::{rust_shadowing_helper_functions, InitVmState};
-use triton_vm::{prelude::BFieldElement, triton_asm};
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
+use tasm_lib::InitVmState;
+use triton_vm::prelude::BFieldElement;
+use triton_vm::triton_asm;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::{
-    math::{tip5::Digest, tip5::DIGEST_LENGTH},
-    util_types::algebraic_hasher::AlgebraicHasher,
-};
+use twenty_first::math::tip5::Digest;
+use twenty_first::math::tip5::DIGEST_LENGTH;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 /// Computes the mast hash of a transaction kernel object
 #[derive(Debug, Clone)]
@@ -424,7 +427,9 @@ impl Function for TransactionKernelMastHash {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;

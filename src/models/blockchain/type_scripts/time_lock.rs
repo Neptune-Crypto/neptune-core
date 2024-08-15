@@ -1,5 +1,28 @@
 use std::collections::HashMap;
 
+use get_size::GetSize;
+use itertools::Itertools;
+use num_traits::Zero;
+use proptest::arbitrary::Arbitrary;
+use proptest::collection::vec;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
+use proptest_arbitrary_interop::arb;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::math::tip5::Tip5;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::Digest;
+
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -9,6 +32,8 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::builtins as tasm;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::SecretWitness;
 use crate::models::consensus::ValidationLogic;
@@ -17,29 +42,6 @@ use crate::models::consensus::ValidityTree;
 use crate::models::consensus::WhichProgram;
 use crate::models::consensus::WitnessType;
 use crate::Hash;
-use get_size::GetSize;
-use itertools::Itertools;
-use num_traits::Zero;
-use proptest::arbitrary::Arbitrary;
-use proptest::collection::vec;
-use proptest::strategy::BoxedStrategy;
-use proptest::strategy::Strategy;
-use proptest_arbitrary_interop::arb;
-use serde::{Deserialize, Serialize};
-use tasm_lib::memory::encode_to_memory;
-use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::triton_vm::program::Program;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::twenty_first::math::tip5::Tip5;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::{
-    triton_vm::{instruction::LabelledInstruction, program::NonDeterminism, triton_asm},
-    twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-    Digest,
-};
-
-use crate::models::consensus::tasm::builtins as tasm;
-use crate::models::consensus::tasm::program::ConsensusProgram;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -577,13 +579,14 @@ impl Arbitrary for TimeLockWitness {
 #[cfg(test)]
 mod test {
     use num_traits::Zero;
-    use proptest::{collection::vec, strategy::Just};
+    use proptest::collection::vec;
+    use proptest::strategy::Just;
     use test_strategy::proptest;
 
-    use crate::models::{
-        blockchain::type_scripts::time_lock::TimeLock,
-        consensus::{tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness},
-    };
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::consensus::tasm::program::ConsensusProgram;
+    use crate::models::consensus::timestamp::Timestamp;
+    use crate::models::consensus::SecretWitness;
 
     use super::TimeLockWitness;
 
@@ -593,7 +596,8 @@ mod test {
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
         #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)
+        ))]
         time_lock_witness: TimeLockWitness,
     ) {
         assert!(
@@ -612,9 +616,11 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()+Timestamp::days(1),Timestamp::now()+Timestamp::days(7)), #_num_inputs))]
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()+Timestamp::days(1),Timestamp::now()+Timestamp::days(7)), #_num_inputs
+        ))]
         _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)
+        ))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
@@ -634,9 +640,11 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs
+        ))]
         _release_dates: Vec<Timestamp>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)
+        ))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());

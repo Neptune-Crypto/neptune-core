@@ -1,30 +1,34 @@
 use std::collections::HashMap;
 
+use get_size::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
+
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction;
-use crate::models::blockchain::transaction::transaction_kernel::{
-    TransactionKernel, TransactionKernelField,
-};
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::{
-    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
-};
-use crate::models::{
-    blockchain::transaction::primitive_witness::SaltedUtxos,
-    consensus::tasm::program::ConsensusProgram,
-};
-
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::type_scripts::BFieldCodec;
+use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::tasm::builtins as tasm;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-
-use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
-use tasm_lib::triton_vm::triton_asm;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{twenty_first::math::b_field_element::BFieldElement, Digest};
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::SecretWitness;
+use crate::models::consensus::ValidationLogic;
+use crate::models::consensus::ValidityAstType;
+use crate::models::consensus::ValidityTree;
+use crate::models::consensus::WhichProgram;
+use crate::models::consensus::WitnessType;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -269,16 +273,16 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
-    use crate::models::blockchain::transaction::{
-        primitive_witness::arbitrary_primitive_witness_with,
-        utxo::{LockScript, Utxo},
-        PublicAnnouncement,
-    };
     use proptest::collection::vec;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    use self::transaction::primitive_witness::PrimitiveWitness;
+    use transaction::primitive_witness::PrimitiveWitness;
+
+    use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
+    use crate::models::blockchain::transaction::utxo::LockScript;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
 
     use super::*;
 
@@ -287,7 +291,8 @@ pub mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
@@ -317,7 +322,8 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
@@ -348,7 +354,8 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up

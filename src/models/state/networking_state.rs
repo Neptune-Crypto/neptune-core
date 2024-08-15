@@ -1,10 +1,16 @@
-use crate::config_models::data_directory::DataDirectory;
-use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
-use crate::models::database::PeerDatabases;
-use crate::models::peer::{self, PeerStanding};
-use anyhow::Result;
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
+
+use anyhow::Result;
+
+use crate::config_models::data_directory::DataDirectory;
+use crate::database::create_db_if_missing;
+use crate::database::NeptuneLevelDb;
+use crate::database::WriteBatchAsync;
+use crate::models::database::PeerDatabases;
+use crate::models::peer;
+use crate::models::peer::PeerStanding;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 

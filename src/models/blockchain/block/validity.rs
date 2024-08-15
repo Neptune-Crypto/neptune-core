@@ -1,26 +1,3 @@
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, PublicInput},
-    },
-    twenty_first,
-};
-use twenty_first::math::bfield_codec::BFieldCodec;
-
-use crate::models::consensus::{tasm::program::ConsensusProgram, SecretWitness};
-
-use self::{
-    coinbase_is_valid::CoinbaseIsValid,
-    correct_control_parameter_update::CorrectControlParameterUpdate,
-    correct_mmr_update::CorrectMmrUpdate, correct_mutator_set_update::CorrectMutatorSetUpdate,
-    mmr_membership::MmrMembership, predecessor_is_valid::PredecessorIsValid,
-    transaction_is_valid::TransactionIsValid,
-};
-
-use super::Block;
-
 pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
@@ -28,6 +5,27 @@ pub mod correct_mutator_set_update;
 pub mod mmr_membership;
 pub mod predecessor_is_valid;
 pub mod transaction_is_valid;
+
+use coinbase_is_valid::CoinbaseIsValid;
+use correct_control_parameter_update::CorrectControlParameterUpdate;
+use correct_mmr_update::CorrectMmrUpdate;
+use correct_mutator_set_update::CorrectMutatorSetUpdate;
+use get_size::GetSize;
+use mmr_membership::MmrMembership;
+use predecessor_is_valid::PredecessorIsValid;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::twenty_first;
+use transaction_is_valid::TransactionIsValid;
+use twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::SecretWitness;
+
+use super::Block;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]

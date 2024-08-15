@@ -1,11 +1,10 @@
 use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
 
-use serde::{Deserialize, Serialize};
-
-use crate::util_types::mutator_set::{
-    addition_record::AdditionRecord, mutator_set_accumulator::MutatorSetAccumulator,
-    removal_record::RemovalRecord,
-};
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MutatorSetUpdate {

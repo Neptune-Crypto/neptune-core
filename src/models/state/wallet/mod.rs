@@ -1,5 +1,3 @@
-use crate::prelude::twenty_first;
-
 pub mod address;
 pub mod coin_with_possible_timelock;
 pub mod monitored_utxo;
@@ -8,26 +6,36 @@ pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
-use self::address::generation_address;
-use self::address::symmetric_key;
-use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::Hash;
-use anyhow::{bail, Context, Result};
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+
+use address::generation_address;
+use address::symmetric_key;
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Result;
 use bip39::Mnemonic;
 use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::{thread_rng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::fs::{self};
-use std::path::{Path, PathBuf};
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
+use zeroize::ZeroizeOnDrop;
+
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::prelude::twenty_first;
+use crate::Hash;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
@@ -399,30 +407,31 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-
-    use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::TxOutput;
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
     use twenty_first::math::tip5::DIGEST_LENGTH;
     use twenty_first::math::x_field_element::EXTENSION_DEGREE;
 
-    use super::monitored_utxo::MonitoredUtxo;
-    use super::wallet_state::WalletState;
-    use super::*;
     use crate::config_models::network::Network;
+    use crate::database::storage::storage_vec::traits::*;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
+    use crate::models::blockchain::transaction::utxo::LockScript;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::TxOutput;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
-    use crate::tests::shared::{
-        make_mock_block, make_mock_transaction_with_generation_key, mock_genesis_global_state,
-        mock_genesis_wallet_state,
-    };
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_transaction_with_generation_key;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+
+    use super::monitored_utxo::MonitoredUtxo;
+    use super::wallet_state::WalletState;
+    use super::*;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
@@ -1028,10 +1037,10 @@ mod wallet_tests {
         let block_18 = next_block;
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
-                2 + 17,
-                monitored_utxos.len(),
-                "List of monitored UTXOs have length 19 after updating wallet state and mining 17 blocks"
-            );
+            2 + 17,
+            monitored_utxos.len(),
+            "List of monitored UTXOs have length 19 after updating wallet state and mining 17 blocks"
+        );
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_18.kernel.body.mutator_set_accumulator.verify(
@@ -1286,10 +1295,10 @@ mod wallet_tests {
             .filter(|x| x.is_synced_to(block_20.hash()))
             .collect();
         assert_eq!(
-                19,
-                monitored_utxos_20.len(),
-                "List of monitored UTXOs must be two higher than after block 19 after returning to bad fork"
-            );
+            19,
+            monitored_utxos_20.len(),
+            "List of monitored UTXOs must be two higher than after block 19 after returning to bad fork"
+        );
         for monitored_utxo in monitored_utxos_20.iter() {
             assert!(
                 monitored_utxo.spent_in_block.is_some()

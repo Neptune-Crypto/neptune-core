@@ -1,27 +1,37 @@
-use super::shared::new_block_file_is_needed;
+use std::ops::DerefMut;
+use std::path::PathBuf;
+
+use anyhow::Result;
+use memmap2::MmapOptions;
+use num_traits::Zero;
+use tokio::io::AsyncSeekExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::SeekFrom;
+use tracing::debug;
+use tracing::warn;
+use twenty_first::math::digest::Digest;
+
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
+use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
-use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
+use crate::database::NeptuneLevelDb;
+use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::database::{
-    BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
-};
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::Block;
+use crate::models::database::BlockFileLocation;
+use crate::models::database::BlockIndexKey;
+use crate::models::database::BlockIndexValue;
+use crate::models::database::BlockRecord;
+use crate::models::database::FileRecord;
+use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use anyhow::Result;
-use memmap2::MmapOptions;
-use num_traits::Zero;
-use std::ops::DerefMut;
-use std::path::PathBuf;
-use tokio::io::AsyncSeekExt;
-use tokio::io::AsyncWriteExt;
-use tokio::io::SeekFrom;
-use tracing::{debug, warn};
-use twenty_first::math::digest::Digest;
+
+use super::shared::new_block_file_is_needed;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -581,14 +591,14 @@ impl ArchivalState {
         for child_digest in children_digests {
             let child_header =
                 self
-                .get_block_header(child_digest)
-                .await
-                .unwrap_or_else(
-                    || panic!(
-                        "Cannot get block header from digest, even though digest was fetched from height. Digest: {}",
-                        child_digest
-                    )
-                );
+                    .get_block_header(child_digest)
+                    .await
+                    .unwrap_or_else(
+                        || panic!(
+                            "Cannot get block header from digest, even though digest was fetched from height. Digest: {}",
+                            child_digest
+                        )
+                    );
             if child_header.prev_block_digest == parent_block_digest {
                 downstream_children.push(child_digest);
             }
@@ -833,9 +843,16 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
+    use rand::random;
+    use rand::rngs::StdRng;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
+    use tracing_test::traced_test;
 
-    use super::*;
-
+    use crate::config_models::cli_args;
+    use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::blockchain::transaction::utxo::LockScript;
@@ -846,15 +863,14 @@ mod archival_state_tests {
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
-    use crate::tests::shared::{
-        add_block_to_archival_state, make_mock_block_with_valid_pow, mock_genesis_archival_state,
-        mock_genesis_global_state, mock_genesis_wallet_state, unit_test_databases,
-    };
-    use rand::rngs::StdRng;
-    use rand::Rng;
-    use rand::SeedableRng;
-    use rand::{random, thread_rng, RngCore};
-    use tracing_test::traced_test;
+    use crate::tests::shared::add_block_to_archival_state;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_archival_state;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+    use crate::tests::shared::unit_test_databases;
+
+    use super::*;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
@@ -1623,10 +1639,10 @@ mod archival_state_tests {
             assert_eq!(
                 3,
                 genesis_state
-                .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxos()
+                    .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
             );
         }
 
@@ -2997,8 +3013,6 @@ mod archival_state_tests {
 
         Ok(())
     }
-
-    use crate::config_models::{cli_args, data_directory::DataDirectory};
 
     #[traced_test]
     #[tokio::test]

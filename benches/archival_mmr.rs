@@ -137,13 +137,15 @@ mod mutate {
     use super::*;
 
     mod mutate_100_of_10000 {
-        const NUM_MUTATIONS: usize = 100;
-        const AMMR_LEAF_COUNT: u64 = 10000;
         use itertools::Itertools;
-        use rand::{thread_rng, Rng};
+        use rand::thread_rng;
+        use rand::Rng;
         use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
+
+        const NUM_MUTATIONS: usize = 100;
+        const AMMR_LEAF_COUNT: u64 = 10000;
 
         fn leaf_mutation_impl(bencher: Bencher, persist: bool) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -184,13 +186,15 @@ mod batch_mutate_leaf_and_update_mps {
     use super::*;
 
     mod mutate_100_of_10000 {
-        const NUM_MUTATIONS_IN_BATCH: usize = 100;
-        const AMMR_LEAF_COUNT: u64 = 10000;
         use itertools::Itertools;
-        use rand::{thread_rng, Rng};
+        use rand::thread_rng;
+        use rand::Rng;
         use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
+
+        const NUM_MUTATIONS_IN_BATCH: usize = 100;
+        const AMMR_LEAF_COUNT: u64 = 10000;
 
         fn batch_leaf_mutation_impl(bencher: Bencher, persist: bool) {
             let rt = tokio::runtime::Runtime::new().unwrap();

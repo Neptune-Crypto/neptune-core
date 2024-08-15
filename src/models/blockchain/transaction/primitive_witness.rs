@@ -1,46 +1,37 @@
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
-use proptest::{
-    arbitrary::Arbitrary,
-    collection::vec,
-    strategy::{BoxedStrategy, Strategy},
-};
+use proptest::arbitrary::Arbitrary;
+use proptest::collection::vec;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use rand::{thread_rng, Rng};
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    structure::tasm_object::TasmObject,
-    twenty_first::{
-        math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-        util_types::algebraic_hasher::AlgebraicHasher,
-    },
-    Digest,
-};
+use rand::thread_rng;
+use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
 
-use crate::{
-    models::{
-        blockchain::type_scripts::TypeScript, consensus::timestamp::Timestamp,
-        state::wallet::address::generation_address,
-    },
-    util_types::mutator_set::{
-        ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
-    },
-};
-use crate::{
-    models::{
-        blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-        consensus::tasm::program::ConsensusProgram,
-    },
-    util_types::mutator_set::commit,
-};
-use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::TypeScript;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::models::state::wallet::address::generation_address;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::Hash;
 
-use super::{
-    transaction_kernel::TransactionKernel,
-    utxo::{LockScript, Utxo},
-    PublicAnnouncement,
-};
+use super::transaction_kernel::TransactionKernel;
+use super::utxo::LockScript;
+use super::utxo::Utxo;
+use super::PublicAnnouncement;
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
 /// is desirable to associate a random but consistent salt for the entire list of UTXOs.
@@ -389,23 +380,24 @@ pub(crate) fn arbitrary_primitive_witness_with(
 
 #[cfg(test)]
 mod test {
-    use super::PrimitiveWitness;
-    use crate::models::blockchain::{
-        transaction::validity::TransactionValidationLogic,
-        type_scripts::neptune_coins::NeptuneCoins,
-    };
-    use crate::models::consensus::mast_hash::MastHash;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+
+    use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::consensus::mast_hash::MastHash;
+
+    use super::*;
 
     #[proptest(cases = 5)]
     fn arbitrary_transaction_is_valid(
         #[strategy(1usize..3)] _num_inputs: usize,
         #[strategy(1usize..3)] _num_outputs: usize,
         #[strategy(0usize..3)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)
+        ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
         let kernel_hash = transaction_primitive_witness.kernel.mast_hash();

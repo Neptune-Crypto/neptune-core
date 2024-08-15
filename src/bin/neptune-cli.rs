@@ -1,6 +1,16 @@
-use anyhow::{bail, Result};
-use clap::{CommandFactory, Parser};
-use clap_complete::{generate, Shell};
+use std::io;
+use std::io::stdout;
+use std::io::Write;
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::str::FromStr;
+
+use anyhow::bail;
+use anyhow::Result;
+use clap::CommandFactory;
+use clap::Parser;
+use clap_complete::generate;
+use clap_complete::Shell;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
@@ -12,13 +22,9 @@ use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPo
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
 use neptune_core::rpc_server::RPCClient;
-use std::io;
-use std::io::stdout;
-use std::io::Write;
-use std::net::IpAddr;
-use std::net::SocketAddr;
-use std::str::FromStr;
-use tarpc::{client, context, tokio_serde::formats::Json};
+use tarpc::client;
+use tarpc::context;
+use tarpc::tokio_serde::formats::Json;
 
 // for parsing SendToMany <output> arguments.
 #[derive(Debug, Clone)]

@@ -2,11 +2,11 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 use num_traits::Zero;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::models::{
-    blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
-};
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
@@ -107,13 +107,14 @@ impl CoinWithPossibleTimeLock {
 
 #[cfg(test)]
 mod test {
+    use arbitrary::Arbitrary;
+    use arbitrary::Unstructured;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
 
-    use arbitrary::{Arbitrary, Unstructured};
-    use rand::{thread_rng, Rng, RngCore};
-
-    use crate::models::{
-        blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::timestamp::Timestamp,
-    };
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::consensus::timestamp::Timestamp;
 
     use super::CoinWithPossibleTimeLock;
 

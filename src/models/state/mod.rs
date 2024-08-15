@@ -1,13 +1,52 @@
-use self::blockchain_state::BlockchainState;
-use self::mempool::Mempool;
-use self::networking_state::NetworkingState;
-use self::wallet::address::ReceivingAddress;
-use self::wallet::utxo_notification_pool::UtxoNotifier;
-use self::wallet::wallet_state::WalletState;
-use self::wallet::wallet_status::WalletStatus;
+pub mod archival_state;
+pub mod blockchain_state;
+pub mod light_state;
+pub mod mempool;
+pub mod networking_state;
+pub mod shared;
+pub mod wallet;
+
+use std::cmp::max;
+use std::ops::Deref;
+use std::ops::DerefMut;
+
+use anyhow::bail;
+use anyhow::Result;
+use blockchain_state::BlockchainState;
+use itertools::Itertools;
+use mempool::Mempool;
+use networking_state::NetworkingState;
+use num_traits::CheckedSub;
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
+use twenty_first::math::digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use wallet::address::ReceivingAddress;
+use wallet::address::SpendingKey;
+use wallet::utxo_notification_pool::UtxoNotifier;
+use wallet::wallet_state::WalletState;
+use wallet::wallet_status::WalletStatus;
+
+use crate::config_models::cli_args;
+use crate::database::storage::storage_schema::traits::StorageWriter as SW;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::storage::storage_vec::Index;
+use crate::locks::tokio as sync_tokio;
+use crate::models::blockchain::transaction::UtxoNotifyMethod;
+use crate::models::peer::HandshakeData;
+use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::prelude::twenty_first;
+use crate::time_fn_call_async;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::Hash;
+use crate::VERSION;
+
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
-use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
+use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::validity::TransactionValidationLogic;
@@ -21,36 +60,6 @@ use super::blockchain::type_scripts::time_lock::TimeLock;
 use super::blockchain::type_scripts::TypeScript;
 use super::consensus::tasm::program::ConsensusProgram;
 use super::consensus::timestamp::Timestamp;
-use crate::config_models::cli_args;
-use crate::database::storage::storage_schema::traits::StorageWriter as SW;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::storage::storage_vec::Index;
-use crate::locks::tokio as sync_tokio;
-use crate::models::blockchain::transaction::UtxoNotifyMethod;
-use crate::models::peer::HandshakeData;
-use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-use crate::prelude::twenty_first;
-use crate::time_fn_call_async;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::{Hash, VERSION};
-use anyhow::{bail, Result};
-use itertools::Itertools;
-use num_traits::CheckedSub;
-use std::cmp::max;
-use std::ops::{Deref, DerefMut};
-use tracing::{debug, info, warn};
-use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use wallet::address::SpendingKey;
-
-pub mod archival_state;
-pub mod blockchain_state;
-pub mod light_state;
-pub mod mempool;
-pub mod networking_state;
-pub mod shared;
-pub mod wallet;
 
 #[derive(Debug, Clone)]
 struct TransactionDetails {
@@ -1376,20 +1385,28 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
-    use crate::{
-        config_models::network::Network,
-        models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
-        tests::shared::{
-            add_block_to_light_state, make_mock_block, make_mock_block_with_valid_pow,
-            mock_genesis_global_state, mock_genesis_wallet_state,
-        },
-    };
-    use num_traits::{One, Zero};
-    use rand::{random, rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use num_traits::One;
+    use num_traits::Zero;
+    use rand::random;
+    use rand::rngs::StdRng;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::{generation_address::GenerationReceivingAddress, KeyType};
+    use wallet::address::generation_address::GenerationReceivingAddress;
+    use wallet::address::KeyType;
 
-    use super::{wallet::WalletSecret, *};
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::Block;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::tests::shared::add_block_to_light_state;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+
+    use super::wallet::WalletSecret;
+    use super::*;
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -2140,15 +2157,15 @@ mod global_state_tests {
         }
 
         assert_eq!(
-                3,
-                genesis_state_lock
-                    .lock_guard_mut()
-                    .await
-                    .wallet_state
-                    .wallet_db
-                    .monitored_utxos()
-                    .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
-            );
+            3,
+            genesis_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+        );
 
         // Now Alice should have a balance of 100 and Bob a balance of 200
         assert_eq!(
@@ -2484,13 +2501,13 @@ mod global_state_tests {
 
                 // alice should have 2 monitored utxos.
                 assert_eq!(
-                        2,
-                        alice_state_mut
-                            .wallet_state
-                            .wallet_db
-                            .monitored_utxos()
-                            .len().await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
-                    );
+                    2,
+                    alice_state_mut
+                        .wallet_state
+                        .wallet_db
+                        .monitored_utxos()
+                        .len().await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
+                );
 
                 // Now alice should have a balance of 19979.
                 // 20000 from premine - 21 (20 to Bob + 1 fee)

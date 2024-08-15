@@ -1,12 +1,21 @@
-use super::super::storage_vec::Index;
-use super::RustyKey;
-use super::{traits::StorageReader, PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
-use crate::locks::tokio::AtomicRw;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::sync::Arc;
+
 use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fmt::{Debug, Formatter};
-use std::{collections::HashMap, sync::Arc};
+
+use crate::locks::tokio::AtomicRw;
+
+use super::super::storage_vec::Index;
+use super::traits::StorageReader;
+use super::PendingWrites;
+use super::RustyKey;
+use super::RustyValue;
+use super::SimpleRustyReader;
+use super::WriteOperation;
 
 pub(super) struct DbtVecPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,

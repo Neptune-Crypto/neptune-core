@@ -1,10 +1,11 @@
-use crate::prelude::twenty_first;
-
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
 use twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::prelude::twenty_first;
 
 use super::shared::CHUNK_SIZE;
 
@@ -128,10 +129,11 @@ impl<'a> Arbitrary<'a> for Chunk {
 
 #[cfg(test)]
 mod chunk_tests {
-    use num_traits::Zero;
-    use rand::{thread_rng, RngCore};
     use std::collections::HashSet;
 
+    use num_traits::Zero;
+    use rand::thread_rng;
+    use rand::RngCore;
     use twenty_first::math::b_field_element::BFieldElement;
 
     use super::*;

@@ -1,28 +1,26 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use rand::{rngs::StdRng, Rng, SeedableRng};
-use tasm_lib::{
-    data_type::DataType,
-    empty_stack,
-    hashing::algebraic_hasher::hash_varlen::HashVarlen,
-    snippet_bencher::BenchmarkCase,
-    traits::{
-        basic_snippet::BasicSnippet,
-        function::{Function, FunctionInitialState},
-    },
-};
-use triton_vm::prelude::{triton_asm, BFieldElement};
-use twenty_first::{
-    math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
-};
-
-use crate::{
-    models::blockchain::shared::Hash,
-    util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord},
-};
+use rand::rngs::StdRng;
+use rand::Rng;
+use rand::SeedableRng;
+use tasm_lib::data_type::DataType;
+use tasm_lib::empty_stack;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
+use tasm_lib::snippet_bencher::BenchmarkCase;
+use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
+use triton_vm::prelude::triton_asm;
+use triton_vm::prelude::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// Compute the hash (using hash_varlen) of the given removal record indices.
 #[derive(Debug, Clone)]
@@ -125,21 +123,21 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::Zero;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::test_helpers::{
-        link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
-    };
-    use tasm_lib::{
-        empty_stack,
-        list::{
-            contiguous_list::get_pointer_list::GetPointerList,
-            higher_order::{inner_function::InnerFunction, map::Map},
-        },
-        rust_shadowing_helper_functions,
-        traits::function::ShadowedFunction,
-        traits::rust_shadow::RustShadow,
-    };
-    use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism};
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use tasm_lib::empty_stack;
+    use tasm_lib::list::contiguous_list::get_pointer_list::GetPointerList;
+    use tasm_lib::list::higher_order::inner_function::InnerFunction;
+    use tasm_lib::list::higher_order::map::Map;
+    use tasm_lib::rust_shadowing_helper_functions;
+    use tasm_lib::test_helpers::link_and_run_tasm_for_test;
+    use tasm_lib::test_helpers::link_and_run_tasm_for_test_deprecated;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+    use triton_vm::prelude::BFieldElement;
+    use triton_vm::prelude::Digest;
+    use triton_vm::prelude::NonDeterminism;
     use twenty_first::math::tip5::DIGEST_LENGTH;
 
     use super::*;
@@ -304,7 +302,8 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
 

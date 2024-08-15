@@ -1,5 +1,7 @@
 use super::super::super::neptune_leveldb::NeptuneLevelDb;
-use super::{traits::StorageReader, RustyKey, RustyValue};
+use super::traits::StorageReader;
+use super::RustyKey;
+use super::RustyValue;
 
 // Note: RustyReader and SimpleRustyReader appear to be exactly
 // the same.  Can we remove one of them?

@@ -1,20 +1,25 @@
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::{triton_vm, twenty_first};
+use std::collections::HashMap;
 
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use triton_vm::prelude::Digest;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 use super::chunk::Chunk;
-use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
@@ -116,15 +121,16 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
 
 #[cfg(test)]
 mod chunk_dict_tests {
+    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+    use twenty_first::math::other::random_elements;
+    use twenty_first::math::tip5::Digest;
+    use twenty_first::math::tip5::Tip5;
+    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     use super::super::archival_mmr::mmr_test::mock;
-    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-    use twenty_first::math::other::random_elements;
-    use twenty_first::math::tip5::{Digest, Tip5};
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-
     use super::*;
 
     #[tokio::test]

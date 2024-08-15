@@ -1,12 +1,14 @@
-use crate::prelude::twenty_first;
-
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
+use rand::Rng;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
+
+use crate::prelude::twenty_first;
 
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec, Arbitrary,
@@ -33,11 +35,11 @@ pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
 
 #[cfg(test)]
 mod addition_record_tests {
-
     use rand::random;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-    use crate::{models::blockchain::shared::Hash, util_types::mutator_set::commit};
+    use crate::models::blockchain::shared::Hash;
+    use crate::util_types::mutator_set::commit;
 
     use super::*;
 

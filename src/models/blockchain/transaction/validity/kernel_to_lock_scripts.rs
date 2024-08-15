@@ -1,20 +1,23 @@
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::prelude::{triton_vm, twenty_first};
-
-use crate::models::blockchain::transaction::{self};
-use crate::models::blockchain::transaction::{
-    transaction_kernel::TransactionKernelField, utxo::Utxo,
-};
-
-use crate::models::consensus::SecretWitness;
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism, PublicInput};
+use triton_vm::prelude::BFieldElement;
+use triton_vm::prelude::Digest;
+use triton_vm::prelude::NonDeterminism;
+use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::SecretWitness;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToLockScriptsWitness {

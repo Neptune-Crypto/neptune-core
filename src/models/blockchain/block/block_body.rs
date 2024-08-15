@@ -1,8 +1,6 @@
-use crate::models::consensus::mast_hash::{HasDiscriminant, MastHash};
-use crate::prelude::twenty_first;
-
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -11,6 +9,9 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::consensus::mast_hash::HasDiscriminant;
+use crate::models::consensus::mast_hash::MastHash;
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, EnumCount)]

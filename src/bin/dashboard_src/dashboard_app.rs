@@ -1,35 +1,58 @@
 use core::fmt;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
-use ratatui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
-};
-use std::{
-    cell::{RefCell, RefMut},
-    collections::HashMap,
-    error::Error,
-    io::{self, Stdout},
-    net::SocketAddr,
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-};
-use strum::{EnumCount, EnumIter, IntoEnumIterator};
-use tokio::{sync::Mutex, time::sleep};
+use std::cell::RefCell;
+use std::cell::RefMut;
+use std::collections::HashMap;
+use std::error::Error;
+use std::io;
+use std::io::Stdout;
+use std::net::SocketAddr;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
-use super::{
-    history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
-    receive_screen::ReceiveScreen, screen::Screen, send_screen::SendScreen,
-};
+use crossterm::event;
+use crossterm::event::DisableMouseCapture;
+use crossterm::event::EnableMouseCapture;
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
+use crossterm::execute;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::enable_raw_mode;
+use crossterm::terminal::EnterAlternateScreen;
+use crossterm::terminal::LeaveAlternateScreen;
+use neptune_core::config_models::network::Network;
+use neptune_core::rpc_server::RPCClient;
+use ratatui::backend::Backend;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::List;
+use ratatui::widgets::ListItem;
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+use ratatui::Terminal;
+use strum::EnumCount;
+use strum::EnumIter;
+use strum::IntoEnumIterator;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
+
+use super::history_screen::HistoryScreen;
+use super::overview_screen::OverviewScreen;
+use super::peers_screen::PeersScreen;
+use super::receive_screen::ReceiveScreen;
+use super::screen::Screen;
+use super::send_screen::SendScreen;
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
 enum MenuItem {

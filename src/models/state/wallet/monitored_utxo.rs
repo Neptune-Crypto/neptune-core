@@ -1,15 +1,15 @@
-use crate::{models::consensus::timestamp::Timestamp, prelude::twenty_first};
-
 use std::collections::VecDeque;
 
-use crate::{
-    models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
-    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
-};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use twenty_first::math::tip5::Digest;
 
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::consensus::timestamp::Timestamp;
+use crate::models::state::archival_state::ArchivalState;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoredUtxo {

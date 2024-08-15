@@ -5,21 +5,27 @@
 //!
 //! auto-destroy-on-drop is needed for unit tests that use the DB.
 
-use leveldb::{
-    batch::{Batch, WriteBatch},
-    compaction::Compaction,
-    database::comparator::Comparator,
-    database::Database,
-    error::Error as DbError,
-    iterator::{Iterable, Iterator, KeyIterator, ValueIterator},
-    key::IntoLevelDBKey,
-    options::{Options, ReadOptions, WriteOptions},
-    snapshots::{Snapshot, Snapshots},
-};
-use rand::distributions::Alphanumeric;
-use rand::distributions::DistString;
 use std::path::Path;
 use std::sync::Arc;
+
+use leveldb::batch::Batch;
+use leveldb::batch::WriteBatch;
+use leveldb::compaction::Compaction;
+use leveldb::database::comparator::Comparator;
+use leveldb::database::Database;
+use leveldb::error::Error as DbError;
+use leveldb::iterator::Iterable;
+use leveldb::iterator::Iterator;
+use leveldb::iterator::KeyIterator;
+use leveldb::iterator::ValueIterator;
+use leveldb::key::IntoLevelDBKey;
+use leveldb::options::Options;
+use leveldb::options::ReadOptions;
+use leveldb::options::WriteOptions;
+use leveldb::snapshots::Snapshot;
+use leveldb::snapshots::Snapshots;
+use rand::distributions::Alphanumeric;
+use rand::distributions::DistString;
 
 /// `DbIntMut` provides thread-safe access to LevelDB API with `&self` setters
 ///
@@ -570,7 +576,6 @@ impl Snapshots for DB {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
