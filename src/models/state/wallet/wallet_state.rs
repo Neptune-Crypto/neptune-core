@@ -51,7 +51,6 @@ use super::address::symmetric_key;
 use super::address::KeyType;
 use super::address::SpendingKey;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use super::expected_utxo;
 use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
 use super::rusty_wallet_database::RustyWalletDatabase;
@@ -344,10 +343,14 @@ impl WalletState {
     ///       So it is implemented by clearing all ExpectedUtxo from DB and
     ///       adding back those that are not stale.
     pub async fn prune_stale_expected_utxos(&mut self) {
-        let cutoff_for_unreceived = Timestamp::now()
-            - Timestamp::seconds(expected_utxo::UNRECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
-        let cutoff_for_received = Timestamp::now()
-            - Timestamp::seconds(expected_utxo::RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
+        // prune un-received ExpectedUtxo after 28 days in secs
+        const UNRECEIVED_UTXO_SECS: u64 = 28 * 24 * 60 * 60;
+
+        // prune received ExpectedUtxo after 3 days in secs.
+        const RECEIVED_UTXO_SECS: u64 = 3 * 24 * 60 * 60;
+
+        let cutoff_for_unreceived = Timestamp::now() - Timestamp::seconds(UNRECEIVED_UTXO_SECS);
+        let cutoff_for_received = Timestamp::now() - Timestamp::seconds(RECEIVED_UTXO_SECS);
 
         let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
 
