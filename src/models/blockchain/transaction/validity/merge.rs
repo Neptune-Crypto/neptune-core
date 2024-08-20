@@ -64,12 +64,10 @@ impl MergeWitness {
         ]
         .concat();
         public_announcements.shuffle(&mut rng);
-        let coinbase = if let Some(cb) = left_kernel.coinbase {
-            Some(cb)
-        } else if let Some(cb) = right_kernel.coinbase {
-            Some(cb)
+        let coinbase = if left_kernel.coinbase.is_some() {
+            left_kernel.coinbase
         } else {
-            None
+            right_kernel.coinbase
         };
         let new_kernel = TransactionKernel {
             inputs,

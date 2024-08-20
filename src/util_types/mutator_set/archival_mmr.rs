@@ -256,7 +256,6 @@ pub(crate) mod mmr_test {
     use twenty_first::math::other::*;
     use twenty_first::math::tip5::Tip5;
     use twenty_first::util_types::merkle_tree::*;
-    use twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 
@@ -291,7 +290,7 @@ pub(crate) mod mmr_test {
         #[derive(Debug, Clone, test_strategy::Arbitrary)]
         pub(crate) struct MerkleTreeToTest {
             #[strategy(arb())]
-            pub tree: MerkleTree<Hash>,
+            pub tree: MerkleTree,
         }
     }
 
@@ -310,7 +309,7 @@ pub(crate) mod mmr_test {
             let num_leaves_in_tree = 1 << tree_height;
             let leaf_digests =
                 &digests[num_processed_digests..num_processed_digests + num_leaves_in_tree];
-            let tree: MerkleTree<Hash> = CpuParallel::from_digests(leaf_digests).unwrap();
+            let tree: MerkleTree = CpuParallel::from_digests(leaf_digests).unwrap();
             num_processed_digests += num_leaves_in_tree;
             trees.push(tree);
         }
