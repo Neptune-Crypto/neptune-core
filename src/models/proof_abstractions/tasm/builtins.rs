@@ -22,7 +22,7 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::{blockchain::shared::Hash, proof_abstractions::tasm::environment::ND_DIGESTS};
+use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
 
 use super::environment::{ND_INDIVIDUAL_TOKEN, ND_MEMORY, PROGRAM_DIGEST, PUB_INPUT, PUB_OUTPUT};
 
@@ -222,11 +222,10 @@ pub fn tasmlib_hashing_merkle_verify(
         }
     });
 
-    let mt_inclusion_proof = MerkleTreeInclusionProof::<Hash> {
+    let mt_inclusion_proof = MerkleTreeInclusionProof {
         tree_height: tree_height as usize,
         indexed_leafs: vec![(leaf_index as usize, leaf)],
         authentication_structure: path.clone(),
-        _hasher: std::marker::PhantomData,
     };
 
     assert!(mt_inclusion_proof.verify(root));

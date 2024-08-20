@@ -14,7 +14,6 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
     structure::tasm_object::TasmObject,
-    triton_vm::program::NonDeterminism,
     twenty_first::{
         math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
         util_types::algebraic_hasher::AlgebraicHasher,

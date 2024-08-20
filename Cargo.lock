@@ -818,7 +818,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=7dbef5c42db4a15ae58b3a8aa99408f514079013#7dbef5c42db4a15ae58b3a8aa99408f514079013"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=5771ae091478e2eaaa92072c5b398d1112b538b4#5771ae091478e2eaaa92072c5b398d1112b538b4"
 dependencies = [
  "quote",
  "syn 2.0.72",
@@ -1578,14 +1578,16 @@ dependencies = [
 
 [[package]]
 name = "ndarray"
-version = "0.15.6"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb12d4e967ec485a5f71c6311fe28158e9d6f4bc4a447b474184d0f91a8fa32"
+checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
 dependencies = [
  "matrixmultiply",
  "num-complex",
  "num-integer",
  "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
  "rawpointer",
  "rayon",
 ]
@@ -2003,6 +2005,21 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
+]
+
+[[package]]
+name = "portable-atomic"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da544ee218f0d287a911e9c99a39a8c9bc8fcad3cb8db5959940044ecfc67265"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcdd8420072e66d54a407b3316991fe946ce3ab1083a7f575b2463866624704d"
+dependencies = [
+ "portable-atomic",
 ]
 
 [[package]]
@@ -2720,7 +2737,7 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=7dbef5c42db4a15ae58b3a8aa99408f514079013#7dbef5c42db4a15ae58b3a8aa99408f514079013"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=5771ae091478e2eaaa92072c5b398d1112b538b4#5771ae091478e2eaaa92072c5b398d1112b538b4"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3129,9 +3146,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.42.0-alpha.8"
+version = "0.42.0-alpha.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cda7d3f6b4656a926c32b3409c13dd10f6a7f67dbd471a432cef23cb90c26263"
+checksum = "8772ee812f7e10d75de0e11ff809c8eb32490d9f5f9451e0e76f8d4a6a81a277"
 dependencies = [
  "arbitrary",
  "colored",
@@ -3164,9 +3181,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.42.0-alpha.8"
+version = "0.42.0-alpha.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "360f1c7b137dc9c17bacc434439eea60c7b3344c4c96fedaa28d902ec40b0006"
+checksum = "bcc308d04b918415c4a12b8791b5fd3cbac99549eba1391d3eccb640a16f95c0"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",

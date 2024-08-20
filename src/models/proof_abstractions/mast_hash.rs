@@ -1,12 +1,10 @@
 use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::twenty_first::{
-    math::{b_field_element::BFieldElement, tip5::Digest},
-    util_types::{
+    math::{b_field_element::BFieldElement, tip5::Digest}, prelude::MerkleTreeMaker, util_types::{
         algebraic_hasher::AlgebraicHasher,
         merkle_tree::{CpuParallel, MerkleTree},
-        merkle_tree_maker::MerkleTreeMaker,
-    },
+    }
 };
 
 use crate::models::blockchain::shared::Hash;
@@ -25,7 +23,7 @@ pub trait MastHash {
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>>;
 
-    fn merkle_tree(&self) -> MerkleTree<Hash> {
+    fn merkle_tree(&self) -> MerkleTree {
         let mut digests = self
             .mast_sequences()
             .into_iter()
