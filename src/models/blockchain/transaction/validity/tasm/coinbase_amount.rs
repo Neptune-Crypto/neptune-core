@@ -183,7 +183,7 @@ mod test {
             let coinbase_ptr: BFieldElement = rng.gen();
 
             let mut memory = HashMap::default();
-            encode_to_memory(&mut memory, coinbase_ptr, coinbase);
+            encode_to_memory(&mut memory, coinbase_ptr, &coinbase);
 
             FunctionInitialState {
                 stack: [self.init_stack_for_isolated_run(), vec![coinbase_ptr]].concat(),

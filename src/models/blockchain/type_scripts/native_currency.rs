@@ -608,7 +608,7 @@ impl SecretWitness for NativeCurrencyWitness {
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self.clone(),
+            self,
         );
 
         // individual tokens
