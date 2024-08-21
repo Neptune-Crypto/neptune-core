@@ -147,7 +147,7 @@ impl ConsensusProgram for SingleProof {
                     input: txk_mast_hash_as_input.clone(),
                     output: salted_inputs_hash_as_output.clone(),
                 };
-                let rri = tasmlib::verify(
+                let rri = tasmlib::verify_stark(
                     Stark::default(),
                     removal_records_integrity_claim,
                     &pc.removal_records_integrity,
@@ -159,7 +159,7 @@ impl ConsensusProgram for SingleProof {
                     input: txk_mast_hash_as_input.clone(),
                     output: salted_outputs_hash_as_output.clone(),
                 };
-                let k2o = tasmlib::verify(
+                let k2o = tasmlib::verify_stark(
                     Stark::default(),
                     kernel_to_outputs_claim,
                     &pc.kernel_to_outputs,
@@ -183,7 +183,7 @@ impl ConsensusProgram for SingleProof {
                     input: salted_inputs_hash_as_input.clone(),
                     output: lock_script_hashes_as_output,
                 };
-                let cls: bool = tasmlib::verify(
+                let cls: bool = tasmlib::verify_stark(
                     Stark::default(),
                     collect_lock_scripts_claim,
                     &pc.collect_lock_scripts,
@@ -211,7 +211,7 @@ impl ConsensusProgram for SingleProof {
                     .concat(),
                     output: type_script_hashes_as_output,
                 };
-                let cts: bool = tasmlib::verify(
+                let cts: bool = tasmlib::verify_stark(
                     Stark::default(),
                     collect_type_scripts_claim,
                     &pc.collect_type_scripts,
@@ -228,7 +228,7 @@ impl ConsensusProgram for SingleProof {
                     };
                     let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
                     let lock_script_halts: bool =
-                        tasmlib::verify(Stark::default(), claim, lock_script_halts_proof);
+                        tasmlib::verify_stark(Stark::default(), claim, lock_script_halts_proof);
                     assert!(lock_script_halts);
 
                     i += 1;
@@ -250,7 +250,7 @@ impl ConsensusProgram for SingleProof {
                     };
                     let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
                     let type_script_halts: bool =
-                        tasmlib::verify(Stark::default(), claim, type_script_halts_proof);
+                        tasmlib::verify_stark(Stark::default(), claim, type_script_halts_proof);
                     assert!(type_script_halts);
                     i += 1;
                 }

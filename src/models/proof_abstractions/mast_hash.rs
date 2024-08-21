@@ -1,10 +1,12 @@
 use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::twenty_first::{
-    math::{b_field_element::BFieldElement, tip5::Digest}, prelude::MerkleTreeMaker, util_types::{
+    math::{b_field_element::BFieldElement, tip5::Digest},
+    prelude::MerkleTreeMaker,
+    util_types::{
         algebraic_hasher::AlgebraicHasher,
         merkle_tree::{CpuParallel, MerkleTree},
-    }
+    },
 };
 
 use crate::models::blockchain::shared::Hash;

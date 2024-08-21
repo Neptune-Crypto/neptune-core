@@ -1,28 +1,22 @@
+use itertools::Itertools;
+use tasm_lib::memory::{encode_to_memory, last_populated_nd_memory_address};
+use tasm_lib::prelude::Library;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::vm::VMState;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::{
-    structure::tasm_object::TasmObject,
-    triton_vm::{
-        self,
-        proof::{Claim, Proof},
-        stark::Stark,
-    },
-    twenty_first::{
-        math::{
-            b_field_element::BFieldElement, bfield_codec::BFieldCodec,
-            x_field_element::XFieldElement,
-        },
-        prelude::MmrMembershipProof,
-        util_types::{
-            merkle_tree::MerkleTreeInclusionProof,
-            mmr::{
-                shared_advanced::get_peak_heights,
-                shared_basic::leaf_index_to_mt_index_and_peak_index,
-            },
-        },
-    },
-    Digest,
+    triton_vm::program::NonDeterminism, triton_vm::proof::Claim, triton_vm::proof::Proof,
+    triton_vm::stark::Stark, twenty_first::math::b_field_element::BFieldElement,
+    twenty_first::math::x_field_element::XFieldElement, twenty_first::prelude::MmrMembershipProof,
+    twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof,
+    twenty_first::util_types::mmr::shared_advanced::get_peak_heights,
+    twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index, Digest,
 };
 
 use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
+use crate::triton_vm::triton_asm;
 
 use super::environment::{ND_INDIVIDUAL_TOKEN, ND_MEMORY, PROGRAM_DIGEST, PUB_INPUT, PUB_OUTPUT};
 
@@ -290,7 +284,88 @@ pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
     *T::decode_iter(&mut iterator).expect("decode from memory failed")
 }
 
-// recufier
-pub fn verify(parameters: Stark, claim: Claim, proof: &Proof) -> bool {
-    triton_vm::verify(parameters, &claim, proof)
+/// Verify a STARK proof.
+pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> bool {
+    // We want to verify the proof in a way that updates the emulated environment (in
+    // particular: non-determinism) in the exact same way that the actual verify snippet
+    // modifies the actual Triton VM environment. However, there is no rust (or host
+    // machine) code that modifies the environment accurately because this is too
+    // much hassle to write for too little benefit. So what we do here is invoke the
+    // tasm snippet, wrapped in make-shift program, in Triton VM and percolate the
+    // induced environment changes.
+
+    let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(stark_parameters);
+
+    // create nondeterminism object for running Triton VM and populate it with
+    // the contents of the environment's variables
+    let mut nondeterminism =
+        NonDeterminism::new(ND_INDIVIDUAL_TOKEN.with_borrow(|tokens| tokens.clone()))
+            .with_digests(ND_DIGESTS.with_borrow(|digests| digests.clone()))
+            .with_ram(ND_MEMORY.with_borrow(|memory| memory.clone()));
+
+    // update the nondeterminism in anticipation of verifying the proof
+    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof.clone(), claim.clone());
+
+    // store the proof and claim to memory
+    let highest_nd_address = last_populated_nd_memory_address(&nondeterminism.ram).unwrap_or(0);
+    let proof_pointer = BFieldElement::new(highest_nd_address as u64 + 1);
+    let claim_pointer = encode_to_memory(&mut nondeterminism.ram, proof_pointer, proof.clone());
+    encode_to_memory(&mut nondeterminism.ram, claim_pointer, claim.clone());
+
+    // create a tasm program to verify the claim+proof
+    let mut library = Library::new();
+    let stark_verify = library.import(Box::new(stark_verify_snippet.clone()));
+    let program_code = triton_asm! {
+        push {claim_pointer}
+        push {proof_pointer}
+        call {stark_verify}
+        halt
+        {&library.all_imports()}
+    };
+    let program = Program::new(&program_code);
+
+    // report on error, if any
+    if let Err(vm_error) = program.run(vec![].into(), nondeterminism.clone()) {
+        println!("Erro verifying STARK proof.");
+        println!("instruction error: {}", vm_error.source);
+        println!("VM state:\n{}", vm_error.vm_state);
+        return false;
+    }
+
+    // run the program and get the final state
+    let mut vm_state = VMState::new(&program, vec![].into(), nondeterminism);
+    vm_state.run().unwrap();
+
+    // percolate the environment changes
+    ND_MEMORY.replace(vm_state.ram);
+    ND_DIGESTS.replace(vm_state.secret_digests.into_iter().collect_vec());
+    ND_INDIVIDUAL_TOKEN.replace(vm_state.secret_individual_tokens.into_iter().collect_vec());
+
+    true
+}
+
+#[cfg(test)]
+mod test {
+    use crate::models::proof_abstractions::tasm::builtins::verify_stark;
+    use crate::models::proof_abstractions::Claim;
+    use crate::models::proof_abstractions::Program;
+    use crate::triton_vm;
+    use tasm_lib::triton_vm::program::NonDeterminism;
+    use tasm_lib::triton_vm::stark::Stark;
+    use tasm_lib::triton_vm::triton_asm;
+
+    #[test]
+    fn can_verify_halt_in_emulated_environment() {
+        let program_code = triton_asm! { halt };
+        let program = Program::new(&program_code);
+        let claim = Claim::new(program.hash());
+        let stark_parameters = Stark::default();
+        let proof = triton_vm::prove(
+            stark_parameters,
+            &claim,
+            &program,
+            NonDeterminism::new(vec![]),
+        ).unwrap();
+        assert!(verify_stark(stark_parameters, claim, &proof));
+    }
 }
