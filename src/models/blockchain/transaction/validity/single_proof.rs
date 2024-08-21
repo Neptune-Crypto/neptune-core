@@ -1,21 +1,29 @@
 use std::collections::HashMap;
 
+use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use itertools::Itertools;
+use tasm_lib::data_type::DataType;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::TasmObject;
+use tasm_lib::prelude::{DynMalloc, Library, TasmObject};
 use tasm_lib::triton_vm::prelude::{BFieldCodec, LabelledInstruction};
 use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::error::BFieldCodecError;
-use tasm_lib::Digest;
+use tasm_lib::verifier::stark_verify::StarkVerify;
+use tasm_lib::{field, Digest};
 
+use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
+use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::tasm_lib::memory::encode_to_memory;
+use crate::triton_vm::triton_asm;
 use crate::BFieldElement;
+use tasm_lib::triton_vm;
 
 use super::proof_collection::ProofCollection;
 
@@ -87,7 +95,7 @@ impl SecretWitness for SingleProofWitness {
         match self {
             SingleProofWitness::Collection(pc) => {
                 PublicInput::new(pc.kernel_mast_hash.reversed().values().to_vec())
-            } // SingleProofWitness::Upodate(_) => todo!(),
+            } // SingleProofWitness::Update(_) => todo!(),
         }
     }
 
@@ -96,7 +104,7 @@ impl SecretWitness for SingleProofWitness {
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        // set memory
+        // populate nondeterministic memory with witness
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
@@ -104,15 +112,26 @@ impl SecretWitness for SingleProofWitness {
             self,
         );
 
-        NonDeterminism::default().with_ram(memory)
+        let mut nondeterminism = NonDeterminism::default().with_ram(memory);
+
+        #[allow(irrefutable_let_patterns)] // drop this line when there is more than 1 variant
+        if let SingleProofWitness::Collection(proof_collection) = self {
+            let rri_claim = proof_collection.removal_records_integrity_claim();
+            let rri_proof = &proof_collection.removal_records_integrity;
+            let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
+            println!("rri claim: {:?}", rri_claim);
+            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, rri_proof, rri_claim);
+        }
+
+        nondeterminism
     }
 
-    fn output(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
+    fn output(&self) -> Vec<BFieldElement> {
         std::vec![]
     }
 
-    fn claim(&self) -> tasm_lib::triton_vm::prelude::Claim {
-        tasm_lib::triton_vm::prelude::Claim::new(self.program().hash())
+    fn claim(&self) -> Claim {
+        Claim::new(self.program().hash())
             .with_input(self.standard_input().individual_tokens)
             .with_output(self.output())
     }
@@ -143,10 +162,15 @@ impl ConsensusProgram for SingleProof {
                     pc.salted_outputs_hash.values().to_vec();
 
                 let removal_records_integrity_claim: Claim = Claim {
-                    program_digest: ProofCollection::REMOVAL_RECORDS_INTEGRITY_PROGRAM_DIGEST,
+                    program_digest: RemovalRecordsIntegrity.program().hash(),
                     input: txk_mast_hash_as_input.clone(),
                     output: salted_inputs_hash_as_output.clone(),
                 };
+                assert!(triton_vm::verify(
+                    Stark::default(),
+                    &removal_records_integrity_claim,
+                    &pc.removal_records_integrity
+                ));
                 let rri = tasmlib::verify_stark(
                     Stark::default(),
                     removal_records_integrity_claim,
@@ -155,7 +179,7 @@ impl ConsensusProgram for SingleProof {
                 assert!(rri);
 
                 let kernel_to_outputs_claim: Claim = Claim {
-                    program_digest: ProofCollection::KERNEL_TO_OUTPUTS_PROGRAM_DIGEST,
+                    program_digest: KernelToOutputs.program().hash(),
                     input: txk_mast_hash_as_input.clone(),
                     output: salted_outputs_hash_as_output.clone(),
                 };
@@ -179,7 +203,7 @@ impl ConsensusProgram for SingleProof {
                     i += 1;
                 }
                 let collect_lock_scripts_claim: Claim = Claim {
-                    program_digest: ProofCollection::COLLECT_LOCK_SCRIPTS_PROGRAM_DIGEST,
+                    program_digest: CollectLockScripts.program().hash(),
                     input: salted_inputs_hash_as_input.clone(),
                     output: lock_script_hashes_as_output,
                 };
@@ -203,7 +227,7 @@ impl ConsensusProgram for SingleProof {
                     i += 1;
                 }
                 let collect_type_scripts_claim: Claim = Claim {
-                    program_digest: ProofCollection::COLLECT_TYPE_SCRIPTS_PROGRAM_DIGEST,
+                    program_digest: CollectTypeScripts.program().hash(),
                     input: [
                         salted_inputs_hash_as_input.clone(),
                         salted_outputs_hash_as_input.clone(),
@@ -254,12 +278,147 @@ impl ConsensusProgram for SingleProof {
                     assert!(type_script_halts);
                     i += 1;
                 }
-            } // SingleProofWitness::Upodate(_) => todo!(),
+            } // SingleProofWitness::Update(_) => todo!(),
         }
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
+        let mut library = Library::new();
+
+        let push_digest = |d: Digest| {
+            triton_asm! {
+                push {d.values()[4]}
+                push {d.values()[3]}
+                push {d.values()[2]}
+                push {d.values()[1]}
+                push {d.values()[0]}
+            }
+        };
+
+        let compare_digests = DataType::Digest.compare();
+        let dyn_malloc = library.import(Box::new(DynMalloc));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+
+        let discriminant_for_proof_collection = 0;
+        let proof_collection_case_label =
+            "neptune_transaction_single_proof_case_collection".to_string();
+        let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
+        let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
+        let proof_collection_field_removal_records_integrity =
+            field!(ProofCollection::removal_records_integrity);
+        let push_rri_hash = push_digest(RemovalRecordsIntegrity.program().hash());
+        let proof_collection_case_body = triton_asm! {
+            // BEFORE: [txk_digest] *single_proof_witness discriminant
+            // AFTER: [txk_digest] *single_proof_witness discriminant
+            {proof_collection_case_label}:
+                // [txk_digest] *single_proof_witness discriminant
+
+                dup 1 push 1 add
+                // [txk_digest] *spw disc *proof_collection
+
+                // Not *proof_collection_si? Unclear.
+
+
+                /* check kernel MAST hash */
+
+                dup 0 {&proof_collection_field_kernel_mast_hash}
+                // [txk_digest] *spw disc *proof_collection *kernel_mast_hash
+
+                push {Digest::LEN - 1}
+                read_mem {Digest::LEN}
+                pop 1
+                // [txk_digest] *spw disc *proof_collection [kernel_mast_hash]
+
+                dup 11
+                dup 11
+                dup 11
+                dup 11
+                dup 11
+                // [txk_digest] *spw disc *proof_collection [kernel_mast_hash] [txk_digest]
+
+                {&compare_digests}
+                assert
+                // [txk_digest] *spw disc *proof_collection
+
+
+                /* create and verify removal records integrity claim */
+
+                call {dyn_malloc} dup 0
+                // [txk_digest] *spw disc *proof_collection *rri_claim *rri_claim
+
+                push {Digest::LEN} swap 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim output_si *rri_claim
+
+                write_mem 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim *output
+
+                dup 2 {&proof_collection_field_salted_inputs_hash}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *output *salted_inputs_hash
+
+                push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash]
+
+                dup 5
+                // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash] *output
+
+                write_mem {Digest::LEN}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *output *input_si
+
+                swap 1 pop 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim *input_si
+
+                push {Digest::LEN} swap 1 write_mem 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim *input
+
+                dup 5 dup 7 dup 9 dup 11 dup 13 dup 5
+                // [txk_digest] *spw disc *proof_collection *rri_claim *input [txk_digest_reversed] *input
+
+                write_mem 5
+                // [txk_digest] *spw disc *proof_collection *rri_claim *input *program_hash
+
+                swap 1 pop 1
+                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash
+
+                {&push_rri_hash}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash [rri_hash]
+
+                dup {Digest::LEN} write_mem {Digest::LEN}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *first_free_address
+
+                dup 1 dup 3 {&proof_collection_field_removal_records_integrity}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *first_free_address *rri_claim *rri_proof
+
+                call {stark_verify}
+
+                return
+        };
+
+        let main = triton_asm! {
+            //
+
+            read_io 5
+            // [txk_digest]
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // [txk_digest] *single_proof_witness
+
+            read_mem 1 push 1 add swap 1
+            // [txk_digest] *single_proof_witness discriminant
+
+            dup 0 push {discriminant_for_proof_collection} eq
+            skiz call {proof_collection_case_label}
+            // [txk_digest] *single_proof_witness discriminant
+
+            halt
+        };
+
+        triton_asm! {
+            {&main}
+            {&proof_collection_case_body}
+            {&library.all_imports()}
+        }
     }
 }
 
@@ -305,6 +464,13 @@ mod test {
                 &txk_mast_hash_as_input_as_public_input,
                 single_proof_witness.nondeterminism(),
             )
-            .expect("rust run failed");
+            .expect("rust run should pass");
+
+        SingleProof
+            .run_tasm(
+                &txk_mast_hash_as_input_as_public_input,
+                single_proof_witness.nondeterminism(),
+            )
+            .expect("tasm run should pass");
     }
 }

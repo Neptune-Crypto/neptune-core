@@ -144,16 +144,6 @@ impl SecretWitness for UpdateWitness {
 #[derive(Debug, Clone)]
 pub struct Update;
 
-impl Update {
-    pub const SINGLE_PROOF_PROGRAM_HASH: Digest = Digest::new([
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-    ]);
-}
-
 impl ConsensusProgram for Update {
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
@@ -170,7 +160,7 @@ impl ConsensusProgram for Update {
 
         // verify the proof of the out-of-date transaction
         let claim: Claim = Claim {
-            program_digest: Self::SINGLE_PROOF_PROGRAM_HASH,
+            program_digest: Digest::default(), // todo: fix me
             input: old_txk_digest_as_input,
             output: vec![],
         };
@@ -353,14 +343,6 @@ mod test {
     use proptest_arbitrary_interop::arb;
 
     use super::UpdateWitness;
-
-    #[test]
-    fn const_single_proof_program_digest_matches_with_hashed_code() {
-        assert_eq!(
-            Update::SINGLE_PROOF_PROGRAM_HASH,
-            SingleProof.program().hash()
-        );
-    }
 
     #[test]
     fn can_verify_transaction_update() {

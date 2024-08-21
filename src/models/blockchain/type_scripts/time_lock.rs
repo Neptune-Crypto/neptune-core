@@ -396,11 +396,8 @@ impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism {
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let input_salted_utxos_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let output_salted_utxos_address = encode_to_memory(
-            &mut memory,
-            input_salted_utxos_address,
-            &self.input_utxos,
-        );
+        let output_salted_utxos_address =
+            encode_to_memory(&mut memory, input_salted_utxos_address, &self.input_utxos);
         encode_to_memory(
             &mut memory,
             output_salted_utxos_address,
