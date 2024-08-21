@@ -304,19 +304,29 @@ impl WalletState {
     /// Scan the transaction for outputs that match with list of expected
     /// incoming UTXOs, and returns expected UTXOs that are present in the
     /// transaction.
+    ///
+    /// note: this algorithm is o(n) + o(m) where:
+    ///   n = number of ExpectedUtxo in database. (all-time)
+    ///   m = number of transaction outputs.
+    ///
+    /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
+    ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
     pub async fn scan_for_expected_utxos<'a>(
         &'a self,
         transaction: &'a Transaction,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
         let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
+        let eu_map: HashMap<_, _> = expected_utxos
+            .into_iter()
+            .map(|eu| (eu.addition_record, eu))
+            .collect();
 
-        transaction.kernel.outputs.iter().filter_map(move |a| {
-            expected_utxos
-                .iter()
-                .find(|eu| eu.addition_record == *a)
-                .map(|eu| eu.into())
-        })
+        transaction
+            .kernel
+            .outputs
+            .iter()
+            .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
     /// Delete all ExpectedUtxo that exceed a certain age
