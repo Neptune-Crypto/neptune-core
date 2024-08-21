@@ -144,7 +144,6 @@ mod test {
                 tree_height,
                 indexed_leafs: vec![indexed_leaf],
                 authentication_structure: path,
-                ..Default::default()
             };
             prop_assert!(inclusion_proof.verify(root_and_paths.root));
         }

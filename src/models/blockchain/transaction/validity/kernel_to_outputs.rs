@@ -78,7 +78,7 @@ impl SecretWitness for KernelToOutputsWitness {
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self.clone(),
+            self,
         );
 
         // set authentication path digests

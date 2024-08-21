@@ -142,7 +142,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            memory_part,
+            &memory_part,
         );
 
         let mut nd_stream: Vec<BFieldElement> = self.swbfa_hash.reversed().values().to_vec();

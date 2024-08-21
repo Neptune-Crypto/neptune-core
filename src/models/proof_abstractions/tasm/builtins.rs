@@ -304,13 +304,13 @@ pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> boo
             .with_ram(ND_MEMORY.with_borrow(|memory| memory.clone()));
 
     // update the nondeterminism in anticipation of verifying the proof
-    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof.clone(), claim.clone());
+    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, claim.clone());
 
     // store the proof and claim to memory
     let highest_nd_address = last_populated_nd_memory_address(&nondeterminism.ram).unwrap_or(0);
     let proof_pointer = BFieldElement::new(highest_nd_address as u64 + 1);
-    let claim_pointer = encode_to_memory(&mut nondeterminism.ram, proof_pointer, proof.clone());
-    encode_to_memory(&mut nondeterminism.ram, claim_pointer, claim.clone());
+    let claim_pointer = encode_to_memory(&mut nondeterminism.ram, proof_pointer, proof);
+    encode_to_memory(&mut nondeterminism.ram, claim_pointer, &claim);
 
     // create a tasm program to verify the claim+proof
     let mut library = Library::new();

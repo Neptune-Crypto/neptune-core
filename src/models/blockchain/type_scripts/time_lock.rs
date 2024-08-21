@@ -399,12 +399,12 @@ impl SecretWitness for TimeLockWitness {
         let output_salted_utxos_address = encode_to_memory(
             &mut memory,
             input_salted_utxos_address,
-            self.input_utxos.clone(),
+            &self.input_utxos,
         );
         encode_to_memory(
             &mut memory,
             output_salted_utxos_address,
-            SaltedUtxos::empty(),
+            &SaltedUtxos::empty(),
         );
         let individual_tokens = vec![
             self.transaction_kernel.timestamp.0,
