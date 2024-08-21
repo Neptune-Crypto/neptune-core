@@ -2,6 +2,7 @@ use itertools::Itertools;
 use tasm_lib::memory::{encode_to_memory, last_populated_nd_memory_address};
 use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::program::Program;
 use tasm_lib::triton_vm::vm::VMState;
@@ -286,6 +287,7 @@ pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
 
 /// Verify a STARK proof.
 pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> bool {
+    assert!(triton_vm::verify(stark_parameters, &claim, proof));
     // We want to verify the proof in a way that updates the emulated environment (in
     // particular: non-determinism) in the exact same way that the actual verify snippet
     // modifies the actual Triton VM environment. However, there is no rust (or host
@@ -302,9 +304,6 @@ pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> boo
         NonDeterminism::new(ND_INDIVIDUAL_TOKEN.with_borrow(|tokens| tokens.clone()))
             .with_digests(ND_DIGESTS.with_borrow(|digests| digests.clone()))
             .with_ram(ND_MEMORY.with_borrow(|memory| memory.clone()));
-
-    // update the nondeterminism in anticipation of verifying the proof
-    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, claim.clone());
 
     // store the proof and claim to memory
     let highest_nd_address = last_populated_nd_memory_address(&nondeterminism.ram).unwrap_or(0);
@@ -337,7 +336,6 @@ pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> boo
     vm_state.run().unwrap();
 
     // percolate the environment changes
-    ND_MEMORY.replace(vm_state.ram);
     ND_DIGESTS.replace(vm_state.secret_digests.into_iter().collect_vec());
     ND_INDIVIDUAL_TOKEN.replace(vm_state.secret_individual_tokens.into_iter().collect_vec());
 
@@ -353,6 +351,10 @@ mod test {
     use tasm_lib::triton_vm::program::NonDeterminism;
     use tasm_lib::triton_vm::stark::Stark;
     use tasm_lib::triton_vm::triton_asm;
+    use tasm_lib::verifier::stark_verify::StarkVerify;
+    use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
+    use crate::models::proof_abstractions::tasm::environment::ND_INDIVIDUAL_TOKEN;
+
 
     #[test]
     fn can_verify_halt_in_emulated_environment() {
@@ -365,7 +367,19 @@ mod test {
             &claim,
             &program,
             NonDeterminism::new(vec![]),
-        ).unwrap();
+        )
+        .unwrap();
+
+        let mut nondeterminism = NonDeterminism::new(vec![]);
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+            &mut nondeterminism,
+            &proof,
+            claim.clone(),
+        );
+
+        ND_DIGESTS.replace(nondeterminism.digests);
+        ND_INDIVIDUAL_TOKEN.replace(nondeterminism.individual_tokens);
+
         assert!(verify_stark(stark_parameters, claim, &proof));
     }
 }
