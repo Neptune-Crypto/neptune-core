@@ -5,18 +5,21 @@
 // It has been shamelessly copied from greenhat's omnizk compiler project:
 // https://github.com/greenhat/omnizk
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+};
 
 use tasm_lib::{
     triton_vm::program::NonDeterminism, twenty_first::math::b_field_element::BFieldElement, Digest,
 };
 
 thread_local! {
-    pub(super) static PUB_INPUT: RefCell<Vec<BFieldElement>> = const {RefCell::new(vec![])};
+    pub(super) static PUB_INPUT: RefCell<VecDeque<BFieldElement>> = const {RefCell::new(VecDeque::new())};
     pub(super) static PUB_OUTPUT: RefCell<Vec<BFieldElement>> = const { RefCell::new(vec![])};
 
-    pub(super) static ND_INDIVIDUAL_TOKEN: RefCell<Vec<BFieldElement>> = const{RefCell::new(vec![])};
-    pub(super) static ND_DIGESTS: RefCell<Vec<Digest>> = const{RefCell::new(vec![])};
+    pub(super) static ND_INDIVIDUAL_TOKEN: RefCell<VecDeque<BFieldElement>> = const{RefCell::new(VecDeque::new())};
+    pub(super) static ND_DIGESTS: RefCell<VecDeque<Digest>> = const{RefCell::new(VecDeque::new())};
     pub(super) static ND_MEMORY: RefCell<HashMap<BFieldElement, BFieldElement>> =
         RefCell::new(HashMap::default());
 
@@ -28,22 +31,14 @@ pub(crate) fn init(
     input: &[BFieldElement],
     nondeterminism: NonDeterminism,
 ) {
-    let mut pub_input_reversed = input.to_vec();
-    pub_input_reversed.reverse();
-    let mut inidividual_tokens_reversed = nondeterminism.individual_tokens;
-    inidividual_tokens_reversed.reverse();
-    let mut digests_reversed = nondeterminism.digests;
-    digests_reversed.reverse();
-
-    // TODO: Do we need to handle ND-memory as well?
     PUB_INPUT.with(|v| {
-        *v.borrow_mut() = pub_input_reversed;
+        *v.borrow_mut() = input.to_vec().into();
     });
     ND_INDIVIDUAL_TOKEN.with(|v| {
-        *v.borrow_mut() = inidividual_tokens_reversed;
+        *v.borrow_mut() = nondeterminism.individual_tokens.into();
     });
     ND_DIGESTS.with(|v| {
-        *v.borrow_mut() = digests_reversed;
+        *v.borrow_mut() = nondeterminism.digests.into();
     });
     ND_MEMORY.with(|v| {
         *v.borrow_mut() = nondeterminism.ram;

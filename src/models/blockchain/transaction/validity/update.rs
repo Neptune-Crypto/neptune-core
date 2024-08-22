@@ -165,7 +165,7 @@ impl ConsensusProgram for Update {
             output: vec![],
         };
         let proof: &Proof = &uw.old_proof;
-        tasmlib::verify_stark(Stark::default(), claim, proof);
+        tasmlib::verify_stark(Stark::default(), &claim, proof);
 
         // authenticate the new mutator set accumulator against the txk mast hash
         let new_aocl_mmr: MmrAccumulator = uw.new_aocl;
