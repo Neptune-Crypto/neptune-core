@@ -262,12 +262,13 @@ impl ConsensusProgram for SingleProof {
             // BEFORE: [txk_digest] *single_proof_witness discriminant
             // AFTER: [txk_digest] *single_proof_witness discriminant
             {proof_collection_case_label}:
+                hint discriminant = stack[0]
+                hint single_proof_witness = stack[1]
+                hint txk_digest = stack[2..7]
                 // [txk_digest] *single_proof_witness discriminant
 
-                dup 1 push 1 add
+                dup 1 push 2 add
                 // [txk_digest] *spw disc *proof_collection
-
-                // Not *proof_collection_si? Unclear.
 
 
                 /* check kernel MAST hash */
@@ -275,16 +276,16 @@ impl ConsensusProgram for SingleProof {
                 dup 0 {&proof_collection_field_kernel_mast_hash}
                 // [txk_digest] *spw disc *proof_collection *kernel_mast_hash
 
-                push {Digest::LEN - 1}
+                push {Digest::LEN - 1} add
                 read_mem {Digest::LEN}
                 pop 1
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash]
 
-                dup 11
-                dup 11
-                dup 11
-                dup 11
-                dup 11
+                dup 13
+                dup 13
+                dup 13
+                dup 13
+                dup 13
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash] [txk_digest]
 
                 {&compare_digests}
@@ -409,15 +410,6 @@ mod test {
             PublicInput::new(txk_mast_hash.reversed().values().encode());
 
         let nondeterminism = single_proof_witness.nondeterminism();
-        println!(
-            "number of nondeterministic digests: {}",
-            nondeterminism.digests.len()
-        );
-
-        println!(
-            "First digest of nd digest stream: {}",
-            nondeterminism.digests[0]
-        );
 
         SingleProof
             .run_rust(
@@ -427,6 +419,7 @@ mod test {
             .expect("rust run should pass");
 
         println!("run_rust succeeded!!1one");
+
         SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
             .expect("tasm run should pass");
