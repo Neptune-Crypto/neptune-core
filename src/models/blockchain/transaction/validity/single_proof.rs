@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use itertools::Itertools;
@@ -311,6 +312,64 @@ impl ConsensusProgram for SingleProof {
              // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash *first_free_address
         );
 
+        let proof_collection_field_salted_outputs_hash =
+            field!(ProofCollection::salted_outputs_hash);
+        let push_k2o_hash = push_digest(KernelToOutputs.program().hash());
+
+        let assemble_k2o_claim = triton_asm!(
+            // [txk_digest] *spw disc *proof_collection
+
+             call {dyn_malloc} dup 0
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *k2o_claim
+
+             push {Digest::LEN} swap 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim output_len *k2o_claim
+
+             push {Digest::LEN + 1} swap 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim output_len output_si *k2o_claim
+
+             write_mem 2
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output
+
+             dup 2 {&proof_collection_field_salted_outputs_hash}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *soh
+
+             push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output [soh]
+
+             dup {Digest::LEN} write_mem {Digest::LEN}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input_si
+
+             swap 1 pop 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *input_si
+
+             push {Digest::LEN} swap 1
+             push {Digest::LEN + 1} swap 1
+             write_mem 2
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *input
+
+             dup 5
+             dup 7
+             dup 9
+             dup 11
+             dup 13
+             dup 5
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *input [txk_digest_reversed] *input
+
+             write_mem {Digest::LEN}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *input *program_digest
+
+             swap 1 pop 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest
+
+             {&push_k2o_hash}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest [k2o_digest]
+
+             dup {Digest::LEN} write_mem {Digest::LEN}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest *next_free_address
+        );
+
+        let proof_collection_field_kernel_to_outputs = field!(ProofCollection::kernel_to_outputs);
         let proof_collection_case_body = triton_asm! {
             // BEFORE: [txk_digest] *single_proof_witness discriminant
             // AFTER: [txk_digest] *single_proof_witness discriminant
@@ -360,6 +419,19 @@ impl ConsensusProgram for SingleProof {
                 call {stark_verify}
                 // [txk_digest] *spw disc *proof_collection
 
+
+                /* create and verify kernel to outputs claim */
+                {&assemble_k2o_claim}
+                // [txk_digest] *spw disc *proof_collection *k2o_claim *program_hash *first_free_address
+
+                pop 2
+                // [txk_digest] *spw disc *proof_collection *k2o_claim
+
+                dup 1 {&proof_collection_field_kernel_to_outputs}
+                // [txk_digest] *spw disc *proof_collection *k2o_claim *proof
+
+                call {stark_verify}
+
                 return
         };
 
@@ -392,24 +464,14 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::SecretWitness;
     use proptest::{
         prelude::{Arbitrary, Strategy},
         test_runner::TestRunner,
     };
-    use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput, proof::Claim};
+    use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput};
 
-    use crate::models::{
-        blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts,
-        proof_abstractions::SecretWitness,
-    };
-    use crate::models::{
-        blockchain::transaction::validity::{
-            collect_type_scripts::CollectTypeScripts,
-            removal_records_integrity::RemovalRecordsIntegrity,
-        },
-        proof_abstractions::mast_hash::MastHash,
-    };
     use crate::models::{
         blockchain::transaction::{
             primitive_witness::PrimitiveWitness,
