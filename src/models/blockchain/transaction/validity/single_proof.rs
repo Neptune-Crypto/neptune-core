@@ -258,6 +258,59 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_field_removal_records_integrity =
             field!(ProofCollection::removal_records_integrity);
         let push_rri_hash = push_digest(RemovalRecordsIntegrity.program().hash());
+
+        let assemble_rri_claim = triton_asm!(
+             // [txk_digest] *spw disc *proof_collection
+
+             call {dyn_malloc} dup 0
+             // [txk_digest] *spw disc *proof_collection *rri_claim *rri_claim
+
+             push {Digest::LEN} swap 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim output_len *rri_claim
+
+             push {Digest::LEN + 1} swap 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim output_len output_si *rri_claim
+
+             write_mem 2
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output
+
+             dup 2 {&proof_collection_field_salted_inputs_hash}
+             hint salted_inputs_hash_ptr = stack[0]
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *salted_inputs_hash
+
+             push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash]
+
+             dup 5
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash] *output
+
+             write_mem {Digest::LEN}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input_si
+
+             swap 1 pop 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim *input_si
+
+             push {Digest::LEN} swap 1
+             push {Digest::LEN + 1} swap 1
+             write_mem 2
+             // [txk_digest] *spw disc *proof_collection *rri_claim *input
+
+             dup 5 dup 7 dup 9 dup 11 dup 13 dup 5
+             // [txk_digest] *spw disc *proof_collection *rri_claim *input [txk_digest_reversed] *input
+
+             write_mem 5
+             // [txk_digest] *spw disc *proof_collection *rri_claim *input *program_hash
+
+             swap 1 pop 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash
+
+             {&push_rri_hash}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash [rri_hash]
+
+             dup {Digest::LEN} write_mem {Digest::LEN}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash *first_free_address
+        );
+
         let proof_collection_case_body = triton_asm! {
             // BEFORE: [txk_digest] *single_proof_witness discriminant
             // AFTER: [txk_digest] *single_proof_witness discriminant
@@ -268,6 +321,7 @@ impl ConsensusProgram for SingleProof {
                 // [txk_digest] *single_proof_witness discriminant
 
                 dup 1 push 2 add
+                hint proof_collection_ptr = stack[0]
                 // [txk_digest] *spw disc *proof_collection
 
 
@@ -281,11 +335,11 @@ impl ConsensusProgram for SingleProof {
                 pop 1
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash]
 
-                dup 13
-                dup 13
-                dup 13
-                dup 13
-                dup 13
+                dup 12
+                dup 12
+                dup 12
+                dup 12
+                dup 12
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash] [txk_digest]
 
                 {&compare_digests}
@@ -294,53 +348,17 @@ impl ConsensusProgram for SingleProof {
 
 
                 /* create and verify removal records integrity claim */
+                {&assemble_rri_claim}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash *first_free_address
 
-                call {dyn_malloc} dup 0
-                // [txk_digest] *spw disc *proof_collection *rri_claim *rri_claim
+                pop 2
+                // [txk_digest] *spw disc *proof_collection *rri_claim
 
-                push {Digest::LEN} swap 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim output_si *rri_claim
-
-                write_mem 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim *output
-
-                dup 2 {&proof_collection_field_salted_inputs_hash}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *output *salted_inputs_hash
-
-                push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash]
-
-                dup 5
-                // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash] *output
-
-                write_mem {Digest::LEN}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *output *input_si
-
-                swap 1 pop 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim *input_si
-
-                push {Digest::LEN} swap 1 write_mem 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim *input
-
-                dup 5 dup 7 dup 9 dup 11 dup 13 dup 5
-                // [txk_digest] *spw disc *proof_collection *rri_claim *input [txk_digest_reversed] *input
-
-                write_mem 5
-                // [txk_digest] *spw disc *proof_collection *rri_claim *input *program_hash
-
-                swap 1 pop 1
-                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash
-
-                {&push_rri_hash}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash [rri_hash]
-
-                dup {Digest::LEN} write_mem {Digest::LEN}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *first_free_address
-
-                dup 1 dup 3 {&proof_collection_field_removal_records_integrity}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *first_free_address *rri_claim *rri_proof
+                dup 1 {&proof_collection_field_removal_records_integrity}
+                // [txk_digest] *spw disc *proof_collection *rri_claim *rri_proof
 
                 call {stark_verify}
+                // [txk_digest] *spw disc *proof_collection
 
                 return
         };
@@ -374,14 +392,24 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use proptest::{
         prelude::{Arbitrary, Strategy},
         test_runner::TestRunner,
     };
-    use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput};
+    use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput, proof::Claim};
 
-    use crate::models::proof_abstractions::mast_hash::MastHash;
-    use crate::models::proof_abstractions::SecretWitness;
+    use crate::models::{
+        blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts,
+        proof_abstractions::SecretWitness,
+    };
+    use crate::models::{
+        blockchain::transaction::validity::{
+            collect_type_scripts::CollectTypeScripts,
+            removal_records_integrity::RemovalRecordsIntegrity,
+        },
+        proof_abstractions::mast_hash::MastHash,
+    };
     use crate::models::{
         blockchain::transaction::{
             primitive_witness::PrimitiveWitness,
