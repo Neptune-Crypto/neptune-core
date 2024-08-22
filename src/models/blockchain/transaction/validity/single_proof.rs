@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use itertools::Itertools;
@@ -15,15 +14,12 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::{field, Digest};
 
-use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
-use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::tasm_lib::memory::encode_to_memory;
 use crate::triton_vm::triton_asm;
 use crate::BFieldElement;
-use tasm_lib::triton_vm;
 
 use super::proof_collection::ProofCollection;
 
@@ -116,10 +112,44 @@ impl SecretWitness for SingleProofWitness {
 
         #[allow(irrefutable_let_patterns)] // drop this line when there is more than 1 variant
         if let SingleProofWitness::Collection(proof_collection) = self {
+            // removal records integrity
             let rri_claim = proof_collection.removal_records_integrity_claim();
             let rri_proof = &proof_collection.removal_records_integrity;
             let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
             stark_verify_snippet.update_nondeterminism(&mut nondeterminism, rri_proof, &rri_claim);
+
+            // kernel to outputs
+            let k2o_claim = proof_collection.kernel_to_outputs_claim();
+            let k2o_proof = &proof_collection.kernel_to_outputs;
+            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, k2o_proof, &k2o_claim);
+
+            // collect lock scripts
+            let cls_claim = proof_collection.collect_lock_scripts_claim();
+            let cls_proof = &proof_collection.collect_lock_scripts;
+            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, cls_proof, &cls_claim);
+
+            // collect type scripts
+            let cts_claim = proof_collection.collect_type_scripts_claim();
+            let cts_proof = &proof_collection.collect_type_scripts;
+            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, cts_proof, &cts_claim);
+
+            // lock scripts
+            for (claim, proof) in proof_collection
+                .lock_script_claims()
+                .into_iter()
+                .zip(&proof_collection.lock_scripts_halt)
+            {
+                stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+            }
+
+            // type scripts
+            for (claim, proof) in proof_collection
+                .type_script_claims()
+                .into_iter()
+                .zip(&proof_collection.type_scripts_halt)
+            {
+                stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+            }
         }
 
         nondeterminism
@@ -149,124 +179,52 @@ impl ConsensusProgram for SingleProof {
             SingleProofWitness::Collection(pc) => {
                 assert_eq!(txk_digest, pc.kernel_mast_hash);
 
-                let txk_mast_hash_as_input: Vec<BFieldElement> =
-                    txk_digest.reversed().values().to_vec();
-                let salted_inputs_hash_as_input: Vec<BFieldElement> =
-                    pc.salted_inputs_hash.reversed().values().to_vec();
-                let salted_inputs_hash_as_output: Vec<BFieldElement> =
-                    pc.salted_inputs_hash.values().to_vec();
-                let salted_outputs_hash_as_input: Vec<BFieldElement> =
-                    pc.salted_outputs_hash.reversed().values().to_vec();
-                let salted_outputs_hash_as_output: Vec<BFieldElement> =
-                    pc.salted_outputs_hash.values().to_vec();
-
-                let removal_records_integrity_claim: Claim = Claim {
-                    program_digest: RemovalRecordsIntegrity.program().hash(),
-                    input: txk_mast_hash_as_input.clone(),
-                    output: salted_inputs_hash_as_output.clone(),
-                };
-                assert!(triton_vm::verify(
-                    Stark::default(),
-                    &removal_records_integrity_claim,
-                    &pc.removal_records_integrity
-                ));
+                let removal_records_integrity_claim: Claim = pc.removal_records_integrity_claim();
                 tasmlib::verify_stark(
                     Stark::default(),
                     &removal_records_integrity_claim,
                     &pc.removal_records_integrity,
                 );
 
-                let kernel_to_outputs_claim: Claim = Claim {
-                    program_digest: KernelToOutputs.program().hash(),
-                    input: txk_mast_hash_as_input.clone(),
-                    output: salted_outputs_hash_as_output.clone(),
-                };
+                let kernel_to_outputs_claim: Claim = pc.kernel_to_outputs_claim();
                 tasmlib::verify_stark(
                     Stark::default(),
                     &kernel_to_outputs_claim,
                     &pc.kernel_to_outputs,
                 );
 
-                let mut lock_script_hashes_as_output: Vec<BFieldElement> =
-                    Vec::<BFieldElement>::new();
-                let mut i: usize = 0;
-                while i < pc.lock_script_hashes.len() {
-                    let lock_script_hash: Digest = pc.lock_script_hashes[i];
-                    let mut j: usize = 0;
-                    while j < Digest::LEN {
-                        lock_script_hashes_as_output.push(lock_script_hash.values()[j]);
-                        j += 1;
-                    }
-                    i += 1;
-                }
-                let collect_lock_scripts_claim: Claim = Claim {
-                    program_digest: CollectLockScripts.program().hash(),
-                    input: salted_inputs_hash_as_input.clone(),
-                    output: lock_script_hashes_as_output,
-                };
+                let collect_lock_scripts_claim: Claim = pc.collect_lock_scripts_claim();
                 tasmlib::verify_stark(
                     Stark::default(),
                     &collect_lock_scripts_claim,
                     &pc.collect_lock_scripts,
                 );
 
-                let mut type_script_hashes_as_output: Vec<BFieldElement> =
-                    Vec::<BFieldElement>::new();
-                i = 0;
-                while i < pc.type_script_hashes.len() {
-                    let type_script_hash: Digest = pc.type_script_hashes[i];
-                    let mut j: usize = 0;
-                    while j < Digest::LEN {
-                        type_script_hashes_as_output.push(type_script_hash.values()[j]);
-                        j += 1;
-                    }
-                    i += 1;
-                }
-                let collect_type_scripts_claim: Claim = Claim {
-                    program_digest: CollectTypeScripts.program().hash(),
-                    input: [
-                        salted_inputs_hash_as_input.clone(),
-                        salted_outputs_hash_as_input.clone(),
-                    ]
-                    .concat(),
-                    output: type_script_hashes_as_output,
-                };
+                let collect_type_scripts_claim: Claim = pc.collect_type_scripts_claim();
                 tasmlib::verify_stark(
                     Stark::default(),
                     &collect_type_scripts_claim,
                     &pc.collect_type_scripts,
                 );
 
-                i = 0;
+                let mut i = 0;
+                let lock_script_claims: Vec<Claim> = pc.lock_script_claims();
+                assert_eq!(lock_script_claims.len(), pc.lock_script_hashes.len());
                 while i < pc.lock_script_hashes.len() {
-                    let lock_script_hash = pc.lock_script_hashes[i];
-                    let claim: Claim = Claim {
-                        program_digest: lock_script_hash,
-                        input: txk_mast_hash_as_input.clone(),
-                        output: Vec::<BFieldElement>::new(),
-                    };
+                    let claim: &Claim = &lock_script_claims[i];
                     let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
-                    tasmlib::verify_stark(Stark::default(), &claim, lock_script_halts_proof);
+                    tasmlib::verify_stark(Stark::default(), claim, lock_script_halts_proof);
 
                     i += 1;
                 }
 
-                let type_script_input: Vec<BFieldElement> = [
-                    txk_mast_hash_as_input,
-                    salted_inputs_hash_as_input,
-                    salted_outputs_hash_as_input,
-                ]
-                .concat();
                 i = 0;
+                let type_script_claims = pc.type_script_claims();
+                assert_eq!(type_script_claims.len(), pc.type_script_hashes.len());
                 while i < pc.type_script_hashes.len() {
-                    let type_script_hash = pc.type_script_hashes[i];
-                    let claim: Claim = Claim {
-                        program_digest: type_script_hash,
-                        input: type_script_input.clone(),
-                        output: Vec::<BFieldElement>::new(),
-                    };
+                    let claim: &Claim = &type_script_claims[i];
                     let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
-                    tasmlib::verify_stark(Stark::default(), &claim, type_script_halts_proof);
+                    tasmlib::verify_stark(Stark::default(), claim, type_script_halts_proof);
                     i += 1;
                 }
             } // SingleProofWitness::Update(_) => todo!(),
