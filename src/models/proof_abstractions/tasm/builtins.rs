@@ -1,15 +1,10 @@
-use itertools::Itertools;
-use tasm_lib::memory::{encode_to_memory, last_populated_nd_memory_address};
-use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::program::Program;
-use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::{
-    triton_vm::program::NonDeterminism, triton_vm::proof::Claim, triton_vm::proof::Proof,
-    triton_vm::stark::Stark, twenty_first::math::b_field_element::BFieldElement,
+    triton_vm::proof::Claim, triton_vm::proof::Proof, triton_vm::stark::Stark,
+    twenty_first::math::b_field_element::BFieldElement,
     twenty_first::math::x_field_element::XFieldElement, twenty_first::prelude::MmrMembershipProof,
     twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof,
     twenty_first::util_types::mmr::shared_advanced::get_peak_heights,
@@ -17,7 +12,6 @@ use tasm_lib::{
 };
 
 use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
-use crate::triton_vm::triton_asm;
 
 use super::environment::{ND_INDIVIDUAL_TOKEN, ND_MEMORY, PROGRAM_DIGEST, PUB_INPUT, PUB_OUTPUT};
 
@@ -29,14 +23,14 @@ pub fn own_program_digest() -> Digest {
 #[allow(non_snake_case)]
 pub fn tasmlib_io_read_stdin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
-    PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap())
+    PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap())
 }
 
 #[allow(non_snake_case)]
 pub fn tasmlib_io_read_stdin___xfe() -> XFieldElement {
-    let x2 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let x1 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
-    let x0 = PUB_INPUT.with(|v| v.borrow_mut().pop().unwrap());
+    let x2 = PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap());
+    let x1 = PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap());
+    let x0 = PUB_INPUT.with(|v| v.borrow_mut().pop_front().unwrap());
     XFieldElement::new([x0, x1, x2])
 }
 
@@ -44,7 +38,7 @@ pub fn tasmlib_io_read_stdin___xfe() -> XFieldElement {
 pub fn tasmlib_io_read_stdin___u32() -> u32 {
     #[allow(clippy::unwrap_used)]
     let val: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     val
@@ -54,11 +48,11 @@ pub fn tasmlib_io_read_stdin___u32() -> u32 {
 pub fn tasmlib_io_read_stdin___u64() -> u64 {
     #[allow(clippy::unwrap_used)]
     let hi: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     let lo: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     ((hi as u64) << 32) + lo as u64
@@ -68,19 +62,19 @@ pub fn tasmlib_io_read_stdin___u64() -> u64 {
 pub fn tasmlib_io_read_stdin___u128() -> u128 {
     #[allow(clippy::unwrap_used)]
     let e3: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     let e2: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     let e1: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     let e0: u32 = PUB_INPUT
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     ((e3 as u128) << 96) + ((e2 as u128) << 64) + ((e1 as u128) << 32) + e0 as u128
@@ -90,27 +84,27 @@ pub fn tasmlib_io_read_stdin___u128() -> u128 {
 pub fn tasmlib_io_read_stdin___digest() -> Digest {
     let e4 = PUB_INPUT.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from stdin -- input not long enough")
     });
     let e3 = PUB_INPUT.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from stdin -- input not long enough")
     });
     let e2 = PUB_INPUT.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from stdin -- input not long enough")
     });
     let e1 = PUB_INPUT.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from stdin -- input not long enough")
     });
     let e0 = PUB_INPUT.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from stdin -- input not long enough")
     });
     Digest::new([e0, e1, e2, e3, e4])
@@ -154,18 +148,18 @@ pub fn tasmlib_io_write_to_stdout___u128(x: u128) {
 #[allow(non_snake_case)]
 pub fn tasmlib_io_read_secin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
-    ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop().unwrap())
+    ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop_front().unwrap())
 }
 
 #[allow(non_snake_case)]
 pub fn tasmlib_io_read_secin___u64() -> u64 {
     #[allow(clippy::unwrap_used)]
     let hi: u32 = ND_INDIVIDUAL_TOKEN
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     let lo: u32 = ND_INDIVIDUAL_TOKEN
-        .with(|v| v.borrow_mut().pop().unwrap())
+        .with(|v| v.borrow_mut().pop_front().unwrap())
         .try_into()
         .unwrap();
     ((hi as u64) << 32) + lo as u64
@@ -175,27 +169,27 @@ pub fn tasmlib_io_read_secin___u64() -> u64 {
 pub fn tasmlib_io_read_secin___digest() -> Digest {
     let e4 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from secin -- input not long enough")
     });
     let e3 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from secin -- input not long enough")
     });
     let e2 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from secin -- input not long enough")
     });
     let e1 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from secin -- input not long enough")
     });
     let e0 = ND_INDIVIDUAL_TOKEN.with(|v| {
         v.borrow_mut()
-            .pop()
+            .pop_front()
             .expect("cannot read digest from secin -- input not long enough")
     });
     Digest::new([e0, e1, e2, e3, e4])
@@ -213,7 +207,7 @@ pub fn tasmlib_hashing_merkle_verify(
 
     ND_DIGESTS.with_borrow_mut(|nd_digests| {
         for _ in 0..tree_height {
-            path.push(nd_digests.pop().unwrap());
+            path.push(nd_digests.pop_front().unwrap());
         }
     });
 
@@ -240,7 +234,7 @@ pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
     let mut auth_path: Vec<Digest> = vec![];
     ND_DIGESTS.with_borrow_mut(|nd_digests| {
         for _ in 0..tree_height {
-            auth_path.push(nd_digests.pop().unwrap());
+            auth_path.push(nd_digests.pop_front().unwrap());
         }
     });
     let mmr_mp = MmrMembershipProof::new(auth_path);
@@ -285,65 +279,40 @@ pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
     *T::decode_iter(&mut iterator).expect("decode from memory failed")
 }
 
-/// Verify a STARK proof.
-pub fn verify_stark(stark_parameters: Stark, claim: Claim, proof: &Proof) -> bool {
-    assert!(triton_vm::verify(stark_parameters, &claim, proof));
-    // We want to verify the proof in a way that updates the emulated environment (in
-    // particular: non-determinism) in the exact same way that the actual verify snippet
-    // modifies the actual Triton VM environment. However, there is no rust (or host
-    // machine) code that modifies the environment accurately because this is too
-    // much hassle to write for too little benefit. So what we do here is invoke the
-    // tasm snippet, wrapped in make-shift program, in Triton VM and percolate the
-    // induced environment changes.
+/// Verify a STARK proof. Crashes if the (claim, proof) pair is invalid. Consumes
+/// the right number of non-deterministic digests from the ND digests stream. Also
+/// consumes the right number of non-deterministic individual tokens from the ND
+/// individual tokens stream. The latter number happens to be 0 right now, but
+/// that might change if the `StarkVerify` snippet changes.
+pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
+    assert!(triton_vm::verify(stark_parameters, claim, proof));
 
     let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(stark_parameters);
 
-    // create nondeterminism object for running Triton VM and populate it with
-    // the contents of the environment's variables
-    let mut nondeterminism =
-        NonDeterminism::new(ND_INDIVIDUAL_TOKEN.with_borrow(|tokens| tokens.clone()))
-            .with_digests(ND_DIGESTS.with_borrow(|digests| digests.clone()))
-            .with_ram(ND_MEMORY.with_borrow(|memory| memory.clone()));
+    let num_digests_consumed =
+        stark_verify_snippet.number_of_nondeterministic_digests_consumed(proof, claim);
+    ND_DIGESTS.with_borrow_mut(|digest_stream| {
+        (0..num_digests_consumed).for_each(|_| {
+            digest_stream.pop_front().expect(
+                "digest stream should contain all digests divined by `StarkVerify` snippet",
+            );
+        })
+    });
 
-    // store the proof and claim to memory
-    let highest_nd_address = last_populated_nd_memory_address(&nondeterminism.ram).unwrap_or(0);
-    let proof_pointer = BFieldElement::new(highest_nd_address as u64 + 1);
-    let claim_pointer = encode_to_memory(&mut nondeterminism.ram, proof_pointer, proof);
-    encode_to_memory(&mut nondeterminism.ram, claim_pointer, &claim);
-
-    // create a tasm program to verify the claim+proof
-    let mut library = Library::new();
-    let stark_verify = library.import(Box::new(stark_verify_snippet.clone()));
-    let program_code = triton_asm! {
-        push {claim_pointer}
-        push {proof_pointer}
-        call {stark_verify}
-        halt
-        {&library.all_imports()}
-    };
-    let program = Program::new(&program_code);
-
-    // report on error, if any
-    if let Err(vm_error) = program.run(vec![].into(), nondeterminism.clone()) {
-        println!("Erro verifying STARK proof.");
-        println!("instruction error: {}", vm_error.source);
-        println!("VM state:\n{}", vm_error.vm_state);
-        return false;
-    }
-
-    // run the program and get the final state
-    let mut vm_state = VMState::new(&program, vec![].into(), nondeterminism);
-    vm_state.run().unwrap();
-
-    // percolate the environment changes
-    ND_DIGESTS.replace(vm_state.secret_digests.into_iter().collect_vec());
-    ND_INDIVIDUAL_TOKEN.replace(vm_state.secret_individual_tokens.into_iter().collect_vec());
-
-    true
+    let num_tokens_consumed =
+        stark_verify_snippet.number_of_nondeterministic_tokens_consumed(proof, claim);
+    ND_INDIVIDUAL_TOKEN.with_borrow_mut(|token_stream| {
+        (0..num_tokens_consumed).for_each(|_| {
+            token_stream
+                .pop_front()
+                .expect("token stream should contain all tokens divined by `StarkVerify` snippet");
+        })
+    });
 }
 
 #[cfg(test)]
 mod test {
+    use crate::models::proof_abstractions;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
     use crate::models::proof_abstractions::Claim;
     use crate::models::proof_abstractions::Program;
@@ -352,9 +321,6 @@ mod test {
     use tasm_lib::triton_vm::stark::Stark;
     use tasm_lib::triton_vm::triton_asm;
     use tasm_lib::verifier::stark_verify::StarkVerify;
-    use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
-    use crate::models::proof_abstractions::tasm::environment::ND_INDIVIDUAL_TOKEN;
-
 
     #[test]
     fn can_verify_halt_in_emulated_environment() {
@@ -374,12 +340,11 @@ mod test {
         StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
             &mut nondeterminism,
             &proof,
-            claim.clone(),
+            &claim,
         );
 
-        ND_DIGESTS.replace(nondeterminism.digests);
-        ND_INDIVIDUAL_TOKEN.replace(nondeterminism.individual_tokens);
+        proof_abstractions::tasm::environment::init(program.hash(), &[], nondeterminism);
 
-        assert!(verify_stark(stark_parameters, claim, &proof));
+        verify_stark(stark_parameters, &claim, &proof);
     }
 }

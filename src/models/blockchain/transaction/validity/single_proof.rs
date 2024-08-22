@@ -119,8 +119,7 @@ impl SecretWitness for SingleProofWitness {
             let rri_claim = proof_collection.removal_records_integrity_claim();
             let rri_proof = &proof_collection.removal_records_integrity;
             let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
-            println!("rri claim: {:?}", rri_claim);
-            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, rri_proof, rri_claim);
+            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, rri_proof, &rri_claim);
         }
 
         nondeterminism
@@ -171,24 +170,22 @@ impl ConsensusProgram for SingleProof {
                     &removal_records_integrity_claim,
                     &pc.removal_records_integrity
                 ));
-                let rri = tasmlib::verify_stark(
+                tasmlib::verify_stark(
                     Stark::default(),
-                    removal_records_integrity_claim,
+                    &removal_records_integrity_claim,
                     &pc.removal_records_integrity,
                 );
-                assert!(rri);
 
                 let kernel_to_outputs_claim: Claim = Claim {
                     program_digest: KernelToOutputs.program().hash(),
                     input: txk_mast_hash_as_input.clone(),
                     output: salted_outputs_hash_as_output.clone(),
                 };
-                let k2o = tasmlib::verify_stark(
+                tasmlib::verify_stark(
                     Stark::default(),
-                    kernel_to_outputs_claim,
+                    &kernel_to_outputs_claim,
                     &pc.kernel_to_outputs,
                 );
-                assert!(k2o);
 
                 let mut lock_script_hashes_as_output: Vec<BFieldElement> =
                     Vec::<BFieldElement>::new();
@@ -207,12 +204,11 @@ impl ConsensusProgram for SingleProof {
                     input: salted_inputs_hash_as_input.clone(),
                     output: lock_script_hashes_as_output,
                 };
-                let cls: bool = tasmlib::verify_stark(
+                tasmlib::verify_stark(
                     Stark::default(),
-                    collect_lock_scripts_claim,
+                    &collect_lock_scripts_claim,
                     &pc.collect_lock_scripts,
                 );
-                assert!(cls);
 
                 let mut type_script_hashes_as_output: Vec<BFieldElement> =
                     Vec::<BFieldElement>::new();
@@ -235,12 +231,11 @@ impl ConsensusProgram for SingleProof {
                     .concat(),
                     output: type_script_hashes_as_output,
                 };
-                let cts: bool = tasmlib::verify_stark(
+                tasmlib::verify_stark(
                     Stark::default(),
-                    collect_type_scripts_claim,
+                    &collect_type_scripts_claim,
                     &pc.collect_type_scripts,
                 );
-                assert!(cts);
 
                 i = 0;
                 while i < pc.lock_script_hashes.len() {
@@ -251,9 +246,7 @@ impl ConsensusProgram for SingleProof {
                         output: Vec::<BFieldElement>::new(),
                     };
                     let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
-                    let lock_script_halts: bool =
-                        tasmlib::verify_stark(Stark::default(), claim, lock_script_halts_proof);
-                    assert!(lock_script_halts);
+                    tasmlib::verify_stark(Stark::default(), &claim, lock_script_halts_proof);
 
                     i += 1;
                 }
@@ -273,9 +266,7 @@ impl ConsensusProgram for SingleProof {
                         output: Vec::<BFieldElement>::new(),
                     };
                     let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
-                    let type_script_halts: bool =
-                        tasmlib::verify_stark(Stark::default(), claim, type_script_halts_proof);
-                    assert!(type_script_halts);
+                    tasmlib::verify_stark(Stark::default(), &claim, type_script_halts_proof);
                     i += 1;
                 }
             } // SingleProofWitness::Update(_) => todo!(),
@@ -459,18 +450,27 @@ mod test {
         let txk_mast_hash_as_input_as_public_input =
             PublicInput::new(txk_mast_hash.reversed().values().encode());
 
+        let nondeterminism = single_proof_witness.nondeterminism();
+        println!(
+            "number of nondeterministic digests: {}",
+            nondeterminism.digests.len()
+        );
+
+        println!(
+            "First digest of nd digest stream: {}",
+            nondeterminism.digests[0]
+        );
+
         SingleProof
             .run_rust(
                 &txk_mast_hash_as_input_as_public_input,
-                single_proof_witness.nondeterminism(),
+                nondeterminism.clone(),
             )
             .expect("rust run should pass");
 
+        println!("run_rust succeeded!!1one");
         SingleProof
-            .run_tasm(
-                &txk_mast_hash_as_input_as_public_input,
-                single_proof_witness.nondeterminism(),
-            )
+            .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
             .expect("tasm run should pass");
     }
 }

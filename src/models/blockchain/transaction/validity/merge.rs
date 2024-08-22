@@ -191,14 +191,14 @@ impl ConsensusProgram for Merge {
             output: vec![],
         };
         let left_proof: &Proof = &mw.left_proof;
-        tasmlib::verify_stark(Stark::default(), left_claim, left_proof);
+        tasmlib::verify_stark(Stark::default(), &left_claim, left_proof);
         let right_claim: Claim = Claim {
             program_digest: Self::SINGLE_PROOF_PROGRAM_HASH,
             input: right_txk_digest_as_input,
             output: vec![],
         };
         let right_proof: &Proof = &mw.left_proof;
-        tasmlib::verify_stark(Stark::default(), right_claim, right_proof);
+        tasmlib::verify_stark(Stark::default(), &right_claim, right_proof);
 
         // new inputs are a permutation of the operands' inputs' concatenation
         let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
