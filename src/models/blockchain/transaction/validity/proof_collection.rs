@@ -330,14 +330,99 @@ impl ProofCollection {
     }
 
     pub fn removal_records_integrity_claim(&self) -> Claim {
-        let input = self.kernel_mast_hash.reversed().values().to_vec();
-        let output = self.salted_inputs_hash.values().to_vec();
-        let program_digest = RemovalRecordsIntegrity.program().hash();
         Claim {
-            program_digest,
-            input,
-            output,
+            program_digest: RemovalRecordsIntegrity.program().hash(),
+            input: self.kernel_mast_hash.reversed().values().to_vec(),
+            output: self.salted_inputs_hash.values().to_vec(),
         }
+    }
+
+    pub fn kernel_to_outputs_claim(&self) -> Claim {
+        Claim {
+            program_digest: KernelToOutputs.program().hash(),
+            input: self.kernel_mast_hash.reversed().values().to_vec(),
+            output: self.salted_outputs_hash.values().to_vec(),
+        }
+    }
+
+    pub fn collect_lock_scripts_claim(&self) -> Claim {
+        let mut lock_script_hashes_as_output = vec![];
+        let mut i: usize = 0;
+        while i < self.lock_script_hashes.len() {
+            let lock_script_hash: Digest = self.lock_script_hashes[i];
+            let mut j: usize = 0;
+            while j < Digest::LEN {
+                lock_script_hashes_as_output.push(lock_script_hash.values()[j]);
+                j += 1;
+            }
+            i += 1;
+        }
+        Claim {
+            program_digest: CollectLockScripts.program().hash(),
+            input: self.salted_inputs_hash.reversed().values().to_vec(),
+            output: lock_script_hashes_as_output,
+        }
+    }
+
+    pub fn collect_type_scripts_claim(&self) -> Claim {
+        let mut type_script_hashes_as_output = vec![];
+        let mut i = 0;
+        while i < self.type_script_hashes.len() {
+            let type_script_hash: Digest = self.type_script_hashes[i];
+            let mut j: usize = 0;
+            while j < Digest::LEN {
+                type_script_hashes_as_output.push(type_script_hash.values()[j]);
+                j += 1;
+            }
+            i += 1;
+        }
+        Claim {
+            program_digest: CollectTypeScripts.program().hash(),
+            input: [
+                self.salted_inputs_hash.reversed().values().to_vec(),
+                self.salted_outputs_hash.reversed().values().to_vec(),
+            ]
+            .concat(),
+            output: type_script_hashes_as_output,
+        }
+    }
+
+    pub fn lock_script_claims(&self) -> Vec<Claim> {
+        let mut claims = vec![];
+        let mut i = 0;
+        while i < self.lock_script_hashes.len() {
+            let lock_script_hash = self.lock_script_hashes[i];
+            claims.push(Claim {
+                program_digest: lock_script_hash,
+                input: self.kernel_mast_hash.reversed().values().to_vec(),
+                output: vec![],
+            });
+
+            i += 1;
+        }
+
+        claims
+    }
+
+    pub fn type_script_claims(&self) -> Vec<Claim> {
+        let type_script_input = [
+            self.kernel_mast_hash.reversed().values(),
+            self.salted_inputs_hash.reversed().values(),
+            self.salted_outputs_hash.reversed().values(),
+        ]
+        .concat();
+        let mut claims = vec![];
+        let mut i = 0;
+        while i < self.type_script_hashes.len() {
+            let type_script_hash = self.type_script_hashes[i];
+            claims.push(Claim {
+                program_digest: type_script_hash,
+                input: type_script_input.clone(),
+                output: vec![],
+            });
+            i += 1;
+        }
+        claims
     }
 }
 
