@@ -235,7 +235,14 @@ impl ConsensusProgram for SingleProof {
     fn code(&self) -> Vec<LabelledInstruction> {
         let mut library = Library::new();
 
-        // shorthands
+        // imports
+        let compare_digests = DataType::Digest.compare();
+        let dyn_malloc = library.import(Box::new(DynMalloc));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+
+        // aliases
         let push_digest = |d: Digest| {
             triton_asm! {
                 push {d.values()[4]}
@@ -256,11 +263,61 @@ impl ConsensusProgram for SingleProof {
             }
         };
 
-        let compare_digests = DataType::Digest.compare();
-        let dyn_malloc = library.import(Box::new(DynMalloc));
-        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
-            Stark::default(),
-        )));
+        // Creates a new Claim object in memory and populates the size and length
+        // indicators of the input and output vectors, respectively. Returns pointers
+        // to
+        //  - the claim
+        //  - the output
+        //  - the input
+        //  - the program digest.
+        let new_claim_with_io_lengths = |il: usize, ol: usize| {
+            triton_asm! {
+                // BEFORE: _
+                // AFTER: _ *new_claim *output *input *program_digest
+
+                call {dyn_malloc}
+                hint new_claim = stack[0]
+                // _ *new_claim
+
+                push {ol} push {ol+1} dup 2
+                // _ *new_claim il (ol+1) *output_si
+
+                write_mem 2
+                hint output = stack[0]
+                // _ *new_claim *output
+
+
+                push {il} push {il+1} dup 2
+                // _ *new_claim *output il (il+1) *output
+
+                push {ol} add
+                // _ *new_claim *output il (il+1) *input_si
+
+                write_mem 2
+                hint input = stack[0]
+                // _ *new_claim *output *input
+
+                dup 0 push {il} add
+                hint program_digest = stack[0]
+                // _ *new_claim *output *input *program_digest
+            }
+        };
+
+        let load_digest = triton_asm! {
+            // _ *digest
+            push {Digest::LEN - 1} add
+            read_mem {Digest::LEN}
+            pop 1
+            hint digest = stack[0..5]
+            // _ [digest]
+        };
+
+        let store_digest = triton_asm! {
+            // _ [digest] *addr
+            write_mem {Digest::LEN}
+            pop 1
+            // _
+        };
 
         let discriminant_for_proof_collection = 0;
         let proof_collection_case_label =
@@ -274,47 +331,34 @@ impl ConsensusProgram for SingleProof {
         let assemble_rri_claim = triton_asm!(
              // [txk_digest] *spw disc *proof_collection
 
-             call {dyn_malloc} dup 0
-             // [txk_digest] *spw disc *proof_collection *rri_claim *rri_claim
+             {&new_claim_with_io_lengths(Digest::LEN,Digest::LEN)}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest
 
-             push {Digest::LEN} swap 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim output_len *rri_claim
 
-             push {Digest::LEN + 1} swap 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim output_len output_si *rri_claim
-
-             write_mem 2
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output
-
-             dup 2 {&proof_collection_field_salted_inputs_hash}
+             dup 4 {&proof_collection_field_salted_inputs_hash}
              hint salted_inputs_hash_ptr = stack[0]
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *salted_inputs_hash
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest *salted_inputs_hash
 
-             push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash]
+             {&load_digest}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest [salted_inputs_hash]
 
+             dup 7
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest [salted_inputs_hash] *output
+
+             {&store_digest}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest
+
+             swap 2 pop 1
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *input
+
+             {&dup_digest_reverse(6)}
              dup 5
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output [salted_inputs_hash] *output
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *input [txk_digest_reversed] *input
 
-             write_mem {Digest::LEN}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input_si
+             {&store_digest}
+             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *program_hash
 
-             swap 1 pop 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim *input_si
-
-             push {Digest::LEN} swap 1
-             push {Digest::LEN + 1} swap 1
-             write_mem 2
-             // [txk_digest] *spw disc *proof_collection *rri_claim *input
-
-             {&dup_digest_reverse(5)}
-             dup 5
-             // [txk_digest] *spw disc *proof_collection *rri_claim *input [txk_digest_reversed] *input
-
-             write_mem 5
-             // [txk_digest] *spw disc *proof_collection *rri_claim *input *program_hash
-
-             swap 1 pop 1
+             pop 1
              // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash
 
              {&push_rri_hash}
@@ -331,43 +375,30 @@ impl ConsensusProgram for SingleProof {
         let assemble_k2o_claim = triton_asm!(
             // [txk_digest] *spw disc *proof_collection
 
-             call {dyn_malloc} dup 0
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *k2o_claim
+            {&new_claim_with_io_lengths(Digest::LEN, Digest::LEN)}
+            hint k2o_claim = stack[3]
+            // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input *program_digest
 
-             push {Digest::LEN} swap 1
-             // [txk_digest] *spw disc *proof_collection *k2o_claim output_len *k2o_claim
+             dup 4 {&proof_collection_field_salted_outputs_hash}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input *program_digest *soh
 
-             push {Digest::LEN + 1} swap 1
-             // [txk_digest] *spw disc *proof_collection *k2o_claim output_len output_si *k2o_claim
+             {&load_digest}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input *program_digest [soh]
 
-             write_mem 2
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *output
+             dup {Digest::LEN+2} {&store_digest}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input *program_digest
 
-             dup 2 {&proof_collection_field_salted_outputs_hash}
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *soh
+             swap 2 pop 1
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest *input
 
-             push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *output [soh]
-
-             dup {Digest::LEN} write_mem {Digest::LEN}
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *output *input_si
-
-             swap 1 pop 1
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *input_si
-
-             push {Digest::LEN} swap 1
-             push {Digest::LEN + 1} swap 1
-             write_mem 2
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *input
-
-             {&dup_digest_reverse(5)}
+             {&dup_digest_reverse(6)}
              dup 5
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *input [txk_digest_reversed] *input
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest *input [txk_digest_reversed] *input
 
-             write_mem {Digest::LEN}
-             // [txk_digest] *spw disc *proof_collection *k2o_claim *input *program_digest
+             {&store_digest}
+             // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest *input
 
-             swap 1 pop 1
+             pop 1
              // [txk_digest] *spw disc *proof_collection *k2o_claim *program_digest
 
              {&push_k2o_hash}
