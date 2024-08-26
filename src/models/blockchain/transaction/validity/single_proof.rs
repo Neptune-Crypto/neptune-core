@@ -235,6 +235,7 @@ impl ConsensusProgram for SingleProof {
     fn code(&self) -> Vec<LabelledInstruction> {
         let mut library = Library::new();
 
+        // shorthands
         let push_digest = |d: Digest| {
             triton_asm! {
                 push {d.values()[4]}
@@ -242,6 +243,16 @@ impl ConsensusProgram for SingleProof {
                 push {d.values()[2]}
                 push {d.values()[1]}
                 push {d.values()[0]}
+            }
+        };
+        let dup_digest_reverse = |s: usize| {
+            assert!(s < 8);
+            triton_asm! {
+                dup {s}
+                dup {s+2}
+                dup {s+4}
+                dup {s+6}
+                dup {s+8}
             }
         };
 
@@ -296,7 +307,8 @@ impl ConsensusProgram for SingleProof {
              write_mem 2
              // [txk_digest] *spw disc *proof_collection *rri_claim *input
 
-             dup 5 dup 7 dup 9 dup 11 dup 13 dup 5
+             {&dup_digest_reverse(5)}
+             dup 5
              // [txk_digest] *spw disc *proof_collection *rri_claim *input [txk_digest_reversed] *input
 
              write_mem 5
@@ -348,11 +360,7 @@ impl ConsensusProgram for SingleProof {
              write_mem 2
              // [txk_digest] *spw disc *proof_collection *k2o_claim *input
 
-             dup 5
-             dup 7
-             dup 9
-             dup 11
-             dup 13
+             {&dup_digest_reverse(5)}
              dup 5
              // [txk_digest] *spw disc *proof_collection *k2o_claim *input [txk_digest_reversed] *input
 
