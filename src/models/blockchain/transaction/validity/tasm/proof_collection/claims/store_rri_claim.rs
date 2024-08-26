@@ -10,9 +10,9 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(super) struct StoreRemovalRecordsIntegrityClaim;
+pub(super) struct StoreRriClaim;
 
-impl BasicSnippet for StoreRemovalRecordsIntegrityClaim {
+impl BasicSnippet for StoreRriClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
@@ -25,7 +25,7 @@ impl BasicSnippet for StoreRemovalRecordsIntegrityClaim {
     }
 
     fn entrypoint(&self) -> String {
-        "tasm_neptune_transaction_validity_proof_collection_store_rri_claim".to_owned()
+        "tasm_neptune_transaction_proof_collection_store_rri_claim".to_owned()
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
@@ -42,9 +42,18 @@ impl BasicSnippet for StoreRemovalRecordsIntegrityClaim {
                 push {d0}
             }
         };
-        let push_rri_hash = push_digest(RemovalRecordsIntegrity.program().hash());
+        let push_rri_program_hash = push_digest(RemovalRecordsIntegrity.program().hash());
 
         let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
+
+        let load_digest = triton_asm!(
+            // _ *digest
+
+            addi {Digest::LEN - 1}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ [digest]
+        );
 
         const ENCODED_CLAIM_SIZE: isize = 19;
         let write_claim_to_memory =
@@ -55,7 +64,7 @@ impl BasicSnippet for StoreRemovalRecordsIntegrityClaim {
                 // _ [txk_digest] *proof_collection
 
                 /* Put the entire encoding onto the stack, then write to memory */
-                {&push_rri_hash}
+                {&push_rri_program_hash}
                 // _ [txk_digest] *proof_collection [program_digest]
 
                 dup 6
@@ -67,23 +76,21 @@ impl BasicSnippet for StoreRemovalRecordsIntegrityClaim {
 
                 push {Digest::LEN}
                 push {Digest::LEN + 1}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_si input_len
+                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si
 
                 dup 12
                 {&proof_collection_field_salted_inputs_hash}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_si input_len *salted_inputs_hash
+                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si *salted_inputs_hash
 
-                addi {Digest::LEN - 1}
-                read_mem {Digest::LEN}
-                pop 1
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_si input_len [salted_inputs_hash]
+                {&load_digest}
+                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash]
 
                 push {Digest::LEN}
                 push {Digest::LEN + 1}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_si input_len [salted_inputs_hash] output_si output_len
+                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash] output_si output_len
 
                 call {dyn_malloc}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_si input_len [salted_inputs_hash] output_si output_len *claim
+                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash] output_si output_len *claim
 
                 {&write_claim_to_memory}
                 // _ [txk_digest] *proof_collection (*claim + 19)
@@ -126,10 +133,10 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(StoreRemovalRecordsIntegrityClaim).test();
+        ShadowedFunction::new(StoreRriClaim).test();
     }
 
-    impl Function for StoreRemovalRecordsIntegrityClaim {
+    impl Function for StoreRriClaim {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,

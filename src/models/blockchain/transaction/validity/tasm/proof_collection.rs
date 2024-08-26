@@ -1,1 +1,1 @@
-pub mod store_removal_records_integrity_claim;
+pub mod claims;
