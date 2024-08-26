@@ -33,6 +33,8 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use std::cmp::max;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 
+use super::single_proof::SingleProof;
+
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct MergeWitness {
     left_kernel: TransactionKernel,
@@ -90,7 +92,17 @@ impl MergeWitness {
 
 impl SecretWitness for MergeWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.new_kernel.mast_hash().reversed().values().to_vec())
+        PublicInput::new(
+            [
+                self.new_kernel.mast_hash().reversed().values(),
+                SingleProof.program().hash().reversed().values(),
+            ]
+            .concat(),
+        )
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        SingleProof.program().hash().values().to_vec()
     }
 
     fn program(&self) -> Program {
@@ -157,20 +169,13 @@ impl SecretWitness for MergeWitness {
 #[derive(Debug, Clone)]
 pub struct Merge;
 
-impl Merge {
-    pub const SINGLE_PROOF_PROGRAM_HASH: Digest = Digest::new([
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-        BFieldElement::new(0),
-    ]);
-}
-
 impl ConsensusProgram for Merge {
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
+
+        // read the hash of the program relative to which the transactions were proven valid
+        let single_proof_program_hash = tasmlib::tasmlib_io_read_stdin___digest();
 
         // divine the witness for this proof
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -186,14 +191,14 @@ impl ConsensusProgram for Merge {
 
         // verify the proofs of the operand transactions
         let left_claim: Claim = Claim {
-            program_digest: Self::SINGLE_PROOF_PROGRAM_HASH,
+            program_digest: single_proof_program_hash,
             input: left_txk_digest_as_input,
             output: vec![],
         };
         let left_proof: &Proof = &mw.left_proof;
         tasmlib::verify_stark(Stark::default(), &left_claim, left_proof);
         let right_claim: Claim = Claim {
-            program_digest: Self::SINGLE_PROOF_PROGRAM_HASH,
+            program_digest: single_proof_program_hash,
             input: right_txk_digest_as_input,
             output: vec![],
         };
@@ -433,6 +438,9 @@ impl ConsensusProgram for Merge {
             Hash::hash(&mutator_set_hash),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
+
+        // output hash of program against which the out-of-date transaction was proven valid
+        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_hash);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
@@ -458,14 +466,6 @@ mod test {
     use proptest::strategy::ValueTree;
 
     use super::MergeWitness;
-
-    #[test]
-    fn const_single_proof_program_digest_matches_with_hashed_code() {
-        assert_eq!(
-            Merge::SINGLE_PROOF_PROGRAM_HASH,
-            SingleProof.program().hash()
-        );
-    }
 
     #[test]
     fn can_verify_transaction_merger() {
