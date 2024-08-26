@@ -428,9 +428,7 @@ impl ConsensusProgram for SingleProof {
                 dup 0 {&proof_collection_field_kernel_mast_hash}
                 // [txk_digest] *spw disc *proof_collection *kernel_mast_hash
 
-                push {Digest::LEN - 1} add
-                read_mem {Digest::LEN}
-                pop 1
+                {&load_digest}
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash]
 
                 dup 12
