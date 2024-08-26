@@ -1,3 +1,4 @@
+use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -143,6 +144,15 @@ pub fn lock_script(spending_lock: Digest) -> LockScript {
     );
 
     instructions.into()
+}
+
+/// returns human-readable-prefix for the given network
+pub fn network_hrp_char(network: Network) -> char {
+    match network {
+        Network::Alpha | Network::Beta | Network::Main => 'm',
+        Network::Testnet => 't',
+        Network::Regtest => 'r',
+    }
 }
 
 #[cfg(test)]

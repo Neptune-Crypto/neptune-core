@@ -6,17 +6,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
 use crate::BFieldElement;
 
 use super::common;
@@ -31,14 +27,18 @@ use super::symmetric_key;
 // actually stored in PublicAnnouncement.
 
 /// enumerates available cryptographic key implementations for sending and receiving funds.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
 #[repr(u8)]
 pub enum KeyType {
+    /// private/public keypair. (give public key to 3rd parties)
+    ///
     /// [generation_address] built on [twenty_first::math::lattice::kem]
     ///
     /// wraps a symmetric key built on aes-256-gcm
     Generation = generation_address::GENERATION_FLAG_U8,
 
+    /// private key only. (never show to 3rd parties)
+    ///
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 }
@@ -194,29 +194,72 @@ impl ReceivingAddress {
 
     /// encodes this address as bech32m
     ///
-    /// note: this will return an error for symmetric keys as they do not impl
-    ///       bech32m at present.  There is no need to give them out to 3rd
-    ///       parties in a serialized form.
+    /// security: note that if this is used on a symmetric key anyone that can view
+    /// it will be able to spend the funds. In general it is best practice to avoid
+    /// display of any part of a symmetric key.
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
-            Self::Symmetric(_k) => bail!("bech32m not implemented for symmetric keys"),
+            Self::Symmetric(k) => k.to_bech32m(network),
         }
     }
 
-    /// parses an address from its bech32m encoding
+    /// returns human-readable-prefix (hrp) for a given network
+    pub fn get_hrp(&self, network: Network) -> String {
+        match self {
+            Self::Generation(_) => generation_address::GenerationReceivingAddress::get_hrp(network),
+            Self::Symmetric(_) => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
+        }
+    }
+
+    /// returns an abbreviated address.
     ///
-    /// note: this will fail for Symmetric keys which do not impl bech32m
-    ///       at present.  There is no need to give them out to 3rd parties
-    ///       in a serialized form.
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   8 start of address.
+    ///   8 end of address.
+    /// ```
+    ///
+    /// security: note that if this is used on a symmetric key it will display 16 chars
+    /// of the bech32m encoded key.  This seriously reduces the key's strength and it
+    /// may be possible to brute-force it.  In general it is best practice to avoid
+    /// display of any part of a symmetric key.
+    ///
+    /// todo:
+    ///
+    /// it would be nice to standardize on a single prefix-len.  6 chars seems a
+    /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
+    /// ngkm --> neptune-generation-key-mainnet
+    pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        let bech32 = self.to_bech32m(network)?;
+        let first_len = self.get_hrp(network).len() + 8usize;
+        let last_len = 8usize;
+
+        assert!(bech32.len() > first_len + last_len);
+
+        let (first, _) = bech32.split_at(first_len);
+        let (_, last) = bech32.split_at(bech32.len() - last_len);
+
+        Ok(format!("{}...{}", first, last))
+    }
+
+    /// parses an address from its bech32m encoding
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        let addr = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)?;
-        Ok(addr.into())
+        if let Ok(addr) =
+            generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)
+        {
+            return Ok(addr.into());
+        }
+
+        let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
+        Ok(key.into())
 
         // when future addr types are supported, we would attempt each type in
         // turn.
-
-        // note: not implemented for SymmetricKey (yet?)
     }
 
     /// generates a lock script from the spending lock.
@@ -241,7 +284,7 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
@@ -321,7 +364,6 @@ impl SpendingKey {
         // pre-compute some fields.
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
-        let receiver_digest = receiver_preimage.hash::<Hash>();
 
         // for all public announcements
         transaction
@@ -348,7 +390,6 @@ impl SpendingKey {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
                 AnnouncedUtxo {
-                    addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
                     utxo,
                     sender_randomness,
                     receiver_preimage,
@@ -432,7 +473,6 @@ mod test {
     }
 
     /// tests bech32m serialize, deserialize with a symmetric key
-    #[should_panic(expected = "bech32m not implemented for symmetric keys")]
     #[proptest]
     fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
         worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());
@@ -445,6 +485,10 @@ mod test {
     }
 
     mod worker {
+        use crate::models::blockchain::shared::Hash;
+        use crate::util_types::mutator_set::commit;
+        use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
         use super::*;
 
         /// this tests the generate_public_announcement() and
@@ -500,7 +544,7 @@ mod test {
 
             // 11. verify each field of the announced_utxo matches original values.
             assert_eq!(utxo, announced_utxo.utxo);
-            assert_eq!(expected_addition_record, announced_utxo.addition_record);
+            assert_eq!(expected_addition_record, announced_utxo.addition_record());
             assert_eq!(sender_randomness, announced_utxo.sender_randomness);
             assert_eq!(key.privacy_preimage(), announced_utxo.receiver_preimage);
         }

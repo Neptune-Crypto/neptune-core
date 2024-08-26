@@ -66,9 +66,7 @@ use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::HandshakeData;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
-use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::wallet_state::WalletState;
@@ -119,7 +117,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     .await;
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block: Block = archival_state.get_tip().await;
+    let latest_block = archival_state.tip().to_owned();
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
@@ -142,12 +140,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let syncing = false;
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
-    let light_state: LightState = LightState::from(latest_block.clone());
-    let blockchain_archival_state = BlockchainArchivalState {
-        light_state,
-        archival_state,
-    };
-    let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
+    let blockchain_state = BlockchainState::Archival(archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size, latest_block.hash());
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,

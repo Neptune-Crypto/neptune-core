@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use directories::ProjectDirs;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
@@ -17,8 +19,10 @@ use crate::models::state::wallet::WALLET_DB_NAME;
 use crate::models::state::wallet::WALLET_DIRECTORY;
 use crate::models::state::wallet::WALLET_OUTPUT_COUNT_DB_NAME;
 
+const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
+
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDirectory {
     data_dir: PathBuf,
 }
@@ -89,6 +93,18 @@ impl DataDirectory {
     /// This directory lives within `DataDirectory::database_dir_path()`.
     pub fn banned_ips_database_dir_path(&self) -> PathBuf {
         self.database_dir_path().join(Path::new(BANNED_IPS_DB_NAME))
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///
+    /// utxo-transfer path
+    ///
+    /// for storing off-chain serialized transfer files.
+    ///
+    /// note: this is not used by neptune-core, but is used/shared by
+    ///       neptune-cli, neptune-dashboard
+    pub fn utxo_transfer_directory_path(&self) -> PathBuf {
+        self.data_dir.join(Path::new(UTXO_TRANSFER_DIRECTORY))
     }
 
     ///////////////////////////////////////////////////////////////////////////

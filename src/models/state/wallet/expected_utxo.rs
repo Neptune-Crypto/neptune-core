@@ -72,4 +72,5 @@ pub enum UtxoNotifier {
     Cli,
     Myself,
     Premine,
+    Claim,
 }

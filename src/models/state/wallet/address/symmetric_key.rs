@@ -1,6 +1,7 @@
 //! provides a symmetric key interface based on aes-256-gcm for sending and claiming [Utxo]
 
 use super::common;
+use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -10,6 +11,9 @@ use aead::Key;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
+use anyhow::bail;
+use bech32::FromBase32;
+use bech32::ToBase32;
 use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
@@ -72,7 +76,7 @@ pub const SYMMETRIC_KEY_FLAG: BFieldElement = BFieldElement::new(SYMMETRIC_KEY_F
 /// opaque.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SymmetricKey {
-    seed: Digest,
+    seed: Digest, // 40 bytes
 }
 
 impl SymmetricKey {
@@ -183,5 +187,46 @@ impl SymmetricKey {
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
         common::lock_script(self.spending_lock())
+    }
+
+    /// encodes the key as bech32m with network-specific prefix
+    ///
+    /// security: note that anyone that can view the bech32m string will be able
+    /// to spend the funds. In general it is best practice to avoid display of
+    /// any part of a symmetric key.
+    pub fn to_bech32m(&self, network: Network) -> anyhow::Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(self)?;
+        let variant = bech32::Variant::Bech32m;
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => bail!("Could not encode SymmetricKey as bech32m because error: {e}"),
+        }
+    }
+
+    /// decodes a key from bech32m with network-specific prefix
+    pub fn from_bech32m(encoded: &str, network: Network) -> anyhow::Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
+
+        if variant != bech32::Variant::Bech32m {
+            bail!("Can only decode bech32m addresses.");
+        }
+
+        if hrp != *Self::get_hrp(network) {
+            bail!("Could not decode bech32m address because of invalid prefix");
+        }
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+
+        match bincode::deserialize(&payload) {
+            Ok(ra) => Ok(ra),
+            Err(e) => bail!("Could not decode bech32m because of error: {e}"),
+        }
+    }
+
+    /// returns human readable prefix (hrp) of a key, specific to `network`
+    pub fn get_hrp(network: Network) -> String {
+        // nsk: neptune-symmetric-key
+        format!("nsk{}", common::network_hrp_char(network))
     }
 }

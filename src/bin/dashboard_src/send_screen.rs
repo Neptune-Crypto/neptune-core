@@ -8,7 +8,8 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::rpc_server::RPCClient;
@@ -136,18 +137,23 @@ impl SendScreen {
         let mut send_ctx = context::current();
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
-        let send_result = rpc_client
-            .send(
+
+        // todo: make owned/unowned notify method configurable.
+        let (tx_params, _outputs_map) = rpc_client
+            .generate_tx_params(
                 send_ctx,
-                valid_amount,
-                valid_address,
-                UtxoNotifyMethod::OnChain,
+                vec![(valid_address, valid_amount)],
                 fee,
+                OwnedUtxoNotifyMethod::default(),
+                UnownedUtxoNotifyMethod::default(),
             )
             .await
+            .unwrap()
             .unwrap();
 
-        if send_result.is_none() {
+        let send_result = rpc_client.send(send_ctx, tx_params).await.unwrap();
+
+        if send_result.is_err() {
             *notice_arc.lock().await = "Could not send due to error.".to_string();
             *focus_arc.lock().await = SendScreenWidget::Address;
             return;

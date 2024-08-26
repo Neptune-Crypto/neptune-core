@@ -522,7 +522,7 @@ mod tests {
     #[tokio::test]
     async fn get_densest_transactions() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let mempool = setup(10, Network::RegTest).await;
+        let mempool = setup(10, Network::Regtest).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -617,7 +617,7 @@ mod tests {
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let mut premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
@@ -829,7 +829,7 @@ mod tests {
         // First put a transaction into the mempool. Then mine block 1a does
         // not contain this transaction, such that mempool is still non-empty.
         // Then mine a a block 1b that also does not contain this transaction.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let mut premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
@@ -963,7 +963,7 @@ mod tests {
     #[tokio::test]
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut preminer_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let now = Block::genesis_block(network).kernel.header.timestamp;

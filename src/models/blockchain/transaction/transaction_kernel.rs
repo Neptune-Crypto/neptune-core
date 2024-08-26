@@ -237,7 +237,7 @@ pub mod transaction_kernel_tests {
                 canonical_commitment: random(),
             }],
             public_announcements: Default::default(),
-            fee: NeptuneCoins::one(),
+            fee: NeptuneCoins::one_nau(),
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: rng.gen::<Digest>(),

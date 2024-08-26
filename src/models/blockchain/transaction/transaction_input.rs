@@ -4,26 +4,46 @@ use super::utxo::LockScript;
 use super::utxo::Utxo;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::state::wallet::address::SpendingKey;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use serde::Deserialize;
+use serde::Serialize;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::Digest;
 
 /// represents a transaction input, as accepted by
 /// [create_transaction()](crate::models::state::GlobalState::create_transaction())
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxInput {
-    pub spending_key: SpendingKey,
+    pub unlock_key: Digest,
     pub utxo: Utxo,
     pub lock_script: LockScript,
     pub ms_membership_proof: MsMembershipProof,
 }
 
+#[cfg(test)]
+impl TxInput {
+    pub fn new_random(amount: NeptuneCoins) -> Self {
+        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+
+        let lock_script = LockScript::anyone_can_spend();
+        Self {
+            unlock_key: GenerationSpendingKey::derive_from_seed(rand::random()).unlock_key,
+            utxo: Utxo::new_native_coin(lock_script.clone(), amount),
+            lock_script,
+            ms_membership_proof: pseudorandom_mutator_set_membership_proof(rand::random()),
+        }
+    }
+}
+
 /// Represents a list of [TxInput]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxInputList(Vec<TxInput>);
 
 impl Deref for TxInputList {
@@ -37,6 +57,12 @@ impl Deref for TxInputList {
 impl DerefMut for TxInputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl From<TxInput> for TxInputList {
+    fn from(t: TxInput) -> Self {
+        Self(vec![t])
     }
 }
 
@@ -100,14 +126,19 @@ impl TxInputList {
         self.lock_scripts_iter().into_iter().collect()
     }
 
-    /// retrieves spending keys
-    pub fn spending_keys_iter(&self) -> impl IntoIterator<Item = SpendingKey> + '_ {
-        self.0.iter().map(|u| u.spending_key)
+    /// retrieves unlock keys
+    pub fn unlock_keys_iter(&self) -> impl Iterator<Item = Digest> + '_ {
+        self.0.iter().map(|u| u.unlock_key)
     }
 
-    /// retrieves spending keys
-    pub fn spending_keys(&self) -> Vec<SpendingKey> {
-        self.spending_keys_iter().into_iter().collect()
+    /// retrieves unlock keys
+    pub fn unlock_keys(&self) -> Vec<Digest> {
+        self.unlock_keys_iter().collect()
+    }
+
+    /// retrieves unlock keys as lock script witnesses
+    pub fn lock_script_witnesses(&self) -> Vec<Vec<BFieldElement>> {
+        self.unlock_keys_iter().map(|uk| uk.encode()).collect()
     }
 
     /// retrieves membership proofs

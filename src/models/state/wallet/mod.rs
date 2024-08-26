@@ -3,6 +3,7 @@ pub mod coin_with_possible_timelock;
 pub mod expected_utxo;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
+pub mod utxo_transfer;
 pub mod wallet_state;
 pub mod wallet_status;
 
@@ -270,6 +271,62 @@ impl WalletSecret {
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
     /// for the mutator set.
+    ///
+    /// design choices:
+    ///
+    /// 1. random or deterministic?
+    ///
+    /// This method could generate a random value or a deterministic value.  if
+    /// random, then we don't need to accept any params and can just call
+    /// rand::random() and we're done.
+    ///
+    /// However, there is a [stated goal](https://github.com/Neptune-Crypto/neptune-core/issues/181#issuecomment-2341230087)
+    /// that if a utxo recipient somehow loses the sender randomness then they
+    /// could ask the sender to re-send it.  The sender could do that either by
+    /// storing a list of sender_randomness per sent utxo or by regenerating it
+    /// deterministically.  The latter is thought to be simpler.
+    ///
+    /// Further choices are constrained by this goal.
+    ///
+    /// 2. which params?
+    ///
+    /// Ideally each tx output (utxo) would have a unique sender_randomness.
+    /// We can't really guarantee that deterministically.  But we can get
+    /// pretty close with the params:
+    ///
+    /// block_height, receiver_digest, tx_timestamp, output_index
+    ///
+    /// But there's a problem.  Once a block is mined the tx_timestamp
+    /// disappears because all the transactions are merged into a single
+    /// block-tx which has the timestamp of the latest user-tx.  So neither
+    /// recipient nor sender can lookup the user-tx timetamp after the user-tx
+    /// is confirmed in a block.
+    ///
+    /// output_index has the same problem as tx_timestamp.  The original index
+    /// gets lost when all the user-tx are merged into the block-tx.
+    ///
+    /// If we remove tx_timestamp and output_index then any user-tx in the same
+    /// block with same lock_script will share the same sender_randomness.
+    ///
+    /// 3. is that a big problem?
+    ///
+    /// Apparently not.  privacy does not depend on the sender_randomness
+    /// being unique.  see [1].
+    ///
+    /// So it is decided not to include tx_timestamp and output_index since
+    /// inclusion would defeat our stated goal.
+    ///
+    /// 4. anyone_can_spend, etc
+    ///
+    /// Not all output utxos are generated from ReceivingAddress::lock_script().
+    /// An example is LockScript::anyone_can_spend().  Unit-test code that uses
+    /// anyone-can-spend always passes random() for the receiver_digest field
+    /// which makes the output of sender_randomness non-deterministic anyway.
+    /// This asymmetry is a bit gross, but does not appear to be an actual
+    /// problem.
+    ///
+    /// [1] further discussion at:
+    /// <https://github.com/Neptune-Crypto/neptune-core/issues/181>
     pub fn generate_sender_randomness(
         &self,
         block_height: BlockHeight,
@@ -444,7 +501,7 @@ mod wallet_tests {
         let mut rng = thread_rng();
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut wallet_state_premine_recipient =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let monitored_utxos_premine_wallet =
@@ -514,7 +571,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state =
             mock_genesis_wallet_state(own_wallet_secret.clone(), network).await;
@@ -650,7 +707,7 @@ mod wallet_tests {
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let mut rng = thread_rng();
         let own_wallet_secret = WalletSecret::new_random();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
@@ -684,7 +741,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::one_nau(), block_1.hash())
                 .await
                 .unwrap()
                 .len()
@@ -693,7 +750,7 @@ mod wallet_tests {
             1,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.checked_sub(&NeptuneCoins::one()).unwrap(),
+                    mining_reward.checked_sub(&NeptuneCoins::one_nau()).unwrap(),
                     block_1.hash()
                 )
                 .await
@@ -711,7 +768,10 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward + NeptuneCoins::one(), block_1.hash())
+            .allocate_sufficient_input_funds(
+                mining_reward + NeptuneCoins::one_nau(),
+                block_1.hash()
+            )
             .await
             .is_err());
 
@@ -754,7 +814,7 @@ mod wallet_tests {
             6,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.scalar_mul(5) + NeptuneCoins::one(),
+                    mining_reward.scalar_mul(5) + NeptuneCoins::one_nau(),
                     next_block.hash()
                 )
                 .await
@@ -775,7 +835,7 @@ mod wallet_tests {
         // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
             .allocate_sufficient_input_funds(
-                expected_balance + NeptuneCoins::one(),
+                expected_balance + NeptuneCoins::one_nau(),
                 next_block.hash()
             )
             .await
@@ -862,7 +922,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
@@ -890,6 +950,8 @@ mod wallet_tests {
 
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen());
+        let mut now = genesis_block.kernel.header.timestamp;
+        let tx_timestamp = now + seven_months;
 
         let tx_outputs_12_to_other = TxOutput::fake_address(
             Utxo {
@@ -920,12 +982,11 @@ mod wallet_tests {
             own_address.privacy_digest,
         );
         let tx_outputs_to_other = vec![tx_outputs_12_to_other, tx_outputs_one_to_other];
-        let mut now = genesis_block.kernel.header.timestamp;
         let (valid_tx, expected_utxos) = premine_receiver_global_state
             .create_transaction_test_wrapper(
                 tx_outputs_to_other.clone(),
                 NeptuneCoins::new(2),
-                now + seven_months,
+                tx_timestamp,
             )
             .await
             .unwrap();
@@ -1058,9 +1119,7 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = own_wallet_state
-            .get_wallet_status_from_lock(block_18.hash())
-            .await;
+        let wallet_status = own_wallet_state.get_wallet_status(block_18.hash()).await;
         assert_eq!(
             19,
             wallet_status.synced_unspent.len(),

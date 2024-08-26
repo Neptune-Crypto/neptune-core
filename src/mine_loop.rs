@@ -51,7 +51,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
 /// Prepare a Block for mining
-fn make_block_template(
+pub(crate) fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     mut block_timestamp: Timestamp,
@@ -299,7 +299,7 @@ fn make_coinbase_transaction(
 /// Create the transaction that goes into the block template. The transaction is
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
-fn create_block_transaction(
+pub(crate) fn create_block_transaction(
     latest_block: &Block,
     global_state: &GlobalState,
     timestamp: Timestamp,
@@ -540,7 +540,7 @@ mod mine_loop_tests {
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut premine_receiver_global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
@@ -663,7 +663,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mined_block_has_proof_of_work() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -714,7 +714,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -786,7 +786,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mine_ten_blocks_in_ten_seconds() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 

@@ -40,7 +40,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct GenerationSpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
@@ -49,12 +49,13 @@ pub struct GenerationSpendingKey {
     pub seed: Digest,
 }
 
+// 2168 bytes.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenerationReceivingAddress {
-    pub receiver_identifier: BFieldElement,
-    pub encryption_key: lattice::kem::PublicKey,
-    pub privacy_digest: Digest,
-    pub spending_lock: Digest,
+    pub receiver_identifier: BFieldElement,      //    8 bytes
+    pub encryption_key: lattice::kem::PublicKey, // 2080 bytes
+    pub privacy_digest: Digest,                  //   40 bytes
+    pub spending_lock: Digest,                   //   40 bytes
 }
 
 impl GenerationSpendingKey {
@@ -198,17 +199,10 @@ impl GenerationReceivingAddress {
         .concat())
     }
 
-    /// returns human readable prefix (hrp) of an address.
-    fn get_hrp(network: Network) -> String {
-        // NOLGA: Neptune lattice-based generation address
-        let mut hrp = "nolga".to_string();
-        let network_byte: char = match network {
-            Network::Alpha | Network::Beta | Network::Main => 'm',
-            Network::Testnet => 't',
-            Network::RegTest => 'r',
-        };
-        hrp.push(network_byte);
-        hrp
+    /// returns human readable prefix (hrp) of an address, specific to `network`.
+    pub fn get_hrp(network: Network) -> String {
+        // nolga: Neptune lattice-based generation address
+        format!("nolga{}", common::network_hrp_char(network))
     }
 
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
@@ -228,7 +222,7 @@ impl GenerationReceivingAddress {
             bail!("Can only decode bech32m addresses.");
         }
 
-        if hrp[0..=5] != Self::get_hrp(network) {
+        if hrp != Self::get_hrp(network) {
             bail!("Could not decode bech32m address because of invalid prefix");
         }
 

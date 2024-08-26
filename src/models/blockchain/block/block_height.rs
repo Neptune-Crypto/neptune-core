@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::Add;
+use std::ops::AddAssign;
 use std::ops::Sub;
 
 use get_size::GetSize;
@@ -79,6 +80,20 @@ impl Add<usize> for BlockHeight {
 
     fn add(self, rhs: usize) -> Self::Output {
         Self(BFieldElement::new(self.0.value() + rhs as u64))
+    }
+}
+
+impl Add<Self> for BlockHeight {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(BFieldElement::new(self.0.value() + rhs.0.value()))
+    }
+}
+
+impl AddAssign for BlockHeight {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
     }
 }
 
