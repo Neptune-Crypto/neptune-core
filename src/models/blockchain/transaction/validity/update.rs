@@ -31,6 +31,8 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::twenty_first::prelude::Mmr;
 
+use super::single_proof::SingleProof;
+
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct UpdateWitness {
     old_kernel: TransactionKernel,
@@ -75,7 +77,17 @@ impl UpdateWitness {
 
 impl SecretWitness for UpdateWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.new_kernel.mast_hash().reversed().values().to_vec())
+        PublicInput::new(
+            [
+                self.new_kernel.mast_hash().reversed().values(),
+                SingleProof.program().hash().reversed().values(),
+            ]
+            .concat(),
+        )
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        SingleProof.program().hash().values().to_vec()
     }
 
     fn program(&self) -> Program {
@@ -149,6 +161,9 @@ impl ConsensusProgram for Update {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
+        // read the hash of the program that this transaction was proved valid under
+        let single_proof_program_digest = tasmlib::tasmlib_io_read_stdin___digest();
+
         // divine the witness for this proof
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let uw: UpdateWitness = tasmlib::decode_from_memory(start_address);
@@ -160,7 +175,7 @@ impl ConsensusProgram for Update {
 
         // verify the proof of the out-of-date transaction
         let claim: Claim = Claim {
-            program_digest: Digest::default(), // todo: fix me
+            program_digest: single_proof_program_digest,
             input: old_txk_digest_as_input,
             output: vec![],
         };
@@ -313,6 +328,9 @@ impl ConsensusProgram for Update {
 
         // mutator set can change, but we only care about extensions of the AOCL MMR
         assert!(uw.aocl_successor_proof.verify(&old_aocl_mmr, &new_aocl_mmr));
+
+        // output hash of program against which the out-of-date transaction was proven valid
+        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_digest);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
