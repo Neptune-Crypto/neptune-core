@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
-use crate::models::blockchain::transaction::validity::tasm::proof_collection::generate_rri_claim::GenerateRriClaim;
+use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use itertools::Itertools;
