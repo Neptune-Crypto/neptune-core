@@ -13,23 +13,25 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// Generates a `RemovalRecordsIntegrity` `Claim` from a `ProofCollection` object.
 /// Assumes the transaction kernel MAST hash is on the stack somewhere, but not
 /// necessarily immediately preceding the proof collection pointer.
-pub(super) struct GenerateRriClaim;
+pub struct GenerateRriClaim;
 
 impl BasicSnippet for GenerateRriClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
-            (DataType::Digest, "transaction_kernel_digest".to_owned()),
-            (DataType::Bfe, "garb1".to_string()),
-            (DataType::Bfe, "garb0".to_string()),
+            // avoid overwriting labels
+            // (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            // (DataType::Bfe, "garb1".to_string()),
+            // (DataType::Bfe, "garb0".to_string()),
             (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
         ]
     }
 
     fn outputs(&self) -> Vec<(DataType, String)> {
         vec![
-            (DataType::Digest, "transaction_kernel_digest".to_owned()),
-            (DataType::Bfe, "garb1".to_string()),
-            (DataType::Bfe, "garb0".to_string()),
+            // avoid overwriting labels
+            // (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            // (DataType::Bfe, "garb1".to_string()),
+            // (DataType::Bfe, "garb0".to_string()),
             (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
             (DataType::VoidPointer, "claim".to_owned()),
         ]
@@ -102,7 +104,7 @@ impl BasicSnippet for GenerateRriClaim {
                 // _ [txk_digest] garb garb *proof_collection *claim *output
 
                 /* put the output on stack, then write to memory */
-                dup 1 {&proof_collection_field_salted_inputs_hash}
+                dup 2 {&proof_collection_field_salted_inputs_hash}
                 // _ [txk_digest] garb garb *proof_collection *claim *output *salted_inputs_hash
 
                 {&load_digest}

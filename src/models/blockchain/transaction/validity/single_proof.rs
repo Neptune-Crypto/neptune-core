@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+use crate::models::blockchain::transaction::validity::tasm::proof_collection::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use itertools::Itertools;
@@ -15,7 +16,6 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::{field, Digest};
 
-use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::tasm_lib::memory::encode_to_memory;
@@ -323,50 +323,10 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_case_label =
             "neptune_transaction_single_proof_case_collection".to_string();
         let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
-        let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
         let proof_collection_field_removal_records_integrity =
             field!(ProofCollection::removal_records_integrity);
-        let push_rri_hash = push_digest(RemovalRecordsIntegrity.program().hash());
 
-        let assemble_rri_claim = triton_asm!(
-             // [txk_digest] *spw disc *proof_collection
-
-             {&new_claim_with_io_lengths(Digest::LEN,Digest::LEN)}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest
-
-
-             dup 4 {&proof_collection_field_salted_inputs_hash}
-             hint salted_inputs_hash_ptr = stack[0]
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest *salted_inputs_hash
-
-             {&load_digest}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest [salted_inputs_hash]
-
-             dup 7
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest [salted_inputs_hash] *output
-
-             {&store_digest}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *output *input *program_digest
-
-             swap 2 pop 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *input
-
-             {&dup_digest_reverse(6)}
-             dup 5
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *input [txk_digest_reversed] *input
-
-             {&store_digest}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_digest *program_hash
-
-             pop 1
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash
-
-             {&push_rri_hash}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash [rri_hash]
-
-             dup {Digest::LEN} write_mem {Digest::LEN}
-             // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash *first_free_address
-        );
+        let assemble_rri_claim = library.import(Box::new(GenerateRriClaim));
 
         let proof_collection_field_salted_outputs_hash =
             field!(ProofCollection::salted_outputs_hash);
@@ -444,10 +404,8 @@ impl ConsensusProgram for SingleProof {
 
 
                 /* create and verify removal records integrity claim */
-                {&assemble_rri_claim}
-                // [txk_digest] *spw disc *proof_collection *rri_claim *program_hash *first_free_address
-
-                pop 2
+                call {assemble_rri_claim}
+                hint rri_claim = stack[0]
                 // [txk_digest] *spw disc *proof_collection *rri_claim
 
                 dup 1 {&proof_collection_field_removal_records_integrity}

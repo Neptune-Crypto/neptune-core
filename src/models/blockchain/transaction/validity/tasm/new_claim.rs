@@ -44,6 +44,7 @@ impl BasicSnippet for NewClaim {
             {entrypoint}:
 
                 call {dyn_malloc}
+                hint claim = stack[0]
                 // _ input_length output_length *claim
 
                 swap 2
@@ -56,6 +57,7 @@ impl BasicSnippet for NewClaim {
                 // _  *claim output_length input_length output_length output_size *output_si
 
                 write_mem 2
+                hint output = stack[0]
                 // _  *claim output_length input_length *output
 
                 dup 0 swap 3
@@ -68,12 +70,14 @@ impl BasicSnippet for NewClaim {
                 // _ *claim *output input_length *input_si input_length input_size
 
                 dup 2 write_mem 2
+                hint input = stack[0]
                 // _ *claim *output input_length *input_si *input
 
                 swap 1 pop 1
                 // _ *claim *output input_length *input
 
                 dup 0 swap 2 add
+                hint program_digest = stack[0]
                 // _ *claim *output *input *program_digest
 
                 return
