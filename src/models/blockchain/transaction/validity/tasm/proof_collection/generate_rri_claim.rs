@@ -18,20 +18,18 @@ pub struct GenerateRriClaim;
 impl BasicSnippet for GenerateRriClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
-            // avoid overwriting labels
-            // (DataType::Digest, "transaction_kernel_digest".to_owned()),
-            // (DataType::Bfe, "garb1".to_string()),
-            // (DataType::Bfe, "garb0".to_string()),
+            (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            (DataType::Bfe, "garb1".to_string()),
+            (DataType::Bfe, "garb0".to_string()),
             (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
         ]
     }
 
     fn outputs(&self) -> Vec<(DataType, String)> {
         vec![
-            // avoid overwriting labels
-            // (DataType::Digest, "transaction_kernel_digest".to_owned()),
-            // (DataType::Bfe, "garb1".to_string()),
-            // (DataType::Bfe, "garb0".to_string()),
+            (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            (DataType::Bfe, "garb1".to_string()),
+            (DataType::Bfe, "garb0".to_string()),
             (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
             (DataType::VoidPointer, "claim".to_owned()),
         ]
@@ -127,6 +125,7 @@ mod tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
+    use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
@@ -217,6 +216,7 @@ mod tests {
                 stack: [
                     self.init_stack_for_isolated_run(),
                     txk_digest_on_stack,
+                    vec![rng.gen(), rng.gen()],
                     vec![pw_pointer],
                 ]
                 .concat(),

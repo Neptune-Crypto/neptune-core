@@ -1,8 +1,7 @@
-use tasm_lib::{
-    data_type::DataType,
-    prelude::{BasicSnippet, DynMalloc, Library},
-    triton_vm::{prelude::LabelledInstruction, triton_asm},
-};
+use tasm_lib::data_type::DataType;
+use tasm_lib::prelude::*;
+use tasm_lib::triton_vm::prelude::LabelledInstruction;
+use tasm_lib::triton_vm::triton_asm;
 
 /// Generates a new Claim object given the lengths of the input and output.
 /// Returns pointers to:
@@ -91,7 +90,8 @@ mod test {
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{
-        empty_stack, rust_shadowing_helper_functions,
+        prelude::BasicSnippet,
+        rust_shadowing_helper_functions,
         snippet_bencher::BenchmarkCase,
         traits::{
             function::{Function, FunctionInitialState, ShadowedFunction},
@@ -159,7 +159,7 @@ mod test {
 
             FunctionInitialState {
                 stack: [
-                    empty_stack(),
+                    self.init_stack_for_isolated_run(),
                     [bfe!(input_length as u64), bfe!(output_length as u64)].to_vec(),
                 ]
                 .concat(),
