@@ -1,1 +1,0 @@
-pub mod store_collect_lock_scripts_claim;

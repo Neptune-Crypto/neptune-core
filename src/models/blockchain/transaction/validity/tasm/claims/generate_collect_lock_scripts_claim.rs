@@ -10,9 +10,9 @@ use crate::models::blockchain::transaction::validity::collect_lock_scripts::Coll
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(super) struct StoreCollectLockScriptsClaim;
+pub(super) struct GenerateCollectLockScriptsClaim;
 
-impl BasicSnippet for StoreCollectLockScriptsClaim {
+impl BasicSnippet for GenerateCollectLockScriptsClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "proof_collection_pointer".to_owned())]
     }
@@ -22,7 +22,7 @@ impl BasicSnippet for StoreCollectLockScriptsClaim {
     }
 
     fn entrypoint(&self) -> String {
-        "tasm_neptune_transaction_proof_collection_store_collect_lock_scripts_claim".to_owned()
+        "tasm_neptune_transaction_proof_collection_generate_collect_lock_scripts_claim".to_owned()
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
@@ -220,10 +220,10 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(StoreCollectLockScriptsClaim).test();
+        ShadowedFunction::new(GenerateCollectLockScriptsClaim).test();
     }
 
-    impl Function for StoreCollectLockScriptsClaim {
+    impl Function for GenerateCollectLockScriptsClaim {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
