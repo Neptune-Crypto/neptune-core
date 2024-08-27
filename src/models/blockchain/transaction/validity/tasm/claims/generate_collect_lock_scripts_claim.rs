@@ -198,7 +198,6 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
-    use itertools::Itertools;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -256,7 +255,9 @@ mod tests {
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut test_runner = TestRunner::deterministic();
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+            // Use test-runner's rng to avoid having to build too many proofs
+            let mut rng = test_runner.new_rng();
 
             let num_inputs = rng.gen_range(0usize..4);
             let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
