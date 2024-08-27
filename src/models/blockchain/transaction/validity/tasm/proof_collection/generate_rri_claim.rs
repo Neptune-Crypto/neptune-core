@@ -1,6 +1,5 @@
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
-use tasm_lib::memory::write_words_to_memory_leave_pointer;
 use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
@@ -8,20 +7,32 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::models::blockchain::transaction::validity::tasm::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(super) struct StoreRriClaim;
+/// Generates a `RemovalRecordsIntegrity` `Claim` from a `ProofCollection` object.
+/// Assumes the transaction kernel MAST hash is on the stack somewhere, but not
+/// necessarily immediately preceding the proof collection pointer.
+pub(super) struct GenerateRriClaim;
 
-impl BasicSnippet for StoreRriClaim {
+impl BasicSnippet for GenerateRriClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            (DataType::Bfe, "garb1".to_string()),
+            (DataType::Bfe, "garb0".to_string()),
             (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
         ]
     }
 
     fn outputs(&self) -> Vec<(DataType, String)> {
-        vec![(DataType::VoidPointer, "claim".to_owned())]
+        vec![
+            (DataType::Digest, "transaction_kernel_digest".to_owned()),
+            (DataType::Bfe, "garb1".to_string()),
+            (DataType::Bfe, "garb0".to_string()),
+            (DataType::VoidPointer, "proof_collection_pointer".to_owned()),
+            (DataType::VoidPointer, "claim".to_owned()),
+        ]
     }
 
     fn entrypoint(&self) -> String {
@@ -30,7 +41,6 @@ impl BasicSnippet for StoreRriClaim {
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
-        let dyn_malloc = library.import(Box::new(DynMalloc));
 
         let push_digest = |d: Digest| {
             let [d0, d1, d2, d3, d4] = d.values();
@@ -55,53 +65,51 @@ impl BasicSnippet for StoreRriClaim {
             // _ [digest]
         );
 
-        const ENCODED_CLAIM_SIZE: isize = 19;
-        let write_claim_to_memory =
-            write_words_to_memory_leave_pointer(ENCODED_CLAIM_SIZE.try_into().unwrap());
+        let new_claim = library.import(Box::new(NewClaim));
+        let input_length = Digest::LEN;
+        let output_length = Digest::LEN;
 
         triton_asm!(
+            // BEFORE: _ [txk_digest] garb garb *proof_collection
+            // AFTER: _ [txk_digest] garb garb *proof_collection *rri_claim
             {entrypoint}:
-                // _ [txk_digest] *proof_collection
 
-                /* Put the entire encoding onto the stack, then write to memory */
+                push {input_length}
+                push {output_length}
+                call {new_claim}
+                // _ [txk_digest] garb garb *proof_collection *claim *output *input *program_digest
+
+
+                /* put the program digest on stack, then write to memory */
                 {&push_rri_program_hash}
-                // _ [txk_digest] *proof_collection [program_digest]
+                // _ [txk_digest] garb garb *proof_collection *claim *output *input *program_digest [program_digest]
 
+                dup 5 write_mem 5 pop 2
+                // _ [txk_digest] garb garb *proof_collection *claim *output *input
+
+
+                /* put input on stack, then write to memory */
                 dup 6
                 dup 8
                 dup 10
                 dup 12
                 dup 14
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)]
+                // _ [txk_digest] garb garb *proof_collection *claim *output *input [txk_digest_reversed]
 
-                push {Digest::LEN}
-                push {Digest::LEN + 1}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si
+                dup 5
+                write_mem 5
+                pop 2
+                // _ [txk_digest] garb garb *proof_collection *claim *output
 
-                dup 12
-                {&proof_collection_field_salted_inputs_hash}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si *salted_inputs_hash
+                /* put the output on stack, then write to memory */
+                dup 1 {&proof_collection_field_salted_inputs_hash}
+                // _ [txk_digest] garb garb *proof_collection *claim *output *salted_inputs_hash
 
                 {&load_digest}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash]
+                // _ [txk_digest] garb garb *proof_collection *claim *output [salted_inputs_hash]
 
-                push {Digest::LEN}
-                push {Digest::LEN + 1}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash] output_si output_len
-
-                call {dyn_malloc}
-                // _ [txk_digest] *proof_collection [program_digest] [reversed(txk_digest)] input_len input_si [salted_inputs_hash] output_si output_len *claim
-
-                {&write_claim_to_memory}
-                // _ [txk_digest] *proof_collection (*claim + 19)
-
-                addi {-ENCODED_CLAIM_SIZE}
-                // _ [txk_digest] *proof_collection *claim
-
-                swap 6
-                pop 5
-                pop 1
-                // _ *claim
+                dup 5 write_mem 5 pop 2
+                // _ [txk_digest] garb garb *proof_collection *claim
 
                 return
         )
@@ -133,17 +141,19 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(StoreRriClaim).test();
+        ShadowedFunction::new(GenerateRriClaim).test();
     }
 
-    impl Function for StoreRriClaim {
+    impl Function for GenerateRriClaim {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            // _ [txk_digest] *proof_collection
+            // _ [txk_digest] garb garb *proof_collection
             let proof_collection_pointer = stack.pop().unwrap();
+            let garb0 = stack.pop().unwrap();
+            let garb1 = stack.pop().unwrap();
             let txk_digest = Digest::new([
                 stack.pop().unwrap(),
                 stack.pop().unwrap(),
@@ -164,6 +174,14 @@ mod tests {
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
 
+            stack.push(txk_digest.values()[4]);
+            stack.push(txk_digest.values()[3]);
+            stack.push(txk_digest.values()[2]);
+            stack.push(txk_digest.values()[1]);
+            stack.push(txk_digest.values()[0]);
+            stack.push(garb1);
+            stack.push(garb0);
+            stack.push(proof_collection_pointer);
             stack.push(claim_pointer);
         }
 
