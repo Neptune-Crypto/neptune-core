@@ -111,3 +111,7 @@ fabric.properties
 .idea/codestream.xml
 
 # End of https://www.toptal.com/developers/gitignore/api/clion
+
+# Debuggable Tasm programs for triton-tui
+program.tasm
+vm_state.json
