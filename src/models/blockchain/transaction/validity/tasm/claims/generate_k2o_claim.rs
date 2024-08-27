@@ -7,7 +7,7 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::tasm::new_claim::NewClaim;
+use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 pub(crate) struct StoreK2oClaim;

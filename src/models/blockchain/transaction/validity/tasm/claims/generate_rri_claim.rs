@@ -7,7 +7,7 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
-use crate::models::blockchain::transaction::validity::tasm::new_claim::NewClaim;
+use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// Generates a `RemovalRecordsIntegrity` `Claim` from a `ProofCollection` object.
