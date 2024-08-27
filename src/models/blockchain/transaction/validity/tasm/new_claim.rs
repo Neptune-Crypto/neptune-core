@@ -85,18 +85,15 @@ impl BasicSnippet for NewClaim {
 mod test {
     use std::collections::HashMap;
 
-    use num_traits::ConstZero;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{
-        empty_stack,
-        memory::encode_to_memory,
-        rust_shadowing_helper_functions,
+        empty_stack, rust_shadowing_helper_functions,
         snippet_bencher::BenchmarkCase,
         traits::{
             function::{Function, FunctionInitialState, ShadowedFunction},
             rust_shadow::RustShadow,
         },
-        triton_vm::{prelude::BFieldElement, proof::Claim},
+        triton_vm::prelude::BFieldElement,
         twenty_first::bfe,
     };
 
@@ -114,17 +111,31 @@ mod test {
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
 
-            let claim = Claim {
-                program_digest: Default::default(),
-                input: vec![BFieldElement::ZERO; input_length],
-                output: vec![BFieldElement::ZERO; output_length],
-            };
+            // We can't use the following because it *sets* memory cells.
+            // The fact that the cells are being set to zero doesn't matter
+            // for the difference check in tasm-lib.
 
-            encode_to_memory(memory, claim_pointer, &claim);
+            // let claim = Claim {
+            //     program_digest: Default::default(),
+            //     input: vec![BFieldElement::ZERO; input_length],
+            //     output: vec![BFieldElement::ZERO; output_length],
+            // };
+            // encode_to_memory(memory, claim_pointer, &claim);
 
-            let output_pointer = claim_pointer;
-            let input_pointer = claim_pointer + bfe!(2) + bfe!(output_length as u64);
-            let program_digest_pointer = input_pointer + bfe!(2) + bfe!(input_length as u64);
+            memory.insert(claim_pointer, bfe!((output_length + 1) as u64));
+            memory.insert(claim_pointer + bfe!(1), bfe!(output_length as u64));
+            memory.insert(
+                claim_pointer + bfe!(output_length as u64) + bfe!(2),
+                bfe!((input_length + 1) as u64),
+            );
+            memory.insert(
+                claim_pointer + bfe!(output_length as u64) + bfe!(3),
+                bfe!(input_length as u64),
+            );
+
+            let output_pointer = claim_pointer + bfe!(2);
+            let input_pointer = output_pointer + bfe!(2) + bfe!(output_length as u64);
+            let program_digest_pointer = input_pointer + bfe!(input_length as u64);
 
             stack.push(claim_pointer);
             stack.push(output_pointer);
@@ -135,7 +146,7 @@ mod test {
         fn pseudorandom_initial_state(
             &self,
             seed: [u8; 32],
-            bench_case: Option<BenchmarkCase>,
+            _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut rng: StdRng = SeedableRng::from_seed(seed);
 
