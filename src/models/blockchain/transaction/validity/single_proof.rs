@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_type_scripts_claim::GenerateCollectTypeScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_k2o_claim::GenerateK2oClaim;
+use crate::models::blockchain::transaction::validity::tasm::claims::generate_lock_script_claim_template::GenerateLockScriptClaimTemplate;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
@@ -11,13 +12,17 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Library;
-use tasm_lib::triton_vm::prelude::{BFieldCodec, LabelledInstruction};
-use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
+use tasm_lib::triton_vm::prelude::LabelledInstruction;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::NonDeterminism;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::{field, Digest};
+use tasm_lib::Digest;
+use tasm_lib::field;
 
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
@@ -259,6 +264,8 @@ impl ConsensusProgram for SingleProof {
         let assemble_k2o_claim = library.import(Box::new(GenerateK2oClaim));
         let assemble_cls_claim = library.import(Box::new(GenerateCollectLockScriptsClaim));
         let assemble_cts_claim = library.import(Box::new(GenerateCollectTypeScriptsClaim));
+        let assemble_lock_script_claim_template =
+            library.import(Box::new(GenerateLockScriptClaimTemplate));
 
         let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
         let proof_collection_field_removal_records_integrity =
@@ -268,6 +275,59 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_field_kernel_to_outputs = field!(ProofCollection::kernel_to_outputs);
         let proof_collection_field_collect_type_scripts =
             field!(ProofCollection::collect_type_scripts);
+        let proof_collection_field_lock_scripts_halt = field!(ProofCollection::lock_scripts_halt);
+
+        let claim_field_with_size_output = triton_asm!(read_mem 1 push 1 add swap 1 push -1 add);
+
+        let verify_lock_scripts_loop_label =
+            "neptune_transaction_verify_lock_scripts_loop".to_string();
+        let verify_lock_scripts_loop_body = triton_asm! {
+            // INVARIANT: _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
+            {verify_lock_scripts_loop_label}:
+                hint current_proof_size = stack[0]
+                hint current_proof_ptr = stack[1]
+                hint eof = stack[2]
+                hint current_program_digest = stack[3]
+                hint claim_program_digest = stack[4]
+                hint claim_template = stack[5]
+
+                dup 3 dup 3 eq skiz return
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
+
+                dup 3
+                push {Digest::LEN - 1}
+                add
+                read_mem {Digest::LEN}
+                pop 1
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size [current_program_digest]
+
+                dup 9
+                write_mem {Digest::LEN}
+                pop 1
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
+
+                dup 5
+                dup 2
+                call {stark_verify}
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
+
+                add
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *next_proof_si
+
+                read_mem 1
+                // _ *claim_template *claim_program_digest *current_program_digest *eof next_proof_size (*next_proof_si-1)
+                push 2 add
+                // _ *claim_template *claim_program_digest *current_program_digest *eof next_proof_size *next_proof
+                swap 1
+                // _ *claim_template *claim_program_digest *current_program_digest *eof *next_proof next_proof_size
+
+                swap 3
+                push {Digest::LEN} add
+                swap 3
+                // _ *claim_template *claim_program_digest *next_program_digest *eof *next_proof next_proof_size
+
+                recurse
+        };
 
         let proof_collection_case_label =
             "neptune_transaction_single_proof_case_collection".to_string();
@@ -333,6 +393,7 @@ impl ConsensusProgram for SingleProof {
                 // [txk_digest] *spw disc *proof_collection
 
                 call {assemble_cls_claim}
+                hint cls_claim = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim
 
                 dup 1 dup 1 swap 1
@@ -351,6 +412,7 @@ impl ConsensusProgram for SingleProof {
                 // [txk_digest] *spw disc *proof_collection *cls_claim *proof_collection
 
                 call {assemble_cts_claim}
+                hint cts_claim = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim
 
                 dup 0 dup 3
@@ -360,6 +422,51 @@ impl ConsensusProgram for SingleProof {
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *cts_claim *cts_proof
 
                 call {stark_verify}
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim
+
+
+                /* for all lock scripts, assemble claim and verify */
+                dup 2
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *proof_collection
+
+                call {assemble_lock_script_claim_template}
+                hint program_digest_ptr = stack[0]
+                hint lock_script_claim_ptr = stack[1]
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr
+
+                dup 3 {&claim_field_with_size_output}
+                hint output_size = stack[0]
+                hint lock_script_hashes = stack[1]
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes size
+
+                dup 1 add push 2 add
+                hint eof = stack[0]
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof
+
+                swap 1 push 2 add
+                hint lock_script_hashes_i = stack[0]
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *eof *lock_script_hashes[0]
+
+                swap 1
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes[0] *eof
+
+
+                dup 6
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes[0] *eof *proof_collection
+
+                {&proof_collection_field_lock_scripts_halt} push 1 add
+                hint lock_script_proofs_i_si = stack[0]
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof *lock_script_proofs[0]_si
+
+                read_mem 1
+                hint proof_size = stack[1]
+                push 2 add
+                swap 1
+                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ls_claim_template *program_digest_ptr *lock_script_hashes *eof *lock_script_proofs[0] proof_size
+
+                call {verify_lock_scripts_loop_label}
+
+                pop 5 pop 1
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim
 
                 return
@@ -387,6 +494,7 @@ impl ConsensusProgram for SingleProof {
         triton_asm! {
             {&main}
             {&proof_collection_case_body}
+            {&verify_lock_scripts_loop_body}
             {&library.all_imports()}
         }
     }
