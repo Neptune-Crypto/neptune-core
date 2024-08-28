@@ -10,7 +10,7 @@ use crate::models::blockchain::transaction::validity::collect_lock_scripts::Coll
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(super) struct GenerateCollectLockScriptsClaim;
+pub(crate) struct GenerateCollectLockScriptsClaim;
 
 impl BasicSnippet for GenerateCollectLockScriptsClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
@@ -201,10 +201,8 @@ mod tests {
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
-    use rand::rngs::StdRng;
     use rand::Rng;
     use rand::RngCore;
-    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -251,7 +249,7 @@ mod tests {
 
         fn pseudorandom_initial_state(
             &self,
-            seed: [u8; 32],
+            _seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut test_runner = TestRunner::deterministic();

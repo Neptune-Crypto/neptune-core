@@ -11,7 +11,7 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(super) struct GenerateCollectTypeScriptsClaim;
+pub(crate) struct GenerateCollectTypeScriptsClaim;
 
 impl BasicSnippet for GenerateCollectTypeScriptsClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
@@ -219,10 +219,8 @@ mod tests {
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
-    use rand::rngs::StdRng;
     use rand::Rng;
     use rand::RngCore;
-    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;

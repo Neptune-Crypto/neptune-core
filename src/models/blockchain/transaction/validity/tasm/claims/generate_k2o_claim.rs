@@ -10,9 +10,9 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
-pub(crate) struct StoreK2oClaim;
+pub(crate) struct GenerateK2oClaim;
 
-impl BasicSnippet for StoreK2oClaim {
+impl BasicSnippet for GenerateK2oClaim {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "transaction_kernel_digest".to_owned()),
@@ -143,10 +143,10 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(StoreK2oClaim).test();
+        ShadowedFunction::new(GenerateK2oClaim).test();
     }
 
-    impl Function for StoreK2oClaim {
+    impl Function for GenerateK2oClaim {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
