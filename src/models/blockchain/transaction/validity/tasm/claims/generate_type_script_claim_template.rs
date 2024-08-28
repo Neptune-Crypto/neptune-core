@@ -10,9 +10,9 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 
 use super::new_claim::NewClaim;
 
-pub(crate) struct GenerateTypeScryptClaimTemplate;
+pub(crate) struct GenerateTypeScriptClaimTemplate;
 
-impl BasicSnippet for GenerateTypeScryptClaimTemplate {
+impl BasicSnippet for GenerateTypeScriptClaimTemplate {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*proof_collection".to_string())]
     }
@@ -43,7 +43,7 @@ impl BasicSnippet for GenerateTypeScryptClaimTemplate {
             // AFTER: _ *claim *program_digest
             {entrypoint}:
 
-                push {Digest::LEN} push 0
+                push {3*Digest::LEN} push 0
                 call {new_claim}
                 // _ *proof_collection *claim *output *input *program_digest
 
@@ -142,9 +142,9 @@ mod test {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 
-    use super::GenerateTypeScryptClaimTemplate;
+    use super::GenerateTypeScriptClaimTemplate;
 
-    impl Function for GenerateTypeScryptClaimTemplate {
+    impl Function for GenerateTypeScriptClaimTemplate {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
@@ -161,8 +161,8 @@ mod test {
             // length / size indicators
             memory.insert(claim_pointer, bfe!(1));
             memory.insert(claim_pointer + bfe!(1), bfe!(0));
-            memory.insert(claim_pointer + bfe!(2), bfe!(Digest::LEN as u64 + 1));
-            memory.insert(claim_pointer + bfe!(3), bfe!(Digest::LEN as u64));
+            memory.insert(claim_pointer + bfe!(2), bfe!(3 * Digest::LEN as u64 + 1));
+            memory.insert(claim_pointer + bfe!(3), bfe!(3 * Digest::LEN as u64));
 
             // insert reversed hashes: txk mast, salted inputs, salted outputs
             for (i, b) in [
@@ -178,7 +178,7 @@ mod test {
             }
 
             stack.push(claim_pointer);
-            stack.push(claim_pointer + bfe!(4u64 + Digest::LEN as u64));
+            stack.push(claim_pointer + bfe!(4u64 + 3 * Digest::LEN as u64));
         }
 
         fn pseudorandom_initial_state(
@@ -209,6 +209,6 @@ mod test {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateTypeScryptClaimTemplate).test();
+        ShadowedFunction::new(GenerateTypeScriptClaimTemplate).test();
     }
 }
