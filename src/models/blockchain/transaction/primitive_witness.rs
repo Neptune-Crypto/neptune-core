@@ -504,7 +504,7 @@ impl PrimitiveWitness {
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<BFieldElement>(), 3),
-            0u64..=u64::MAX,
+            0u64..=(u64::MAX>>1),
             arb::<Timestamp>(),
         )
             .prop_flat_map(
