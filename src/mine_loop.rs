@@ -371,7 +371,7 @@ pub async fn mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
-    global_state_lock: GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
@@ -541,7 +541,7 @@ mod mine_loop_tests {
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::RegTest;
-        let premine_receiver_global_state_lock =
+        let mut premine_receiver_global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;

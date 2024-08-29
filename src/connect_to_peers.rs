@@ -256,7 +256,7 @@ where
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
     let peer_distance = 1; // All incoming connections have distance 1
-    let peer_loop_handler = PeerLoopHandler::new(
+    let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
         peer_address,
@@ -411,7 +411,7 @@ where
         bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
     }
 
-    let peer_loop_handler = PeerLoopHandler::new(
+    let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
         peer_address,
@@ -433,7 +433,7 @@ where
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub async fn close_peer_connected_callback(
-    global_state_lock: GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) -> Result<()> {
@@ -921,12 +921,18 @@ mod connect_tests {
             .build();
 
         let peer_count_before_incoming_connection_request = 3;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(
-                Network::Alpha,
-                peer_count_before_incoming_connection_request,
-            )
-            .await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(
+            Network::Alpha,
+            peer_count_before_incoming_connection_request,
+        )
+        .await?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((

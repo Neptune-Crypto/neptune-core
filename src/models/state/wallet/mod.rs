@@ -873,7 +873,7 @@ mod wallet_tests {
         let premine_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let premine_receiver_global_state =
+        let mut premine_receiver_global_state =
             mock_genesis_global_state(network, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state.lock_guard_mut().await;

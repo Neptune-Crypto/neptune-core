@@ -478,7 +478,7 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn next_receiving_address(
-        self,
+        mut self,
         _context: tarpc::context::Context,
         key_type: KeyType,
     ) -> ReceivingAddress {
@@ -565,7 +565,7 @@ impl RPC for NeptuneRPCServer {
     //   * acquires `global_state_lock` for write
     //
     // documented in trait. do not add doc-comment.
-    async fn clear_all_standings(self, _: context::Context) {
+    async fn clear_all_standings(mut self, _: context::Context) {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
             .net
@@ -588,7 +588,7 @@ impl RPC for NeptuneRPCServer {
     //   * acquires `global_state_lock` for write
     //
     // documented in trait. do not add doc-comment.
-    async fn clear_standing_by_ip(self, _: context::Context, ip: IpAddr) {
+    async fn clear_standing_by_ip(mut self, _: context::Context, ip: IpAddr) {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
             .net
@@ -629,7 +629,7 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn send_to_many(
-        self,
+        mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_method: UtxoNotifyMethod,
@@ -755,7 +755,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
+    async fn prune_abandoned_monitored_utxos(mut self, _context: tarpc::context::Context) -> usize {
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
@@ -957,7 +957,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (rpc_server, state_lock) =
+        let (rpc_server, mut state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let rpc_request_context = context::current();
         let global_state = state_lock.lock_guard().await;
@@ -1100,7 +1100,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (rpc_server, state_lock) =
+        let (rpc_server, mut state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let mut state = state_lock.lock_guard_mut().await;
         let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
@@ -1398,7 +1398,7 @@ mod rpc_server_tests {
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
         let network = Network::RegTest;
-        let (rpc_server, state_lock) =
+        let (rpc_server, mut state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let mut rng = rand::thread_rng();

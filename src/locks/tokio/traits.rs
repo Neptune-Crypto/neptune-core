@@ -38,7 +38,7 @@ pub trait Atomic<T> {
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// # })
     /// ```
-    async fn with_mut<R, F>(&self, f: F) -> R
+    async fn with_mut<R, F>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R;
 }

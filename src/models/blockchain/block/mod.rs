@@ -735,7 +735,7 @@ mod block_tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let network = Network::RegTest;
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
             .lock_guard()

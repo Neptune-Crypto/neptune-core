@@ -994,7 +994,7 @@ mod archival_state_tests {
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = wallet.nth_generation_spending_key_for_tests(0).to_address();
-        let genesis_receiver_global_state_lock =
+        let mut genesis_receiver_global_state_lock =
             mock_genesis_global_state(network, 0, wallet).await;
         let mut genesis_receiver_global_state =
             genesis_receiver_global_state_lock.lock_guard_mut().await;
@@ -1137,7 +1137,7 @@ mod archival_state_tests {
         let own_receiving_address = genesis_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
         let mut num_utxos = Block::premine_utxos(network).len();
 
@@ -1258,7 +1258,7 @@ mod archival_state_tests {
         let own_receiving_address = genesis_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
 
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -1432,7 +1432,7 @@ mod archival_state_tests {
         let seven_months = Timestamp::months(7);
         let (mut block_1_a, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address, rng.gen());
-        let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
 
         // Verify that block_1 that only contains the coinbase output is valid
         assert!(block_1_a.has_proof_of_work(&genesis_block));
@@ -1484,16 +1484,16 @@ mod archival_state_tests {
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let genesis_state_lock =
+        let mut genesis_state_lock =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
 
         let wallet_secret_alice = WalletSecret::new_random();
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
-        let alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
+        let mut alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
         let wallet_secret_bob = WalletSecret::new_random();
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
-        let bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
+        let mut bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
@@ -1627,7 +1627,11 @@ mod archival_state_tests {
         }
 
         // Update chain states
-        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+        for state_lock in [
+            &mut genesis_state_lock,
+            &mut alice_state_lock,
+            &mut bob_state_lock,
+        ] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_1.clone()).await.unwrap();
         }
@@ -1817,7 +1821,11 @@ mod archival_state_tests {
             .await;
 
         // Update chain states
-        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+        for state_lock in [
+            &mut genesis_state_lock,
+            &mut alice_state_lock,
+            &mut bob_state_lock,
+        ] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_2.clone()).await.unwrap();
         }

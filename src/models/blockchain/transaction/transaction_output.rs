@@ -410,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_utxoreceiver_auto_owned_output() -> Result<()> {
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
 
         // obtain next unused receiving address from our wallet.

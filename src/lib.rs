@@ -149,7 +149,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size, latest_block.hash());
-    let global_state_lock = GlobalStateLock::new(
+    let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
@@ -267,7 +267,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Handle incoming connections, messages from peer tasks, and messages from the mining task
     info!("Starting main loop");
-    let main_loop_handler = MainLoopHandler::new(
+    let mut main_loop_handler = MainLoopHandler::new(
         incoming_peer_listener,
         global_state_lock,
         main_to_peer_broadcast_tx,

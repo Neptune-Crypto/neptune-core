@@ -81,7 +81,7 @@ impl PeerLoopHandler {
 
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
+    async fn punish(&mut self, reason: PeerSanctionReason) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         warn!(
             "Sanctioning peer {} for {:?}",
@@ -112,7 +112,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_blocks(
-        &self,
+        &mut self,
         received_blocks: Vec<Block>,
         parent_of_first_block: Block,
     ) -> Result<BlockHeight> {
@@ -186,7 +186,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
     async fn receive_new_block<S>(
-        &self,
+        &mut self,
         received_block: Box<Block>,
         peer: &mut S,
         peer_state: &mut MutablePeerState,
@@ -324,7 +324,7 @@ impl PeerLoopHandler {
     ///   * acquires `global_state_lock` for read
     ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_peer_message<S>(
-        &self,
+        &mut self,
         msg: PeerMessage,
         peer: &mut S,
         peer_state_info: &mut MutablePeerState,
@@ -907,7 +907,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_main_task_message<S>(
-        &self,
+        &mut self,
         msg: MainToPeerTask,
         peer: &mut S,
         peer_state_info: &mut MutablePeerState,
@@ -997,7 +997,7 @@ impl PeerLoopHandler {
     /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
     /// or a message from main over the main-to-peer-tasks broadcast channel.
     async fn run<S>(
-        &self,
+        &mut self,
         mut peer: S,
         mut from_main_rx: broadcast::Receiver<MainToPeerTask>,
         peer_state_info: &mut MutablePeerState,
@@ -1085,7 +1085,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
     pub async fn run_wrapper<S>(
-        &self,
+        &mut self,
         mut peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerTask>,
     ) -> Result<()>
@@ -1220,7 +1220,7 @@ mod peer_loop_tests {
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -1269,7 +1269,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -1322,7 +1322,7 @@ mod peer_loop_tests {
             block_1_with_different_genesis.into(),
         )))]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1408,7 +1408,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1473,8 +1473,14 @@ mod peer_loop_tests {
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main task.
         let network = Network::Alpha;
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+        let (
+            peer_broadcast_tx,
+            _from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            hsd,
+        ) = get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
@@ -1495,7 +1501,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1538,7 +1544,7 @@ mod peer_loop_tests {
 
         let mut rng = thread_rng();
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
@@ -1579,7 +1585,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_1 = PeerLoopHandler::new(
+        let mut peer_loop_handler_1 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1605,7 +1611,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_2 = PeerLoopHandler::new(
+        let mut peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1630,7 +1636,7 @@ mod peer_loop_tests {
 
         let mut rng = thread_rng();
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
@@ -1671,7 +1677,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_2 = PeerLoopHandler::new(
+        let mut peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1696,7 +1702,7 @@ mod peer_loop_tests {
 
         let mut rng = thread_rng();
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
@@ -1732,7 +1738,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1778,7 +1784,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1847,7 +1853,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1954,7 +1960,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address1,
@@ -2004,8 +2010,14 @@ mod peer_loop_tests {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            hsd,
+        ) = get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = global_state_mut.chain.archival_state().get_tip().await;
@@ -2037,7 +2049,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -2119,7 +2131,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -2172,8 +2184,14 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a new block
         // notification.
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            hsd,
+        ) = get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret
@@ -2222,7 +2240,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_socket_address,
@@ -2276,8 +2294,14 @@ mod peer_loop_tests {
 
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 1).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(network, 1).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_infos: Vec<PeerInfo> = global_state_mut
             .net
@@ -2332,7 +2356,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa_1, hsd_1, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -2396,7 +2420,7 @@ mod peer_loop_tests {
         ]);
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
             get_dummy_socket_address(0),
@@ -2428,8 +2452,14 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn populated_mempool_request_tx_test() -> Result<()> {
         // In this scenario the peer is informed of a transaction that it already knows
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 1).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Alpha, 1).await?;
 
         let transaction_1 = make_mock_transaction(vec![], vec![]);
 
@@ -2441,7 +2471,7 @@ mod peer_loop_tests {
         ]);
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
             get_dummy_socket_address(0),

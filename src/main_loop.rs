@@ -310,7 +310,7 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn handle_miner_task_message(&self, msg: MinerToMain) -> Result<()> {
+    async fn handle_miner_task_message(&mut self, msg: MinerToMain) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
                 // When receiving a block from the miner task, we assume it is valid
@@ -371,7 +371,7 @@ impl MainLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
     async fn handle_peer_task_message(
-        &self,
+        &mut self,
         msg: PeerTaskToMain,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
@@ -795,7 +795,7 @@ impl MainLoopHandler {
     }
 
     pub async fn run(
-        &self,
+        &mut self,
         mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
@@ -1009,7 +1009,7 @@ impl MainLoopHandler {
 
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down
     /// after handling this message.
-    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
+    async fn handle_rpc_server_message(&mut self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transaction) => {
                 debug!(
@@ -1052,7 +1052,7 @@ impl MainLoopHandler {
         }
     }
 
-    async fn graceful_shutdown(&self, task_handles: Vec<JoinHandle<()>>) -> Result<()> {
+    async fn graceful_shutdown(&mut self, task_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
         // Stop mining

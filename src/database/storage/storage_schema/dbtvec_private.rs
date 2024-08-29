@@ -150,11 +150,13 @@ where
 
     #[inline]
     async fn write_op_overwrite(&mut self, index: Index, value: V) {
+        let index_key = self.get_index_key(index);
+
         let persist_count = {
             let mut pending_writes = self.pending_writes.lock_guard_mut().await;
 
             pending_writes.write_ops.push(WriteOperation::Write(
-                self.get_index_key(index),
+                index_key,
                 RustyValue::from_any(&value),
             ));
             pending_writes.persist_count
@@ -335,13 +337,14 @@ where
         *current_length -= 1;
 
         let new_length = *current_length;
+        let index_key = self.get_index_key(new_length);
 
         let persist_count = {
             let mut pending_writes = self.pending_writes.lock_guard_mut().await;
 
             pending_writes
                 .write_ops
-                .push(WriteOperation::Delete(self.get_index_key(new_length)));
+                .push(WriteOperation::Delete(index_key));
             pending_writes.write_ops.push(WriteOperation::Write(
                 Self::get_length_key(self.key_prefix),
                 RustyValue::from_any(&new_length),
@@ -367,12 +370,13 @@ where
         // record in cache
         let current_length = self.len().await;
         let new_length = current_length + 1;
+        let index_key = self.get_index_key(current_length);
 
         let persist_count = {
             let mut pending_writes = self.pending_writes.lock_guard_mut().await;
 
             pending_writes.write_ops.push(WriteOperation::Write(
-                self.get_index_key(current_length),
+                index_key,
                 RustyValue::from_any(&value),
             ));
             pending_writes.write_ops.push(WriteOperation::Write(

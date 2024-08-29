@@ -619,7 +619,7 @@ mod tests {
 
         let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let premine_receiver_global_state =
+        let mut premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state.lock_guard_mut().await;
@@ -630,7 +630,7 @@ mod tests {
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
-        let other_global_state_lock =
+        let mut other_global_state_lock =
             mock_genesis_global_state(network, 2, other_wallet_secret.clone()).await;
         let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
         let other_receiver_spending_key =
@@ -831,7 +831,7 @@ mod tests {
         // Then mine a a block 1b that also does not contain this transaction.
         let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let premine_receiver_global_state =
+        let mut premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state.lock_guard_mut().await;
@@ -964,7 +964,7 @@ mod tests {
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let network = Network::RegTest;
-        let preminer_state_lock =
+        let mut preminer_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let now = Block::genesis_block(network).kernel.header.timestamp;
         let seven_months = Timestamp::months(7);

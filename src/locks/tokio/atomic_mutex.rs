@@ -21,7 +21,7 @@ use super::LockType;
 ///     year: u16,
 /// };
 /// # tokio_test::block_on(async {
-/// let atomic_car = AtomicMutex::from(Car{year: 2016});
+/// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
@@ -59,7 +59,7 @@ use super::LockType;
 /// const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 ///
 /// # tokio_test::block_on(async {
-/// let atomic_car = AtomicMutex::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_EVENT_CB)));
+/// let mut atomic_car = AtomicMutex::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_EVENT_CB)));
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
@@ -230,11 +230,11 @@ impl<T> AtomicMutex<T> {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
-    pub async fn lock_guard_mut(&self) -> AtomicMutexGuard<T> {
+    pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<T> {
         self.try_acquire_write_cb();
         let guard = self.inner.lock().await;
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Write)
@@ -274,12 +274,12 @@ impl<T> AtomicMutex<T> {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_mut(|mut c| c.year = 2022).await;
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
     /// ```
-    pub async fn lock_mut<R, F>(&self, f: F) -> R
+    pub async fn lock_mut<R, F>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
     {
@@ -333,13 +333,13 @@ impl<T> AtomicMutex<T> {
     ///     year: u16,
     /// };
     /// # tokio_test::block_on(async {
-    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// let mut atomic_car = AtomicMutex::from(Car{year: 2016});
     /// atomic_car.lock_mut_async(|mut c| async {c.year = 2022}.boxed()).await;
     /// let year = atomic_car.lock_mut_async(|mut c| async {c.year = 2023; c.year}.boxed()).await;
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
-    pub async fn lock_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
+    pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
         let inner_guard = self.inner.lock().await;
         let mut guard = AtomicMutexGuard::new(
@@ -455,7 +455,7 @@ mod tests {
     // Verify (compile-time) that AtomicMutex:.lock() and :.lock_mut() accept mutable values.  (FnMut)
     async fn mutable_assignment() {
         let name = "Jim".to_string();
-        let atomic_name = AtomicMutex::from(name);
+        let mut atomic_name = AtomicMutex::from(name);
 
         let mut new_name: String = Default::default();
         atomic_name.lock_mut(|n| *n = "Sally".to_string()).await;

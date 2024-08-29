@@ -1027,7 +1027,8 @@ mod tests {
         let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let own_global_state_lock = mock_genesis_global_state(network, 0, own_wallet_secret).await;
+        let mut own_global_state_lock =
+            mock_genesis_global_state(network, 0, own_wallet_secret).await;
         let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = own_global_state

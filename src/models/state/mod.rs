@@ -159,7 +159,7 @@ impl GlobalStateLock {
     }
 
     // enable or disable mining
-    pub async fn set_mining(&self, mining: bool) {
+    pub async fn set_mining(&mut self, mining: bool) {
         self.lock_mut(|s| s.mining = mining).await
     }
 
@@ -169,13 +169,13 @@ impl GlobalStateLock {
     }
 
     // flush databases (persist to disk)
-    pub async fn flush_databases(&self) -> Result<()> {
+    pub async fn flush_databases(&mut self) -> Result<()> {
         self.lock_guard_mut().await.flush_databases().await
     }
 
     /// store a coinbase (self-mined) block
     pub async fn store_coinbase_block(
-        &self,
+        &mut self,
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
     ) -> Result<()> {
@@ -186,17 +186,17 @@ impl GlobalStateLock {
     }
 
     /// store a block (non coinbase)
-    pub async fn store_block(&self, new_block: Block) -> Result<()> {
+    pub async fn store_block(&mut self, new_block: Block) -> Result<()> {
         self.lock_guard_mut().await.set_new_tip(new_block).await
     }
 
     /// resync membership proofs
-    pub async fn resync_membership_proofs(&self) -> Result<()> {
+    pub async fn resync_membership_proofs(&mut self) -> Result<()> {
         self.lock_guard_mut().await.resync_membership_proofs().await
     }
 
     pub async fn prune_abandoned_monitored_utxos(
-        &self,
+        &mut self,
         block_depth_threshhold: usize,
     ) -> Result<usize> {
         self.lock_guard_mut()
@@ -1580,7 +1580,7 @@ mod global_state_tests {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let global_state_lock = mock_genesis_global_state(network, 2, devnet_wallet).await;
+        let mut global_state_lock = mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let other_receiver_address = WalletSecret::new_random()
             .nth_generation_spending_key_for_tests(0)
@@ -1656,7 +1656,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
 
@@ -1726,7 +1726,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let own_spending_key = global_state
@@ -1812,7 +1812,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
@@ -2005,16 +2005,16 @@ mod global_state_tests {
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let genesis_state_lock =
+        let mut genesis_state_lock =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
 
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
-        let alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
+        let mut alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
         let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
-        let bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
+        let mut bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
@@ -2150,7 +2150,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        for state_lock in [&alice_state_lock, &bob_state_lock] {
+        for state_lock in [&mut alice_state_lock, &mut bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_1.clone()).await.unwrap();
         }
@@ -2292,7 +2292,7 @@ mod global_state_tests {
     async fn mock_global_state_is_valid() {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
+        let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
@@ -2424,9 +2424,9 @@ mod global_state_tests {
             let alice_to_bob_fee = NeptuneCoins::new(1);
 
             // init global state for alice bob
-            let alice_state_lock =
+            let mut alice_state_lock =
                 mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
-            let bob_state_lock =
+            let mut bob_state_lock =
                 mock_genesis_global_state(network, 3, WalletSecret::new_random()).await;
 
             // in bob wallet: create receiving address for bob
@@ -2553,7 +2553,7 @@ mod global_state_tests {
             // Fortunately alice still has her seed that she can restore from.
             {
                 // devnet_wallet() stands in for alice's seed.
-                let alice_restored_state_lock =
+                let mut alice_restored_state_lock =
                     mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
 
                 let mut alice_state_mut = alice_restored_state_lock.lock_guard_mut().await;
