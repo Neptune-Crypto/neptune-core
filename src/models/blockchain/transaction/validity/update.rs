@@ -10,6 +10,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
@@ -63,6 +64,20 @@ impl UpdateWitness {
         new_msa: MutatorSetAccumulator,
         aocl_successor_proof: MmrSuccessorProof,
     ) -> Self {
+        let msah_path = new_kernel.mast_path(TransactionKernelField::MutatorSetHash);
+        assert!(
+            MerkleTreeInclusionProof {
+                tree_height: TransactionKernelField::COUNT.next_power_of_two().ilog2() as usize,
+                indexed_leafs: vec![(
+                    TransactionKernelField::MutatorSetHash as usize,
+                    Hash::hash(&new_msa.hash())
+                )],
+                authentication_structure: msah_path.clone(),
+            }
+            .verify(new_kernel.mast_hash()),
+            "path should be valid"
+        );
+
         Self {
             old_kernel_mast_hash: old_kernel.mast_hash(),
             new_kernel_mast_hash: new_kernel.mast_hash(),
@@ -123,25 +138,14 @@ impl SecretWitness for UpdateWitness {
         // set remaining digests
         nondeterminism.digests.append(
             &mut [
-                // new mutator set hash
+                // mutator set hash
                 self.new_kernel
+                    .mast_path(TransactionKernelField::MutatorSetHash),
+                self.old_kernel
                     .mast_path(TransactionKernelField::MutatorSetHash),
                 // inputs
                 self.old_kernel.mast_path(TransactionKernelField::Inputs),
                 self.new_kernel.mast_path(TransactionKernelField::Inputs),
-                // chunk membership proofs
-                self.new_kernel
-                    .inputs
-                    .iter()
-                    .flat_map(|input| {
-                        input
-                            .target_chunks
-                            .chunk_indices_and_membership_proofs_and_leafs()
-                    })
-                    .flat_map(|(_chunk_index, membership_proof, _chunk)| {
-                        membership_proof.authentication_path
-                    })
-                    .collect_vec(),
                 // outputs
                 self.old_kernel.mast_path(TransactionKernelField::Outputs),
                 self.new_kernel.mast_path(TransactionKernelField::Outputs),
@@ -159,6 +163,19 @@ impl SecretWitness for UpdateWitness {
                 // timestamp
                 self.old_kernel.mast_path(TransactionKernelField::Timestamp),
                 self.new_kernel.mast_path(TransactionKernelField::Timestamp),
+                // chunk membership proofs
+                self.new_kernel
+                    .inputs
+                    .iter()
+                    .flat_map(|input| {
+                        input
+                            .target_chunks
+                            .chunk_indices_and_membership_proofs_and_leafs()
+                    })
+                    .flat_map(|(_chunk_index, membership_proof, _chunk)| {
+                        membership_proof.authentication_path
+                    })
+                    .collect_vec(),
             ]
             .concat(),
         );
@@ -307,7 +324,7 @@ impl ConsensusProgram for Update {
         );
 
         // coinbases are identical
-        let coinbase_hash: Digest = Hash::hash(&uw.new_kernel.fee);
+        let coinbase_hash: Digest = Hash::hash(&uw.new_kernel.coinbase);
         tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Coinbase as u32,
@@ -325,7 +342,7 @@ impl ConsensusProgram for Update {
         let new_timestamp: Timestamp = uw.new_kernel.timestamp;
         let new_timestamp_hash: Digest = Hash::hash(&new_timestamp);
         let old_timestamp: Timestamp = uw.old_kernel.timestamp;
-        let old_timestamp_hash: Digest = Hash::hash(&new_timestamp);
+        let old_timestamp_hash: Digest = Hash::hash(&old_timestamp);
         tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Timestamp as u32,
@@ -459,6 +476,7 @@ mod test {
             &newly_confirmed_records,
         );
 
+        new_kernel.mutator_set_hash = new_msa.hash();
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
         // todo: also update mutator set
         let update_witness = UpdateWitness::from_old_transaction(

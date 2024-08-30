@@ -217,7 +217,10 @@ pub fn tasmlib_hashing_merkle_verify(
         authentication_structure: path.clone(),
     };
 
-    assert!(mt_inclusion_proof.verify(root));
+    assert!(
+        mt_inclusion_proof.verify(root),
+        "expected root {root} but that's not what we got"
+    );
 }
 
 pub fn mmr_verify_from_secret_in_leaf_index_on_stack(
