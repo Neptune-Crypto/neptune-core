@@ -1,19 +1,22 @@
-use std::collections::HashMap;
-
 use itertools::Itertools;
 use strum::EnumCount;
+use tasm_lib::field;
+use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::triton_vm::triton_asm;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
@@ -37,6 +40,8 @@ use super::single_proof::SingleProof;
 pub struct UpdateWitness {
     old_kernel: TransactionKernel,
     new_kernel: TransactionKernel,
+    old_kernel_mast_hash: Digest,
+    new_kernel_mast_hash: Digest,
     old_proof: Proof,
     new_swbfi_bagged: Digest,
     new_aocl: MmrAccumulator,
@@ -59,6 +64,8 @@ impl UpdateWitness {
         aocl_successor_proof: MmrSuccessorProof,
     ) -> Self {
         Self {
+            old_kernel_mast_hash: old_kernel.mast_hash(),
+            new_kernel_mast_hash: new_kernel.mast_hash(),
             old_kernel,
             new_kernel: new_kernel.clone(),
             old_proof,
@@ -95,61 +102,68 @@ impl SecretWitness for UpdateWitness {
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
+        let mut nondeterminism = NonDeterminism::new(vec![]);
+
         // set memory
-        let mut memory = HashMap::default();
         encode_to_memory(
-            &mut memory,
+            &mut nondeterminism.ram,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             self,
         );
 
-        // set digests
-        let digests = [
-            // new mutator set hash
-            self.new_kernel
-                .mast_path(TransactionKernelField::MutatorSetHash),
-            // inputs
-            self.old_kernel.mast_path(TransactionKernelField::Inputs),
-            self.new_kernel.mast_path(TransactionKernelField::Inputs),
-            // chunk membership proofs
-            self.new_kernel
-                .inputs
-                .iter()
-                .flat_map(|input| {
-                    input
-                        .target_chunks
-                        .chunk_indices_and_membership_proofs_and_leafs()
-                })
-                .flat_map(|(_chunk_index, membership_proof, _chunk)| {
-                    membership_proof.authentication_path
-                })
-                .collect_vec(),
-            // outputs
-            self.old_kernel.mast_path(TransactionKernelField::Outputs),
-            self.new_kernel.mast_path(TransactionKernelField::Outputs),
-            // public announcements
-            self.old_kernel
-                .mast_path(TransactionKernelField::PublicAnnouncements),
-            self.new_kernel
-                .mast_path(TransactionKernelField::PublicAnnouncements),
-            // fee
-            self.old_kernel.mast_path(TransactionKernelField::Fee),
-            self.new_kernel.mast_path(TransactionKernelField::Fee),
-            // coinbase
-            self.old_kernel.mast_path(TransactionKernelField::Coinbase),
-            self.new_kernel.mast_path(TransactionKernelField::Coinbase),
-            // timestamp
-            self.old_kernel.mast_path(TransactionKernelField::Timestamp),
-            self.new_kernel.mast_path(TransactionKernelField::Timestamp),
-        ]
-        .concat();
+        // update nondeterminism to account for verifying one STARK proof
+        let claim = Claim::new(SingleProof.program().hash())
+            .with_input(self.old_kernel_mast_hash.reversed().values().to_vec());
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+            &mut nondeterminism,
+            &self.old_proof,
+            &claim,
+        );
 
-        // set individual tokens
-        let individual_tokens = self.old_kernel.mast_hash().reversed().values().to_vec();
+        // set remaining digests
+        nondeterminism.digests.append(
+            &mut [
+                // new mutator set hash
+                self.new_kernel
+                    .mast_path(TransactionKernelField::MutatorSetHash),
+                // inputs
+                self.old_kernel.mast_path(TransactionKernelField::Inputs),
+                self.new_kernel.mast_path(TransactionKernelField::Inputs),
+                // chunk membership proofs
+                self.new_kernel
+                    .inputs
+                    .iter()
+                    .flat_map(|input| {
+                        input
+                            .target_chunks
+                            .chunk_indices_and_membership_proofs_and_leafs()
+                    })
+                    .flat_map(|(_chunk_index, membership_proof, _chunk)| {
+                        membership_proof.authentication_path
+                    })
+                    .collect_vec(),
+                // outputs
+                self.old_kernel.mast_path(TransactionKernelField::Outputs),
+                self.new_kernel.mast_path(TransactionKernelField::Outputs),
+                // public announcements
+                self.old_kernel
+                    .mast_path(TransactionKernelField::PublicAnnouncements),
+                self.new_kernel
+                    .mast_path(TransactionKernelField::PublicAnnouncements),
+                // fee
+                self.old_kernel.mast_path(TransactionKernelField::Fee),
+                self.new_kernel.mast_path(TransactionKernelField::Fee),
+                // coinbase
+                self.old_kernel.mast_path(TransactionKernelField::Coinbase),
+                self.new_kernel.mast_path(TransactionKernelField::Coinbase),
+                // timestamp
+                self.old_kernel.mast_path(TransactionKernelField::Timestamp),
+                self.new_kernel.mast_path(TransactionKernelField::Timestamp),
+            ]
+            .concat(),
+        );
 
-        NonDeterminism::new(individual_tokens)
-            .with_ram(memory)
-            .with_digests(digests)
+        nondeterminism
     }
 }
 
@@ -168,8 +182,8 @@ impl ConsensusProgram for Update {
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let uw: UpdateWitness = tasmlib::decode_from_memory(start_address);
 
-        // divine the kernel of the out-of-date transaction
-        let old_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
+        // get the kernel of the out-of-date transaction
+        let old_txk_digest: Digest = uw.old_kernel_mast_hash;
         let old_txk_digest_as_input: Vec<BFieldElement> =
             old_txk_digest.reversed().values().to_vec();
 
@@ -334,7 +348,61 @@ impl ConsensusProgram for Update {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
+        let mut library = Library::new();
+
+        let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
+
+        let new_claim = library.import(Box::new(NewClaim));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+
+        let update_witness_field_old_kernel_mast_hash = field!(UpdateWitness::old_kernel_mast_hash);
+        let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
+
+        let main = triton_asm! {
+            // _
+
+            read_io {Digest::LEN}
+            // _ [txk_mast_hash]
+
+            push {Digest::LEN} push 0
+            call {new_claim}
+            // _ [txk_mast_hash] *claim *output *input *program_digest
+
+            read_io {Digest::LEN}
+            // _ [txk_mast_hash] *claim *output *input *program_digest [single_proof_program_digest]
+
+            /* verify old proof */
+            write_mem {Digest::LEN}
+            // _ [txk_mast_hash] *claim *output *input (*program_digest+5)
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness
+
+            dup 0 {&update_witness_field_old_kernel_mast_hash}
+            {&load_digest}
+            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness [old_txk_mast_hash]
+
+            dup 7 write_mem {Digest::LEN}
+            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness (*input+5)
+
+            swap 3 pop 1
+            // _ [txk_mast_hash] *claim *output (*input+5) (*program_digest+5) *update_witness
+
+            dup 4 dup 1 {&update_witness_field_old_proof}
+            // _ [txk_mast_hash] *claim *output (*input+5) (*program_digest+5) *update_witness *claim *proof
+
+            call {stark_verify}
+
+            halt
+
+        };
+
+        triton_asm! {
+            {&main}
+            {&library.all_imports()}
+        }
     }
 }
 

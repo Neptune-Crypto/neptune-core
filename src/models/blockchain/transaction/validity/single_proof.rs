@@ -94,6 +94,10 @@ impl TasmObject for SingleProofWitness {
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
     }
+
+    fn get_encoding_length() -> Vec<LabelledInstruction> {
+        todo!()
+    }
 }
 
 impl SecretWitness for SingleProofWitness {
