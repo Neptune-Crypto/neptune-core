@@ -47,8 +47,10 @@ const _DISCONNECT_CONNECTION: bool = true;
 
 pub type PeerStandingNumber = i32;
 
-/// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
-/// since this needs to be a mutable variable in most methods.
+/// Handles messages from peers via TCP
+///
+/// also handles messages from main task over the main-to-peer-tasks broadcast
+/// channel.
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerTaskToMain>,
     global_state_lock: GlobalStateLock,
