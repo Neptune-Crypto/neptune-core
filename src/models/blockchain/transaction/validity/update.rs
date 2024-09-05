@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::field;
+use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -163,22 +164,11 @@ impl SecretWitness for UpdateWitness {
                 // timestamp
                 self.old_kernel.mast_path(TransactionKernelField::Timestamp),
                 self.new_kernel.mast_path(TransactionKernelField::Timestamp),
-                // chunk membership proofs
-                self.new_kernel
-                    .inputs
-                    .iter()
-                    .flat_map(|input| {
-                        input
-                            .target_chunks
-                            .chunk_indices_and_membership_proofs_and_leafs()
-                    })
-                    .flat_map(|(_chunk_index, membership_proof, _chunk)| {
-                        membership_proof.authentication_path
-                    })
-                    .collect_vec(),
             ]
             .concat(),
         );
+
+        VerifyMmrSuccessor::update_nondeterminism(&mut nondeterminism, &self.aocl_successor_proof);
 
         nondeterminism
     }
