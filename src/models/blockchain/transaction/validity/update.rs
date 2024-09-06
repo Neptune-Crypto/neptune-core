@@ -358,6 +358,14 @@ impl ConsensusProgram for Update {
         let mut library = Library::new();
 
         let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
+        let load_digest_reversed = triton_asm! {
+            // *digest
+            read_mem 1 addi 2
+            read_mem 1 addi 2
+            read_mem 1 addi 2
+            read_mem 1 addi 2
+            read_mem 1 pop 1
+        };
 
         let new_claim = library.import(Box::new(NewClaim));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -365,42 +373,53 @@ impl ConsensusProgram for Update {
         )));
 
         let update_witness_field_old_kernel_mast_hash = field!(UpdateWitness::old_kernel_mast_hash);
+        let generate_single_proof_claim = triton_asm!(
+            // _ *update_witness [txk_mast_hash]
+
+            push {Digest::LEN} push 0
+            call {new_claim}
+            // _ *update_witness [txk_mast_hash] *claim *output *input *program_digest
+
+            read_io {Digest::LEN}
+            // _ *update_witness [txk_mast_hash] *claim *output *input *program_digest [single_proof_program_digest]
+
+            dup 5
+            // _ **update_witness [txk_mast_hash] claim *output *input *program_digest [single_proof_program_digest] *program_digest
+
+            write_mem {Digest::LEN} pop 2
+            // _ *update_witness [txk_mast_hash] *claim *output *input
+
+            dup 8 {&update_witness_field_old_kernel_mast_hash}
+            {&load_digest_reversed}
+            // _ *update_witness [txk_mast_hash] *claim *output *input [old_txk_mast_hash_as_input]
+
+            dup 5 write_mem {Digest::LEN}
+            // _ *update_witness [txk_mast_hash] *claim *output *input (*input+5)
+
+            pop 3
+            // _ *update_witness [txk_mast_hash] *claim
+        );
+
         let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
 
         let main = triton_asm! {
             // _
 
-            read_io {Digest::LEN}
-            // _ [txk_mast_hash]
-
-            push {Digest::LEN} push 0
-            call {new_claim}
-            // _ [txk_mast_hash] *claim *output *input *program_digest
-
-            read_io {Digest::LEN}
-            // _ [txk_mast_hash] *claim *output *input *program_digest [single_proof_program_digest]
-
-            /* verify old proof */
-            write_mem {Digest::LEN}
-            // _ [txk_mast_hash] *claim *output *input (*program_digest+5)
-
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness
+            // _ *update_witness
 
-            dup 0 {&update_witness_field_old_kernel_mast_hash}
-            {&load_digest}
-            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness [old_txk_mast_hash]
+            read_io {Digest::LEN}
+            // _ *update_witness [txk_mast_hash]
 
-            dup 7 write_mem {Digest::LEN}
-            // _ [txk_mast_hash] *claim *output *input (*program_digest+5) *update_witness (*input+5)
+            {&generate_single_proof_claim}
+            // _ *update_witness [txk_mast_hash] *claim
 
-            swap 3 pop 1
-            // _ [txk_mast_hash] *claim *output (*input+5) (*program_digest+5) *update_witness
+            dup 0 dup 7 {&update_witness_field_old_proof}
+            // _ *update_witness [txk_mast_hash] *claim *claim *proof
 
-            dup 4 dup 1 {&update_witness_field_old_proof}
-            // _ [txk_mast_hash] *claim *output (*input+5) (*program_digest+5) *update_witness *claim *proof
-
+            break
             call {stark_verify}
+            // _ *update_witness [txk_mast_hash] *claim
 
             halt
 
@@ -479,10 +498,13 @@ mod test {
         );
 
         let claim = update_witness.claim();
-        let rust_result = Update.run_rust(
-            &PublicInput::new(claim.input),
-            update_witness.nondeterminism(),
-        );
+        let input = PublicInput::new(claim.input.clone());
+        let nondeterminism = update_witness.nondeterminism();
+
+        let rust_result = Update.run_rust(&input, nondeterminism.clone());
         assert!(rust_result.is_ok());
+
+        let tasm_result = Update.run_tasm(&input, nondeterminism);
+        assert!(tasm_result.is_ok());
     }
 }
