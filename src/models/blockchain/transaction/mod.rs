@@ -17,6 +17,7 @@ use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::Digest;
 use tracing::error;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -36,7 +37,17 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, Arbitrary,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    GetSize,
+    BFieldCodec,
+    Default,
+    TasmObject,
+    Arbitrary,
 )]
 pub struct PublicAnnouncement {
     pub message: Vec<BFieldElement>,

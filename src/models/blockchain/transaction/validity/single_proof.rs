@@ -95,7 +95,13 @@ impl TasmObject for SingleProofWitness {
         }
     }
 
-    fn get_encoding_length() -> Vec<LabelledInstruction> {
+    fn label_friendly_name() -> String {
+        "SingleProofWitness".to_string()
+    }
+
+    fn compute_size_and_assert_valid_size_indicator(
+        library: &mut Library,
+    ) -> Vec<LabelledInstruction> {
         todo!()
     }
 }

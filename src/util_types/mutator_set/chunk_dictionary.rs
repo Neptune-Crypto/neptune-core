@@ -9,6 +9,7 @@ use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::slice::{Iter, IterMut};
 use std::vec::IntoIter;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -20,7 +21,17 @@ type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
 
 #[derive(
-    Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary, BFieldCodec,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    GetSize,
+    PartialEq,
+    Eq,
+    Default,
+    Arbitrary,
+    BFieldCodec,
+    TasmObject,
 )]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}

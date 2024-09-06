@@ -11,13 +11,26 @@ use num_traits::Zero;
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
-use tasm_lib::twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use tasm_lib::{
+    prelude::TasmObject,
+    twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
+};
 
 /// Dedicated struct for timestamps (and durations). Counts the number of
 /// milliseconds elapsed since the Unix epoch (00:00 UTC on 1 Jan 1970) using
 /// a single BFieldElement.
 #[derive(
-    Debug, Clone, Copy, BFieldCodec, PartialEq, Eq, Serialize, Deserialize, GetSize, Default,
+    Debug,
+    Clone,
+    Copy,
+    BFieldCodec,
+    TasmObject,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    GetSize,
+    Default,
 )]
 pub struct Timestamp(pub BFieldElement);
 

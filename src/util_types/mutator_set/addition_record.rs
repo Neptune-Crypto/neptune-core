@@ -5,11 +5,23 @@ use get_size::GetSize;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use tasm_lib::prelude::TasmObject;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
 #[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec, Arbitrary,
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    GetSize,
+    BFieldCodec,
+    Arbitrary,
+    TasmObject,
 )]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,

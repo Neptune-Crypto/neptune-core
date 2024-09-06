@@ -30,7 +30,7 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
