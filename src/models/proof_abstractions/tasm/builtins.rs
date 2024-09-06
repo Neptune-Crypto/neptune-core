@@ -1,6 +1,8 @@
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::{
     triton_vm::proof::Claim, triton_vm::proof::Proof, triton_vm::stark::Stark,
@@ -311,6 +313,29 @@ pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
                 .expect("token stream should contain all tokens divined by `StarkVerify` snippet");
         })
     });
+}
+
+/// Verify a MMR successor proof. Crashes if the proof is invalid for the given
+/// MMR accumulators. Consumes the right number of non-deterministic digests from
+/// the ND digest stream.
+pub fn verify_mmr_successor_proof(
+    old_mmr: &MmrAccumulator,
+    new_mmr: &MmrAccumulator,
+    proof: &MmrSuccessorProof,
+) {
+    let num_digests_consumed = proof.paths.len();
+    let mut consumed_digests = vec![];
+    ND_DIGESTS.with_borrow_mut(|digest_stream| {
+        (0..num_digests_consumed).for_each(|_| {
+            consumed_digests.push(digest_stream.pop_front().expect(
+                "digest stream should contain all digests divined by `VerifyMmrSuccessor` snippet",
+            ));
+        })
+    });
+
+    assert_eq!(consumed_digests, proof.paths);
+
+    assert!(proof.verify(old_mmr, new_mmr));
 }
 
 #[cfg(test)]

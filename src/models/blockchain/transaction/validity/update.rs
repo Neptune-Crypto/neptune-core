@@ -348,7 +348,7 @@ impl ConsensusProgram for Update {
         assert!(new_timestamp >= old_timestamp);
 
         // mutator set can change, but we only care about extensions of the AOCL MMR
-        assert!(uw.aocl_successor_proof.verify(&old_aocl_mmr, &new_aocl_mmr));
+        tasmlib::verify_mmr_successor_proof(&old_aocl_mmr, &new_aocl_mmr, &uw.aocl_successor_proof);
 
         // output hash of program against which the out-of-date transaction was proven valid
         tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_digest);
