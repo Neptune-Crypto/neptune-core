@@ -25,8 +25,8 @@ else
 endif
 
 # Tests that require proofs that are expensive to create
-tx-update-test:
-	CARGO_TARGET_DIR=./makefile-target-opt-level3 RUSTFLAGS="-C opt-level=3 -C debug-assertions=no -Z threads=180 --cfg=tokio_unstable" cargo t can_verify_transaction_update -- --nocapture
+expensive-proofs:
+	CARGO_TARGET_DIR=./makefile-target-opt-level3 RUSTFLAGS="-C opt-level=3 -C debug-assertions=no -Z threads=180 --cfg=tokio_unstable" cargo t can_verify_transaction_ -- --nocapture
 
 build:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
