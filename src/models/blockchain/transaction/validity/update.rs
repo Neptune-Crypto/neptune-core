@@ -417,7 +417,6 @@ impl ConsensusProgram for Update {
             dup 0 dup 7 {&update_witness_field_old_proof}
             // _ *update_witness [txk_mast_hash] *claim *claim *proof
 
-            break
             call {stark_verify}
             // _ *update_witness [txk_mast_hash] *claim
 
