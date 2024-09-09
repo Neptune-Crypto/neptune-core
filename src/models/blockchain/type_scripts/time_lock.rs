@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -625,7 +624,7 @@ impl ConsensusProgram for TimeLock {
 pub struct TimeLockWitness {
     /// One timestamp for every input UTXO. Inputs that do not have a time lock are
     /// assigned timestamp 0, which is automatically satisfied.
-    release_dates: Vec<u64>,
+    release_dates: Vec<Timestamp>,
     input_utxos: SaltedUtxos,
     transaction_kernel: TransactionKernel,
 }
@@ -690,7 +689,7 @@ impl From<PrimitiveWitness> for TimeLockWitness {
             .map(|utxo| {
                 utxo.coins
                     .iter()
-                    .find(|coin| coin.type_script_hash == TimeLock {}.hash())
+                    .find(|coin| coin.type_script_hash == TimeLock.hash())
                     .cloned()
                     .map(|coin| {
                         coin.state
@@ -700,7 +699,7 @@ impl From<PrimitiveWitness> for TimeLockWitness {
                     })
                     .unwrap_or_else(|| BFieldElement::new(0))
             })
-            .map(|b| b.value())
+            .map(Timestamp)
             .collect_vec();
         let transaction_kernel = TransactionKernel::from(primitive_witness.clone());
         let input_utxos = primitive_witness.input_utxos.clone();
@@ -950,21 +949,18 @@ fn arbitrary_primitive_witness_with_timelocks(
                     counter += 1;
                 }
                 let release_dates = release_dates.clone();
-                PrimitiveWitness::arbitrary_primitive_witness_with(
+                PrimitiveWitness::arbitrary_primitive_witness_with_timestamp_and(
                     &input_utxos,
                     &input_lock_scripts_and_witnesses,
                     &output_utxos,
                     &public_announcements,
                     fee,
                     maybe_coinbase,
+                    now
                 )
                 .prop_map(move |primitive_witness_template| {
                     let mut primitive_witness = primitive_witness_template.clone();
-                    let time_lock_witness = TimeLockWitness {
-                        release_dates: release_dates.iter().map(|t| t.0.value()).collect_vec(),
-                        input_utxos: primitive_witness_template.input_utxos,
-                        transaction_kernel: primitive_witness_template.kernel,
-                    };
+                    let time_lock_witness = TimeLockWitness::from(primitive_witness.clone());
                     primitive_witness.type_scripts_and_witnesses.push(
                         TypeScriptAndWitness::new_with_nondeterminism(
                             TimeLock.program(),
@@ -981,6 +977,7 @@ fn arbitrary_primitive_witness_with_timelocks(
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use num_traits::Zero;
     use proptest::{collection::vec, prop_assert, strategy::Just};
     use test_strategy::proptest;

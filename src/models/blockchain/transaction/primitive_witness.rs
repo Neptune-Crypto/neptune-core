@@ -481,6 +481,35 @@ impl PrimitiveWitness {
         fee: NeptuneCoins,
         coinbase: Option<NeptuneCoins>,
     ) -> BoxedStrategy<PrimitiveWitness> {
+        let input_utxos = input_utxos.to_vec();
+        let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
+        let output_utxos = output_utxos.to_vec();
+        let public_announcements = public_announcements.to_vec();
+
+        arb::<Timestamp>()
+            .prop_flat_map(move |now| {
+                Self::arbitrary_primitive_witness_with_timestamp_and(
+                    &input_utxos,
+                    &input_lock_scripts_and_witnesses,
+                    &output_utxos,
+                    &public_announcements,
+                    fee,
+                    coinbase,
+                    now,
+                )
+            })
+            .boxed()
+    }
+
+    pub fn arbitrary_primitive_witness_with_timestamp_and(
+        input_utxos: &[Utxo],
+        input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
+        output_utxos: &[Utxo],
+        public_announcements: &[PublicAnnouncement],
+        fee: NeptuneCoins,
+        coinbase: Option<NeptuneCoins>,
+        timestamp: Timestamp,
+    ) -> BoxedStrategy<PrimitiveWitness> {
         let num_inputs = input_utxos.len();
         let num_outputs = output_utxos.len();
         let input_utxos = input_utxos.to_vec();
@@ -496,7 +525,6 @@ impl PrimitiveWitness {
         //  - receiver preimage (output)
         //  - salt (output)
         //  - aocl size
-        //  - timestamp
         (
             vec(arb::<Digest>(), num_inputs),
             vec(arb::<Digest>(), num_inputs),
@@ -505,7 +533,6 @@ impl PrimitiveWitness {
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<BFieldElement>(), 3),
             0u64..=(u64::MAX >> 1),
-            arb::<Timestamp>(),
         )
             .prop_flat_map(
                 move |(
@@ -516,7 +543,6 @@ impl PrimitiveWitness {
                     output_receiver_preimages,
                     outputs_salt,
                     aocl_size,
-                    timestamp,
                 )| {
                     let input_triples = input_utxos
                         .iter()
