@@ -27,9 +27,13 @@ mod transaction {
                 time_lock::arbitrary_primitive_witness_with_timelocks,
             },
         },
-        proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
+        proof_abstractions::{
+            tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
+        },
     };
+    use proptest::strategy::ValueTree;
     use proptest::{arbitrary::Arbitrary, strategy::Strategy, test_runner::TestRunner};
+    use proptest_arbitrary_interop::arb;
     use tasm_lib::{
         generate_full_profile,
         snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult, NamedBenchmarkResult},
@@ -124,11 +128,19 @@ mod transaction {
     fn native_currency(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness =
-            arbitrary_primitive_witness_with_timelocks(num_inputs, num_outputs, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+        let deterministic_now = arb::<Timestamp>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(
+            num_inputs,
+            num_outputs,
+            2,
+            deterministic_now,
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
         let nc_witness = NativeCurrencyWitness {
             salted_input_utxos: primitive_witness.input_utxos,
             salted_output_utxos: primitive_witness.output_utxos,
@@ -165,11 +177,19 @@ mod transaction {
     fn collect_type_scripts(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness =
-            arbitrary_primitive_witness_with_timelocks(num_inputs, num_outputs, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+        let deterministic_now = arb::<Timestamp>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(
+            num_inputs,
+            num_outputs,
+            2,
+            deterministic_now,
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
         bench_and_profile_consensus_program(
             CollectTypeScripts,

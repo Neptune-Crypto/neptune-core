@@ -799,10 +799,14 @@ impl Arbitrary for TimeLockWitness {
     }
 }
 
+/// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
+/// inputs, outputs, and public announcements. The UTXOs are timelocked with a
+/// release date set between `now` and six months from `now`.
 pub fn arbitrary_primitive_witness_with_timelocks(
     num_inputs: usize,
     num_outputs: usize,
     num_announcements: usize,
+    now: Timestamp,
 ) -> BoxedStrategy<PrimitiveWitness> {
     (
         arb::<NeptuneCoins>(),
@@ -814,7 +818,7 @@ pub fn arbitrary_primitive_witness_with_timelocks(
         arb::<u64>(),
         arb::<Option<u64>>(),
         vec(
-            Timestamp::arbitrary_between(Timestamp::now(), Timestamp::now() + Timestamp::months(6)),
+            Timestamp::arbitrary_between(now, now + Timestamp::months(6)),
             num_inputs + num_outputs,
         ),
     )
@@ -948,6 +952,7 @@ mod test {
             tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
         },
     };
+    use proptest_arbitrary_interop::arb;
 
     use super::TimeLockWitness;
 
@@ -1050,7 +1055,8 @@ mod test {
 
     #[proptest(cases = 5)]
     fn primitive_witness_with_timelocks_is_valid(
-        #[strategy(arbitrary_primitive_witness_with_timelocks(2, 2, 2))]
+        #[strategy(arb::<Timestamp>())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_timelocks(2, 2, 2, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(Runtime::new()

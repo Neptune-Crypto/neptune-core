@@ -563,10 +563,13 @@ impl ConsensusProgram for SingleProof {
 mod test {
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput};
 
     use crate::models::{
@@ -605,8 +608,6 @@ mod test {
             )
             .expect("rust run should pass");
 
-        println!("run_rust succeeded!!1one");
-
         SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
             .expect("tasm run should pass");
@@ -615,10 +616,15 @@ mod test {
     #[test]
     fn can_verify_timelocked_transaction_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(2, 2, 2)
+        let deterministic_now = arb::<Timestamp>()
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        let primitive_witness =
+            arbitrary_primitive_witness_with_timelocks(2, 2, 2, deterministic_now)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
         let proof_collection = ProofCollection::produce(&primitive_witness);
@@ -636,8 +642,6 @@ mod test {
                 nondeterminism.clone(),
             )
             .expect("rust run should pass");
-
-        println!("run_rust succeeded!!1one");
 
         SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)

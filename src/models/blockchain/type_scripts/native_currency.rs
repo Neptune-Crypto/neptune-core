@@ -631,6 +631,7 @@ impl SecretWitness for NativeCurrencyWitness {
 #[cfg(test)]
 pub mod test {
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use proptest::prelude::*;
     use proptest::prop_assert;
     use proptest::{
@@ -750,7 +751,8 @@ pub mod test {
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
-        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements))]
+        #[strategy(arb::<Timestamp>())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         let native_currency_witness = NativeCurrencyWitness {

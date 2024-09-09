@@ -215,10 +215,13 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use itertools::Itertools;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
     use rand::Rng;
     use rand::RngCore;
     use tasm_lib::memory::encode_to_memory;
@@ -289,7 +292,11 @@ mod tests {
                     .unwrap()
                     .current()
             } else {
-                arbitrary_primitive_witness_with_timelocks(num_inputs, 2, 2)
+                let deterministic_now = arb::<Timestamp>()
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+                arbitrary_primitive_witness_with_timelocks(num_inputs, 2, 2, deterministic_now)
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current()

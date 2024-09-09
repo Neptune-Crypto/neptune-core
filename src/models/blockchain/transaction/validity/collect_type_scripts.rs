@@ -371,12 +371,15 @@ mod test {
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::triton_vm::stark::Stark;
@@ -420,7 +423,8 @@ mod test {
     fn derived_witness_with_timelocks_generates_accepting_program_proptest(
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
-        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs,#_num_outputs,2))]
+        #[strategy(arb::<Timestamp>())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs,#_num_outputs,2, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
@@ -439,10 +443,15 @@ mod test {
     #[test]
     fn derived_edge_case_witnesses_with_timelock_generate_accepting_programs_unit() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(1, 1, 2)
+        let deterministic_now = arb::<Timestamp>()
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        let primitive_witness =
+            arbitrary_primitive_witness_with_timelocks(1, 1, 2, deterministic_now)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         prop(primitive_witness).expect("");
     }
 
