@@ -148,6 +148,7 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::collections::VecDeque;
 
     use itertools::Itertools;
     use prop::test_runner::RngAlgorithm;
@@ -157,9 +158,9 @@ mod tests {
     use strum::EnumCount;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::traits::procedure::Procedure;
-    use tasm_lib::traits::procedure::ProcedureInitialState;
-    use tasm_lib::traits::procedure::ShadowedProcedure;
+    use tasm_lib::traits::mem_preserver::MemPreserver;
+    use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
+    use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
     use tasm_lib::traits::rust_shadow::RustShadow;
     use twenty_first::prelude::AlgebraicHasher;
     use twenty_first::prelude::MerkleTreeInclusionProof;
@@ -171,13 +172,14 @@ mod tests {
 
     use super::*;
 
-    impl Procedure for AuthenticateMsaAgainstTxk {
+    impl MemPreserver for AuthenticateMsaAgainstTxk {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
-            memory: &mut HashMap<BFieldElement, BFieldElement>,
-            nondeterminism: &NonDeterminism,
-            _public_input: &[BFieldElement],
+            memory: &HashMap<BFieldElement, BFieldElement>,
+            _nd_tokens: VecDeque<BFieldElement>,
+            nd_digests: VecDeque<Digest>,
+            _stdin: VecDeque<BFieldElement>,
             sponge: &mut Option<Tip5>,
         ) -> Vec<BFieldElement> {
             let txk_digest = Digest::new([
@@ -214,9 +216,7 @@ mod tests {
             ]);
 
             let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2() as usize;
-            let auth_path = (0..tree_height)
-                .map(|i| nondeterminism.digests[i])
-                .collect_vec();
+            let auth_path = (0..tree_height).map(|i| nd_digests[i]).collect_vec();
 
             let mt_proof = MerkleTreeInclusionProof {
                 tree_height,
@@ -232,7 +232,7 @@ mod tests {
             &self,
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
-        ) -> ProcedureInitialState {
+        ) -> MemPreserverInitialState {
             let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
             let swbfi_digest_ptr = rng.gen_range(0..(1 << 30));
             let swbfa_digest_ptr = swbfi_digest_ptr + rng.gen_range(5..(1 << 25));
@@ -277,17 +277,17 @@ mod tests {
             let nondeterminism = NonDeterminism::default()
                 .with_ram(memory)
                 .with_digests(digests);
-            ProcedureInitialState {
+            MemPreserverInitialState {
                 stack,
                 nondeterminism,
-                public_input: vec![],
-                sponge: None,
+                public_input: VecDeque::default(),
+                sponge_state: None,
             }
         }
     }
 
     #[test]
     fn test() {
-        ShadowedProcedure::new(AuthenticateMsaAgainstTxk).test();
+        ShadowedMemPreserver::new(AuthenticateMsaAgainstTxk).test();
     }
 }
