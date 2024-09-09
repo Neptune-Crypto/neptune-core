@@ -155,9 +155,11 @@ mod tests {
     use prop::test_runner::TestRng;
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
+    use rand::random;
     use strum::EnumCount;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
+    use tasm_lib::test_helpers::negative_test;
     use tasm_lib::traits::mem_preserver::MemPreserver;
     use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
@@ -223,7 +225,7 @@ mod tests {
                 indexed_leafs: vec![(TransactionKernelField::MutatorSetHash as usize, msah_digest)],
                 authentication_structure: auth_path,
             };
-            mt_proof.verify(txk_digest);
+            assert!(mt_proof.verify(txk_digest));
 
             vec![]
         }
@@ -289,5 +291,18 @@ mod tests {
     #[test]
     fn test() {
         ShadowedMemPreserver::new(AuthenticateMsaAgainstTxk).test();
+    }
+
+    #[test]
+    fn negative_test_bad_auth_path() {
+        let seed: [u8; 32] = random();
+        let mut bad_auth_path = AuthenticateMsaAgainstTxk.pseudorandom_initial_state(seed, None);
+        bad_auth_path.nondeterminism.digests[1] = random();
+
+        negative_test(
+            &ShadowedMemPreserver::new(AuthenticateMsaAgainstTxk),
+            bad_auth_path.into(),
+            &[InstructionError::VectorAssertionFailed(0)],
+        );
     }
 }
