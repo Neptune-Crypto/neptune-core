@@ -1,3 +1,4 @@
+pub mod authenticate_inputs_against_txk;
 pub mod authenticate_msa_against_txk;
 pub mod claims;
 pub(crate) mod coinbase_amount;
