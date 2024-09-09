@@ -1,6 +1,8 @@
 use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::field;
+use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
@@ -17,6 +19,7 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::authenticate_inputs_against_txk::AuthenticateInputsAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
@@ -378,7 +381,9 @@ impl ConsensusProgram for Update {
             Stark::default(),
         )));
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk));
+        let authenticate_inputs = library.import(Box::new(AuthenticateInputsAgainstTxk));
         let verify_mmr_successor_proof = library.import(Box::new(VerifyMmrSuccessor));
+        let hash_varlen = library.import(Box::new(HashVarlen));
 
         let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
         let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
@@ -421,14 +426,18 @@ impl ConsensusProgram for Update {
         );
 
         let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
+
         let new_aocl_mmr_field = field!(UpdateWitness::new_aocl);
         let new_swbfi_bagged = field!(UpdateWitness::new_swbfi_bagged);
         let new_swbfa_hash = field!(UpdateWitness::new_swbfa_hash);
-        let peaks_field = field!(MmrAccumulator::peaks);
-
         let old_aocl_mmr_field = field!(UpdateWitness::old_aocl);
         let old_swbfi_bagged = field!(UpdateWitness::old_swbfi_bagged);
         let old_swbfa_hash = field!(UpdateWitness::old_swbfa_hash);
+        let peaks_field = field!(MmrAccumulator::peaks);
+
+        let old_kernel = field!(UpdateWitness::old_kernel);
+        let new_kernel = field!(UpdateWitness::new_kernel);
+        let inputs_field_with_size = field_with_size!(TransactionKernel::inputs);
 
         let main = triton_asm! {
             // _
@@ -510,7 +519,42 @@ impl ConsensusProgram for Update {
             // _ *update_witness [new_txk_mhash]
 
 
+            /* Authenticate inputs, preserve pointers */
+            dup 5
+            {&old_kernel}
+            {&inputs_field_with_size}
+            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size
 
+            push {old_txk_digest_end_ptr}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size [old_txk_mhash]
+
+            dup 6
+            dup 6
+            call {authenticate_inputs}
+            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size
+
+            pop 1
+            dup 6
+            {&new_kernel}
+            {&inputs_field_with_size}
+            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size
+
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size [new_txk_mhash]
+
+            dup 6
+            dup 6
+            call {authenticate_inputs}
+            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size
+
+            pop 1
+            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs
 
             halt
 
