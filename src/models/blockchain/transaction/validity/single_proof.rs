@@ -100,7 +100,7 @@ impl TasmObject for SingleProofWitness {
     }
 
     fn compute_size_and_assert_valid_size_indicator(
-        library: &mut Library,
+        _library: &mut Library,
     ) -> Vec<LabelledInstruction> {
         todo!()
     }
@@ -561,12 +561,12 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::SecretWitness;
-    use proptest::{
-        prelude::{Arbitrary, Strategy},
-        test_runner::TestRunner,
-    };
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::Strategy;
+    use proptest::test_runner::TestRunner;
     use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput};
 
     use crate::models::{
@@ -584,6 +584,38 @@ mod test {
     fn can_verify_transaction_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+
+        let proof_collection = ProofCollection::produce(&primitive_witness);
+        assert!(proof_collection.verify(txk_mast_hash));
+
+        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+        let txk_mast_hash_as_input_as_public_input =
+            PublicInput::new(txk_mast_hash.reversed().values().encode());
+
+        let nondeterminism = single_proof_witness.nondeterminism();
+
+        SingleProof
+            .run_rust(
+                &txk_mast_hash_as_input_as_public_input,
+                nondeterminism.clone(),
+            )
+            .expect("rust run should pass");
+
+        println!("run_rust succeeded!!1one");
+
+        SingleProof
+            .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
+            .expect("tasm run should pass");
+    }
+
+    #[test]
+    fn can_verify_timelocked_transaction_via_valid_proof_collection() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = arbitrary_primitive_witness_with_timelocks(2, 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
