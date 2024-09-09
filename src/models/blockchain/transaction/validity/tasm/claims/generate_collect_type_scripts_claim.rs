@@ -233,7 +233,7 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
 
     use super::*;
 
@@ -296,10 +296,15 @@ mod tests {
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();
-                arbitrary_primitive_witness_with_timelocks(num_inputs, 2, 2, deterministic_now)
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current()
+                arbitrary_primitive_witness_with_active_timelocks(
+                    num_inputs,
+                    2,
+                    2,
+                    deterministic_now,
+                )
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
             };
             let proof_collection = ProofCollection::produce(&primitive_witness);
 

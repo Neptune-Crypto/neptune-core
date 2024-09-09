@@ -630,8 +630,6 @@ pub struct TimeLockWitness {
     transaction_kernel: TransactionKernel,
 }
 
-impl TimeLockWitness {}
-
 impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism {
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
@@ -683,8 +681,8 @@ impl TypeScriptWitness for TimeLockWitness {
     }
 }
 
-impl From<transaction::primitive_witness::PrimitiveWitness> for TimeLockWitness {
-    fn from(primitive_witness: transaction::primitive_witness::PrimitiveWitness) -> Self {
+impl From<PrimitiveWitness> for TimeLockWitness {
+    fn from(primitive_witness: PrimitiveWitness) -> Self {
         let release_dates = primitive_witness
             .input_utxos
             .utxos
@@ -802,11 +800,59 @@ impl Arbitrary for TimeLockWitness {
 /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
 /// inputs, outputs, and public announcements. The UTXOs are timelocked with a
 /// release date set between `now` and six months from `now`.
-pub fn arbitrary_primitive_witness_with_timelocks(
+pub fn arbitrary_primitive_witness_with_active_timelocks(
     num_inputs: usize,
     num_outputs: usize,
     num_announcements: usize,
     now: Timestamp,
+) -> BoxedStrategy<PrimitiveWitness> {
+    vec(
+        Timestamp::arbitrary_between(now, now + Timestamp::months(6)),
+        num_inputs + num_outputs,
+    )
+    .prop_flat_map(move |release_dates| {
+        arbitrary_primitive_witness_with_timelocks(
+            num_inputs,
+            num_outputs,
+            num_announcements,
+            now,
+            release_dates,
+        )
+    })
+    .boxed()
+}
+
+/// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
+/// inputs, outputs, and public announcements. The UTXOs are timelocked with a
+/// release date set between six months in the past relative to `now` and `now`.
+pub fn arbitrary_primitive_witness_with_expired_timelocks(
+    num_inputs: usize,
+    num_outputs: usize,
+    num_announcements: usize,
+    now: Timestamp,
+) -> BoxedStrategy<PrimitiveWitness> {
+    vec(
+        Timestamp::arbitrary_between(now - Timestamp::months(6), now - Timestamp::millis(1)),
+        num_inputs + num_outputs,
+    )
+    .prop_flat_map(move |release_dates| {
+        arbitrary_primitive_witness_with_timelocks(
+            num_inputs,
+            num_outputs,
+            num_announcements,
+            now,
+            release_dates,
+        )
+    })
+    .boxed()
+}
+
+fn arbitrary_primitive_witness_with_timelocks(
+    num_inputs: usize,
+    num_outputs: usize,
+    num_announcements: usize,
+    now: Timestamp,
+    release_dates: Vec<Timestamp>,
 ) -> BoxedStrategy<PrimitiveWitness> {
     (
         arb::<NeptuneCoins>(),
@@ -817,13 +863,9 @@ pub fn arbitrary_primitive_witness_with_timelocks(
         vec(arb::<PublicAnnouncement>(), num_announcements),
         arb::<u64>(),
         arb::<Option<u64>>(),
-        vec(
-            Timestamp::arbitrary_between(now, now + Timestamp::months(6)),
-            num_inputs + num_outputs,
-        ),
     )
         .prop_flat_map(
-            |(
+            move |(
                 total_amount,
                 input_address_seeds,
                 input_dist,
@@ -832,7 +874,6 @@ pub fn arbitrary_primitive_witness_with_timelocks(
                 public_announcements,
                 fee_dist,
                 maybe_coinbase_dist,
-                lock_times,
             )| {
                 // distribute total amount across inputs (+ coinbase)
                 let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
@@ -899,15 +940,16 @@ pub fn arbitrary_primitive_witness_with_timelocks(
                     );
                 let mut counter = 0usize;
                 for utxo in input_utxos.iter_mut() {
-                    let release_date = lock_times[counter];
+                    let release_date = release_dates[counter];
                     let time_lock = TimeLock::until(release_date);
                     utxo.coins.push(time_lock);
                     counter += 1;
                 }
                 for utxo in output_utxos.iter_mut() {
-                    utxo.coins.push(TimeLock::until(lock_times[counter]));
+                    utxo.coins.push(TimeLock::until(release_dates[counter]));
                     counter += 1;
                 }
+                let release_dates = release_dates.clone();
                 PrimitiveWitness::arbitrary_primitive_witness_with(
                     &input_utxos,
                     &input_lock_scripts_and_witnesses,
@@ -919,7 +961,7 @@ pub fn arbitrary_primitive_witness_with_timelocks(
                 .prop_map(move |primitive_witness_template| {
                     let mut primitive_witness = primitive_witness_template.clone();
                     let time_lock_witness = TimeLockWitness {
-                        release_dates: lock_times.iter().map(|t| t.0.value()).collect_vec(),
+                        release_dates: release_dates.iter().map(|t| t.0.value()).collect_vec(),
                         input_utxos: primitive_witness_template.input_utxos,
                         transaction_kernel: primitive_witness_template.kernel,
                     };
@@ -929,6 +971,7 @@ pub fn arbitrary_primitive_witness_with_timelocks(
                             time_lock_witness.nondeterminism(),
                         ),
                     );
+                    primitive_witness.kernel.timestamp = now;
                     primitive_witness
                 })
             },
@@ -943,10 +986,14 @@ mod test {
     use test_strategy::proptest;
     use tokio::runtime::Runtime;
 
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+
     use crate::models::{
         blockchain::{
             transaction::primitive_witness::PrimitiveWitness,
-            type_scripts::time_lock::{arbitrary_primitive_witness_with_timelocks, TimeLock},
+            type_scripts::time_lock::{
+                arbitrary_primitive_witness_with_active_timelocks, TimeLock,
+            },
         },
         proof_abstractions::{
             tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
@@ -1056,11 +1103,67 @@ mod test {
     #[proptest(cases = 5)]
     fn primitive_witness_with_timelocks_is_valid(
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
-        #[strategy(arbitrary_primitive_witness_with_timelocks(2, 2, 2, #_now))]
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(2, 2, 2, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(Runtime::new()
             .unwrap()
             .block_on(primitive_witness.validate()));
+    }
+
+    #[proptest(cases = 10)]
+    fn arbitrary_primitive_witness_with_active_timelocks_fails(
+        #[strategy(arb::<Timestamp>())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(2, 2, 2, #_now))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let time_lock_witness = TimeLockWitness::from(primitive_witness);
+
+        prop_assert!(
+            TimeLock {}
+                .run_rust(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_err(),
+            "time lock program failed to panic"
+        );
+        prop_assert!(
+            TimeLock {}
+                .run_tasm(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_err(),
+            "time lock program failed to panic"
+        );
+    }
+
+    #[proptest(cases = 10)]
+    fn arbitrary_primitive_witness_with_expired_timelocks_passes(
+        #[strategy(arb::<Timestamp>())] _now: Timestamp,
+        #[strategy(arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, #_now))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let time_lock_witness = TimeLockWitness::from(primitive_witness);
+
+        prop_assert!(
+            TimeLock
+                .run_rust(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_ok(),
+            "time lock program did not halt gracefully"
+        );
+        prop_assert!(
+            TimeLock
+                .run_tasm(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_ok(),
+            "time lock program did not halt gracefully"
+        );
     }
 }

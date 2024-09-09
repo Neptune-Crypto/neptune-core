@@ -561,7 +561,7 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
@@ -614,14 +614,14 @@ mod test {
     }
 
     #[test]
-    fn can_verify_timelocked_transaction_via_valid_proof_collection() {
+    fn can_verify_expired_timelocked_transaction_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
         let deterministic_now = arb::<Timestamp>()
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
         let primitive_witness =
-            arbitrary_primitive_witness_with_timelocks(2, 2, 2, deterministic_now)
+            arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
@@ -629,6 +629,8 @@ mod test {
 
         let proof_collection = ProofCollection::produce(&primitive_witness);
         assert!(proof_collection.verify(txk_mast_hash));
+
+        println!("Have proof collection. \\o/");
 
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let txk_mast_hash_as_input_as_public_input =

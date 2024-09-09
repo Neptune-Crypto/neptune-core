@@ -369,7 +369,7 @@ mod test {
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
     use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
@@ -424,7 +424,7 @@ mod test {
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
-        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs,#_num_outputs,2, #_now))]
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs,#_num_outputs,2, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
@@ -448,7 +448,7 @@ mod test {
             .unwrap()
             .current();
         let primitive_witness =
-            arbitrary_primitive_witness_with_timelocks(1, 1, 2, deterministic_now)
+            arbitrary_primitive_witness_with_active_timelocks(1, 1, 2, deterministic_now)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();

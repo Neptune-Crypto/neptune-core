@@ -645,7 +645,7 @@ pub mod test {
 
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::{utxo::Utxo, PublicAnnouncement};
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::triton_vm::prelude::InstructionError;
 
@@ -752,7 +752,7 @@ pub mod test {
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
-        #[strategy(arbitrary_primitive_witness_with_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now))]
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now))]
         primitive_witness: PrimitiveWitness,
     ) {
         let native_currency_witness = NativeCurrencyWitness {

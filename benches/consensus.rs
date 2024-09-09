@@ -24,7 +24,7 @@ mod transaction {
             },
             type_scripts::{
                 native_currency::{NativeCurrency, NativeCurrencyWitness},
-                time_lock::arbitrary_primitive_witness_with_timelocks,
+                time_lock::arbitrary_primitive_witness_with_active_timelocks,
             },
         },
         proof_abstractions::{
@@ -132,7 +132,7 @@ mod transaction {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(
+        let primitive_witness = arbitrary_primitive_witness_with_active_timelocks(
             num_inputs,
             num_outputs,
             2,
@@ -181,7 +181,7 @@ mod transaction {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let primitive_witness = arbitrary_primitive_witness_with_timelocks(
+        let primitive_witness = arbitrary_primitive_witness_with_active_timelocks(
             num_inputs,
             num_outputs,
             2,
