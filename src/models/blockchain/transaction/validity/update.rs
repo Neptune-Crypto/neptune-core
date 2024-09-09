@@ -378,6 +378,7 @@ impl ConsensusProgram for Update {
             Stark::default(),
         )));
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk));
+        let verify_mmr_successor_proof = library.import(Box::new(VerifyMmrSuccessor));
 
         let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
         let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
@@ -451,18 +452,19 @@ impl ConsensusProgram for Update {
             /* 1: Verify new AOCL-related witness data */
             dup 5
             {&new_aocl_mmr_field}
-            {&peaks_field}
-            // _ *update_witness [new_txk_mhash] *new_aocl_peaks
+            // _ *update_witness [new_txk_mhash] *new_aocl
 
             dup 6
             {&new_swbfi_bagged}
-            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged
+            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged
 
             dup 7
             {&new_swbfa_hash}
-            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest
+            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
             dup 2
+            {&peaks_field}
+
             dup 2
             dup 2
             dup 10
@@ -471,30 +473,43 @@ impl ConsensusProgram for Update {
             dup 10
             dup 10
             call {authenticate_msa}
-            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest
+            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
             /* Verify old AOCL-related witness data */
             dup 8
             {&old_aocl_mmr_field}
-            {&peaks_field}
-            // _ *update_witness [...; 8] *old_aocl_peaks
+            // _ *update_witness [...; 8] *old_aocl
 
             dup 9
             {&old_swbfi_bagged}
-            // _ *update_witness [...; 8] *old_aocl_peaks *old_swbfi_bagged
+            // _ *update_witness [...; 8] *old_aocl *old_swbfi_bagged
 
             dup 10
             {&old_swbfa_hash}
-            // _ *update_witness [...; 8] *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+            // _ *update_witness [...; 8] *old_aocl *old_swbfi_bagged *old_swbfa_digest
 
             dup 2
+            {&peaks_field}
+
             dup 2
             dup 2
             push {old_txk_digest_end_ptr}
             read_mem {Digest::LEN}
             pop 1
             call {authenticate_msa}
-            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
+
+            pop 2
+            swap 2
+            pop 2
+            swap 1
+            // _ *update_witness [new_txk_mhash] *old_aocl *new_aocl
+
+            /* Authenticate that new AOCL is a successor of old AOCL */
+            call {verify_mmr_successor_proof}
+            // _ *update_witness [new_txk_mhash]
+
+
 
 
             halt
