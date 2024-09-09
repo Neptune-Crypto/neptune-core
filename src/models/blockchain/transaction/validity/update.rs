@@ -10,14 +10,14 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::triton_asm;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
+use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
@@ -144,6 +144,14 @@ impl SecretWitness for UpdateWitness {
                     .mast_path(TransactionKernelField::MutatorSetHash),
                 self.old_kernel
                     .mast_path(TransactionKernelField::MutatorSetHash),
+            ]
+            .concat(),
+        );
+
+        VerifyMmrSuccessor::update_nondeterminism(&mut nondeterminism, &self.aocl_successor_proof);
+
+        nondeterminism.digests.append(
+            &mut [
                 // inputs
                 self.old_kernel.mast_path(TransactionKernelField::Inputs),
                 self.new_kernel.mast_path(TransactionKernelField::Inputs),
@@ -167,8 +175,6 @@ impl SecretWitness for UpdateWitness {
             ]
             .concat(),
         );
-
-        VerifyMmrSuccessor::update_nondeterminism(&mut nondeterminism, &self.aocl_successor_proof);
 
         nondeterminism
     }
@@ -233,6 +239,9 @@ impl ConsensusProgram for Update {
             Hash::hash(&old_msah),
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
+
+        // mutator set can change, but we only care about extensions of the AOCL MMR
+        tasmlib::verify_mmr_successor_proof(&old_aocl_mmr, &new_aocl_mmr, &uw.aocl_successor_proof);
 
         // verify update ...
 
@@ -347,9 +356,6 @@ impl ConsensusProgram for Update {
         );
         assert!(new_timestamp >= old_timestamp);
 
-        // mutator set can change, but we only care about extensions of the AOCL MMR
-        tasmlib::verify_mmr_successor_proof(&old_aocl_mmr, &new_aocl_mmr, &uw.aocl_successor_proof);
-
         // output hash of program against which the out-of-date transaction was proven valid
         tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_digest);
     }
@@ -371,36 +377,57 @@ impl ConsensusProgram for Update {
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
+        let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk));
+
+        let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
+        let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
 
         let update_witness_field_old_kernel_mast_hash = field!(UpdateWitness::old_kernel_mast_hash);
         let generate_single_proof_claim = triton_asm!(
-            // _ *update_witness [txk_mast_hash]
+            // _ *update_witness [new_txk_mhash]
 
             push {Digest::LEN} push 0
             call {new_claim}
-            // _ *update_witness [txk_mast_hash] *claim *output *input *program_digest
+            // _ *update_witness [new_txk_mhash] *claim *output *input *program_digest
 
             read_io {Digest::LEN}
-            // _ *update_witness [txk_mast_hash] *claim *output *input *program_digest [single_proof_program_digest]
+            // _ *update_witness [new_txk_mhash] *claim *output *input *program_digest [single_proof_program_digest]
 
             dup 5
-            // _ **update_witness [txk_mast_hash] claim *output *input *program_digest [single_proof_program_digest] *program_digest
+            // _ **update_witness [new_txk_mhash] claim *output *input *program_digest [single_proof_program_digest] *program_digest
 
             write_mem {Digest::LEN} pop 2
-            // _ *update_witness [txk_mast_hash] *claim *output *input
+            // _ *update_witness [new_txk_mhash] *claim *output *input
 
             dup 8 {&update_witness_field_old_kernel_mast_hash}
+            {&load_digest}
+            // _ *update_witness [new_txk_mhash] *claim *output *input [old_tx_mast_hash]
+
+            push {old_txk_digest_begin_ptr}
+            write_mem {Digest::LEN}
+            pop 1
+            // _ *update_witness [new_txk_mhash] *claim *output *input
+
+            push {old_txk_digest_begin_ptr}
             {&load_digest_reversed}
-            // _ *update_witness [txk_mast_hash] *claim *output *input [old_txk_mast_hash_as_input]
+            // _ *update_witness [new_txk_mhash] *claim *output *input [old_txk_mhash_as_input]
 
             dup 5 write_mem {Digest::LEN}
-            // _ *update_witness [txk_mast_hash] *claim *output *input (*input+5)
+            // _ *update_witness [new_txk_mhash] *claim *output *input (*input+5)
 
             pop 3
-            // _ *update_witness [txk_mast_hash] *claim
+            // _ *update_witness [new_txk_mhash] *claim
         );
 
         let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
+        let new_aocl_mmr_field = field!(UpdateWitness::new_aocl);
+        let new_swbfi_bagged = field!(UpdateWitness::new_swbfi_bagged);
+        let new_swbfa_hash = field!(UpdateWitness::new_swbfa_hash);
+        let peaks_field = field!(MmrAccumulator::peaks);
+
+        let old_aocl_mmr_field = field!(UpdateWitness::old_aocl);
+        let old_swbfi_bagged = field!(UpdateWitness::old_swbfi_bagged);
+        let old_swbfa_hash = field!(UpdateWitness::old_swbfa_hash);
 
         let main = triton_asm! {
             // _
@@ -409,16 +436,66 @@ impl ConsensusProgram for Update {
             // _ *update_witness
 
             read_io {Digest::LEN}
-            // _ *update_witness [txk_mast_hash]
+            // _ *update_witness [new_txk_mhash]
 
             {&generate_single_proof_claim}
-            // _ *update_witness [txk_mast_hash] *claim
+            // _ *update_witness [new_txk_mhash] *claim
 
-            dup 0 dup 7 {&update_witness_field_old_proof}
-            // _ *update_witness [txk_mast_hash] *claim *claim *proof
+            dup 6 {&update_witness_field_old_proof}
+            // _ *update_witness [new_txk_mhash] *claim *proof
 
             call {stark_verify}
-            // _ *update_witness [txk_mast_hash] *claim
+            // _ *update_witness [new_txk_mhash]
+
+            /* Verify AOCL-related witness data */
+            /* 1: Verify new AOCL-related witness data */
+            dup 5
+            {&new_aocl_mmr_field}
+            {&peaks_field}
+            // _ *update_witness [new_txk_mhash] *new_aocl_peaks
+
+            dup 6
+            {&new_swbfi_bagged}
+            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged
+
+            dup 7
+            {&new_swbfa_hash}
+            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest
+
+            dup 2
+            dup 2
+            dup 2
+            dup 10
+            dup 10
+            dup 10
+            dup 10
+            dup 10
+            call {authenticate_msa}
+            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest
+
+            /* Verify old AOCL-related witness data */
+            dup 8
+            {&old_aocl_mmr_field}
+            {&peaks_field}
+            // _ *update_witness [...; 8] *old_aocl_peaks
+
+            dup 9
+            {&old_swbfi_bagged}
+            // _ *update_witness [...; 8] *old_aocl_peaks *old_swbfi_bagged
+
+            dup 10
+            {&old_swbfa_hash}
+            // _ *update_witness [...; 8] *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+
+            dup 2
+            dup 2
+            dup 2
+            push {old_txk_digest_end_ptr}
+            read_mem {Digest::LEN}
+            pop 1
+            call {authenticate_msa}
+            // _ *update_witness [new_txk_mhash] *new_aocl_peaks *new_swbfi_bagged *new_swbfa_digest *old_aocl_peaks *old_swbfi_bagged *old_swbfa_digest
+
 
             halt
 
