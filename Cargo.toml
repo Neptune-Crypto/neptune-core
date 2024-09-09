@@ -123,5 +123,4 @@ name = "consensus"
 harness = false
 
 [patch.crates-io]
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "15ed18d7f0476f56f2e9c8a304ceeb7ba3bdf1af" } # branch master, 2024-09-06
-
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "7c86811b612114bc5c4f0c1cc574ed643186f0aa" } # branch master, 2024-09-09
