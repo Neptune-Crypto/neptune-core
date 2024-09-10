@@ -762,6 +762,10 @@ mod test {
 
         new_kernel.mutator_set_hash = new_msa.hash();
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
+        assert_ne!(
+            new_msa, primitive_witness.mutator_set_accumulator,
+            "must update mutator set too in order for test to be meaningful"
+        );
 
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
@@ -772,6 +776,7 @@ mod test {
             aocl_successor_proof,
         )
     }
+        
 
     #[test]
     fn can_verify_transaction_update() {
