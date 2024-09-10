@@ -1,7 +1,7 @@
 use strum::EnumCount;
+use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
-use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
@@ -19,7 +19,6 @@ use tasm_lib::Digest;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::assert_rr_index_set_equality::AssertRemovalRecordIndexSetEquality;
-use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_inputs_against_txk::AuthenticateInputsAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
@@ -385,12 +384,13 @@ impl ConsensusProgram for Update {
         let authenticate_inputs = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Inputs,
         )));
-        let authenticate_outputs = library.import(Box::new(AuthenticateTxkField(
-            TransactionKernelField::Outputs,
+        let authenticate_timestamp = library.import(Box::new(AuthenticateTxkField(
+            TransactionKernelField::Timestamp,
         )));
         let verify_mmr_successor_proof = library.import(Box::new(VerifyMmrSuccessor));
         let assert_rr_index_set_equality =
             library.import(Box::new(AssertRemovalRecordIndexSetEquality));
+        let u64_lt = library.import(Box::new(LtU64ConsumeArgs));
 
         let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
         let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
@@ -402,7 +402,7 @@ impl ConsensusProgram for Update {
             pop 1
         );
 
-        let update_witness_field_old_kernel_mast_hash = field!(UpdateWitness::old_kernel_mast_hash);
+        let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
         let generate_single_proof_claim = triton_asm!(
             // _ *update_witness [new_txk_mhash]
 
@@ -419,7 +419,7 @@ impl ConsensusProgram for Update {
             write_mem {Digest::LEN} pop 2
             // _ *update_witness [new_txk_mhash] *claim *output *input
 
-            dup 8 {&update_witness_field_old_kernel_mast_hash}
+            dup 8 {&old_txk_mh}
             {&load_digest}
             // _ *update_witness [new_txk_mhash] *claim *output *input [old_tx_mast_hash]
 
@@ -484,7 +484,8 @@ impl ConsensusProgram for Update {
         let peaks_field = field!(MmrAccumulator::peaks);
 
         let new_kernel = field!(UpdateWitness::new_kernel);
-        let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
+
+        let field_timestamp = field!(TransactionKernel::timestamp);
         let inputs_field_with_size = field_with_size!(TransactionKernel::inputs);
         let outputs_field_with_size = field_with_size!(TransactionKernel::outputs);
         let public_announcements_field_with_size =
@@ -593,13 +594,13 @@ impl ConsensusProgram for Update {
             pop 1
             dup 7
             {&new_kernel}
-            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size *new_kernel
+            hint new_kernel_ptr = stack[0]
+            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs *new_kernel
 
-            swap 2
             swap 1
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs old_inputs_size
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs
 
-            dup 2 {&inputs_field_with_size}
+            dup 1 {&inputs_field_with_size}
             // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
 
             dup 9
@@ -629,13 +630,67 @@ impl ConsensusProgram for Update {
             {&authenticate_field_twice_with_no_change(&public_announcements_field_with_size, TransactionKernelField::PublicAnnouncements)}
             // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
-            /* Authenticate outputs and verify no-change */
+            /* Authenticate fee and verify no-change */
             {&authenticate_field_twice_with_no_change(&fee_field_with_size, TransactionKernelField::Fee)}
             // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
-            /* Authenticate public announcements and verify no-change */
+            /* Authenticate coinbase and verify no-change */
             {&authenticate_field_twice_with_no_change(&coinbase_field_with_size, TransactionKernelField::Coinbase)}
             // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+
+            /* Authenticate timestamps and verify gte */
+            {&field_timestamp}
+            swap 1
+            {&field_timestamp}
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+
+            {&load_old_kernel_digest}
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh]
+
+            dup 5 push 1
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh] *old_timestamp 1
+
+            call {authenticate_timestamp}
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+
+            dup 6
+            dup 6
+            dup 6
+            dup 6
+            dup 6
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash]
+
+            dup 6 push 1
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash] *new_timestamp 1
+
+            call {authenticate_timestamp}
+            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+
+            read_mem 1 pop 1
+            // _ *update_witness [new_txk_mhash] *new_timestamp old_timestamp
+
+            split
+            // _ *update_witness [new_txk_mhash] *new_timestamp old_hi old_lo
+
+            swap 1
+            swap 2
+            read_mem 1
+            pop 1
+            split
+            // _ *update_witness [new_txk_mhash] old_hi old_lo new_hi new_lo
+
+            call {u64_lt}
+            // _ *update_witness [new_txk_mhash] (new_timestamp < old_timestamp)
+
+            push 0 eq
+            // _ *update_witness [new_txk_mhash] (new_timestamp >= old_timestamp)
+
+            assert
+
+            pop 3
+            pop 2
+            pop 1
+            // _
 
             halt
 
