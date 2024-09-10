@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -514,7 +513,7 @@ impl ConsensusProgram for Update {
             swap 1
             // _ *update_witness [new_txk_mhash] *old_aocl *new_aocl
 
-            /* Authenticate that new AOCL is a successor of old AOCL */
+            /* Verify that new AOCL is a successor of old AOCL */
             call {verify_mmr_successor_proof}
             // _ *update_witness [new_txk_mhash]
 
@@ -555,6 +554,10 @@ impl ConsensusProgram for Update {
 
             pop 1
             // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs
+
+
+            /* Authenticate outputs and verify no-change */
+
 
             halt
 

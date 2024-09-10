@@ -14,7 +14,7 @@ use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
-use strum::EnumCount;
+use strum::{EnumCount, VariantArray};
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest};
 
@@ -54,7 +54,8 @@ impl From<PrimitiveWitness> for TransactionKernel {
     }
 }
 
-#[derive(Debug, Clone, EnumCount)]
+#[derive(VariantArray, Debug, Clone, EnumCount, Copy, strum_macros::Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum TransactionKernelField {
     Inputs,
     Outputs,
@@ -67,7 +68,7 @@ pub enum TransactionKernelField {
 
 impl HasDiscriminant for TransactionKernelField {
     fn discriminant(&self) -> usize {
-        self.clone() as usize
+        *self as usize
     }
 }
 

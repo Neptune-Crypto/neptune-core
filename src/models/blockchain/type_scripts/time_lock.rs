@@ -956,7 +956,7 @@ fn arbitrary_primitive_witness_with_timelocks(
                     &public_announcements,
                     fee,
                     maybe_coinbase,
-                    now
+                    now,
                 )
                 .prop_map(move |primitive_witness_template| {
                     let mut primitive_witness = primitive_witness_template.clone();
