@@ -1,18 +1,18 @@
-use std::panic::{catch_unwind, RefUnwindSafe};
+use std::panic::catch_unwind;
+use std::panic::RefUnwindSafe;
 
 use itertools::Itertools;
-use tasm_lib::{
-    maybe_write_debuggable_program_to_disk,
-    triton_vm::{
-        error::InstructionError,
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, Program, PublicInput},
-        proof::{Claim, Proof},
-        vm::VMState,
-    },
-    twenty_first::math::b_field_element::BFieldElement,
-    Digest,
-};
+use tasm_lib::maybe_write_debuggable_program_to_disk;
+use tasm_lib::triton_vm::error::InstructionError;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::triton_vm::vm::VMState;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::Digest;
 
 use super::environment;
 
@@ -26,7 +26,7 @@ pub enum ConsensusError {
 /// block validity.
 pub trait ConsensusProgram
 where
-    Self: RefUnwindSafe + Clone,
+    Self: RefUnwindSafe + Clone + std::fmt::Debug,
 {
     /// The canonical reference source code for the consensus program, written in the
     /// subset of rust that the tasm-lang compiler understands. To run this program, call
@@ -149,27 +149,59 @@ pub fn prove_consensus_program(
 
 #[cfg(test)]
 pub mod test {
-    use std::{
-        fs::{create_dir_all, File},
-        io::{stdout, Read, Write},
-        path::{Path, PathBuf},
-    };
+    use std::fs::create_dir_all;
+    use std::fs::File;
+    use std::io::stdout;
+    use std::io::Read;
+    use std::io::Write;
+    use std::path::Path;
+    use std::path::PathBuf;
 
     use crate::triton_vm::program::NonDeterminism;
     use crate::triton_vm::stark::Stark;
     use itertools::Itertools;
     use std::time::SystemTime;
     use tasm_lib::triton_vm;
-    use tasm_lib::{
-        triton_vm::{
-            prelude::BFieldElement,
-            program::Program,
-            proof::{Claim, Proof},
-        },
-        twenty_first::util_types::algebraic_hasher::AlgebraicHasher,
-    };
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::program::Program;
+    use tasm_lib::triton_vm::proof::Claim;
+    use tasm_lib::triton_vm::proof::Proof;
+    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use crate::models::blockchain::shared::Hash;
+
+    use super::*;
+
+    pub(crate) fn consensus_program_negative_test<T: ConsensusProgram>(
+        consensus_program: T,
+        input: &PublicInput,
+        nondeterminism: NonDeterminism,
+        allowed_instruction_errors: &[InstructionError],
+    ) {
+        let rust_result = consensus_program.run_rust(input, nondeterminism.clone());
+        assert!(matches!(
+            rust_result.unwrap_err(),
+            ConsensusError::RustShadowPanic(_)
+        ));
+
+        let tasm_result = consensus_program.run_tasm(input, nondeterminism);
+        let instruction_error = match tasm_result {
+            Ok(_) => {
+                panic!("negative test failed to fail for consensus program {consensus_program:?}",)
+            }
+            Err(ConsensusError::RustShadowPanic(_)) => {
+                panic!("TASM code must fail with expected error enum. Program was {consensus_program:?}")
+            }
+            Err(ConsensusError::TritonVMPanic(_, instruction_error)) => instruction_error,
+        };
+
+        assert!(
+            allowed_instruction_errors.contains(&instruction_error),
+            "Triton VM must fail with expected instruction error. Expected one of: [{}]\n got {}",
+            allowed_instruction_errors.iter().join(","),
+            instruction_error
+        );
+    }
 
     /// Derive a file name from the claim
     fn proof_filename(claim: Claim) -> String {

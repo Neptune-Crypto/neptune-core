@@ -707,7 +707,10 @@ impl ConsensusProgram for Update {
 mod test {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use rand::random;
+    use tasm_lib::triton_vm::error::InstructionError;
     use tasm_lib::triton_vm::program::PublicInput;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
     use tasm_lib::Digest;
 
@@ -716,6 +719,8 @@ mod test {
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::ProofCollection;
+    use crate::models::proof_abstractions::tasm::builtins::decode_from_memory;
+    use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
@@ -725,7 +730,7 @@ mod test {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
-    use super::UpdateWitness;
+    use super::*;
 
     fn deterministic_update_witness(
         num_inputs: usize,
@@ -790,5 +795,78 @@ mod test {
 
         let tasm_result = Update.run_tasm(&input, nondeterminism);
         assert!(tasm_result.is_ok());
+    }
+
+    fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
+        let mut bad_witness = good_witness.to_owned();
+        bad_witness.new_kernel.timestamp = bad_witness.old_kernel.timestamp - Timestamp::hours(1);
+
+        let claim = bad_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        let nondeterminism = bad_witness.nondeterminism();
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::AssertionFailed],
+        );
+    }
+
+    fn bad_new_aocl(good_witness: &UpdateWitness) {
+        let claim = good_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        let mut nondeterminism = good_witness.nondeterminism();
+
+        let mut witness_again: UpdateWitness = *UpdateWitness::decode_from_memory(
+            &nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+        )
+        .unwrap();
+        witness_again.new_aocl.append(random());
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &witness_again,
+        );
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::VectorAssertionFailed(0)],
+        );
+    }
+
+    fn bad_old_aocl(good_witness: &UpdateWitness) {
+        let claim = good_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        let mut nondeterminism = good_witness.nondeterminism();
+
+        let mut witness_again: UpdateWitness = *UpdateWitness::decode_from_memory(
+            &nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+        )
+        .unwrap();
+        witness_again.old_aocl.append(random());
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &witness_again,
+        );
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::VectorAssertionFailed(0)],
+        );
+    }
+
+    #[test]
+    fn update_witness_negative_tests() {
+        // It takes a long time to generate the witness, so we reuse it across
+        // multiple tests
+        let good_witness = deterministic_update_witness(2, 2, 2);
+        new_timestamp_older_than_old(&good_witness);
+        bad_new_aocl(&good_witness);
+        bad_old_aocl(&good_witness);
     }
 }
