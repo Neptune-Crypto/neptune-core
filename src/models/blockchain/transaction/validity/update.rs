@@ -727,13 +727,17 @@ mod test {
 
     use super::UpdateWitness;
 
-    #[test]
-    fn can_verify_transaction_update() {
+    fn deterministic_update_witness(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_pub_announcements: usize,
+    ) -> UpdateWitness {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, num_pub_announcements))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let newly_confirmed_records = vec(arb::<Digest>(), 0usize..100)
             .new_tree(&mut test_runner)
             .unwrap()
@@ -758,16 +762,20 @@ mod test {
 
         new_kernel.mutator_set_hash = new_msa.hash();
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
-        // todo: also update mutator set
-        let update_witness = UpdateWitness::from_old_transaction(
+
+        UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
             proof,
             primitive_witness.mutator_set_accumulator,
             new_kernel,
             new_msa,
             aocl_successor_proof,
-        );
+        )
+    }
 
+    #[test]
+    fn can_verify_transaction_update() {
+        let update_witness = deterministic_update_witness(2, 2, 2);
         let claim = update_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         let nondeterminism = update_witness.nondeterminism();
