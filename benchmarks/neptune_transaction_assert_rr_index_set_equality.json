@@ -1,0 +1,24 @@
+[
+  {
+    "name": "neptune_transaction_assert_rr_index_set_equality",
+    "benchmark_result": {
+      "clock_cycle_count": 1892,
+      "hash_table_height": 888,
+      "u32_table_height": 208,
+      "op_stack_table_height": 1504,
+      "ram_table_height": 798
+    },
+    "case": "CommonCase"
+  },
+  {
+    "name": "neptune_transaction_assert_rr_index_set_equality",
+    "benchmark_result": {
+      "clock_cycle_count": 13970,
+      "hash_table_height": 5352,
+      "u32_table_height": 847,
+      "op_stack_table_height": 11008,
+      "ram_table_height": 7890
+    },
+    "case": "WorstCase"
+  }
+]

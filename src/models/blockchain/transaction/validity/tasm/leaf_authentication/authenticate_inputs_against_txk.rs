@@ -19,8 +19,8 @@ pub struct AuthenticateInputsAgainstTxk;
 impl BasicSnippet for AuthenticateInputsAgainstTxk {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![
-            // Type of `inputs` is Vec<RemovalRecord>
             (DataType::Digest, "transaction_kernel_mast_hash".to_owned()),
+            // Type of `inputs` is Vec<RemovalRecord>
             (DataType::VoidPointer, "inputs".to_owned()),
             (DataType::U32, "inputs_size".to_owned()),
         ]

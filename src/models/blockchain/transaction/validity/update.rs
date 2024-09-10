@@ -18,8 +18,8 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::validity::tasm::authenticate_inputs_against_txk::AuthenticateInputsAgainstTxk;
-use crate::models::blockchain::transaction::validity::tasm::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
+use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_inputs_against_txk::AuthenticateInputsAgainstTxk;
+use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
