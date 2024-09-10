@@ -78,48 +78,48 @@ impl BasicSnippet for AssertRemovalRecordIndexSetEquality {
             // _ *rr_x[n+1]_si
         );
         let hash_absolute_indices_loop = triton_asm!(
-            // INVARIANT: _ *a_digests[len] *a_digests[n] *b_digests_[n] 0 0 *rr_a[n]_si *rr_b[n]_si
-            // START: _ *a_digests[len] *a_digests[0] *b_digests_[0] 0 0 *rr_a[0]_si *rr_b[0]_si
+            // INVARIANT: _ *a_digests[len] *a_digests[n] *b_digests_[n] offset_end 0 *rr_a[n]_si *rr_b[n]_si
+            // START: _ *a_digests[len] *a_digests[0] *b_digests_[0] offset_end 0 *rr_a[0]_si *rr_b[0]_si
             {hash_absolute_indices_loop_label}:
-                // _ *a_digests[len] *a_digests[n] *b_digests[n] 0 0 *rr_a[n]_si *rr_b[n]_si
+                // _ *a_digests[len] *a_digests[n] *b_digests[n] [b; 2] *rr_a[n]_si *rr_b[n]_si
 
                 /* Push `b_digest` */
                 dup 0
                 addi 1
                 {&absolute_indices_and_size}
                 call {hash_varlen}
-                // _ *a_digests[len] *a_digests[n] *b_digests[n] 0 0 *rr_a[n]_si *rr_b[n]_si [b_digest]
+                // _ *a_digests[len] *a_digests[n] *b_digests[n] [b; 2] *rr_a[n]_si *rr_b[n]_si [b_digest]
 
                 dup 9
                 write_mem {Digest::LEN}
                 swap 5
                 pop 1
-                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] 0 0 *rr_a[n]_si *rr_b[n]_si
+                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] [b; 2] *rr_a[n]_si *rr_b[n]_si
 
                 {&advance_to_next_removal_record_element}
-                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] 0 0 *rr_a[n]_si *rr_b[n+1]_si
+                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] [b; 2] *rr_a[n]_si *rr_b[n+1]_si
 
                 swap 1
-                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] 0 0 *rr_b[n+1]_si *rr_a[n]_si
+                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] [b; 2] *rr_b[n+1]_si *rr_a[n]_si
 
                 /* Push `a_digest` */
                 dup 0
                 addi 1
                 {&absolute_indices_and_size}
                 call {hash_varlen}
-                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] 0 0 *rr_b[n+1]_si *rr_a[n]_si [a_digest]
+                // _ *a_digests[len] *a_digests[n] *b_digests[n+1] [b; 2] *rr_b[n+1]_si *rr_a[n]_si [a_digest]
 
                 dup 10
                 write_mem {Digest::LEN}
                 swap 6
                 pop 1
-                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] 0 0 *rr_b[n+1]_si *rr_a[n]_si
+                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] [b; 2] *rr_b[n+1]_si *rr_a[n]_si
 
                 {&advance_to_next_removal_record_element}
-                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] 0 0 *rr_b[n+1]_si *rr_a[n+1]_si
+                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] [b; 2] *rr_b[n+1]_si *rr_a[n+1]_si
 
                 swap 1
-                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] 0 0 *rr_a[n+1]_si *rr_b[n+1]_si
+                // _ *a_digests[len] *a_digests[n+1] *b_digests[n+1] [b; 2] *rr_a[n+1]_si *rr_b[n+1]_si
 
                 recurse_or_return
         );

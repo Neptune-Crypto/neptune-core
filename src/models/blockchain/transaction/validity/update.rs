@@ -18,8 +18,10 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::assert_rr_index_set_equality::AssertRemovalRecordIndexSetEquality;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_inputs_against_txk::AuthenticateInputsAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
+use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
@@ -380,12 +382,25 @@ impl ConsensusProgram for Update {
             Stark::default(),
         )));
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk));
-        let authenticate_inputs = library.import(Box::new(AuthenticateInputsAgainstTxk));
+        let authenticate_inputs = library.import(Box::new(AuthenticateTxkField(
+            TransactionKernelField::Inputs,
+        )));
+        let authenticate_outputs = library.import(Box::new(AuthenticateTxkField(
+            TransactionKernelField::Outputs,
+        )));
         let verify_mmr_successor_proof = library.import(Box::new(VerifyMmrSuccessor));
-        let hash_varlen = library.import(Box::new(HashVarlen));
+        let assert_rr_index_set_equality =
+            library.import(Box::new(AssertRemovalRecordIndexSetEquality));
 
         let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
         let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
+
+        let old_kernel = field!(UpdateWitness::old_kernel);
+        let load_old_kernel_digest = triton_asm!(
+            push {old_txk_digest_end_ptr}
+            read_mem {Digest::LEN}
+            pop 1
+        );
 
         let update_witness_field_old_kernel_mast_hash = field!(UpdateWitness::old_kernel_mast_hash);
         let generate_single_proof_claim = triton_asm!(
@@ -424,6 +439,40 @@ impl ConsensusProgram for Update {
             // _ *update_witness [new_txk_mhash] *claim
         );
 
+        let mut authenticate_field_twice_with_no_change =
+            |field_with_size_getter: &[LabelledInstruction], field: TransactionKernelField| {
+                let authenticate_generic_field =
+                    library.import(Box::new(AuthenticateTxkField(field)));
+                triton_asm! {
+                    // _ [new_txk_mhash] *old_kernel *new_kernel
+
+                    dup 1
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *old_kernel
+
+                    {&field_with_size_getter}
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size
+
+                    {&load_old_kernel_digest}
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size [old_txk_mhash]
+
+                    dup 6 dup 6 call {authenticate_generic_field}
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size
+
+                    dup 8
+                    dup 8
+                    dup 8
+                    dup 8
+                    dup 8
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size [new_txk_mhash]
+
+                    dup 6 dup 6 call {authenticate_generic_field}
+                    // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size
+
+                    pop 2
+                    // _ [new_txk_mhash] *old_kernel *new_kernel
+                }
+            };
+
         let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
 
         let new_aocl_mmr_field = field!(UpdateWitness::new_aocl);
@@ -434,9 +483,14 @@ impl ConsensusProgram for Update {
         let old_swbfa_hash = field!(UpdateWitness::old_swbfa_hash);
         let peaks_field = field!(MmrAccumulator::peaks);
 
-        let old_kernel = field!(UpdateWitness::old_kernel);
         let new_kernel = field!(UpdateWitness::new_kernel);
+        let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
         let inputs_field_with_size = field_with_size!(TransactionKernel::inputs);
+        let outputs_field_with_size = field_with_size!(TransactionKernel::outputs);
+        let public_announcements_field_with_size =
+            field_with_size!(TransactionKernel::public_announcements);
+        let fee_field_with_size = field_with_size!(TransactionKernel::fee);
+        let coinbase_field_with_size = field_with_size!(TransactionKernel::coinbase);
 
         let main = triton_asm! {
             // _
@@ -521,43 +575,67 @@ impl ConsensusProgram for Update {
             /* Authenticate inputs, preserve pointers */
             dup 5
             {&old_kernel}
+            // _ *update_witness [new_txk_mhash] *old_kernel
+            dup 0
             {&inputs_field_with_size}
-            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size
+            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
 
             push {old_txk_digest_end_ptr}
             read_mem {Digest::LEN}
             pop 1
-            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size [old_txk_mhash]
+            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size [old_txk_mhash]
 
             dup 6
             dup 6
             call {authenticate_inputs}
-            // _ *update_witness [new_txk_mhash] *old_inputs old_inputs_size
+            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
 
             pop 1
-            dup 6
+            dup 7
             {&new_kernel}
-            {&inputs_field_with_size}
-            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size
+            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size *new_kernel
 
-            dup 7
-            dup 7
-            dup 7
-            dup 7
-            dup 7
-            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size [new_txk_mhash]
+            swap 2
+            swap 1
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs old_inputs_size
+
+            dup 2 {&inputs_field_with_size}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
+
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size [new_txk_mhash]
 
             dup 6
             dup 6
             call {authenticate_inputs}
-            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs new_inputs_size
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
 
             pop 1
-            // _ *update_witness [new_txk_mhash] *old_inputs *new_inputs
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
 
+            /* verify index set equality */
+            call {assert_rr_index_set_equality}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate outputs and verify no-change */
+            {&authenticate_field_twice_with_no_change(&outputs_field_with_size, TransactionKernelField::Outputs)}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
+            /* Authenticate public announcements and verify no-change */
+            {&authenticate_field_twice_with_no_change(&public_announcements_field_with_size, TransactionKernelField::PublicAnnouncements)}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+
+            /* Authenticate outputs and verify no-change */
+            {&authenticate_field_twice_with_no_change(&fee_field_with_size, TransactionKernelField::Fee)}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+
+            /* Authenticate public announcements and verify no-change */
+            {&authenticate_field_twice_with_no_change(&coinbase_field_with_size, TransactionKernelField::Coinbase)}
+            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             halt
 
