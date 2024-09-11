@@ -1,20 +1,26 @@
 use std::cmp::max;
 use std::collections::HashMap;
 
+use arbitrary::Arbitrary;
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
+use tasm_lib::field;
+use tasm_lib::library::Library;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use super::single_proof::SingleProof;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -25,6 +31,9 @@ use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
+use crate::prelude::triton_vm::triton_asm;
+use crate::triton_vm::prelude::NonDeterminism;
+use crate::triton_vm::prelude::Program;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
@@ -195,7 +204,7 @@ impl ConsensusProgram for Merge {
             input: right_txk_digest_as_input,
             output: vec![],
         };
-        let right_proof: &Proof = &mw.left_proof;
+        let right_proof: &Proof = &mw.right_proof;
         tasmlib::verify_stark(Stark::default(), &right_claim, right_proof);
 
         // new inputs are a permutation of the operands' inputs' concatenation
@@ -437,7 +446,63 @@ impl ConsensusProgram for Merge {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        todo!()
+        let mut library = Library::new();
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+
+        let left_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let right_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let new_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+
+        let main = triton_asm! {
+                                // _
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+                                // _ *merge_witness
+
+            read_io 5           // _ *merge_witness [new_txk_digest; 5]
+            push {new_txk_mast_hash_address}
+            write_mem 5
+            pop 1               // _ *merge_witness
+
+            read_io 5           // _ *merge_witness [single_proof_program_digest; 5]
+            divine 5            // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
+            dup 4 dup 4 dup 4 dup 4 dup 4
+            push {left_txk_mast_hash_address}
+            write_mem 5
+            pop 1               // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
+
+            dup 9 dup 9 dup 9 dup 9 dup 9
+            call {generate_single_proof_claim}
+                                // _ *merge_witness [single_proof_program_digest; 5] *left_claim
+            divine 5            // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
+            dup 4 dup 4 dup 4 dup 4 dup 4
+            push {right_txk_mast_hash_address}
+            write_mem 5
+            pop 1               // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
+
+            dup 10 dup 10 dup 10 dup 10 dup 10
+            call {generate_single_proof_claim}
+                                // _ *merge_witness [single_proof_program_digest; 5] *left_claim *right_claim
+            swap 6 pop 1
+            swap 4 pop 4        // _ *merge_witness *right_claim *left_claim
+
+            dup 2
+            {&field!(MergeWitness::left_proof)}
+                                // _ *merge_witness *right_claim *left_claim *left_proof
+            call {stark_verify} // _ *merge_witness *right_claim
+
+            dup 1
+            {&field!(MergeWitness::right_proof)}
+                                // _ *merge_witness *right_claim *right_proof
+            call {stark_verify} // _ *merge_witness
+        };
+
+        triton_asm! {
+            {&main}
+            {&library.all_imports()}
+        }
     }
 }
 
@@ -498,10 +563,11 @@ mod test {
         );
 
         let claim = merge_witness.claim();
-        let rust_result = Merge.run_rust(
-            &PublicInput::new(claim.input),
-            merge_witness.nondeterminism(),
-        );
+        let public_input = PublicInput::new(claim.input);
+        let rust_result = Merge.run_rust(&public_input, merge_witness.nondeterminism());
         assert!(rust_result.is_ok());
+
+        let tasm_result = Merge.run_tasm(&public_input, merge_witness.nondeterminism());
+        assert!(tasm_result.is_ok());
     }
 }

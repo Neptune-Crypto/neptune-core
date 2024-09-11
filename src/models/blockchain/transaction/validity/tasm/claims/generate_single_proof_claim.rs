@@ -29,7 +29,7 @@ impl BasicSnippet for GenerateSingleProofClaim {
         let single_proof_digest_location = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
 
         triton_asm!(
-            // BEFORE: _ [mast_hash; 5] [spd; 5]
+            // BEFORE: _ [mast_hash; 5] [single_proof_digest; 5]
             // AFTER:  _ *claim
             {self.entrypoint()}:
             push {single_proof_digest_location}
