@@ -1,23 +1,20 @@
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, PublicInput},
-    },
-    twenty_first,
-};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness};
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
 
-use self::{
-    coinbase_is_valid::CoinbaseIsValid,
-    correct_control_parameter_update::CorrectControlParameterUpdate,
-    correct_mmr_update::CorrectMmrUpdate, correct_mutator_set_update::CorrectMutatorSetUpdate,
-    mmr_membership::MmrMembership, predecessor_is_valid::PredecessorIsValid,
-    transaction_is_valid::TransactionIsValid,
-};
+use self::coinbase_is_valid::CoinbaseIsValid;
+use self::correct_control_parameter_update::CorrectControlParameterUpdate;
+use self::correct_mmr_update::CorrectMmrUpdate;
+use self::correct_mutator_set_update::CorrectMutatorSetUpdate;
+use self::mmr_membership::MmrMembership;
+use self::predecessor_is_valid::PredecessorIsValid;
+use self::transaction_is_valid::TransactionIsValid;
 
 use super::Block;
 
@@ -75,7 +72,7 @@ impl SecretWitness for PrincipalBlockValidationWitness {
         todo!()
     }
 
-    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
+    fn program(&self) -> Program {
         todo!()
     }
 }

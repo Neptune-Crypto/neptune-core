@@ -1,18 +1,18 @@
+use std::cmp::max;
 use std::collections::HashMap;
 
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::Digest;
 
+use super::single_proof::SingleProof;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::BFieldCodec;
@@ -25,15 +25,8 @@ use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::tasm_lib::memory::encode_to_memory;
-use crate::triton_vm::program::NonDeterminism;
-use crate::triton_vm::program::Program;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use std::cmp::max;
-use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-
-use super::single_proof::SingleProof;
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct MergeWitness {
@@ -450,10 +443,14 @@ impl ConsensusProgram for Merge {
 
 #[cfg(test)]
 mod test {
+    use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::triton_vm::program::PublicInput;
+    use tasm_lib::triton_vm::prelude::PublicInput;
 
+    use super::MergeWitness;
     use crate::models::blockchain::transaction::validity::merge::Merge;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
@@ -461,11 +458,6 @@ mod test {
     use crate::models::blockchain::transaction::ProofCollection;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
-    use proptest::arbitrary::Arbitrary;
-    use proptest::strategy::Strategy;
-    use proptest::strategy::ValueTree;
-
-    use super::MergeWitness;
 
     #[test]
     fn can_verify_transaction_merger() {

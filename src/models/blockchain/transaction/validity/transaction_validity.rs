@@ -1,10 +1,10 @@
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use tasm_lib::triton_vm::{instruction::LabelledInstruction, prelude::BFieldCodec};
-
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::*;
 
 use super::proof_collection::ProofCollection;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionValidity;

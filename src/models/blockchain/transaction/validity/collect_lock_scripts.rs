@@ -1,29 +1,33 @@
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::prelude::{triton_vm, twenty_first};
-
-use crate::models::proof_abstractions::SecretWitness;
 use get_size::GetSize;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::field;
+use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::eq_digest::EqDigest;
 use tasm_lib::library::Library;
-use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{field, field_with_size, Digest};
+use tasm_lib::Digest;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;
+
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct CollectLockScriptsWitness {
@@ -183,17 +187,18 @@ impl From<&PrimitiveWitness> for CollectLockScriptsWitness {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
-    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
+
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
+    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::SecretWitness;
 
     fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);

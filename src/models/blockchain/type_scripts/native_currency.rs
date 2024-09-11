@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::{
-    blockchain::transaction::primitive_witness::SaltedUtxos,
-    proof_abstractions::tasm::program::ConsensusProgram,
-};
 
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -26,9 +24,7 @@ use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use tasm_lib::triton_vm::program::{NonDeterminism, Program, PublicInput};
-use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::{field, field_with_size};

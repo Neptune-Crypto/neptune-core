@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size::GetSize;
@@ -8,7 +10,6 @@ use rand::RngCore;
 use rand::SeedableRng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use std::collections::HashMap;
 use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
@@ -24,17 +25,15 @@ use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecre
 use tasm_lib::neptune::mutator_set;
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::Digest;
-use triton_vm::instruction::LabelledInstruction;
-use triton_vm::prelude::BFieldElement;
-use triton_vm::prelude::NonDeterminism;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -46,10 +45,6 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
-use crate::triton_vm::triton_asm;
-use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::get_swbf_indices;
@@ -179,7 +174,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         Hash::hash(&self.input_utxos).values().to_vec()
     }
 
-    fn program(&self) -> triton_vm::prelude::Program {
+    fn program(&self) -> Program {
         RemovalRecordsIntegrity.program()
     }
 }
@@ -951,15 +946,6 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
 #[cfg(test)]
 mod tests {
-    use super::RemovalRecordsIntegrity;
-    use super::RemovalRecordsIntegrityWitness;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::proof_abstractions::tasm::program::ConsensusError;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::triton_vm::prelude::*;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
-
     use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert;
@@ -968,6 +954,15 @@ mod tests {
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
+
+    use super::RemovalRecordsIntegrity;
+    use super::RemovalRecordsIntegrityWitness;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::proof_abstractions::tasm::program::ConsensusError;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::SecretWitness;
+    use crate::triton_vm::prelude::*;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
     fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,

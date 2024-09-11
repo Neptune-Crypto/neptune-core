@@ -5,7 +5,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm;
-use tasm_lib::triton_vm::program::Program;
+use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::Digest;

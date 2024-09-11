@@ -1,12 +1,12 @@
-use crate::models::blockchain::block::BFieldCodec;
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::*;
+use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::{
-    models::proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
-    util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
-};
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMutatorSetUpdateWitness {
@@ -22,7 +22,7 @@ impl SecretWitness for CorrectMutatorSetUpdateWitness {
         todo!()
     }
 
-    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
+    fn program(&self) -> Program {
         todo!()
     }
 }
@@ -37,7 +37,7 @@ impl ConsensusProgram for CorrectMutatorSetUpdate {
         todo!()
     }
 
-    fn code(&self) -> Vec<tasm_lib::prelude::triton_vm::prelude::LabelledInstruction> {
+    fn code(&self) -> Vec<LabelledInstruction> {
         todo!()
     }
 }

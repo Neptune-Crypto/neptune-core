@@ -1,14 +1,9 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::transaction_kernel::{
-    pseudorandom_transaction_kernel, TransactionKernel,
-};
 use num_traits::One;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
@@ -16,13 +11,22 @@ use tasm_lib::list::get::Get;
 use tasm_lib::list::new::New;
 use tasm_lib::list::set::Set;
 use tasm_lib::list::set_length::SetLength;
+use tasm_lib::rust_shadowing_helper_functions;
 use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-use tasm_lib::traits::function::{Function, FunctionInitialState};
-use tasm_lib::{rust_shadowing_helper_functions, InitVmState};
-use triton_vm::{prelude::BFieldElement, triton_asm};
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
+use tasm_lib::InitVmState;
+use triton_vm::prelude::*;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 /// Computes the mast hash of a transaction kernel object
 #[derive(Debug, Clone)]
@@ -63,7 +67,7 @@ impl BasicSnippet for TransactionKernelMastHash {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
 
-    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(New {
             element_type: DataType::Digest,
@@ -421,7 +425,9 @@ impl Function for TransactionKernelMastHash {
 
 #[cfg(test)]
 mod tests {
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
@@ -429,9 +435,8 @@ mod tests {
     use twenty_first::math::bfield_codec::BFieldCodec;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
-    use crate::models::proof_abstractions::mast_hash::MastHash;
-
     use super::*;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
 
     #[test]
     fn verify_agreement_with_tx_kernel_mast_hash() {
@@ -474,9 +479,10 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use super::*;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+
+    use super::*;
 
     #[test]
     fn bench() {

@@ -2,9 +2,9 @@
   {
     "name": "tasm_neptune_transaction_transaction_kernel_mast_hash",
     "benchmark_result": {
-      "clock_cycle_count": 4776,
-      "hash_table_height": 3601,
-      "u32_table_height": 191,
+      "clock_cycle_count": 4798,
+      "hash_table_height": 3625,
+      "u32_table_height": 311,
       "op_stack_table_height": 3536,
       "ram_table_height": 5293
     },
@@ -13,9 +13,9 @@
   {
     "name": "tasm_neptune_transaction_transaction_kernel_mast_hash",
     "benchmark_result": {
-      "clock_cycle_count": 5142,
-      "hash_table_height": 3967,
-      "u32_table_height": 192,
+      "clock_cycle_count": 5164,
+      "hash_table_height": 3991,
+      "u32_table_height": 312,
       "op_stack_table_height": 3780,
       "ram_table_height": 5903
     },

@@ -2,13 +2,10 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::triton_vm::triton_asm;
-use tasm_lib::Digest;
-
-use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+use tasm_lib::triton_vm::prelude::*;
 
 use super::new_claim::NewClaim;
+use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 
 pub(crate) struct GenerateTypeScriptClaimTemplate;
 
@@ -119,13 +116,14 @@ impl BasicSnippet for GenerateTypeScriptClaimTemplate {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use proptest::arbitrary::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
     use rand::RngCore;
     use rand::SeedableRng;
-    use std::collections::HashMap;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::BasicSnippet;
     use tasm_lib::prelude::TasmObject;
@@ -139,10 +137,9 @@ mod test {
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::Digest;
 
+    use super::GenerateTypeScriptClaimTemplate;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-
-    use super::GenerateTypeScriptClaimTemplate;
 
     impl Function for GenerateTypeScriptClaimTemplate {
         fn rust_shadow(

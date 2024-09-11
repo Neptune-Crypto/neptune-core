@@ -1,16 +1,5 @@
 use std::collections::HashMap;
 
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::utxo::Coin;
-use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
-use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::proof_abstractions::SecretWitness;
-use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -20,24 +9,32 @@ use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::triton_vm::program::Program;
-use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::{
-    triton_vm::{instruction::LabelledInstruction, program::NonDeterminism, triton_asm},
-    twenty_first::math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-    Digest,
-};
-
-use crate::models::proof_abstractions::tasm::builtins as tasm;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use tasm_lib::Digest;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::builtins as tasm;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::SecretWitness;
+use crate::Hash;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock;
@@ -977,28 +974,22 @@ fn arbitrary_primitive_witness_with_timelocks(
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
     use num_traits::Zero;
-    use proptest::{collection::vec, prop_assert, strategy::Just};
+    use proptest::collection::vec;
+    use proptest::prop_assert;
+    use proptest::strategy::Just;
+    use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tokio::runtime::Runtime;
 
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
-
-    use crate::models::{
-        blockchain::{
-            transaction::primitive_witness::PrimitiveWitness,
-            type_scripts::time_lock::{
-                arbitrary_primitive_witness_with_active_timelocks, TimeLock,
-            },
-        },
-        proof_abstractions::{
-            tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
-        },
-    };
-    use proptest_arbitrary_interop::arb;
-
     use super::TimeLockWitness;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::proof_abstractions::SecretWitness;
 
     #[proptest(cases = 20)]
     fn test_unlocked(

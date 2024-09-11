@@ -3,42 +3,38 @@ fn main() {
 }
 
 mod transaction {
-    use std::{
-        fs::{create_dir_all, File},
-        io::Write,
-        path::{Path, PathBuf},
-    };
+    use std::fs::create_dir_all;
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::Path;
+    use std::path::PathBuf;
 
-    use neptune_core::models::{
-        blockchain::{
-            transaction::{
-                primitive_witness::PrimitiveWitness,
-                validity::{
-                    collect_lock_scripts::{CollectLockScripts, CollectLockScriptsWitness},
-                    collect_type_scripts::{CollectTypeScripts, CollectTypeScriptsWitness},
-                    kernel_to_outputs::{KernelToOutputs, KernelToOutputsWitness},
-                    removal_records_integrity::{
-                        RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness,
-                    },
-                },
-            },
-            type_scripts::{
-                native_currency::{NativeCurrency, NativeCurrencyWitness},
-                time_lock::arbitrary_primitive_witness_with_active_timelocks,
-            },
-        },
-        proof_abstractions::{
-            tasm::program::ConsensusProgram, timestamp::Timestamp, SecretWitness,
-        },
-    };
+    use neptune_core::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_core::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
+    use neptune_core::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
+    use neptune_core::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
+    use neptune_core::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
+    use neptune_core::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+    use neptune_core::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
+    use neptune_core::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
+    use neptune_core::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
+    use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrency;
+    use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
+    use neptune_core::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use neptune_core::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use neptune_core::models::proof_abstractions::timestamp::Timestamp;
+    use neptune_core::models::proof_abstractions::SecretWitness;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
-    use proptest::{arbitrary::Arbitrary, strategy::Strategy, test_runner::TestRunner};
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::{
-        generate_full_profile,
-        snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult, NamedBenchmarkResult},
-        triton_vm::program::{NonDeterminism, PublicInput},
-    };
+    use tasm_lib::generate_full_profile;
+    use tasm_lib::snippet_bencher::write_benchmarks;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
+    use tasm_lib::snippet_bencher::BenchmarkResult;
+    use tasm_lib::snippet_bencher::NamedBenchmarkResult;
+    use tasm_lib::triton_vm::prelude::*;
 
     const COMMON: (usize, usize) = (2, 2);
     const LARGEISH: (usize, usize) = (4, 4);
@@ -53,9 +49,7 @@ mod transaction {
         case: BenchmarkCase,
     ) {
         let program = cp.program();
-        let (aet, _output) = program
-            .trace_execution(input.clone(), nondeterminism.clone())
-            .unwrap();
+        let (aet, _output) = VM::trace_execution(&program, input.clone(), nondeterminism).unwrap();
         let benchmark_result = BenchmarkResult::new(&aet);
         let benchmark = NamedBenchmarkResult {
             name: name.to_owned(),
@@ -74,9 +68,8 @@ mod transaction {
         name: &str,
     ) {
         let program = cp.program();
-        let (_aet, _output) = program
-            .trace_execution(input.clone(), nondeterminism.clone())
-            .unwrap();
+        let (_aet, _output) =
+            VM::trace_execution(&program, input.clone(), nondeterminism.clone()).unwrap();
         let profile = generate_full_profile(name, program, input, &nondeterminism);
         write_profile(name.to_string(), profile);
     }

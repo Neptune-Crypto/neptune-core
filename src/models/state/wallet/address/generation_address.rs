@@ -1,5 +1,6 @@
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::prelude::{triton_vm, twenty_first};
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 
 use aead::Aead;
@@ -18,15 +19,12 @@ use serde_derive::Serialize;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
-use tasm_lib::triton_vm::program::NonDeterminism;
-use triton_vm::triton_asm;
-use triton_vm::triton_instr;
+use triton_vm::prelude::*;
+use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
-use twenty_first::{
-    math::{b_field_element::BFieldElement, lattice},
-    util_types::algebraic_hasher::AlgebraicHasher,
-};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
@@ -437,20 +435,21 @@ fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8; NU
 
 #[cfg(test)]
 mod test_generation_addresses {
-    use rand::{random, thread_rng, Rng, RngCore};
-    use triton_vm::{program::PublicInput, proof::Claim, stark::Stark};
-    use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
-
-    use crate::{
-        config_models::network::Network,
-        models::blockchain::{
-            shared::Hash, transaction::utxo::Utxo, type_scripts::neptune_coins::NeptuneCoins,
-        },
-        tests::shared::make_mock_transaction,
-    };
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
+    use rand::random;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
     use test_strategy::proptest;
+    use twenty_first::math::tip5::Digest;
+    use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::tests::shared::make_mock_transaction;
 
     use super::*;
 

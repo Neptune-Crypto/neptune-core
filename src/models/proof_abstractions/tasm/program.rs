@@ -4,12 +4,7 @@ use std::panic::RefUnwindSafe;
 use itertools::Itertools;
 use tasm_lib::maybe_write_debuggable_program_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use tasm_lib::triton_vm::program::NonDeterminism;
-use tasm_lib::triton_vm::program::Program;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
@@ -80,7 +75,7 @@ where
         let program = self.program();
         let init_vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
         maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
-        let result = program.run(input.clone(), nondeterminism);
+        let result = VM::run(&program, input.clone(), nondeterminism);
         match result {
             Ok(output) => Ok(output),
             Err(error) => {
@@ -139,7 +134,7 @@ pub fn prove_consensus_program(
     )
     .unwrap();
 
-    let vm_output = program.run(PublicInput::new(claim.input.clone()), nondeterminism);
+    let vm_output = VM::run(&program, claim.input.clone().into(), nondeterminism);
     assert!(vm_output.is_ok());
     assert_eq!(claim.program_digest, program.hash());
     assert_eq!(claim.output, vm_output.unwrap());
@@ -156,21 +151,15 @@ pub mod test {
     use std::io::Write;
     use std::path::Path;
     use std::path::PathBuf;
-
-    use crate::triton_vm::program::NonDeterminism;
-    use crate::triton_vm::stark::Stark;
-    use itertools::Itertools;
     use std::time::SystemTime;
+
+    use itertools::Itertools;
     use tasm_lib::triton_vm;
-    use tasm_lib::triton_vm::prelude::BFieldElement;
-    use tasm_lib::triton_vm::program::Program;
-    use tasm_lib::triton_vm::proof::Claim;
-    use tasm_lib::triton_vm::proof::Proof;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-    use crate::models::blockchain::shared::Hash;
-
     use super::*;
+    use crate::models::blockchain::shared::Hash;
+    use crate::triton_vm::stark::Stark;
 
     pub(crate) fn consensus_program_negative_test<T: ConsensusProgram>(
         consensus_program: T,

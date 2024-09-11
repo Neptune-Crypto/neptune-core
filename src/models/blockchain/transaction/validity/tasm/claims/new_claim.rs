@@ -1,7 +1,6 @@
 use tasm_lib::data_type::DataType;
 use tasm_lib::prelude::*;
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::triton_vm::prelude::*;
 
 /// Generates a new Claim object given the lengths of the input and output.
 /// Returns pointers to:
@@ -88,18 +87,18 @@ impl BasicSnippet for NewClaim {
 mod test {
     use std::collections::HashMap;
 
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{
-        prelude::BasicSnippet,
-        rust_shadowing_helper_functions,
-        snippet_bencher::BenchmarkCase,
-        traits::{
-            function::{Function, FunctionInitialState, ShadowedFunction},
-            rust_shadow::RustShadow,
-        },
-        triton_vm::prelude::BFieldElement,
-        twenty_first::bfe,
-    };
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+    use tasm_lib::prelude::BasicSnippet;
+    use tasm_lib::rust_shadowing_helper_functions;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
+    use tasm_lib::traits::function::Function;
+    use tasm_lib::traits::function::FunctionInitialState;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::twenty_first::bfe;
 
     use super::NewClaim;
 

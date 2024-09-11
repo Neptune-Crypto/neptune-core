@@ -1,28 +1,22 @@
-use crate::prelude::{triton_vm, twenty_first};
-
 use std::collections::HashMap;
 
-use rand::{rngs::StdRng, RngCore, SeedableRng};
-use tasm_lib::{
-    data_type::DataType,
-    hashing::algebraic_hasher::hash_varlen::HashVarlen,
-    snippet_bencher::BenchmarkCase,
-    traits::{
-        basic_snippet::BasicSnippet,
-        function::{Function, FunctionInitialState},
-    },
-};
-use triton_vm::prelude::{triton_asm, BFieldElement};
-
+use rand::rngs::StdRng;
+use rand::RngCore;
+use rand::SeedableRng;
+use tasm_lib::data_type::DataType;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
-use twenty_first::{
-    math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
-};
+use tasm_lib::snippet_bencher::BenchmarkCase;
+use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::Function;
+use tasm_lib::traits::function::FunctionInitialState;
+use tasm_lib::triton_vm::prelude::*;
+use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::models::blockchain::{
-    shared::Hash,
-    transaction::utxo::{pseudorandom_utxo, Utxo},
-};
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
+use crate::models::blockchain::transaction::utxo::Utxo;
 
 /// HashUtxo takes a VoidPointer to a UTXO living in a contiguous
 /// list, and hashes it.
@@ -42,7 +36,7 @@ impl BasicSnippet for HashUtxo {
         "tasm_neptune_transaction_hash_utxo".to_string()
     }
 
-    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
         let hash_varlen = library.import(Box::new(HashVarlen));
 
@@ -102,7 +96,7 @@ impl Function for HashUtxo {
     ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let utxo = pseudorandom_utxo(seed);
-        let address = triton_vm::prelude::BFieldElement::new(rng.next_u64() % (1 << 20));
+        let address = bfe!(rng.next_u64() % (1 << 20));
         let mut stack = tasm_lib::empty_stack();
         stack.push(address);
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
@@ -121,8 +115,10 @@ impl Function for HashUtxo {
 
 #[cfg(test)]
 mod tests {
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+
     use super::*;
-    use tasm_lib::traits::{function::ShadowedFunction, rust_shadow::RustShadow};
 
     #[test]
     fn new_prop_test() {
@@ -133,8 +129,10 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+
     use super::*;
-    use tasm_lib::traits::{function::ShadowedFunction, rust_shadow::RustShadow};
 
     #[test]
     fn hash_utxo_benchmark() {

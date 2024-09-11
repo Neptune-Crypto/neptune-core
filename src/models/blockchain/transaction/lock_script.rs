@@ -1,20 +1,16 @@
-use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
-use crate::prelude::{triton_vm, twenty_first};
-use arbitrary::Arbitrary;
+use std::collections::HashMap;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
-use tasm_lib::triton_vm::program::{NonDeterminism, PublicInput};
-use tasm_lib::triton_vm::proof::{Claim, Proof};
-use triton_vm::instruction::LabelledInstruction;
-use triton_vm::program::Program;
-use triton_vm::triton_asm;
+use tasm_lib::triton_vm::prelude::*;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
-use twenty_first::math::b_field_element::BFieldElement;
+use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {
@@ -122,14 +118,14 @@ impl LockScriptAndWitness {
     }
 
     pub fn halts_gracefully(&self, public_input: PublicInput) -> bool {
-        self.program
-            .run(
-                public_input,
-                NonDeterminism::new(self.nd_tokens.clone())
-                    .with_digests(self.nd_digests.clone())
-                    .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>()),
-            )
-            .is_ok()
+        VM::run(
+            &self.program,
+            public_input,
+            NonDeterminism::new(self.nd_tokens.clone())
+                .with_digests(self.nd_digests.clone())
+                .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>()),
+        )
+        .is_ok()
     }
 
     /// Assuming the lock script halts gracefully, prove it.
@@ -149,13 +145,14 @@ impl<'a> Arbitrary<'a> for LockScriptAndWitness {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use num_traits::Zero;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+
+    use super::*;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(

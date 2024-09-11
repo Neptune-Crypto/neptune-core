@@ -1,36 +1,30 @@
-use crate::models::blockchain::transaction::BFieldCodec;
-use crate::models::proof_abstractions::SecretWitness;
-use crate::models::{
-    blockchain::shared::Hash, proof_abstractions::tasm::program::ConsensusProgram,
-};
-use crate::models::{
-    blockchain::transaction::{
-        primitive_witness::PrimitiveWitness,
-        validity::{
-            collect_lock_scripts::{CollectLockScripts, CollectLockScriptsWitness},
-            collect_type_scripts::CollectTypeScripts,
-            kernel_to_outputs::KernelToOutputs,
-            removal_records_integrity::RemovalRecordsIntegrityWitness,
-        },
-    },
-    proof_abstractions::mast_hash::MastHash,
-};
-use crate::triton_vm::proof::Proof;
 use get_size::GetSize;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::{
-    triton_vm::{self, program::PublicInput, stark::Stark},
-    twenty_first::util_types::algebraic_hasher::AlgebraicHasher,
-    Digest,
-};
+use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
 
-use super::{
-    collect_type_scripts::CollectTypeScriptsWitness, kernel_to_outputs::KernelToOutputsWitness,
-    removal_records_integrity::RemovalRecordsIntegrity,
-};
+use super::collect_type_scripts::CollectTypeScriptsWitness;
+use super::kernel_to_outputs::KernelToOutputsWitness;
+use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
+use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
+use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
+use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
+use crate::models::blockchain::transaction::BFieldCodec;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
+use crate::triton_vm::proof::Proof;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
@@ -428,9 +422,10 @@ impl ProofCollection {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
     use proptest::prop_assert;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(

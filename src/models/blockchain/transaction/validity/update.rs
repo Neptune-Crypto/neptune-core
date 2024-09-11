@@ -6,24 +6,16 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::triton_vm::triton_asm;
-use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::assert_rr_index_set_equality::AssertRemovalRecordIndexSetEquality;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
-use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
@@ -33,8 +25,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::tasm_lib::memory::encode_to_memory;
-use crate::triton_vm::program::NonDeterminism;
-use crate::triton_vm::program::Program;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -682,32 +672,29 @@ impl ConsensusProgram for Update {
 
 #[cfg(test)]
 mod test {
+    use proptest::arbitrary::Arbitrary;
+    use proptest::collection::vec;
+    use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use tasm_lib::triton_vm::error::InstructionError;
-    use tasm_lib::triton_vm::program::PublicInput;
-    use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+    use tasm_lib::triton_vm::prelude::*;
     use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
     use tasm_lib::Digest;
 
+    use super::*;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::ProofCollection;
-    use crate::models::proof_abstractions::tasm::builtins::decode_from_memory;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use proptest::arbitrary::Arbitrary;
-    use proptest::collection::vec;
-    use proptest::strategy::Strategy;
-    use proptest_arbitrary_interop::arb;
-
-    use super::*;
 
     fn deterministic_update_witness(
         num_inputs: usize,

@@ -255,7 +255,7 @@ impl<'a> Arbitrary<'a> for Utxo {
 mod utxo_tests {
     use super::*;
     use crate::models::blockchain::type_scripts::TypeScript;
-    use crate::triton_vm::program::Program;
+    use crate::triton_vm::prelude::*;
     use rand::thread_rng;
     use tracing_test::traced_test;
     use twenty_first::math::other::random_elements;

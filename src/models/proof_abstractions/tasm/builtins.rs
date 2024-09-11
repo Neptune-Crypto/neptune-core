@@ -1,21 +1,26 @@
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::x_field_element::XFieldElement;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::{
-    triton_vm::proof::Claim, triton_vm::proof::Proof, triton_vm::stark::Stark,
-    twenty_first::math::b_field_element::BFieldElement,
-    twenty_first::math::x_field_element::XFieldElement, twenty_first::prelude::MmrMembershipProof,
-    twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof,
-    twenty_first::util_types::mmr::shared_advanced::get_peak_heights,
-    twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index, Digest,
-};
+use tasm_lib::Digest;
 
+use super::environment::ND_INDIVIDUAL_TOKEN;
+use super::environment::ND_MEMORY;
+use super::environment::PROGRAM_DIGEST;
+use super::environment::PUB_INPUT;
+use super::environment::PUB_OUTPUT;
 use crate::models::proof_abstractions::tasm::environment::ND_DIGESTS;
-
-use super::environment::{ND_INDIVIDUAL_TOKEN, ND_MEMORY, PROGRAM_DIGEST, PUB_INPUT, PUB_OUTPUT};
 
 /// Get the hash digest of the program that's currently running.
 pub fn own_program_digest() -> Digest {
@@ -340,15 +345,13 @@ pub fn verify_mmr_successor_proof(
 
 #[cfg(test)]
 mod test {
+    use tasm_lib::verifier::stark_verify::StarkVerify;
+
+    use super::*;
     use crate::models::proof_abstractions;
     use crate::models::proof_abstractions::tasm::builtins::verify_stark;
     use crate::models::proof_abstractions::Claim;
     use crate::models::proof_abstractions::Program;
-    use crate::triton_vm;
-    use tasm_lib::triton_vm::program::NonDeterminism;
-    use tasm_lib::triton_vm::stark::Stark;
-    use tasm_lib::triton_vm::triton_asm;
-    use tasm_lib::verifier::stark_verify::StarkVerify;
 
     #[test]
     fn can_verify_halt_in_emulated_environment() {

@@ -1,34 +1,25 @@
-use crate::{
-    models::proof_abstractions::{
-        mast_hash::MastHash,
-        tasm::program::{prove_consensus_program, ConsensusProgram},
-    },
-    Hash,
-};
+use std::collections::HashMap;
+use std::hash::Hash as StdHash;
+use std::hash::Hasher as StdHasher;
+
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    hash::{Hash as StdHash, Hasher as StdHasher},
-};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        prelude::BFieldElement,
-        program::{NonDeterminism, Program, PublicInput},
-        proof::{Claim, Proof},
-    },
-    twenty_first::{
-        math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
-    },
-    Digest,
-};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
 
 use self::native_currency::NativeCurrency;
-
-use super::transaction::{primitive_witness::SaltedUtxos, transaction_kernel::TransactionKernel};
+use super::transaction::primitive_witness::SaltedUtxos;
+use super::transaction::transaction_kernel::TransactionKernel;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::Hash;
 
 pub mod native_currency;
 pub mod neptune_coins;
@@ -165,14 +156,11 @@ impl TypeScriptAndWitness {
             .flat_map(|d| d.reversed().values().to_vec())
             .collect_vec();
         let public_input = PublicInput::new(standard_input);
-        self.program
-            .run(
-                public_input,
-                NonDeterminism::new(self.nd_tokens.clone())
-                    .with_digests(self.nd_digests.clone())
-                    .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>()),
-            )
-            .is_ok()
+        let non_determinism = NonDeterminism::new(self.nd_tokens.clone())
+            .with_digests(self.nd_digests.clone())
+            .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>());
+
+        VM::run(&self.program, public_input, non_determinism).is_ok()
     }
 
     /// Assuming the type script halts gracefully, prove it.

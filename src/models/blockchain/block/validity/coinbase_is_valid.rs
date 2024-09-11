@@ -1,18 +1,12 @@
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    triton_vm::{
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, PublicInput},
-    },
-    twenty_first,
-};
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::{
-    blockchain::block::Block,
-    proof_abstractions::{tasm::program::ConsensusProgram, SecretWitness},
-};
+use crate::models::blockchain::block::Block;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoinbaseIsValidWitness {
@@ -28,7 +22,7 @@ impl SecretWitness for CoinbaseIsValidWitness {
         todo!()
     }
 
-    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
+    fn program(&self) -> Program {
         todo!()
     }
 }

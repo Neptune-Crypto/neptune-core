@@ -7,28 +7,21 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_loc
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
-use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
+use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use itertools::Itertools;
 use tasm_lib::data_type::DataType;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Library;
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::triton_vm::program::Program;
-use tasm_lib::triton_vm::program::NonDeterminism;
-use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::prelude::TasmObject;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
+use tasm_lib::memory::encode_to_memory;
 use tasm_lib::field;
 
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::tasm_lib::memory::encode_to_memory;
-use crate::triton_vm::triton_asm;
 use crate::BFieldElement;
 
 use super::proof_collection::ProofCollection;
@@ -561,27 +554,23 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::models::proof_abstractions::SecretWitness;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::triton_vm::{prelude::BFieldCodec, program::PublicInput};
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use tasm_lib::triton_vm::vm::PublicInput;
 
-    use crate::models::{
-        blockchain::transaction::{
-            primitive_witness::PrimitiveWitness,
-            validity::{
-                proof_collection::ProofCollection,
-                single_proof::{SingleProof, SingleProofWitness},
-            },
-        },
-        proof_abstractions::tasm::program::ConsensusProgram,
-    };
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+    use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
+    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::proof_abstractions::SecretWitness;
 
     #[test]
     fn can_verify_transaction_via_valid_proof_collection() {

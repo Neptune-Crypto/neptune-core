@@ -4,45 +4,42 @@ use std::fmt::Display;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
-use proptest::{
-    arbitrary::Arbitrary,
-    collection::vec,
-    strategy::{BoxedStrategy, Strategy},
-};
+use proptest::arbitrary::Arbitrary;
+use proptest::collection::vec;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use rand::{thread_rng, Rng};
-use serde::{Deserialize, Serialize};
-use tasm_lib::{
-    structure::tasm_object::TasmObject,
-    twenty_first::{
-        math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-        util_types::algebraic_hasher::AlgebraicHasher,
-    },
-    Digest,
-};
-use tracing::{debug, warn};
-
-use crate::{
-    models::blockchain::type_scripts::{
-        native_currency::NativeCurrencyWitness, neptune_coins::NeptuneCoins, TypeScriptWitness,
-    },
-    util_types::mutator_set::commit,
-};
-use crate::{
-    models::{
-        blockchain::type_scripts::{TypeScript, TypeScriptAndWitness},
-        proof_abstractions::{mast_hash::MastHash, timestamp::Timestamp},
-        state::wallet::address::generation_address,
-    },
-    util_types::mutator_set::{
-        ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
-    },
-};
-use crate::{util_types::mutator_set::msa_and_records::MsaAndRecords, Hash};
+use rand::thread_rng;
+use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
+use tracing::debug;
+use tracing::warn;
 
 use super::lock_script::LockScript;
 use super::lock_script::LockScriptAndWitness;
-use super::{transaction_kernel::TransactionKernel, utxo::Utxo, PublicAnnouncement};
+use super::transaction_kernel::TransactionKernel;
+use super::utxo::Utxo;
+use super::PublicAnnouncement;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::TypeScript;
+use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
+use crate::models::blockchain::type_scripts::TypeScriptWitness;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::wallet::address::generation_address;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::Hash;
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
 /// is desirable to associate a random but consistent salt for the entire list of UTXOs.
@@ -232,9 +229,10 @@ impl PrimitiveWitness {
             // This could be a lengthy, CPU intensive call.
             // Also, the lock script is satisfied if it halts gracefully (i.e., without crashing).
             // The output is irrelevant.
-            let result =
-                tokio::task::spawn_blocking(move || lock_script.run(public_input, secret_input))
-                    .await;
+            let result = tokio::task::spawn_blocking(move || {
+                VM::run(&lock_script, public_input, secret_input)
+            })
+            .await;
 
             if let Err(e) = result {
                 warn!("Failed to verify lock script of transaction. Got: \"{e}\"");
@@ -303,9 +301,10 @@ impl PrimitiveWitness {
 
             // Like above: potentially lengthy, CPU intensive call, only thing that matters
             // is error-free completion.
-            let result =
-                tokio::task::spawn_blocking(move || type_script.run(public_input, secret_input))
-                    .await;
+            let result = tokio::task::spawn_blocking(move || {
+                VM::run(&type_script, public_input, secret_input)
+            })
+            .await;
 
             if let Err(e) = result {
                 warn!("Type script {type_script_hash} not satisfied for transaction: {e}");
@@ -654,16 +653,17 @@ impl PrimitiveWitness {
 
 #[cfg(test)]
 mod test {
-    use super::PrimitiveWitness;
-    use crate::models::blockchain::transaction::TransactionProof;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+
+    use super::PrimitiveWitness;
+    use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
 
     #[proptest(cases = 5, async = "tokio")]
     async fn arbitrary_transaction_is_valid(

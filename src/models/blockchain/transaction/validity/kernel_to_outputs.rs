@@ -11,12 +11,7 @@ use tasm_lib::list;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::instruction::LabelledInstruction;
-use tasm_lib::triton_vm::prelude::BFieldElement;
-use tasm_lib::triton_vm::prelude::Digest;
-use tasm_lib::triton_vm::program::NonDeterminism;
-use tasm_lib::triton_vm::program::PublicInput;
-use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfieldcodec_derive::BFieldCodec;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 
@@ -308,10 +303,6 @@ impl ConsensusProgram for KernelToOutputs {
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
     use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -319,6 +310,10 @@ mod test {
     use test_strategy::proptest;
 
     use super::KernelToOutputsWitness;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::validity::kernel_to_outputs::KernelToOutputs;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::SecretWitness;
 
     #[proptest(cases = 12)]
     fn kernel_to_outputs_proptest(
@@ -365,9 +360,10 @@ mod test {
 
         assert_eq!(kernel_to_outputs_witness.output(), tasm_result);
     }
+    use tasm_lib::triton_vm;
+
     use crate::triton_vm::proof::Claim;
     use crate::triton_vm::stark::Stark;
-    use tasm_lib::triton_vm;
 
     #[test]
     fn kernel_to_outputs_failing_proof() {

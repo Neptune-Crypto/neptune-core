@@ -1,16 +1,13 @@
-use tasm_lib::triton_vm::prelude::LabelledInstruction;
-use tasm_lib::{
-    data_type::DataType,
-    hashing::{algebraic_hasher::hash_varlen::HashVarlen, merkle_verify::MerkleVerify},
-    prelude::{BasicSnippet, Library},
-    triton_vm::triton_asm,
-};
+use tasm_lib::data_type::DataType;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
+use tasm_lib::prelude::BasicSnippet;
+use tasm_lib::prelude::Library;
+use tasm_lib::triton_vm::prelude::*;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::{
-    blockchain::transaction::transaction_kernel::TransactionKernelField,
-    proof_abstractions::mast_hash::MastHash,
-};
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuthenticateTxkField(pub(crate) TransactionKernelField);
@@ -86,23 +83,17 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::triton_vm::error::InstructionError;
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
-    use tasm_lib::triton_vm::prelude::BFieldElement;
-    use tasm_lib::triton_vm::prelude::Tip5;
-    use tasm_lib::triton_vm::program::NonDeterminism;
     use tasm_lib::twenty_first::bfe;
-    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-    use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
+    use tasm_lib::twenty_first::prelude::*;
     use tasm_lib::Digest;
 
+    use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-    use super::*;
 
     impl AuthenticateTxkField {
         fn load_kernel(

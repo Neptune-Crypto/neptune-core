@@ -5,14 +5,13 @@
 // It has been shamelessly copied from greenhat's omnizk compiler project:
 // https://github.com/greenhat/omnizk
 
-use std::{
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::collections::VecDeque;
 
-use tasm_lib::{
-    triton_vm::program::NonDeterminism, twenty_first::math::b_field_element::BFieldElement, Digest,
-};
+use tasm_lib::triton_vm::prelude::NonDeterminism;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::Digest;
 
 thread_local! {
     pub(super) static PUB_INPUT: RefCell<VecDeque<BFieldElement>> = const {RefCell::new(VecDeque::new())};
