@@ -226,9 +226,7 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            fn claim_ptr_ptr_in_isolated_run() -> BFieldElement {
-                bfe!(-2)
-            }
+            let claim_ptr_ptr_in_isolated_run = tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;
 
             // _ *proof_collection
             let proof_collection_pointer = stack.pop().unwrap();
@@ -242,7 +240,7 @@ mod tests {
             encode_to_memory(memory, claim_pointer, &claim);
 
             // Mimic population of static memory
-            memory.insert(claim_ptr_ptr_in_isolated_run(), claim_pointer);
+            memory.insert(claim_ptr_ptr_in_isolated_run, claim_pointer);
 
             stack.push(claim_pointer);
         }

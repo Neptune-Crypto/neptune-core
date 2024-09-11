@@ -2,6 +2,7 @@ use strum::EnumCount;
 use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
@@ -11,6 +12,7 @@ use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::triton_asm;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
@@ -36,9 +38,7 @@ use crate::triton_vm::program::Program;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::twenty_first::prelude::Mmr;
-
+use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use super::single_proof::SingleProof;
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
@@ -367,16 +367,7 @@ impl ConsensusProgram for Update {
         let mut library = Library::new();
 
         let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
-        let load_digest_reversed = triton_asm! {
-            // *digest
-            read_mem 1 addi 2
-            read_mem 1 addi 2
-            read_mem 1 addi 2
-            read_mem 1 addi 2
-            read_mem 1 pop 1
-        };
 
-        let new_claim = library.import(Box::new(NewClaim));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
@@ -403,41 +394,7 @@ impl ConsensusProgram for Update {
         );
 
         let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
-        let generate_single_proof_claim = triton_asm!(
-            // _ *update_witness [new_txk_mhash]
-
-            push {Digest::LEN} push 0
-            call {new_claim}
-            // _ *update_witness [new_txk_mhash] *claim *output *input *program_digest
-
-            read_io {Digest::LEN}
-            // _ *update_witness [new_txk_mhash] *claim *output *input *program_digest [single_proof_program_digest]
-
-            dup 5
-            // _ **update_witness [new_txk_mhash] claim *output *input *program_digest [single_proof_program_digest] *program_digest
-
-            write_mem {Digest::LEN} pop 2
-            // _ *update_witness [new_txk_mhash] *claim *output *input
-
-            dup 8 {&old_txk_mh}
-            {&load_digest}
-            // _ *update_witness [new_txk_mhash] *claim *output *input [old_tx_mast_hash]
-
-            push {old_txk_digest_begin_ptr}
-            write_mem {Digest::LEN}
-            pop 1
-            // _ *update_witness [new_txk_mhash] *claim *output *input
-
-            push {old_txk_digest_begin_ptr}
-            {&load_digest_reversed}
-            // _ *update_witness [new_txk_mhash] *claim *output *input [old_txk_mhash_as_input]
-
-            dup 5 write_mem {Digest::LEN}
-            // _ *update_witness [new_txk_mhash] *claim *output *input (*input+5)
-
-            pop 3
-            // _ *update_witness [new_txk_mhash] *claim
-        );
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
 
         let mut authenticate_field_twice_with_no_change =
             |field_with_size_getter: &[LabelledInstruction], field: TransactionKernelField| {
@@ -499,10 +456,30 @@ impl ConsensusProgram for Update {
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // _ *update_witness
 
+            dup 0
+            {&old_txk_mh}
+            // _ *update_witness *old_txk_mhash
+
+            {&load_digest}
+            // _ *update_witness [old_tx_mast_hash; 5]
+
+            push {old_txk_digest_begin_ptr}
+            write_mem {Digest::LEN}
+            pop 1
+            // _ *update_witness
+
             read_io {Digest::LEN}
             // _ *update_witness [new_txk_mhash]
 
-            {&generate_single_proof_claim}
+            push {old_txk_digest_end_ptr}
+            read_mem 5
+            pop 1
+            // _ *update_witness [new_txk_mhash] [old_txk_mhash; 5]
+
+            read_io 5
+            // _ *update_witness [new_txk_mhash] [old_txk_mhash; 5] [single_proof_digest; 5]
+
+            call {generate_single_proof_claim}
             // _ *update_witness [new_txk_mhash] *claim
 
             dup 6 {&update_witness_field_old_proof}
@@ -781,7 +758,6 @@ mod test {
             aocl_successor_proof,
         )
     }
-        
 
     #[test]
     fn can_verify_transaction_update() {
