@@ -6,6 +6,7 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
@@ -20,6 +21,7 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::audit_vm_end_state::AuditVmEndState;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -386,6 +388,11 @@ impl ConsensusProgram for Update {
         let old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
 
+        let audit_preloaded_data =
+            library.import(Box::new(VerifyNdSiIntegrity::<UpdateWitness>::default()));
+        let audit_end_vm_state =
+            library.import(Box::new(AuditVmEndState::<UpdateWitness>::default()));
+
         let mut authenticate_field_twice_with_no_change =
             |field_with_size_getter: &[LabelledInstruction], field: TransactionKernelField| {
                 let authenticate_generic_field =
@@ -447,50 +454,57 @@ impl ConsensusProgram for Update {
             // _ *update_witness
 
             dup 0
+            call {audit_preloaded_data}
+            // _ *update_witness witness_size
+
+            swap 1
+            // _ witness_size *update_witness
+
+            dup 0
             {&old_txk_mh}
-            // _ *update_witness *old_txk_mhash
+            // _ witness_size *update_witness *old_txk_mhash
 
             {&load_digest}
-            // _ *update_witness [old_tx_mast_hash; 5]
+            // _ witness_size *update_witness [old_tx_mast_hash; 5]
 
             push {old_txk_digest_begin_ptr}
             write_mem {Digest::LEN}
             pop 1
-            // _ *update_witness
+            // _ witness_size *update_witness
 
             read_io {Digest::LEN}
-            // _ *update_witness [new_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash]
 
             push {old_txk_digest_end_ptr}
             read_mem 5
             pop 1
-            // _ *update_witness [new_txk_mhash] [old_txk_mhash; 5]
+            // _ witness_size *update_witness [new_txk_mhash] [old_txk_mhash; 5]
 
             read_io 5
-            // _ *update_witness [new_txk_mhash] [old_txk_mhash; 5] [single_proof_digest; 5]
+            // _ witness_size *update_witness [new_txk_mhash] [old_txk_mhash; 5] [single_proof_digest; 5]
 
             call {generate_single_proof_claim}
-            // _ *update_witness [new_txk_mhash] *claim
+            // _ witness_size *update_witness [new_txk_mhash] *claim
 
             dup 6 {&update_witness_field_old_proof}
-            // _ *update_witness [new_txk_mhash] *claim *proof
+            // _ witness_size *update_witness [new_txk_mhash] *claim *proof
 
             call {stark_verify}
-            // _ *update_witness [new_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash]
 
             /* Verify AOCL-related witness data */
             /* 1: Verify new AOCL-related witness data */
             dup 5
             {&new_aocl_mmr_field}
-            // _ *update_witness [new_txk_mhash] *new_aocl
+            // _ witness_size *update_witness [new_txk_mhash] *new_aocl
 
             dup 6
             {&new_swbfi_bagged}
-            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged
+            // _ witness_size *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged
 
             dup 7
             {&new_swbfa_hash}
-            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
+            // _ witness_size *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
             dup 2
             {&peaks_field}
@@ -503,20 +517,20 @@ impl ConsensusProgram for Update {
             dup 10
             dup 10
             call {authenticate_msa}
-            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
+            // _ witness_size *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest
 
             /* Verify old AOCL-related witness data */
             dup 8
             {&old_aocl_mmr_field}
-            // _ *update_witness [...; 8] *old_aocl
+            // _ witness_size *update_witness [...; 8] *old_aocl
 
             dup 9
             {&old_swbfi_bagged}
-            // _ *update_witness [...; 8] *old_aocl *old_swbfi_bagged
+            // _ witness_size *update_witness [...; 8] *old_aocl *old_swbfi_bagged
 
             dup 10
             {&old_swbfa_hash}
-            // _ *update_witness [...; 8] *old_aocl *old_swbfi_bagged *old_swbfa_digest
+            // _ witness_size *update_witness [...; 8] *old_aocl *old_swbfi_bagged *old_swbfa_digest
 
             dup 2
             {&peaks_field}
@@ -527,140 +541,141 @@ impl ConsensusProgram for Update {
             read_mem {Digest::LEN}
             pop 1
             call {authenticate_msa}
-            // _ *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
+            // _ witness_size *update_witness [new_txk_mhash] *new_aocl *new_swbfi_bagged *new_swbfa_digest *old_aocl *old_swbfi_bagged *old_swbfa_digest
 
             pop 2
             swap 2
             pop 2
             swap 1
-            // _ *update_witness [new_txk_mhash] *old_aocl *new_aocl
+            // _ witness_size *update_witness [new_txk_mhash] *old_aocl *new_aocl
 
             /* Verify that new AOCL is a successor of old AOCL */
             call {verify_mmr_successor_proof}
-            // _ *update_witness [new_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash]
 
 
             /* Authenticate inputs, preserve pointers */
             dup 5
             {&old_kernel}
-            // _ *update_witness [new_txk_mhash] *old_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel
             dup 0
             {&inputs_field_with_size}
-            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
 
             push {old_txk_digest_end_ptr}
             read_mem {Digest::LEN}
             pop 1
-            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size [old_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size [old_txk_mhash]
 
             dup 6
             dup 6
             call {authenticate_inputs}
-            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
 
             pop 1
             dup 7
             {&new_kernel}
             hint new_kernel_ptr = stack[0]
-            // _ *update_witness [new_txk_mhash] *old_kernel *old_inputs *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs *new_kernel
 
             swap 1
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs
 
             dup 1 {&inputs_field_with_size}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
 
             dup 9
             dup 9
             dup 9
             dup 9
             dup 9
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size [new_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size [new_txk_mhash]
 
             dup 6
             dup 6
             call {authenticate_inputs}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_size
 
             pop 1
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
 
             /* verify index set equality */
             call {assert_rr_index_set_equality}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate outputs and verify no-change */
             {&authenticate_field_twice_with_no_change(&outputs_field_with_size, TransactionKernelField::Outputs)}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate public announcements and verify no-change */
             {&authenticate_field_twice_with_no_change(&public_announcements_field_with_size, TransactionKernelField::PublicAnnouncements)}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate fee and verify no-change */
             {&authenticate_field_twice_with_no_change(&fee_field_with_size, TransactionKernelField::Fee)}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate coinbase and verify no-change */
             {&authenticate_field_twice_with_no_change(&coinbase_field_with_size, TransactionKernelField::Coinbase)}
-            // _ *update_witness [new_txk_mhash] *old_kernel *new_kernel
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate timestamps and verify gte */
             {&field_timestamp}
             swap 1
             {&field_timestamp}
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
 
             {&load_old_kernel_digest}
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh]
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh]
 
             dup 5 push 1
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh] *old_timestamp 1
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [old_kernel_txk_mh] *old_timestamp 1
 
             call {authenticate_timestamp}
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
 
             dup 6
             dup 6
             dup 6
             dup 6
             dup 6
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash]
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash]
 
             dup 6 push 1
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash] *new_timestamp 1
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp [new_txk_mhash] *new_timestamp 1
 
             call {authenticate_timestamp}
-            // _ *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp *old_timestamp
 
             read_mem 1 pop 1
-            // _ *update_witness [new_txk_mhash] *new_timestamp old_timestamp
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp old_timestamp
 
             split
-            // _ *update_witness [new_txk_mhash] *new_timestamp old_hi old_lo
+            // _ witness_size *update_witness [new_txk_mhash] *new_timestamp old_hi old_lo
 
             swap 1
             swap 2
             read_mem 1
             pop 1
             split
-            // _ *update_witness [new_txk_mhash] old_hi old_lo new_hi new_lo
+            // _ witness_size *update_witness [new_txk_mhash] old_hi old_lo new_hi new_lo
 
             call {u64_lt}
-            // _ *update_witness [new_txk_mhash] (new_timestamp < old_timestamp)
+            // _ witness_size *update_witness [new_txk_mhash] (new_timestamp < old_timestamp)
 
             push 0 eq
-            // _ *update_witness [new_txk_mhash] (new_timestamp >= old_timestamp)
+            // _ witness_size *update_witness [new_txk_mhash] (new_timestamp >= old_timestamp)
 
             assert
+            // _ witness_size *update_witness [new_txk_mhash]
 
-            pop 3
-            pop 2
-            pop 1
+            pop {Digest::LEN}
+            // _ witness_size *update_witness
+
+            call {audit_end_vm_state}
             // _
 
             halt
-
         };
 
         triton_asm! {
