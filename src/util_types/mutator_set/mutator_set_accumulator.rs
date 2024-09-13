@@ -1,31 +1,32 @@
 use std::collections::HashMap;
 
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::{
-    algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
-};
 
+use super::active_window::ActiveWindow;
+use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::get_swbf_indices;
+use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::AbsoluteIndexSet;
-use super::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE};
-use super::{
-    active_window::ActiveWindow, addition_record::AdditionRecord,
-    ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
-};
+use super::removal_record::RemovalRecord;
+use super::shared::BATCH_SIZE;
+use super::shared::CHUNK_SIZE;
+use super::shared::WINDOW_SIZE;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct MutatorSetAccumulator {
@@ -495,19 +496,20 @@ impl MutatorSetAccumulator {
 
 #[cfg(test)]
 mod ms_accumulator_tests {
-    use crate::util_types::{
-        mutator_set::{
-            commit,
-            shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
-        },
-        test_shared::mutator_set::*,
-    };
-    use itertools::{izip, Itertools};
+    use itertools::izip;
+    use itertools::Itertools;
     use proptest::prop_assert_eq;
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
+    use rand::Rng;
     use test_strategy::proptest;
 
     use super::*;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
+    use crate::util_types::test_shared::mutator_set::*;
 
     #[test]
     fn active_window_chunk_interval_unit_test() {

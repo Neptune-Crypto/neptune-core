@@ -1,15 +1,21 @@
-use anyhow::{Context, Result};
+use std::path::Path;
+use std::path::PathBuf;
+
+use anyhow::Context;
+use anyhow::Result;
 use directories::ProjectDirs;
-use std::path::{Path, PathBuf};
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
-use crate::models::state::archival_state::{BLOCK_INDEX_DB_NAME, MUTATOR_SET_DIRECTORY_NAME};
+use crate::models::state::archival_state::BLOCK_INDEX_DB_NAME;
+use crate::models::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
 use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
-use crate::models::state::shared::{
-    BLOCK_FILENAME_EXTENSION, BLOCK_FILENAME_PREFIX, DIR_NAME_FOR_BLOCKS,
-};
-use crate::models::state::wallet::{WALLET_DB_NAME, WALLET_DIRECTORY, WALLET_OUTPUT_COUNT_DB_NAME};
+use crate::models::state::shared::BLOCK_FILENAME_EXTENSION;
+use crate::models::state::shared::BLOCK_FILENAME_PREFIX;
+use crate::models::state::shared::DIR_NAME_FOR_BLOCKS;
+use crate::models::state::wallet::WALLET_DB_NAME;
+use crate::models::state::wallet::WALLET_DIRECTORY;
+use crate::models::state::wallet::WALLET_OUTPUT_COUNT_DB_NAME;
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone)]

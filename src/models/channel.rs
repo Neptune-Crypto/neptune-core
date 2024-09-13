@@ -1,15 +1,15 @@
-use crate::prelude::twenty_first;
-
 use std::net::SocketAddr;
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
-use super::blockchain::block::{block_height::BlockHeight, Block};
+use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
 use super::peer::TransactionNotification;
 use super::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {

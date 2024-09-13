@@ -1,30 +1,42 @@
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
+use std::cmp;
+use std::marker::Unpin;
+use std::net::SocketAddr;
+use std::time::SystemTime;
+
+use anyhow::bail;
+use anyhow::Result;
+use futures::sink::Sink;
+use futures::sink::SinkExt;
+use futures::stream::TryStream;
+use futures::stream::TryStreamExt;
+use itertools::Itertools;
+use tokio::select;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
+use twenty_first::math::digest::Digest;
 
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::channel::{MainToPeerThread, PeerThreadToMain, PeerThreadToMainTransaction};
-use crate::models::peer::{
-    HandshakeData, MutablePeerState, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
-};
-use crate::models::state::mempool::{
-    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
-};
+use crate::models::channel::MainToPeerThread;
+use crate::models::channel::PeerThreadToMain;
+use crate::models::channel::PeerThreadToMainTransaction;
+use crate::models::peer::HandshakeData;
+use crate::models::peer::MutablePeerState;
+use crate::models::peer::PeerInfo;
+use crate::models::peer::PeerMessage;
+use crate::models::peer::PeerSanctionReason;
+use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
+use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalStateLock;
-use anyhow::{bail, Result};
-use futures::sink::{Sink, SinkExt};
-use futures::stream::{TryStream, TryStreamExt};
-use itertools::Itertools;
-use std::cmp;
-use std::marker::Unpin;
-use std::net::SocketAddr;
-use std::time::SystemTime;
-use tokio::select;
-use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
-use twenty_first::math::digest::Digest;
+use crate::prelude::twenty_first;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -1179,21 +1191,23 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
+    use rand::Rng;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
-    use crate::{
-        config_models::network::Network,
-        models::{peer::TransactionNotification, state::wallet::WalletSecret},
-        tests::shared::{
-            get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
-            get_test_genesis_setup, make_mock_block_with_invalid_pow,
-            make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
-        },
-    };
-
     use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::peer::TransactionNotification;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::get_dummy_peer_connection_data_genesis;
+    use crate::tests::shared::get_dummy_socket_address;
+    use crate::tests::shared::get_test_genesis_setup;
+    use crate::tests::shared::make_mock_block_with_invalid_pow;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::Action;
+    use crate::tests::shared::Mock;
 
     #[traced_test]
     #[tokio::test]

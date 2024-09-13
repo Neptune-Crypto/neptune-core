@@ -1,19 +1,18 @@
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::prelude::twenty_first;
-
-use anyhow::Result;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use systemstat::{Platform, System};
+
+use anyhow::Result;
+use get_size::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use systemstat::Platform;
+use systemstat::System;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
-use tracing::{error, info};
+use tracing::error;
+use tracing::info;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -24,13 +23,18 @@ use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalStateLock, UtxoReceiverData};
+use crate::models::state::GlobalStateLock;
+use crate::models::state::UtxoReceiverData;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -711,20 +715,24 @@ impl RPC for NeptuneRPCServer {
 
 #[cfg(test)]
 mod rpc_server_tests {
-    use super::*;
-    use crate::Block;
-    use crate::{
-        config_models::network::Network,
-        models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
-        rpc_server::NeptuneRPCServer,
-        tests::shared::mock_genesis_global_state,
-        RPC_CHANNEL_CAPACITY,
-    };
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::SocketAddr;
+
     use anyhow::Result;
-    use num_traits::{One, Zero};
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use num_traits::One;
+    use num_traits::Zero;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
+
+    use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::peer::PeerSanctionReason;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::Block;
+    use crate::RPC_CHANNEL_CAPACITY;
 
     async fn test_rpc_server(
         network: Network,

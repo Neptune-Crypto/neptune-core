@@ -1,17 +1,15 @@
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use std::cmp::max;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
-use crate::database::storage::storage_schema::traits::StorageWriter as SW;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::storage::storage_vec::Index;
-use crate::util_types::mutator_set::commit;
-use anyhow::{bail, Result};
+use anyhow::bail;
+use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
-use std::cmp::max;
-use std::ops::{Deref, DerefMut};
-use tracing::{debug, info, warn};
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -27,7 +25,8 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
 use super::blockchain::transaction;
 use super::blockchain::transaction::lock_script::LockScriptAndWitness;
-use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
+use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::PublicAnnouncement;
@@ -40,17 +39,23 @@ use super::blockchain::type_scripts::TypeScriptAndWitness;
 use super::proof_abstractions::tasm::program::ConsensusProgram;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
+use crate::database::storage::storage_schema::traits::StorageWriter as SW;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::models::peer::HandshakeData;
 use crate::models::state::transaction::lock_script::LockScript;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-use crate::{Hash, VERSION};
+use crate::Hash;
+use crate::VERSION;
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -1394,19 +1399,24 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
-    use crate::{
-        config_models::network::Network,
-        models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
-        tests::shared::{
-            add_block_to_light_state, make_mock_block, make_mock_block_with_valid_pow,
-            mock_genesis_global_state, mock_genesis_wallet_state,
-        },
-    };
-    use num_traits::{One, Zero};
-    use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use num_traits::One;
+    use num_traits::Zero;
+    use rand::rngs::StdRng;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tracing_test::traced_test;
 
-    use super::{wallet::WalletSecret, *};
+    use super::wallet::WalletSecret;
+    use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::Block;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::tests::shared::add_block_to_light_state;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,

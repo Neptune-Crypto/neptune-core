@@ -8,30 +8,13 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
-use crate::{
-    models::{
-        blockchain::{transaction::TransactionProof, type_scripts::neptune_coins::NeptuneCoins},
-        proof_abstractions::timestamp::Timestamp,
-    },
-    prelude::twenty_first,
-    util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
-};
+use std::collections::hash_map::RandomState;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::iter::Rev;
 
 use bytesize::ByteSize;
 use get_size::GetSize;
-use num_traits::Zero;
-use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
-use std::{
-    collections::{hash_map::RandomState, HashMap, HashSet},
-    iter::Rev,
-};
-use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::Transaction;
-
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
 /// to mine, but a simple one is to pick transactions in descending order of
@@ -50,6 +33,20 @@ use crate::models::blockchain::transaction::Transaction;
 /// the set { TransactionA } while the optimal solution is { TransactionB,
 /// TransactionC }.
 use num_rational::BigRational as FeeDensity;
+use num_traits::Zero;
+use priority_queue::double_priority_queue::iterators::IntoSortedIter;
+use priority_queue::DoublePriorityQueue;
+use twenty_first::math::digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 // 72 hours in secs
 pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
@@ -439,34 +436,36 @@ impl Mempool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        config_models::network::Network,
-        models::{
-            blockchain::{
-                block::block_height::BlockHeight,
-                transaction::{utxo::Utxo, PublicAnnouncement, Transaction},
-                type_scripts::neptune_coins::NeptuneCoins,
-            },
-            shared::SIZE_20MB_IN_BYTES,
-            state::{
-                wallet::{utxo_notification_pool::UtxoNotifier, WalletSecret},
-                UtxoReceiverData,
-            },
-        },
-        tests::shared::{
-            make_mock_block, make_mock_transaction_with_wallet, mock_genesis_global_state,
-            mock_genesis_wallet_state,
-        },
-        util_types::mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, WINDOW_SIZE},
-    };
     use anyhow::Result;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::Zero;
-    use rand::{random, rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use rand::random;
+    use rand::rngs::StdRng;
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tracing::debug;
     use tracing_test::traced_test;
+
+    use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::transaction::Transaction;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::shared::SIZE_20MB_IN_BYTES;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::UtxoReceiverData;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_transaction_with_wallet;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {

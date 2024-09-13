@@ -215,7 +215,6 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::models::proof_abstractions::timestamp::Timestamp;
     use itertools::Itertools;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
@@ -232,10 +231,10 @@ mod tests {
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
 
+    use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-
-    use super::*;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn unit_test() {

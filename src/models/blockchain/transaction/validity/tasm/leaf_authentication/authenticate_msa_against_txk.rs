@@ -170,9 +170,8 @@ mod tests {
     use twenty_first::prelude::Sponge;
     use twenty_first::util_types::shared::bag_peaks;
 
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-
     use super::*;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 
     impl MemPreserver for AuthenticateMsaAgainstTxk {
         fn rust_shadow(

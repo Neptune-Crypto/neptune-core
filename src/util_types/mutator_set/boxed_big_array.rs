@@ -1,7 +1,14 @@
-use serde::de::{Deserialize, Deserializer, Error, SeqAccess, Visitor};
-use serde::ser::{Serialize, SerializeTuple, Serializer};
 use std::fmt;
 use std::marker::PhantomData;
+
+use serde::de::Deserialize;
+use serde::de::Deserializer;
+use serde::de::Error;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
+use serde::ser::Serialize;
+use serde::ser::SerializeTuple;
+use serde::ser::Serializer;
 
 pub trait CompositeBigArray<'de>: Sized {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

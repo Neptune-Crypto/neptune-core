@@ -1,13 +1,11 @@
 use itertools::Itertools;
 use strum::EnumCount;
-use tasm_lib::twenty_first::{
-    math::{b_field_element::BFieldElement, tip5::Digest},
-    prelude::MerkleTreeMaker,
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        merkle_tree::{CpuParallel, MerkleTree},
-    },
-};
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::math::tip5::Digest;
+use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::merkle_tree::CpuParallel;
+use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTree;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -53,7 +51,8 @@ pub trait MastHash {
 
 #[cfg(test)]
 mod test {
-    use strum::{EnumCount, FromRepr};
+    use strum::EnumCount;
+    use strum::FromRepr;
 
     use super::HasDiscriminant;
 

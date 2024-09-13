@@ -1,21 +1,30 @@
-use std::{
-    cmp::{max, min},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::cmp::max;
+use std::cmp::min;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 
-use super::{dashboard_app::DashboardEvent, screen::Screen};
 use itertools::Itertools;
-use neptune_core::{models::peer::PeerInfo, rpc_server::RPCClient};
-use ratatui::{
-    layout::{Constraint, Margin},
-    style::{Color, Style},
-    widgets::{Block, Borders, Cell, Row, Table, Widget},
-};
+use neptune_core::models::peer::PeerInfo;
+use neptune_core::rpc_server::RPCClient;
+use ratatui::layout::Constraint;
+use ratatui::layout::Margin;
+use ratatui::style::Color;
+use ratatui::style::Style;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Cell;
+use ratatui::widgets::Row;
+use ratatui::widgets::Table;
+use ratatui::widgets::Widget;
 use tarpc::context;
+use tokio::select;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
+
+use super::dashboard_app::DashboardEvent;
+use super::screen::Screen;
 
 #[derive(Debug, Clone)]
 pub struct PeersScreen {

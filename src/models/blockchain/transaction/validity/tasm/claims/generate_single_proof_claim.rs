@@ -64,14 +64,16 @@ impl BasicSnippet for GenerateSingleProofClaim {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use rand::prelude::StdRng;
     use rand::Rng;
-    use std::collections::HashMap;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
+    use tasm_lib::traits::algorithm::Algorithm;
     use tasm_lib::traits::algorithm::AlgorithmInitialState;
-    use tasm_lib::traits::algorithm::{Algorithm, ShadowedAlgorithm};
+    use tasm_lib::traits::algorithm::ShadowedAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::triton_vm::proof::Claim;
 

@@ -2,11 +2,15 @@ use std::cmp::max;
 use std::collections::HashMap;
 
 use arbitrary::Arbitrary;
+use itertools::Itertools;
+use num_traits::ConstOne;
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
 use tasm_lib::field;
+use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -20,6 +24,7 @@ use tasm_lib::Digest;
 use super::single_proof::SingleProof;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
@@ -31,7 +36,7 @@ use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::prelude::triton_vm::triton_asm;
+use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::triton_vm::prelude::Program;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -446,40 +451,57 @@ impl ConsensusProgram for Merge {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
+        fn read_address_from_write_address<T: BFieldCodec>(
+            address: BFieldElement,
+        ) -> BFieldElement {
+            let length = T::static_length().unwrap();
+            let offset = bfe!(u64::try_from(length).unwrap()) - BFieldElement::ONE;
+            address + offset
+        }
+
         let mut library = Library::new();
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
+        let hash_varlen = library.import(Box::new(HashVarlen));
+        let authenticate_txk_input_field = library.import(Box::new(AuthenticateTxkField(
+            TransactionKernelField::Inputs,
+        )));
 
-        let left_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
-        let right_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
-        let new_txk_mast_hash_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let left_txk_mast_hash_write_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let right_txk_mast_hash_write_address =
+            library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let new_txk_mast_hash_write_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
 
         let main = triton_asm! {
                                 // _
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
                                 // _ *merge_witness
 
-            read_io 5           // _ *merge_witness [new_txk_digest; 5]
-            push {new_txk_mast_hash_address}
-            write_mem 5
+            read_io {Digest::LEN}
+                                // _ *merge_witness [new_txk_digest; 5]
+            push {new_txk_mast_hash_write_address}
+            write_mem {Digest::LEN}
             pop 1               // _ *merge_witness
 
-            read_io 5           // _ *merge_witness [single_proof_program_digest; 5]
-            divine 5            // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
+            read_io {Digest::LEN}
+                                // _ *merge_witness [single_proof_program_digest; 5]
+            divine {Digest::LEN}
+                                // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
             dup 4 dup 4 dup 4 dup 4 dup 4
-            push {left_txk_mast_hash_address}
-            write_mem 5
+            push {left_txk_mast_hash_write_address}
+            write_mem {Digest::LEN}
             pop 1               // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
 
             dup 9 dup 9 dup 9 dup 9 dup 9
             call {generate_single_proof_claim}
                                 // _ *merge_witness [single_proof_program_digest; 5] *left_claim
-            divine 5            // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
+            divine {Digest::LEN}
+                                // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
             dup 4 dup 4 dup 4 dup 4 dup 4
-            push {right_txk_mast_hash_address}
-            write_mem 5
+            push {right_txk_mast_hash_write_address}
+            write_mem {Digest::LEN}
             pop 1               // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
 
             dup 10 dup 10 dup 10 dup 10 dup 10
@@ -497,6 +519,67 @@ impl ConsensusProgram for Merge {
             {&field!(MergeWitness::right_proof)}
                                 // _ *merge_witness *right_claim *right_proof
             call {stark_verify} // _ *merge_witness
+
+            push 0 push 0 push 0
+                                // _ *merge_witness 0 0 0
+
+            dup 0
+            {&field!(MergeWitness::left_kernel)}
+            dup 1
+            {&field!(MergeWitness::right_kernel)}
+            dup 2
+            {&field!(MergeWitness::new_kernel)}
+                                // _ *merge_witness 0 0 0 *left_tx_kernel *right_tx_kernel *new_tx_kernel
+
+            push {read_address_from_write_address::<Digest>(left_txk_mast_hash_write_address)}
+            read_mem {Digest::LEN}
+            pop 1               // _ *merge_witness 0 0 0 *l_txk *r_txk *n_txk [left_txk_digest; 5]
+            dup 7
+            {&field_with_size!(TransactionKernel::inputs)}
+                                // _ *merge_witness 0 0 0 *l_txk *r_txk *n_txk [left_txk_digest; 5] *l_txk_in size
+            dup 1
+            swap 13
+            pop 1               // _ *merge_witness *l_txk_in 0 0 *l_txk *r_txk *n_txk [left_txk_digest; 5] *l_txk_in size
+            call {authenticate_txk_input_field}
+                                // _ *merge_witness *l_txk_in 0 0 *l_txk *r_txk *n_txk
+
+            push {read_address_from_write_address::<Digest>(right_txk_mast_hash_write_address)}
+            read_mem {Digest::LEN}
+            pop 1               // _ *merge_witness *l_txk_in 0 0 *l_txk *r_txk *n_txk [right_txk_digest; 5]
+            dup 6
+            {&field_with_size!(TransactionKernel::inputs)}
+                                // _ *merge_witness *l_txk_in 0 0 *l_txk *r_txk *n_txk [right_txk_digest; 5] *r_txk_in size
+            dup 1
+            swap 12
+            pop 1               // _ *merge_witness *l_txk_in *r_txk_in 0 *l_txk *r_txk *n_txk [right_txk_digest; 5] *r_txk_in size
+            call {authenticate_txk_input_field}
+                                // _ *merge_witness *l_txk_in *r_txk_in 0 *l_txk *r_txk *n_txk
+
+            push {read_address_from_write_address::<Digest>(new_txk_mast_hash_write_address)}
+            read_mem {Digest::LEN}
+            pop 1               // _ *merge_witness *l_txk_in *r_txk_in 0 *l_txk *r_txk *n_txk [new_txk_digest; 5]
+            dup 5
+            {&field_with_size!(TransactionKernel::inputs)}
+                                // _ *merge_witness *l_txk_in *r_txk_in 0 *l_txk *r_txk *n_txk [new_txk_digest; 5] *n_txk_in size
+            dup 1
+            swap 11
+            pop 1               // _ *merge_witness *l_txk_in *r_txk_in *n_txk_in *l_txk *r_txk *n_txk [new_txk_digest; 5] *n_txk_in size
+            call {authenticate_txk_input_field}
+                                // _ *merge_witness *l_txk_in *r_txk_in *n_txk_in *l_txk *r_txk *n_txk
+
+
+
+
+            // ==============
+                                // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size
+            // {&load_old_kernel_digest}
+                                // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size [old_txk_mhash]
+            // dup 6 dup 6 call {authenticate_txk_input_field}
+                                // _ [new_txk_mhash] *old_kernel *new_kernel *field field_size
+            // ====
+
+            dup 1 swap 1        // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_in *l_txk_in size
+            call {hash_varlen}
         };
 
         triton_asm! {

@@ -1,5 +1,6 @@
 use super::super::storage_vec::Index;
-use super::{RustyKey, RustyValue};
+use super::RustyKey;
+use super::RustyValue;
 
 /// Database write operations
 #[derive(Debug, Clone)]

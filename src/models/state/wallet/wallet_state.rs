@@ -1,43 +1,55 @@
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
-
-use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
-use anyhow::{bail, Result};
-use itertools::Itertools;
-use num_traits::Zero;
-use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
+
+use anyhow::bail;
+use anyhow::Result;
+use itertools::Itertools;
+use num_traits::Zero;
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
 use tokio::fs::OpenOptions;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tracing::{debug, error, info, warn};
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio::io::BufWriter;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
-use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
-use super::wallet_status::{WalletStatus, WalletStatusElement};
-use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
+use super::utxo_notification_pool::UtxoNotificationPool;
+use super::utxo_notification_pool::UtxoNotifier;
+use super::wallet_status::WalletStatus;
+use super::wallet_status::WalletStatusElement;
+use super::WalletSecret;
+use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction::lock_script::LockScript;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 
 pub struct WalletState {
@@ -763,16 +775,16 @@ impl WalletState {
 #[cfg(test)]
 mod tests {
     use num_traits::One;
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
+    use rand::Rng;
     use tracing_test::traced_test;
 
-    use crate::{
-        config_models::network::Network,
-        models::state::wallet::utxo_notification_pool::ExpectedUtxo,
-        tests::shared::{make_mock_block, mock_genesis_global_state, mock_genesis_wallet_state},
-    };
-
     use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
 
     #[tokio::test]
     #[traced_test]

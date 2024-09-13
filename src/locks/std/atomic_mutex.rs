@@ -1,7 +1,15 @@
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+
 use super::traits::Atomic;
-use super::{LockAcquisition, LockCallbackFn, LockCallbackInfo, LockEvent, LockType};
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex, MutexGuard};
+use super::LockAcquisition;
+use super::LockCallbackFn;
+use super::LockCallbackInfo;
+use super::LockEvent;
+use super::LockType;
 
 /// An `Arc<Mutex<T>>` wrapper to make data thread-safe and easy to work with.
 ///

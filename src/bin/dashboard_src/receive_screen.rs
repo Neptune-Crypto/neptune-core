@@ -1,23 +1,30 @@
-use std::{
-    cmp::max,
-    error::Error,
-    sync::{Arc, Mutex},
-};
+use std::cmp::max;
+use std::error::Error;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use super::{
-    dashboard_app::{ConsoleIO, DashboardEvent},
-    overview_screen::VerticalRectifier,
-    screen::Screen,
-};
-use crossterm::event::{Event, KeyCode, KeyEventKind};
-use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
-use ratatui::{
-    layout::{Alignment, Margin},
-    style::{Color, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Widget},
-};
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
+use neptune_core::config_models::network::Network;
+use neptune_core::rpc_server::RPCClient;
+use ratatui::layout::Alignment;
+use ratatui::layout::Margin;
+use ratatui::style::Color;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use tarpc::context;
+
+use super::dashboard_app::ConsoleIO;
+use super::dashboard_app::DashboardEvent;
+use super::overview_screen::VerticalRectifier;
+use super::screen::Screen;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sign {

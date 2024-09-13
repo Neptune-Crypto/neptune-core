@@ -1,20 +1,18 @@
-use std::{error::Error, fmt};
+use std::error::Error;
+use std::fmt;
 
 use itertools::Itertools;
-use tasm_lib::{
-    twenty_first::{
-        math::bfield_codec::BFieldCodec,
-        util_types::algebraic_hasher::{AlgebraicHasher, Sponge},
-    },
-    Digest,
-};
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::Sponge;
+use tasm_lib::Digest;
 
+use self::addition_record::AdditionRecord;
+use self::shared::BATCH_SIZE;
+use self::shared::CHUNK_SIZE;
+use self::shared::NUM_TRIALS;
+use self::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
-
-use self::{
-    addition_record::AdditionRecord,
-    shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
-};
 
 pub mod active_window;
 pub mod addition_record;
@@ -96,10 +94,9 @@ mod accumulation_scheme_tests {
     use rand::Rng;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+    use super::*;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::test_shared::mutator_set::*;
-
-    use super::*;
 
     #[test]
     fn get_batch_index_test() {

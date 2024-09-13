@@ -87,10 +87,9 @@ mod tests {
     use twenty_first::prelude::AlgebraicHasher;
     use twenty_first::prelude::MerkleTreeInclusionProof;
 
+    use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-    use super::*;
 
     impl AuthenticateInputsAgainstTxk {
         fn correct_init_state(

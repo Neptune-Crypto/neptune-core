@@ -159,8 +159,9 @@ pub(crate) use duration_info;
 #[cfg(test)]
 mod test {
 
-    use super::*;
     use tracing::Level;
+
+    use super::*;
 
     fn fibonacci(n: u32) -> u32 {
         match n {

@@ -1,15 +1,11 @@
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
-
 use std::collections::HashMap;
 
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{thread_rng, Rng, RngCore, SeedableRng};
-
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
+use rand::thread_rng;
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -17,19 +13,24 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::NeptuneLevelDb;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
-use crate::util_types::mutator_set::chunk_dictionary::{
-    pseudorandom_chunk_dictionary, ChunkDictionary,
-};
-use crate::util_types::mutator_set::ms_membership_proof::{
-    pseudorandom_mutator_set_membership_proof, MsMembershipProof,
-};
+use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
+use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
+use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
+use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 pub fn random_chunk_dictionary() -> ChunkDictionary {
     let mut rng = thread_rng();

@@ -1,7 +1,4 @@
-use crate::database::storage::storage_vec::traits::*;
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-
+use itertools::Itertools;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
@@ -10,14 +7,15 @@ use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
 use twenty_first::math::digest::Digest;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::mmr::shared_advanced;
 use twenty_first::util_types::shared::bag_peaks;
 
-use itertools::Itertools;
-
-use twenty_first::util_types::mmr::{
-    mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
-    shared_advanced,
-};
+use crate::database::storage::storage_vec::traits::*;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -239,25 +237,23 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 #[cfg(test)]
 pub(crate) mod mmr_test {
 
-    use super::*;
-
     use itertools::*;
     use rand::random;
     use rand::thread_rng;
     use test_strategy::proptest;
-
-    use crate::database::storage::storage_schema::traits::*;
-    use crate::database::storage::storage_schema::SimpleRustyStorage;
-    use crate::database::storage::storage_vec::OrdinaryVec;
-    use crate::database::NeptuneLevelDb;
-    use crate::Hash;
-
     use twenty_first::math::b_field_element::BFieldElement;
     use twenty_first::math::other::*;
     use twenty_first::math::tip5::Tip5;
     use twenty_first::util_types::merkle_tree::*;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
+
+    use super::*;
+    use crate::database::storage::storage_schema::traits::*;
+    use crate::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::database::storage::storage_vec::OrdinaryVec;
+    use crate::database::NeptuneLevelDb;
+    use crate::Hash;
 
     type Storage = OrdinaryVec<Digest>;
 
@@ -283,8 +279,9 @@ pub(crate) mod mmr_test {
     }
 
     mod test_tree {
-        use super::*;
         use proptest_arbitrary_interop::arb;
+
+        use super::*;
 
         /// Test helper to deduplicate generation of Merkle trees.
         #[derive(Debug, Clone, test_strategy::Arbitrary)]

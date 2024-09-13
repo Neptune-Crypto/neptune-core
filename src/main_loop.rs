@@ -1,33 +1,44 @@
-use crate::prelude::twenty_first;
-
-use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
-
-use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
-use crate::models::blockchain::block::block_height::BlockHeight;
-
-use crate::models::peer::{
-    HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
-};
-
-use crate::models::state::GlobalStateLock;
-use anyhow::Result;
-use itertools::Itertools;
-use rand::prelude::{IteratorRandom, SliceRandom};
-use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::thread::sleep;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
+
+use anyhow::Result;
+use itertools::Itertools;
+use rand::prelude::IteratorRandom;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::select;
+use tokio::signal;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::{select, signal, time};
-use tracing::{debug, error, info, warn};
+use tokio::time;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 use twenty_first::amount::u32s::U32s;
 
-use crate::models::channel::{
-    MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
-};
+use crate::connect_to_peers::answer_peer_wrapper;
+use crate::connect_to_peers::call_peer_wrapper;
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::channel::MainToMiner;
+use crate::models::channel::MainToPeerThread;
+use crate::models::channel::MinerToMain;
+use crate::models::channel::PeerThreadToMain;
+use crate::models::channel::RPCServerToMain;
+use crate::models::peer::HandshakeData;
+use crate::models::peer::PeerInfo;
+use crate::models::peer::PeerSynchronizationState;
+use crate::models::peer::TransactionNotification;
+use crate::models::state::GlobalStateLock;
+use crate::prelude::twenty_first;
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
@@ -837,7 +848,8 @@ impl MainLoopHandler {
             tokio::sync::mpsc::channel(2);
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::signal;
+            use tokio::signal::unix::SignalKind;
 
             // Monitor for SIGTERM
             let mut sigterm = signal(SignalKind::terminate())?;

@@ -1,15 +1,12 @@
 use itertools::Itertools;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{BoxedStrategy, Just, Strategy},
-};
+use proptest::arbitrary::Arbitrary;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Just;
+use proptest::strategy::Strategy;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use tasm_lib::{
-    twenty_first::util_types::mmr::{
-        mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
-    },
-    Digest,
-};
+use tasm_lib::Digest;
 
 use super::root_and_paths::RootAndPaths;
 
@@ -148,13 +145,14 @@ impl Arbitrary for MmraAndMembershipProofs {
 #[cfg(test)]
 mod test {
 
-    use super::*;
-    use crate::twenty_first::math::tip5::Digest;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test_strategy::proptest;
+
+    use super::*;
+    use crate::twenty_first::math::tip5::Digest;
 
     fn indices_and_leafs_strategy(max: u64, num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
         vec((0u64..max, arb::<Digest>()), num)

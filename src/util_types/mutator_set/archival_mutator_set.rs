@@ -1,9 +1,5 @@
-use crate::database::storage::storage_vec::traits::*;
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::{get_swbf_indices, MutatorSetError};
-
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::error::Error;
 
 use itertools::Itertools;
@@ -20,7 +16,13 @@ use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
-use super::shared::{BATCH_SIZE, CHUNK_SIZE};
+use super::shared::BATCH_SIZE;
+use super::shared::CHUNK_SIZE;
+use crate::database::storage::storage_vec::traits::*;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::get_swbf_indices;
+use crate::util_types::mutator_set::MutatorSetError;
 
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
@@ -457,16 +459,16 @@ where
 mod archival_mutator_set_tests {
     use itertools::Itertools;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
-
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
-    use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
-    use crate::util_types::test_shared::mutator_set::{
-        empty_rusty_mutator_set, make_item_and_randomnesses,
-    };
+    use rand::Rng;
+    use rand::SeedableRng;
 
     use super::*;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
+    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
 
     #[tokio::test]
     async fn archival_set_commitment_test() {

@@ -1,14 +1,14 @@
-use crate::prelude::twenty_first;
-
-use crate::database::{
-    storage::storage_schema::{
-        traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
-    },
-    NeptuneLevelDb,
-};
 use twenty_first::math::tip5::Digest;
 
 use super::monitored_utxo::MonitoredUtxo;
+use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_schema::DbtSingleton;
+use crate::database::storage::storage_schema::DbtVec;
+use crate::database::storage::storage_schema::RustyKey;
+use crate::database::storage::storage_schema::RustyValue;
+use crate::database::storage::storage_schema::SimpleRustyStorage;
+use crate::database::NeptuneLevelDb;
+use crate::prelude::twenty_first;
 
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,

@@ -1,10 +1,11 @@
 use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::field_with_size;
 use tasm_lib::memory::write_words_to_memory_leave_pointer;
 use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::Digest;
-use tasm_lib::{field, field_with_size};
 
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -211,9 +212,8 @@ mod tests {
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
 
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-
     use super::*;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 
     #[test]
     fn unit_test() {

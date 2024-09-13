@@ -1,37 +1,41 @@
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::error::Error;
+use std::fmt;
+use std::ops::IndexMut;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::error::Error;
-use std::fmt;
-use std::ops::IndexMut;
+use rand::Rng;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
+use super::chunk_dictionary::pseudorandom_chunk_dictionary;
+use super::chunk_dictionary::ChunkDictionary;
+use super::commit;
+use super::get_swbf_indices;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
-use super::shared::{
-    get_batch_mutation_argument_for_removal_record,
-    prepare_authenticated_batch_modification_for_removal_record_reversion, BATCH_SIZE, CHUNK_SIZE,
-};
-use super::{commit, get_swbf_indices};
+use super::shared::get_batch_mutation_argument_for_removal_record;
+use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
+use super::shared::BATCH_SIZE;
+use super::shared::CHUNK_SIZE;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -590,18 +594,23 @@ pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembe
 #[cfg(test)]
 mod ms_proof_tests {
 
-    use crate::util_types::mutator_set::chunk::Chunk;
-    use crate::util_types::mutator_set::commit;
-    use crate::util_types::test_shared::mutator_set::{
-        empty_rusty_mutator_set, make_item_and_randomnesses, random_mutator_set_membership_proof,
-    };
-
-    use super::*;
-    use itertools::{Either, Itertools};
+    use itertools::Either;
+    use itertools::Itertools;
+    use rand::random;
     use rand::rngs::StdRng;
-    use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
+    use rand::thread_rng;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::SeedableRng;
     use twenty_first::math::other::random_elements;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+
+    use super::*;
+    use crate::util_types::mutator_set::chunk::Chunk;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
+    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
+    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
 
     #[test]
     fn mp_equality_test() {

@@ -1,26 +1,28 @@
-use crate::config_models::network::Network;
-use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::twenty_first;
+use std::sync::OnceLock;
 
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
-use num_traits::{abs, Zero};
-
-use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use num_traits::abs;
+use num_traits::Zero;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::math::bfield_codec::BFieldCodec;
-
-use tracing::{debug, error, warn};
-
+use tracing::debug;
+use tracing::error;
+use tracing::warn;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::config_models::network::Network;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::prelude::twenty_first;
 
 pub mod block_body;
 pub mod block_header;
@@ -33,9 +35,10 @@ pub mod transfer_block;
 pub mod validity;
 
 use self::block_body::BlockBody;
-use self::block_header::{
-    BlockHeader, MINIMUM_DIFFICULTY, TARGET_BLOCK_INTERVAL, TARGET_DIFFICULTY_U32_SIZE,
-};
+use self::block_header::BlockHeader;
+use self::block_header::MINIMUM_DIFFICULTY;
+use self::block_header::TARGET_BLOCK_INTERVAL;
+use self::block_header::TARGET_DIFFICULTY_U32_SIZE;
 use self::block_height::BlockHeight;
 use self::block_kernel::BlockKernel;
 use self::mutator_set_update::MutatorSetUpdate;
@@ -46,7 +49,8 @@ use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
 use crate::models::blockchain::shared::Hash;
-use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
+use crate::models::state::wallet::address::generation_address::ReceivingAddress;
+use crate::models::state::wallet::address::generation_address::{self};
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -748,22 +752,20 @@ impl Block {
 #[cfg(test)]
 mod block_tests {
 
-    use crate::{
-        config_models::network::Network,
-        database::storage::storage_schema::SimpleRustyStorage,
-        database::NeptuneLevelDb,
-        models::state::wallet::WalletSecret,
-        tests::shared::{
-            make_mock_block, make_mock_block_with_valid_pow, mock_genesis_global_state,
-        },
-        util_types::mutator_set::archival_mmr::ArchivalMmr,
-    };
+    use rand::thread_rng;
+    use rand::Rng;
     use strum::IntoEnumIterator;
+    use tracing_test::traced_test;
 
     use super::*;
-
-    use rand::{thread_rng, Rng};
-    use tracing_test::traced_test;
+    use crate::config_models::network::Network;
+    use crate::database::storage::storage_schema::SimpleRustyStorage;
+    use crate::database::NeptuneLevelDb;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
     impl Block {
         pub fn new_block_from_template(

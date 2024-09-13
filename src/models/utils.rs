@@ -1,7 +1,6 @@
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 use futures::Future;
 

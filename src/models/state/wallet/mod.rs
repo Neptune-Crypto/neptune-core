@@ -8,29 +8,34 @@ pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
-use anyhow::{bail, Context, Result};
+use std::fs::{self};
+use std::path::Path;
+use std::path::PathBuf;
+
+use anyhow::bail;
+use anyhow::Context;
+use anyhow::Result;
 use bip39::Mnemonic;
 use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::{thread_rng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::fs::{self};
-use std::path::{Path, PathBuf};
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::info;
+use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use zeroize::{Zeroize, ZeroizeOnDrop};
-
-use twenty_first::math::b_field_element::BFieldElement;
-
-use crate::models::blockchain::block::block_height::BlockHeight;
-
-use crate::Hash;
+use zeroize::Zeroize;
+use zeroize::ZeroizeOnDrop;
 
 use self::address::generation_address;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::Hash;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
@@ -347,7 +352,6 @@ impl WalletSecret {
 #[cfg(test)]
 mod wallet_tests {
 
-    use crate::database::storage::storage_vec::traits::*;
     use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
@@ -359,6 +363,7 @@ mod wallet_tests {
     use super::wallet_state::WalletState;
     use super::*;
     use crate::config_models::network::Network;
+    use crate::database::storage::storage_vec::traits::*;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
@@ -369,10 +374,10 @@ mod wallet_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
-    use crate::tests::shared::{
-        make_mock_block, make_mock_transaction_with_generation_key, mock_genesis_global_state,
-        mock_genesis_wallet_state,
-    };
+    use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_transaction_with_generation_key;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::mock_genesis_wallet_state;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...

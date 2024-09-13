@@ -1,37 +1,38 @@
 use std::collections::HashMap;
 
+use get_size::GetSize;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::library::Library;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::bfe;
+use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
+
+use super::neptune_coins::NeptuneCoins;
+use super::TypeScriptWitness;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
-use crate::models::blockchain::transaction::transaction_kernel::{
-    TransactionKernel, TransactionKernelField,
-};
-use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::SecretWitness;
-
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::tasm::coinbase_amount::CoinbaseAmount;
 use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-
-use tasm_lib::data_type::DataType;
-use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
-use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
-use tasm_lib::library::Library;
-use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
-use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::bfe;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::{field, field_with_size};
-use tasm_lib::{twenty_first::math::b_field_element::BFieldElement, Digest};
-
-use super::neptune_coins::NeptuneCoins;
-use super::TypeScriptWitness;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins. The arithmetic for amounts are defined by the struct `NeptuneCoins`.
@@ -626,26 +627,27 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
-    use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::prop_assert;
-    use proptest::{
-        arbitrary::Arbitrary, collection::vec, strategy::Strategy, test_runner::TestRunner,
-    };
+    use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
+    use super::*;
+    use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::{utxo::Utxo, PublicAnnouncement};
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::triton_vm::prelude::InstructionError;
-
-    use super::*;
 
     fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> Result<(), TestCaseError> {
         let tasm_result = NativeCurrency

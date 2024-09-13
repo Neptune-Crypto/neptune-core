@@ -1,6 +1,7 @@
 use leveldb::database::key::IntoLevelDBKey;
 use leveldb::error::Error;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 // Todo: consider making RustyKey a newtype for RustyValue and auto derive all its From impls
 //       using either `derive_more` or `newtype_derive` crate

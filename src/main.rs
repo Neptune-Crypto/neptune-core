@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use neptune_core::config_models::cli_args;
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 pub async fn main() -> Result<()> {

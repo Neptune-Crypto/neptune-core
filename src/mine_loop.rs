@@ -1,3 +1,21 @@
+use std::ops::Deref;
+use std::time::Duration;
+
+use anyhow::Context;
+use anyhow::Result;
+use futures::channel::oneshot;
+use num_traits::identities::Zero;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
+use tokio::select;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tracing::*;
+use twenty_first::amount::u32s::U32s;
+
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::*;
@@ -7,22 +25,9 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
-use crate::models::state::{GlobalState, GlobalStateLock};
+use crate::models::state::GlobalState;
+use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use anyhow::{Context, Result};
-use futures::channel::oneshot;
-use num_traits::identities::Zero;
-use rand::rngs::StdRng;
-use rand::thread_rng;
-use rand::Rng;
-use rand::SeedableRng;
-use std::ops::Deref;
-use std::time::Duration;
-use tokio::select;
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
-use tracing::*;
-use twenty_first::amount::u32s::U32s;
 
 /// Attempt to mine a valid block for the network
 #[allow(clippy::too_many_arguments)]
@@ -351,18 +356,17 @@ pub async fn mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
-    use crate::WalletSecret;
-    use crate::{
-        config_models::network::Network,
-        models::{proof_abstractions::timestamp::Timestamp, state::UtxoReceiverData},
-        tests::shared::mock_genesis_global_state,
-    };
     use lock_script::LockScript;
     use tasm_lib::Digest;
     use tracing_test::traced_test;
     use utxo::Utxo;
 
     use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::UtxoReceiverData;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::WalletSecret;
 
     #[traced_test]
     #[tokio::test]

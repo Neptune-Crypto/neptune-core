@@ -1,16 +1,18 @@
-use super::leveldb::DB;
+use std::marker::PhantomData;
+use std::path::Path;
+
 use anyhow::Result;
-use leveldb::{
-    batch::WriteBatch,
-    iterator::Iterable,
-    options::{Options, ReadOptions, WriteOptions},
-};
+use leveldb::batch::WriteBatch;
+use leveldb::iterator::Iterable;
+use leveldb::options::Options;
+use leveldb::options::ReadOptions;
+use leveldb::options::WriteOptions;
 use leveldb_sys::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::marker::PhantomData;
-use std::path::Path;
 use tokio::task;
+
+use super::leveldb::DB;
 
 struct NeptuneLevelDbInternal<Key, Value>
 where

@@ -1,14 +1,16 @@
-use crate::prelude::twenty_first;
+use std::ops::Range;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
+use serde::Deserialize;
+use serde::Serialize;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
-use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
+use super::shared::CHUNK_SIZE;
+use super::shared::WINDOW_SIZE;
+use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary)]
 pub struct ActiveWindow {
@@ -175,11 +177,12 @@ impl ActiveWindow {
 #[cfg(test)]
 mod active_window_tests {
 
-    use crate::models::blockchain::shared::Hash;
+    use rand::thread_rng;
+    use rand::RngCore;
+    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
-    use rand::{thread_rng, RngCore};
-    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+    use crate::models::blockchain::shared::Hash;
 
     impl ActiveWindow {
         fn new_from(sbf: Vec<u32>) -> Self {

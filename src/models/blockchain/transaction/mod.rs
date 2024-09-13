@@ -8,15 +8,19 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
-use anyhow::{bail, Result};
+use std::cmp::max;
+use std::hash::Hash as StdHash;
+use std::hash::Hasher as StdHasher;
+
+use anyhow::bail;
+use anyhow::Result;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use serde::{Deserialize, Serialize};
-use std::cmp::max;
-use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::Digest;
 use tracing::error;
@@ -408,9 +412,8 @@ mod tests {
     use tasm_lib::Digest;
     use tests::primitive_witness::SaltedUtxos;
 
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-
     use super::*;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
     #[test]
     fn decode_encode_test_empty() {
@@ -449,14 +452,10 @@ mod transaction_tests {
     use transaction_tests::utxo::Utxo;
 
     use super::*;
-    use crate::{
-        models::{
-            blockchain::type_scripts::neptune_coins::NeptuneCoins,
-            proof_abstractions::timestamp::Timestamp,
-        },
-        tests::shared::make_mock_transaction,
-        util_types::mutator_set::commit,
-    };
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::util_types::mutator_set::commit;
 
     #[traced_test]
     #[test]

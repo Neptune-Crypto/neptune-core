@@ -1,8 +1,3 @@
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
-
 use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
@@ -29,10 +24,14 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::LockScriptAndWitness;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
@@ -445,13 +444,12 @@ mod test_generation_addresses {
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+    use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::tests::shared::make_mock_transaction;
-
-    use super::*;
 
     #[proptest]
     fn lock_script_halts_gracefully(

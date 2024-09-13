@@ -1,7 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
 
-use super::{block_body::BlockBody, block_header::BlockHeader};
+use super::block_body::BlockBody;
+use super::block_header::BlockHeader;
 
 /// Data structure for communicating blocks with peers. The hash digest is not
 /// communicated such that the receiver is forced to calculate it themselves.

@@ -1,7 +1,11 @@
 use divan::Bencher;
-use leveldb::options::{Options, ReadOptions, WriteOptions};
+use leveldb::options::Options;
+use leveldb::options::ReadOptions;
+use leveldb::options::WriteOptions;
 use leveldb_sys::Compression;
-use neptune_core::database::storage::storage_schema::{traits::*, DbtVec, SimpleRustyStorage};
+use neptune_core::database::storage::storage_schema::traits::*;
+use neptune_core::database::storage::storage_schema::DbtVec;
+use neptune_core::database::storage::storage_schema::SimpleRustyStorage;
 use neptune_core::database::storage::storage_vec::traits::*;
 use neptune_core::database::NeptuneLevelDb;
 

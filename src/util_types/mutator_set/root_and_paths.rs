@@ -2,13 +2,14 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{BoxedStrategy, Just, Strategy},
-};
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Just;
+use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use tasm_lib::{twenty_first::util_types::algebraic_hasher::AlgebraicHasher, Digest};
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::Digest;
 
 use crate::models::blockchain::shared::Hash;
 

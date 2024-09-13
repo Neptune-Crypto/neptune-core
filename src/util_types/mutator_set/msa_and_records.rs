@@ -1,31 +1,29 @@
 use std::collections::HashMap;
 
-use super::{
-    active_window::ActiveWindow,
-    chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
-    get_swbf_indices,
-    mmra_and_membership_proofs::MmraAndMembershipProofs,
-    ms_membership_proof::MsMembershipProof,
-    mutator_set_accumulator::MutatorSetAccumulator,
-    removal_record::{AbsoluteIndexSet, RemovalRecord},
-    shared::{BATCH_SIZE, CHUNK_SIZE},
-};
-use crate::{util_types::mutator_set::commit, Hash};
 use itertools::Itertools;
+use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{BoxedStrategy, Strategy},
-};
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use tasm_lib::{
-    twenty_first::util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr},
-    },
-    Digest,
-};
+use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tasm_lib::Digest;
+
+use super::active_window::ActiveWindow;
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
+use super::get_swbf_indices;
+use super::mmra_and_membership_proofs::MmraAndMembershipProofs;
+use super::ms_membership_proof::MsMembershipProof;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
+use super::removal_record::AbsoluteIndexSet;
+use super::removal_record::RemovalRecord;
+use super::shared::BATCH_SIZE;
+use super::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::commit;
+use crate::Hash;
 
 #[derive(Debug, Clone)]
 pub struct MsaAndRecords {

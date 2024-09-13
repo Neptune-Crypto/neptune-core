@@ -1,21 +1,26 @@
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::{triton_vm, twenty_first};
+use std::slice::Iter;
+use std::slice::IterMut;
+use std::vec::IntoIter;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::slice::{Iter, IterMut};
-use std::vec::IntoIter;
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
+use serde::Deserialize;
+use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk::Chunk;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::triton_vm;
+use crate::prelude::twenty_first;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
@@ -202,16 +207,15 @@ pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
 
 #[cfg(test)]
 mod chunk_dict_tests {
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
-
-    use super::super::archival_mmr::mmr_test::mock;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::math::other::random_elements;
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+    use super::super::archival_mmr::mmr_test::mock;
     use super::*;
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     #[tokio::test]
     async fn hash_test() {

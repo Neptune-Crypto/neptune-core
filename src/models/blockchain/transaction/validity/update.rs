@@ -2,6 +2,7 @@ use strum::EnumCount;
 use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::Library;
@@ -14,7 +15,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::validity::tasm::assert_rr_index_set_equality::AssertRemovalRecordIndexSetEquality;
+use crate::models::blockchain::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::models::blockchain::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::BFieldCodec;
@@ -371,8 +372,9 @@ impl ConsensusProgram for Update {
             TransactionKernelField::Timestamp,
         )));
         let verify_mmr_successor_proof = library.import(Box::new(VerifyMmrSuccessor));
-        let assert_rr_index_set_equality =
-            library.import(Box::new(AssertRemovalRecordIndexSetEquality));
+        let hash_removal_record_index_set =
+            library.import(Box::new(HashRemovalRecordIndexSets::<1>));
+        let multiset_eq_digests = library.import(Box::new(MultisetEqualityDigests));
         let u64_lt = library.import(Box::new(LtU64ConsumeArgs));
 
         let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
@@ -600,7 +602,17 @@ impl ConsensusProgram for Update {
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
 
             /* verify index set equality */
-            call {assert_rr_index_set_equality}
+            call {hash_removal_record_index_set}
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs_digests
+
+            swap 1
+            call {hash_removal_record_index_set}
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel *new_inputs_digests *old_inputs_digests
+
+            call {multiset_eq_digests}
+            // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel set_equality(*new_inputs_digests, *old_inputs_digests)
+
+            assert
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate outputs and verify no-change */

@@ -1,29 +1,40 @@
-use std::{
-    cmp::{max, min},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::cmp::max;
+use std::cmp::min;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 
-use super::{dashboard_app::DashboardEvent, screen::Screen};
-use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind;
 use itertools::Itertools;
-use neptune_core::{
-    models::{
-        blockchain::{block::block_height::BlockHeight, type_scripts::neptune_coins::NeptuneCoins},
-        proof_abstractions::timestamp::Timestamp,
-    },
-    rpc_server::RPCClient,
-};
-use num_traits::{CheckedSub, Zero};
-use ratatui::{
-    layout::{Constraint, Margin},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState, Widget},
-};
+use neptune_core::models::blockchain::block::block_height::BlockHeight;
+use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::models::proof_abstractions::timestamp::Timestamp;
+use neptune_core::rpc_server::RPCClient;
+use num_traits::CheckedSub;
+use num_traits::Zero;
+use ratatui::layout::Constraint;
+use ratatui::layout::Margin;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Cell;
+use ratatui::widgets::Row;
+use ratatui::widgets::StatefulWidget;
+use ratatui::widgets::Table;
+use ratatui::widgets::TableState;
+use ratatui::widgets::Widget;
 use tarpc::context;
+use tokio::select;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
+
+use super::dashboard_app::DashboardEvent;
+use super::screen::Screen;
 
 type BalanceUpdate = (BlockHeight, Timestamp, NeptuneCoins, NeptuneCoins);
 type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;

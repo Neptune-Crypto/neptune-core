@@ -195,8 +195,10 @@ mod test {
 
 #[cfg(test)]
 mod benches {
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
+
     use super::*;
-    use tasm_lib::traits::{function::ShadowedFunction, rust_shadow::RustShadow};
 
     #[test]
     fn coinbase_amount_benchmark() {

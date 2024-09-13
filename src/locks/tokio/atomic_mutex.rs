@@ -1,8 +1,16 @@
-use super::{LockAcquisition, LockCallbackFn, LockCallbackInfo, LockEvent, LockType};
-use futures::future::BoxFuture;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
-use tokio::sync::{Mutex, MutexGuard};
+
+use futures::future::BoxFuture;
+use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
+
+use super::LockAcquisition;
+use super::LockCallbackFn;
+use super::LockCallbackInfo;
+use super::LockEvent;
+use super::LockType;
 
 /// An `Arc<Mutex<T>>` wrapper to make data thread-safe and easy to work with.
 ///
@@ -440,8 +448,9 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use futures::future::FutureExt;
+
+    use super::*;
 
     #[tokio::test]
     // Verify (compile-time) that AtomicMutex:.lock() and :.lock_mut() accept mutable values.  (FnMut)

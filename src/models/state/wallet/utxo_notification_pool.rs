@@ -1,26 +1,27 @@
-use crate::{
-    models::blockchain::transaction::transaction_kernel::TransactionKernel,
-    prelude::twenty_first,
-    util_types::mutator_set::{addition_record::AdditionRecord, commit},
-};
+use std::collections::HashMap;
+use std::time::Duration;
+use std::time::SystemTime;
 
-use anyhow::{bail, Result};
+use anyhow::bail;
+use anyhow::Result;
 use bytesize::ByteSize;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use priority_queue::DoublePriorityQueue;
-use std::{
-    collections::HashMap,
-    time::{Duration, SystemTime},
-};
-use tracing::{error, info, warn};
-use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+use tracing::error;
+use tracing::info;
+use tracing::warn;
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::models::{
-    blockchain::{shared::Hash, transaction::utxo::Utxo},
-    peer::InstanceId,
-};
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::peer::InstanceId;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 
 pub type Credibility = i32;
 
@@ -358,12 +359,9 @@ mod wallet_state_tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::{
-        models::blockchain::{
-            transaction::lock_script::LockScript, type_scripts::neptune_coins::NeptuneCoins,
-        },
-        tests::shared::make_mock_transaction,
-    };
+    use crate::models::blockchain::transaction::lock_script::LockScript;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::tests::shared::make_mock_transaction;
 
     #[traced_test]
     #[tokio::test]

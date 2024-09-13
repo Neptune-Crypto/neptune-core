@@ -34,9 +34,11 @@
 // todo: consider moving the serialization functions, or perhaps all
 // of rusty_value.rs to a top level module, eg twenty-first::serialization.
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
 use std::fmt::Debug;
+
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Represents a database value as bytes and provides conversions for standard types
 ///
