@@ -850,6 +850,23 @@ mod test {
         );
     }
 
+    fn bad_absolute_index_set(good_witness: &UpdateWitness) {
+        let mut bad_witness = good_witness.clone();
+        bad_witness.new_kernel.inputs[0]
+            .absolute_indices
+            .decrement_bloom_filter_index(10);
+        let claim = bad_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+        let nondeterminism = bad_witness.nondeterminism();
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::AssertionFailed],
+        );
+    }
+
     #[test]
     fn update_witness_negative_tests() {
         // It takes a long time to generate the witness, so we reuse it across
@@ -858,5 +875,6 @@ mod test {
         new_timestamp_older_than_old(&good_witness);
         bad_new_aocl(&good_witness);
         bad_old_aocl(&good_witness);
+        bad_absolute_index_set(&good_witness)
     }
 }
