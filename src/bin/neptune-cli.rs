@@ -41,7 +41,7 @@ use tarpc::tokio_serde::formats::Json;
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
 
-/// for parsing SendToMany <output> arguments.
+/// for parsing SendToMany `<output>` arguments.
 #[derive(Debug, Clone)]
 struct TransactionOutput {
     address: String,

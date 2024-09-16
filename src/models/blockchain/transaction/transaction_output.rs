@@ -57,7 +57,7 @@ pub enum UnownedUtxoNotifyMethod {
 /// [PublicAnnouncement] is essentially opaque however one can determine the key
 /// type via [`KeyType::try_from::<PublicAnnouncement>()`](crate::models::state::wallet::address::KeyType::try_from::<PublicAnnouncement>())
 ///
-/// see also: [UtxoNotifyMethod], [KeyType](crate::models::state::wallet::address::KeyType)
+/// see also: [UnownedUtxoNotifyMethod], [KeyType](crate::models::state::wallet::address::KeyType)
 ///
 /// future work:
 ///

@@ -311,7 +311,7 @@ impl WalletSecret {
     /// 3. is that a big problem?
     ///
     /// Apparently not.  privacy does not depend on the sender_randomness
-    /// being unique.  see [1].
+    /// being unique.
     ///
     /// So it is decided not to include tx_timestamp and output_index since
     /// inclusion would defeat our stated goal.
@@ -325,7 +325,7 @@ impl WalletSecret {
     /// This asymmetry is a bit gross, but does not appear to be an actual
     /// problem.
     ///
-    /// [1] further discussion at:
+    /// further discussion:
     /// <https://github.com/Neptune-Crypto/neptune-core/issues/181>
     pub fn generate_sender_randomness(
         &self,

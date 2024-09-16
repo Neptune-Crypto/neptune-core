@@ -32,7 +32,7 @@ use super::symmetric_key;
 pub enum KeyType {
     /// private/public keypair. (give public key to 3rd parties)
     ///
-    /// [generation_address] built on [twenty_first::math::lattice::kem]
+    /// [generation_address] built on [lattice::kem](tasm_lib::prelude::twenty_first::math::lattice::kem)
     ///
     /// wraps a symmetric key built on aes-256-gcm
     Generation = generation_address::GENERATION_FLAG_U8,

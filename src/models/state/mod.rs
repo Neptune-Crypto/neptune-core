@@ -225,7 +225,7 @@ impl GlobalStateLock {
 
     /// Generate tx params for use by `create_transaction()` and `send()`
     ///
-    /// This method simplifies building [TxParam].  It should be used
+    /// This method simplifies building [TxParams].  It should be used
     /// when the following are true:
     ///  * each output is sent to a `ReceivingAddress`
     ///  * each output sends a non-zero amount of native coins.
@@ -235,7 +235,7 @@ impl GlobalStateLock {
     ///  * the change spending key can be a `SymmetricKey`
     ///  * no non-native coins or custom lockscripts are used.
     ///
-    /// Otherwise, the [TxParam] must be generated some other way.
+    /// Otherwise, the [TxParams] must be generated some other way.
     ///
     /// params:
     ///  + outputs: a list of (ReceivingAddress,amount) where amount is > 0.
@@ -663,8 +663,8 @@ impl GlobalState {
 
     /// generates [TxOutputList] from a list of address:amount pairs (outputs).
     ///
-    /// This is a helper method for generating the `TxOutputList` that
-    /// is required by [Self::create_transaction()] and [Self::create_raw_transaction()].
+    /// This is a helper method for generating the `TxOutputList` that is part
+    /// of [TxParams].
     ///
     /// Each output may use either `OnChain` or `OffChain` notifications.  See documentation of
     /// of [TxOutput::auto()] for a description of the logic and the
@@ -714,7 +714,7 @@ impl GlobalState {
     ///
     /// This is useful when ReceivingAddress is not available, such as when
     /// creating output Utxo directly from lockscripts or using non-native
-    /// coins/tokens.  Otherwise [generate_tx_params()] is preferred.
+    /// coins/tokens.  Otherwise [Self::generate_tx_params()] is preferred.
     pub async fn generate_tx_params_from_tx_outputs(
         &self,
         mut tx_output_list: TxOutputList,

@@ -335,7 +335,7 @@ impl WalletState {
     ///   n = number of ExpectedUtxo in database. (all-time)
     ///   m = number of transaction outputs.
     ///
-    /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
+    /// see <https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025>
     ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
     pub async fn scan_for_expected_utxos<'a>(
@@ -357,7 +357,7 @@ impl WalletState {
 
     /// check if wallet already has the provided `expected_utxo`
     ///
-    /// note that [WalletState::add_expected_utxo()] prevents duplicate
+    /// note that `WalletState::add_expected_utxo()` prevents duplicate
     /// [ExpectedUtxo], however its possible for distinct `ExpectedUtxo` to
     /// include the same `Utxo`.
     ///
