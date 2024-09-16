@@ -2,6 +2,7 @@ use std::ops::DerefMut;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use futures::Stream;
 use memmap2::MmapOptions;
 use num_traits::Zero;
 use tokio::io::AsyncSeekExt;
@@ -19,6 +20,8 @@ use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 use crate::models::blockchain::block::Block;
 use crate::models::database::BlockFileLocation;
 use crate::models::database::BlockIndexKey;
@@ -61,6 +64,9 @@ pub struct ArchivalState {
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker task.
     genesis_block: Box<Block>,
+
+    /// The tip of canonical chain
+    tip_block: Box<Block>,
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
@@ -212,12 +218,40 @@ impl ArchivalState {
             archival_mutator_set.persist().await;
         }
 
+        let tip_block = Self::load_tip(&data_dir, &block_index_db)
+            .await
+            .unwrap_or_else(|| genesis_block.clone());
+
         Self {
+            tip_block,
             data_dir,
             block_index_db,
             genesis_block,
             archival_mutator_set,
         }
+    }
+
+    // loads tip from DB+disk
+    async fn load_tip(
+        data_dir: &DataDirectory,
+        block_index_db: &NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
+    ) -> Option<Box<Block>> {
+        if let Some(v) = block_index_db.get(BlockIndexKey::BlockTipDigest).await {
+            if let Some(bv) = block_index_db
+                .get(BlockIndexKey::Block(v.as_tip_digest()))
+                .await
+            {
+                let block_record = bv.as_block_record();
+                return Self::get_block_from_block_record(
+                    Self::block_file_path(data_dir, &block_record),
+                    block_record,
+                )
+                .await
+                .map(Box::new)
+                .ok();
+            }
+        }
+        None
     }
 
     pub fn genesis_block(&self) -> &Block {
@@ -347,15 +381,20 @@ impl ArchivalState {
 
         self.block_index_db.batch_write(batch).await;
 
+        self.tip_block = Box::new(new_block.to_owned());
+
         Ok(())
     }
 
-    async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
-        // Get path of file for block
-        let block_file_path: PathBuf = self
-            .data_dir
-            .block_file_path(block_record.file_location.file_index);
+    // Get path of file for block
+    fn block_file_path(data_dir: &DataDirectory, block_record: &BlockRecord) -> PathBuf {
+        data_dir.block_file_path(block_record.file_location.file_index)
+    }
 
+    async fn get_block_from_block_record(
+        block_file_path: PathBuf,
+        block_record: BlockRecord,
+    ) -> Result<Block> {
         // Open file as read-only
         let block_file: tokio::fs::File = tokio::fs::OpenOptions::new()
             .read(true)
@@ -379,61 +418,141 @@ impl ArchivalState {
         .await?
     }
 
+    /// returns a [Stream] of blocks from `oldest` to `newest` in ascending order
+    ///
+    /// This method provides an async "iterator" for canonical blocks.
+    ///
+    /// if `oldest` or `newest` does not refer to a canonical block then
+    /// the returned stream will not yield any blocks.
+    ///
+    /// perf:
+    ///
+    /// this method returns right away.  no blocks are retrieved until the
+    /// caller iterates over the stream.
+    ///
+    /// the stream returned from [Self::canonical_block_stream_desc()] should be
+    /// faster because it can walk the chain backward using the
+    /// prev_block_digest in each block's header.
+    ///
+    /// In contrast this stream must query the Db for each iteration to map a
+    /// height to the canonical block.
+    pub async fn canonical_block_stream_asc(
+        &self,
+        oldest: BlockSelector,
+        newest: BlockSelector,
+    ) -> impl Stream<Item = Box<Block>> + '_ {
+        let (mut iter_height, newest_height) =
+            match (oldest.as_height(self).await, newest.as_height(self).await) {
+                (Some(o), Some(n)) => (o, n),
+                _ => (1.into(), 0.into()), // 1 > 0, so loop exits immediately.
+            };
+
+        async_stream::stream! {
+            while iter_height <= newest_height {
+                let block = self.get_block(BlockSelector::Height(iter_height).as_digest(self).await.unwrap()).await.unwrap().unwrap();
+                iter_height += 1.into();
+                yield Box::new(block);
+            }
+        }
+    }
+
+    /// returns a [Stream] of blocks from `oldest` to `newest` in descending order
+    ///
+    /// This method provides an async "iterator" for canonical blocks.
+    ///
+    /// if `oldest` or `newest` does not refer to a canonical block then
+    /// the returned stream will not yield any blocks.
+    ///
+    /// perf:
+    ///
+    /// this method returns right away.  no blocks are retrieved until the
+    /// caller iterates over the stream.
+    ///
+    /// the returned stream walks the chain backward using the prev_block_digest
+    /// in each block's header.
+    ///
+    /// In contrast the stream returned from [Self::canonical_block_stream_asc]
+    /// must query the Db for each iteration to map a height to the canonical
+    /// block.
+    pub async fn canonical_block_stream_desc(
+        &self,
+        oldest: BlockSelector,
+        newest: BlockSelector,
+    ) -> impl Stream<Item = Box<Block>> + '_ {
+        let (oldest_digest, mut iter_digest) =
+            match (oldest.as_digest(self).await, newest.as_digest(self).await) {
+                (Some(o), Some(n)) => (o, n),
+                _ => (
+                    // so loop will exit immediately on failure.
+                    Block::genesis_prev_block_digest(),
+                    Block::genesis_prev_block_digest(),
+                ),
+            };
+
+        async_stream::stream! {
+            while iter_digest != oldest_digest && iter_digest != Block::genesis_prev_block_digest() {
+                let block = self.get_block(iter_digest).await.unwrap().unwrap();
+                iter_digest = block.header().prev_block_digest;
+                yield Box::new(block);
+            }
+        }
+    }
+
+    /// searches from tip to `oldest` to find a block containing `output`
+    pub async fn find_canonical_block_with_output(
+        &self,
+        output: AdditionRecord,
+        oldest: BlockSelector,
+    ) -> Option<Block> {
+        let oldest_digest = oldest.as_digest(self).await?;
+        let mut block = self.tip().to_owned();
+
+        loop {
+            if block
+                .body()
+                .transaction
+                .kernel
+                .outputs
+                .iter()
+                .any(|ar| *ar == output)
+            {
+                break Some(block);
+            }
+
+            if block.hash() == oldest_digest {
+                break None;
+            }
+
+            block = self
+                .get_block(block.header().prev_block_digest)
+                .await
+                .ok()??;
+        }
+    }
+
     /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
     /// if tip is genesis, then `None` is returned
-    async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
-        let tip_digest = self.block_index_db.get(BlockIndexKey::BlockTipDigest).await;
-        let tip_digest: Digest = match tip_digest {
-            Some(digest) => digest.as_tip_digest(),
-            None => return Ok(None),
-        };
-
-        let tip_block_record: BlockRecord = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
-            .await
-            .unwrap()
-            .as_block_record();
-
-        let block: Block = self.get_block_from_block_record(tip_block_record).await?;
-
-        Ok(Some(block))
+    #[cfg(test)]
+    async fn get_tip_from_disk(&self) -> Option<Box<Block>> {
+        Self::load_tip(&self.data_dir, &self.block_index_db).await
     }
 
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub async fn get_tip(&self) -> Block {
-        let lookup_res_info: Option<Block> = self
-            .get_tip_from_disk()
-            .await
-            .expect("Failed to read block from disk");
+    pub fn tip(&self) -> &Block {
+        &self.tip_block
+    }
 
-        match lookup_res_info {
-            None => *self.genesis_block.clone(),
-            Some(block) => block,
-        }
+    /// returns mutable reference to tip block
+    pub(crate) fn tip_mut(&mut self) -> &mut Block {
+        &mut self.tip_block
     }
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
     pub async fn get_tip_parent(&self) -> Option<Block> {
-        let tip_digest = self
-            .block_index_db
-            .get(BlockIndexKey::BlockTipDigest)
-            .await?;
-        let tip_digest: Digest = tip_digest.as_tip_digest();
-        let tip_header = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
+        self.get_block(self.tip_block.header().prev_block_digest)
             .await
-            .map(|x| x.as_block_record().block_header)
-            .expect("Indicated block must exist in block record");
-
-        let parent = self
-            .get_block(tip_header.prev_block_digest)
-            .await
-            .expect("Fetching indicated block must succeed");
-
-        Some(parent.expect("Indicated block must exist"))
+            .expect("Fetching indicated block must succeed")
     }
 
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
@@ -470,7 +589,11 @@ impl ArchivalState {
         };
 
         // Fetch block from disk
-        let block = self.get_block_from_block_record(record).await?;
+        let block = Self::get_block_from_block_record(
+            Self::block_file_path(&self.data_dir, &record),
+            record,
+        )
+        .await?;
 
         Ok(Some(block))
     }
@@ -839,6 +962,44 @@ impl ArchivalState {
 
         Ok(())
     }
+
+    pub fn data_dir(&self) -> &DataDirectory {
+        &self.data_dir
+    }
+}
+
+impl BlockchainBlockSelector for ArchivalState {
+    // doc'ed in trait
+    fn tip_digest(&self) -> Digest {
+        self.tip_block.hash()
+    }
+
+    // doc'ed in trait
+    fn tip_height(&self) -> BlockHeight {
+        self.tip_block.header().height
+    }
+
+    // doc'ed in trait
+    fn genesis_digest(&self) -> Digest {
+        self.genesis_block.hash()
+    }
+
+    // doc'ed in trait
+    async fn height_to_canonical_digest(&self, h: BlockHeight) -> Option<Digest> {
+        self.block_height_to_canonical_block_digest(h, self.tip_digest())
+            .await
+    }
+
+    // doc'ed in trait
+    async fn digest_to_canonical_height(&self, d: Digest) -> Option<BlockHeight> {
+        match self
+            .block_belongs_to_canonical_chain(d, self.tip_digest())
+            .await
+        {
+            true => self.get_block_header(d).await.map(|h| h.height),
+            false => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -889,7 +1050,7 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         let seed: [u8; 32] = thread_rng().gen();
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let network = Network::RegTest;
+        let network = Network::Regtest;
 
         let mut archival_state0 = make_test_archival_state(network).await;
 
@@ -916,7 +1077,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn archival_state_init_test() -> Result<()> {
         // Verify that archival mutator set is populated with outputs from genesis block
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let archival_state = make_test_archival_state(network).await;
 
         assert_eq!(
@@ -1128,7 +1289,7 @@ mod archival_state_tests {
         // blocks.
 
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (mut archival_state, _peer_db_lock, _data_dir) =
             mock_genesis_archival_state(network).await;
         let genesis_wallet_state =
@@ -1138,7 +1299,7 @@ mod archival_state_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
+            mock_genesis_global_state(Network::Regtest, 42, genesis_wallet).await;
         let mut num_utxos = Block::premine_utxos(network).len();
 
         // 1. Create new block 1 with one input and four outputs and store it to disk
@@ -1251,7 +1412,7 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
@@ -1259,7 +1420,7 @@ mod archival_state_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
+            mock_genesis_global_state(Network::Regtest, 42, genesis_wallet).await;
 
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
@@ -1420,7 +1581,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
@@ -1478,7 +1639,7 @@ mod archival_state_tests {
         // Test various parts of the state update when a block contains multiple inputs and outputs
 
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
@@ -1507,7 +1668,7 @@ mod archival_state_tests {
         );
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = NeptuneCoins::one();
+        let fee = NeptuneCoins::one_nau();
         let sender_randomness: Digest = random();
         let tx_outputs_for_alice = vec![
             TxOutput::fake_address(
@@ -1870,7 +2031,7 @@ mod archival_state_tests {
                     .await,
                 "AMS must be correctly updated"
             );
-            assert_eq!(block_2, state.chain.archival_state().get_tip().await);
+            assert_eq!(block_2, *state.chain.archival_state().tip());
             assert_eq!(
                 block_1,
                 state.chain.archival_state().get_tip_parent().await.unwrap()
@@ -1887,19 +2048,16 @@ mod archival_state_tests {
             Network::Alpha,
             Network::Beta,
             Network::Main,
-            Network::RegTest,
+            Network::Regtest,
             Network::Testnet,
         ] {
             let mut archival_state: ArchivalState = make_test_archival_state(network).await;
 
             assert!(
-                archival_state.get_tip_from_disk().await.unwrap().is_none(),
+                archival_state.get_tip_from_disk().await.is_none(),
                 "Must return None when no block is stored in DB"
             );
-            assert_eq!(
-                archival_state.genesis_block(),
-                &archival_state.get_tip().await
-            );
+            assert_eq!(archival_state.genesis_block(), archival_state.tip());
             assert!(
                 archival_state.get_tip_parent().await.is_none(),
                 "Genesis tip has no parent"
@@ -1920,13 +2078,13 @@ mod archival_state_tests {
 
             assert_eq!(
                 mock_block_1,
-                archival_state.get_tip_from_disk().await.unwrap().unwrap(),
+                *archival_state.get_tip_from_disk().await.unwrap(),
                 "Returned block must match the one inserted"
             );
-            assert_eq!(mock_block_1, archival_state.get_tip().await);
+            assert_eq!(mock_block_1, *archival_state.tip());
             assert_eq!(
-                archival_state.genesis_block(),
-                &archival_state.get_tip_parent().await.unwrap()
+                Some(archival_state.genesis_block()),
+                archival_state.get_tip_parent().await.as_ref()
             );
 
             // Add a 2nd block and verify that this new block is now returned
@@ -1939,17 +2097,17 @@ mod archival_state_tests {
             add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
                 .await
                 .unwrap();
-            let ret2 = archival_state.get_tip_from_disk().await.unwrap();
+            let ret2 = archival_state.get_tip_from_disk().await;
             assert!(
                 ret2.is_some(),
                 "Must return a block when one is stored to DB"
             );
             assert_eq!(
                 mock_block_2,
-                ret2.unwrap(),
+                *ret2.unwrap(),
                 "Returned block must match the one inserted"
             );
-            assert_eq!(mock_block_2, archival_state.get_tip().await);
+            assert_eq!(mock_block_2, *archival_state.tip());
             assert_eq!(mock_block_1, archival_state.get_tip_parent().await.unwrap());
         }
 
@@ -2839,6 +2997,7 @@ mod archival_state_tests {
             .as_tip_digest();
 
         assert_eq!(mock_block_1.hash(), tip_digest);
+        assert_eq!(archival_state.tip_digest(), tip_digest);
 
         // Verify that `Block` is stored correctly
         let actual_block: BlockRecord = archival_state
@@ -2960,14 +3119,16 @@ mod archival_state_tests {
         );
 
         // Test `get_latest_block_from_disk`
-        let read_latest_block = archival_state.get_tip_from_disk().await?.unwrap();
+        let read_latest_block = *archival_state.get_tip_from_disk().await.unwrap();
         assert_eq!(mock_block_2, read_latest_block);
 
         // Test `get_block_from_block_record`
-        let block_from_block_record = archival_state
-            .get_block_from_block_record(actual_block_record_2)
-            .await
-            .unwrap();
+        let block_from_block_record = ArchivalState::get_block_from_block_record(
+            ArchivalState::block_file_path(&archival_state.data_dir, &actual_block_record_2),
+            actual_block_record_2,
+        )
+        .await
+        .unwrap();
         assert_eq!(mock_block_2, block_from_block_record);
         assert_eq!(mock_block_2.hash(), block_from_block_record.hash());
 
@@ -2980,17 +3141,17 @@ mod archival_state_tests {
 
         // Test `get_block_header`
         {
-            let block_header_2_from_lock_method = archival_state
+            let block_header_2_method = archival_state
                 .get_block_header(mock_block_2.hash())
                 .await
                 .unwrap();
-            assert_eq!(mock_block_2.kernel.header, block_header_2_from_lock_method);
+            assert_eq!(mock_block_2.kernel.header, block_header_2_method);
 
-            let genesis_header_from_lock_method = archival_state
+            let genesis_header_method = archival_state
                 .get_block_header(genesis.hash())
                 .await
                 .unwrap();
-            assert_eq!(genesis.kernel.header, genesis_header_from_lock_method);
+            assert_eq!(genesis.kernel.header, genesis_header_method);
         }
 
         // Test `block_height_to_block_headers`

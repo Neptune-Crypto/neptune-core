@@ -65,12 +65,12 @@ impl NeptuneCoins {
         product
     }
 
-    /// Return the element that corresponds to 1. Use in tests only.
-    pub fn one() -> NeptuneCoins {
+    /// Return the element that corresponds to 1 nau. Use in tests only.
+    pub fn one_nau() -> NeptuneCoins {
         NeptuneCoins(1u128)
     }
 
-    /// Create an Amount object of the given number of coins.
+    /// Create an Amount object of the given number of whole coins.
     pub fn new(num_coins: u32) -> NeptuneCoins {
         assert!(
             num_coins <= 42000000,

@@ -1024,11 +1024,6 @@ impl MainLoopHandler {
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::TransactionNotification(notification))?;
 
-                // insert transaction into mempool
-                self.global_state_lock
-                    .lock_mut(|s| s.mempool.insert(&transaction))
-                    .await;
-
                 // do not shut down
                 Ok(false)
             }

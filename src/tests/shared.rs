@@ -34,7 +34,6 @@ use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -77,7 +76,6 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
@@ -195,7 +193,7 @@ pub async fn mock_genesis_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
-    let genesis_block = archival_state.get_tip().await;
+    let genesis_block = archival_state.tip();
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
@@ -205,11 +203,8 @@ pub async fn mock_genesis_global_state(
         "Genesis light state MSA hash: {}",
         light_state.body().mutator_set_accumulator.hash()
     );
-    let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
-        light_state,
-        archival_state,
-    });
     let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
+    let blockchain_state = BlockchainState::Archival(archival_state);
     let cli_args = cli_args::Args {
         network,
         ..Default::default()
@@ -267,6 +262,8 @@ pub async fn add_block_to_light_state(
     let previous_pow_family = light_state.kernel.header.proof_of_work_family;
     if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         light_state.set_block(new_block);
+    } else if new_block == *light_state {
+        // no-op. light-state already has the block.
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
     }
@@ -722,17 +719,11 @@ pub async fn make_mock_transaction_with_generation_key(
 
     let type_scripts = vec![TypeScript::native_currency()];
 
-    let spending_key_unlock_keys = tx_inputs
-        .spending_keys_iter()
-        .into_iter()
-        .map(|k| k.unlock_key().encode())
-        .collect_vec();
-
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(tx_inputs.utxos()),
         type_scripts,
         input_lock_scripts: tx_inputs.lock_scripts(),
-        lock_script_witnesses: spending_key_unlock_keys,
+        lock_script_witnesses: tx_inputs.lock_script_witnesses(),
         input_membership_proofs: tx_inputs.ms_membership_proofs(),
         output_utxos: SaltedUtxos::new(tx_outputs.utxos()),
         mutator_set_accumulator: tip_msa,
@@ -988,4 +979,28 @@ pub async fn mock_genesis_archival_state(
     let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams, network).await;
 
     (archival_state, peer_db, data_dir)
+}
+
+// this will create and store the next block including any transactions
+// presently in the mempool.  The coinbase will go to our own wallet.
+//
+// the stored block does NOT have valid proof-of-work.
+pub async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> Result<Block> {
+    let state = global_state_lock.lock_guard().await;
+    let tip_block = state.chain.light_state();
+
+    let timestamp = Timestamp::now();
+    let (transaction, coinbase_expected_utxo) =
+        crate::mine_loop::create_block_transaction(tip_block, &state, timestamp);
+
+    let (header, body) =
+        crate::mine_loop::make_block_template(tip_block, transaction, timestamp, None);
+    let block = Block::new(header, body, Block::mk_std_block_type(None));
+    drop(state);
+
+    global_state_lock
+        .store_coinbase_block(block.clone(), coinbase_expected_utxo)
+        .await?;
+
+    Ok(block)
 }
