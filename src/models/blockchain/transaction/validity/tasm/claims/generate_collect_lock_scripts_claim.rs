@@ -53,7 +53,7 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
             pop 1
         );
         let dyn_malloc = library.import(Box::new(DynMalloc));
-        let claim_pointer_pointer = library.kmalloc(1);
+        let claim_pointer_alloc = library.kmalloc(1);
 
         let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
         let proof_collection_field_and_size_lock_script_hashes =
@@ -162,8 +162,8 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
                 // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len output_si *claim
 
                 dup 0
-                push {claim_pointer_pointer}
-                write_mem 1
+                push {claim_pointer_alloc.write_address()}
+                write_mem {claim_pointer_alloc.num_words()}
                 pop 1
                 // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len output_si *claim
 
@@ -183,8 +183,8 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 
                 pop 2
 
-                push {claim_pointer_pointer}
-                read_mem 1
+                push {claim_pointer_alloc.read_address()}
+                read_mem {claim_pointer_alloc.num_words()}
                 pop 1
                 // _ *claim
 

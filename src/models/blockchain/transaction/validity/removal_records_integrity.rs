@@ -640,18 +640,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let compare_digests = DataType::Digest.compare();
 
         let u64_stack_size: u32 = DataType::U64.stack_size().try_into().unwrap();
-        let aocl_leaf_index_write_pointer = library.kmalloc(u64_stack_size);
-        let aocl_leaf_index_read_pointer = aocl_leaf_index_write_pointer + bfe!(u64_stack_size - 1);
+        let aocl_leaf_index_alloc = library.kmalloc(u64_stack_size);
 
         let digest_stack_size: u32 = DataType::Digest.stack_size().try_into().unwrap();
-        let receiver_preimage_write_pointer = library.kmalloc(digest_stack_size);
-        let receiver_preimage_read_pointer =
-            receiver_preimage_write_pointer + bfe!(digest_stack_size - 1);
-        let sender_randomness_write_pointer = library.kmalloc(digest_stack_size);
-        let sender_randomness_read_pointer =
-            sender_randomness_write_pointer + bfe!(digest_stack_size - 1);
-        let utxo_hash_write_pointer = library.kmalloc(digest_stack_size);
-        let utxo_hash_read_pointer = utxo_hash_write_pointer + bfe!(digest_stack_size - 1);
+        let receiver_preimage_alloc = library.kmalloc(digest_stack_size);
+        let sender_randomness_alloc = library.kmalloc(digest_stack_size);
+        let utxo_hash_alloc = library.kmalloc(digest_stack_size);
 
         let for_all_utxos_loop = triton_asm! {
             // INVARIANT: _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -690,7 +684,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 hint utxo_hash = stack[0..5]
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [utxo_hash]
 
-                push {utxo_hash_write_pointer}
+                push {utxo_hash_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -700,7 +694,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 divine {u64_stack_size}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
-                push {aocl_leaf_index_write_pointer}
+                push {aocl_leaf_index_alloc.write_address()}
                 write_mem {u64_stack_size}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -710,7 +704,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 divine {Digest::LEN}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [receiver_preimage]
 
-                push {receiver_preimage_write_pointer}
+                push {receiver_preimage_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -720,7 +714,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 divine {Digest::LEN}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [sender_randomness]
 
-                push {sender_randomness_write_pointer}
+                push {sender_randomness_alloc.write_address()}
                 write_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
@@ -735,7 +729,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 push 0
                 push 0
                 push 0
-                push {receiver_preimage_read_pointer}
+                push {receiver_preimage_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [default] [receiver_preimage]
@@ -743,12 +737,12 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 hash
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest]
 
-                push {sender_randomness_read_pointer}
+                push {sender_randomness_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness]
 
-                push {utxo_hash_read_pointer}
+                push {utxo_hash_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [receiver_digest] [sender_randomness] [utxo_hash]
@@ -764,7 +758,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 push 1 add read_mem {u64_stack_size} pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs]
 
-                push {aocl_leaf_index_read_pointer}
+                push {aocl_leaf_index_alloc.read_address()}
                 read_mem {u64_stack_size}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
@@ -773,22 +767,22 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 8. */
-                push {aocl_leaf_index_read_pointer}
+                push {aocl_leaf_index_alloc.read_address()}
                 read_mem {u64_stack_size}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index]
 
-                push {receiver_preimage_read_pointer}
+                push {receiver_preimage_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage]
 
-                push {sender_randomness_read_pointer}
+                push {sender_randomness_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness]
 
-                push {utxo_hash_read_pointer}
+                push {utxo_hash_alloc.read_address()}
                 read_mem {Digest::LEN}
                 pop 1
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl [aocl_leaf_index] [receiver_preimage] [sender_randomness] [utxo_hash]

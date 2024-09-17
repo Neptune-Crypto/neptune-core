@@ -453,14 +453,6 @@ impl ConsensusProgram for Merge {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
-        fn read_address_from_write_address<T: BFieldCodec>(
-            address: BFieldElement,
-        ) -> BFieldElement {
-            let length = T::static_length().unwrap();
-            let offset = bfe!(u64::try_from(length).unwrap()) - BFieldElement::ONE;
-            address + offset
-        }
-
         let mut library = Library::new();
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -478,10 +470,10 @@ impl ConsensusProgram for Merge {
             library.import(Box::new(HashRemovalRecordIndexSets::<2>));
         let multiset_equality = library.import(Box::new(MultisetEqualityDigests));
 
-        let left_txk_mast_hash_write_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
-        let right_txk_mast_hash_write_address =
-            library.kmalloc(u32::try_from(Digest::LEN).unwrap());
-        let new_txk_mast_hash_write_address = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let digest_len = u32::try_from(Digest::LEN).unwrap();
+        let left_txk_mast_hash_alloc = library.kmalloc(digest_len);
+        let right_txk_mast_hash_alloc = library.kmalloc(digest_len);
+        let new_txk_mast_hash_alloc = library.kmalloc(digest_len);
 
         let main = triton_asm! {
                                 // _
@@ -492,7 +484,7 @@ impl ConsensusProgram for Merge {
             read_io {Digest::LEN}
                                 hint new_tx_kernel_digest: Digest = stack[0..6]
                                 // _ *merge_witness [new_txk_digest; 5]
-            push {new_txk_mast_hash_write_address}
+            push {new_txk_mast_hash_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1               // _ *merge_witness
 
@@ -503,7 +495,7 @@ impl ConsensusProgram for Merge {
                                 hint left_tx_kernel_digest: Digest = stack[0..6]
                                 // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
             dup 4 dup 4 dup 4 dup 4 dup 4
-            push {left_txk_mast_hash_write_address}
+            push {left_txk_mast_hash_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1               // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
 
@@ -515,7 +507,7 @@ impl ConsensusProgram for Merge {
                                 hint right_tx_kernel_digest: Digest = stack[0..6]
                                 // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
             dup 4 dup 4 dup 4 dup 4 dup 4
-            push {right_txk_mast_hash_write_address}
+            push {right_txk_mast_hash_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1               // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
 
@@ -549,7 +541,7 @@ impl ConsensusProgram for Merge {
                                 // _ *merge_witness *left_tx_kernel *right_tx_kernel *new_tx_kernel
 
             /* new inputs are a permutation of the operands' inputs' concatenation */
-            push {read_address_from_write_address::<Digest>(left_txk_mast_hash_write_address)}
+            push {left_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest; 5]
             dup 7
@@ -560,7 +552,7 @@ impl ConsensusProgram for Merge {
             call {authenticate_txk_input_field}
                                 // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_in
 
-            push {read_address_from_write_address::<Digest>(right_txk_mast_hash_write_address)}
+            push {right_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_in [right_txk_digest; 5]
             dup 7
@@ -571,7 +563,7 @@ impl ConsensusProgram for Merge {
             call {authenticate_txk_input_field}
                                 // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_in *r_txk_in
 
-            push {read_address_from_write_address::<Digest>(new_txk_mast_hash_write_address)}
+            push {new_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_in *r_txk_in [new_txk_digest; 5]
             dup 7
@@ -589,7 +581,7 @@ impl ConsensusProgram for Merge {
             assert              // _ *merge_witness *l_txk *r_txk *n_txk
 
             /* new outputs are a permutation of the operands' outputs' concatenation */
-            push {read_address_from_write_address::<Digest>(left_txk_mast_hash_write_address)}
+            push {left_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest; 5]
             dup 7
@@ -600,7 +592,7 @@ impl ConsensusProgram for Merge {
             call {authenticate_txk_output_field}
                                 // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_out
 
-            push {read_address_from_write_address::<Digest>(right_txk_mast_hash_write_address)}
+            push {right_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_out [right_txk_digest; 5]
             dup 7
@@ -611,7 +603,7 @@ impl ConsensusProgram for Merge {
             call {authenticate_txk_output_field}
                                 // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_out *r_txk_out
 
-            push {read_address_from_write_address::<Digest>(new_txk_mast_hash_write_address)}
+            push {new_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_out *r_txk_out [new_txk_digest; 5]
             dup 7

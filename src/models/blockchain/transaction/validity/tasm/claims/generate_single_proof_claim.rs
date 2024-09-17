@@ -26,13 +26,13 @@ impl BasicSnippet for GenerateSingleProofClaim {
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let new_claim = library.import(Box::new(NewClaim));
-        let single_proof_digest_location = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
 
         triton_asm!(
             // BEFORE: _ [mast_hash; 5] [single_proof_digest; 5]
             // AFTER:  _ *claim
             {self.entrypoint()}:
-            push {single_proof_digest_location}
+            push {single_proof_digest_alloc.write_address()}
             write_mem {Digest::LEN} // _ [mast_hash; 5] *spd
             pop 1                   // _ [mast_hash; 5]
 
@@ -40,7 +40,7 @@ impl BasicSnippet for GenerateSingleProofClaim {
             push 0                  // _ [mast_hash; 5] input_len output_len
             call {new_claim}        // _ [mast_hash; 5] *claim *output *input *program_digest
 
-            push {single_proof_digest_location + bfe!(u64::try_from(Digest::LEN).unwrap() - 1)}
+            push {single_proof_digest_alloc.read_address()}
             read_mem {Digest::LEN}  // _ [mast_hash; 5] *claim *output *input *program_digest [spd; 5] *spd
             swap 6                  // _ [mast_hash; 5] *claim *output *input *program_digest *spd [spd; 5] *program_digest
             write_mem {Digest::LEN} // _ [mast_hash; 5] *claim *output *input *spd *program_digest'

@@ -111,7 +111,7 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
                 recurse
         );
 
-        let type_script_hashes_si_pointer = library.kmalloc(1);
+        let type_script_hashes_si_alloc = library.kmalloc(1);
         triton_asm!(
             // BEFORE: _ *proof_collection_pointer
             // AFTER:  _ *claim
@@ -131,8 +131,8 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
                 // _ *proof_collection_pointer *type_script_hashes input_size type_script_hashes_si
 
                 dup 0
-                push {type_script_hashes_si_pointer}
-                write_mem 1
+                push {type_script_hashes_si_alloc.write_address()}
+                write_mem {type_script_hashes_si_alloc.num_words()}
                 pop 1
                 // _ *proof_collection_pointer *type_script_hashes input_size type_script_hashes_si
 
@@ -176,8 +176,8 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
                 pop 2
                 // _ *proof_collection_pointer *type_script_hashes *claim *claim_output
 
-                push {type_script_hashes_si_pointer}
-                read_mem 1
+                push {type_script_hashes_si_alloc.read_address()}
+                read_mem {type_script_hashes_si_alloc.num_words()}
                 pop 1
                 // _ *proof_collection_pointer *type_script_hashes *claim *claim_output type_script_hashes_si
 

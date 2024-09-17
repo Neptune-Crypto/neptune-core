@@ -186,9 +186,7 @@ impl ConsensusProgram for NativeCurrency {
             library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAddU128));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
 
-        let own_program_digest_ptr_write = library.kmalloc(Digest::LEN as u32);
-        let own_program_digest_ptr_read =
-            own_program_digest_ptr_write + bfe!(Digest::LEN as u32 - 1);
+        let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
 
         let loop_utxos_add_amounts =
             "neptune_consensus_transaction_type_script_loop_utxos_add_amounts".to_string();
@@ -203,7 +201,7 @@ impl ConsensusProgram for NativeCurrency {
             dup 15 dup 15 dup 15 dup 15 dup 15
             // _ [own_program_digest]
 
-            push {own_program_digest_ptr_write}
+            push {own_program_digest_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1
             // _
@@ -212,7 +210,7 @@ impl ConsensusProgram for NativeCurrency {
         let load_own_program_digest = triton_asm! {
             // _
 
-            push {own_program_digest_ptr_read}
+            push {own_program_digest_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
             // _ [own_program_digest]

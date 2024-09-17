@@ -377,12 +377,11 @@ impl ConsensusProgram for Update {
         let multiset_eq_digests = library.import(Box::new(MultisetEqualityDigests));
         let u64_lt = library.import(Box::new(LtU64ConsumeArgs));
 
-        let old_txk_digest_begin_ptr = library.kmalloc(Digest::LEN as u32);
-        let old_txk_digest_end_ptr = old_txk_digest_begin_ptr + bfe!(Digest::LEN as u64 - 1);
+        let old_txk_digest_alloc = library.kmalloc(Digest::LEN as u32);
 
         let old_kernel = field!(UpdateWitness::old_kernel);
         let load_old_kernel_digest = triton_asm!(
-            push {old_txk_digest_end_ptr}
+            push {old_txk_digest_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
         );
@@ -469,7 +468,7 @@ impl ConsensusProgram for Update {
             {&load_digest}
             // _ witness_size *update_witness [old_tx_mast_hash; 5]
 
-            push {old_txk_digest_begin_ptr}
+            push {old_txk_digest_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1
             // _ witness_size *update_witness
@@ -477,7 +476,7 @@ impl ConsensusProgram for Update {
             read_io {Digest::LEN}
             // _ witness_size *update_witness [new_txk_mhash]
 
-            push {old_txk_digest_end_ptr}
+            push {old_txk_digest_alloc.read_address()}
             read_mem 5
             pop 1
             // _ witness_size *update_witness [new_txk_mhash] [old_txk_mhash; 5]
@@ -539,7 +538,7 @@ impl ConsensusProgram for Update {
 
             dup 2
             dup 2
-            push {old_txk_digest_end_ptr}
+            push {old_txk_digest_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
             call {authenticate_msa}
@@ -564,7 +563,7 @@ impl ConsensusProgram for Update {
             {&inputs_field_with_size}
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size
 
-            push {old_txk_digest_end_ptr}
+            push {old_txk_digest_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *old_inputs old_inputs_size [old_txk_mhash]
