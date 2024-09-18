@@ -1493,7 +1493,7 @@ mod peer_loop_tests {
             .to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
-        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock_peer_messages = Mock::new(vec![
@@ -1566,11 +1566,19 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        global_state_mut.set_new_tip(block_1.clone()).await?;
-        global_state_mut.set_new_tip(block_2_a.clone()).await?;
-        global_state_mut.set_new_tip(block_2_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_a.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_a.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_a.clone())
+            .await?;
 
         drop(global_state_mut);
 
@@ -1658,11 +1666,19 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        global_state_mut.set_new_tip(block_1.clone()).await?;
-        global_state_mut.set_new_tip(block_2_a.clone()).await?;
-        global_state_mut.set_new_tip(block_2_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_a.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_a.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_a.clone())
+            .await?;
 
         drop(global_state_mut);
 
@@ -1724,11 +1740,19 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
-        global_state_mut.set_new_tip(block_1.clone()).await?;
-        global_state_mut.set_new_tip(block_2_a.clone()).await?;
-        global_state_mut.set_new_tip(block_2_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_b.clone()).await?;
-        global_state_mut.set_new_tip(block_3_a.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_a.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_2_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_b.clone())
+            .await?;
+        global_state_mut
+            .set_new_tip_atomic(block_3_a.clone())
+            .await?;
 
         drop(global_state_mut);
 
@@ -1951,7 +1975,7 @@ mod peer_loop_tests {
             own_recipient_address,
             rng.gen(),
         );
-        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
 
         drop(global_state_mut);
 
@@ -2039,7 +2063,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
-        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock = Mock::new(vec![
@@ -2215,7 +2239,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
         let (block_5, _, _) =
             make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address, rng.gen());
-        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
         drop(global_state_mut);
 
         let mock = Mock::new(vec![
@@ -2329,7 +2353,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
-        global_state_mut.set_new_tip(block_1.clone()).await?;
+        global_state_mut.set_new_tip_atomic(block_1.clone()).await?;
         drop(global_state_mut);
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;

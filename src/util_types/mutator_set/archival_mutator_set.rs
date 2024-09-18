@@ -296,7 +296,7 @@ where
 
     /// Determine whether the given `AdditionRecord` can be reversed.
     /// Equivalently, determine if it was added last.
-    pub async fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
+    pub async fn add_is_reversible(&self, addition_record: &AdditionRecord) -> bool {
         let leaf_index = self.aocl.count_leaves().await - 1;
         let digest = self.aocl.get_leaf_async(leaf_index).await;
         addition_record.canonical_commitment == digest

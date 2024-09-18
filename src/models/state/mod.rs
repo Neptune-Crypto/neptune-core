@@ -7,6 +7,7 @@ pub mod shared;
 pub mod wallet;
 
 use std::cmp::max;
+use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -38,7 +39,6 @@ use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
-use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 use crate::VERSION;
@@ -173,26 +173,263 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.flush_databases().await
     }
 
-    /// store a coinbase (self-mined) block
-    pub async fn store_coinbase_block(
+    /// stores a block and sets it as the new tip.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// This method is atomic (read+write) but not concurrent.
+    /// All other tasks that read or write GlobalState will be blocked.
+    pub async fn set_new_tip_atomic(
         &mut self,
         new_block: Block,
-        coinbase_utxo_info: ExpectedUtxo,
+        coinbase_utxo_info: Option<ExpectedUtxo>,
     ) -> Result<()> {
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, coinbase_utxo_info)
+            .set_new_tip_atomic_internal(new_block, coinbase_utxo_info)
             .await
     }
 
-    /// store a block (non coinbase)
-    pub async fn store_block(&mut self, new_block: Block) -> Result<()> {
-        self.lock_guard_mut().await.set_new_tip(new_block).await
+    /// stores a block and sets it as the new tip.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// This method favors concurrency over atomicity.
+    ///
+    /// The prepare/finalize pattern enables lengthy read operations to be
+    /// performed with only a read-lock.
+    ///
+    /// These reads are performed in batches. Thus it is not guaranteed
+    /// that reads are atomic nor read+write.
+    ///
+    /// experimental:
+    ///
+    /// This method is considered experimental and is not presently in use.
+    pub async fn set_new_tip_concurrent(
+        &mut self,
+        new_block: Block,
+        coinbase_utxo_info: Option<ExpectedUtxo>,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        {
+            let mut gsm = self.lock_guard_mut().await;
+
+            // Apply the updates
+            gsm.chain
+                .archival_state_mut()
+                .write_block_as_tip(&new_block)
+                .await?;
+
+            if let Some(coinbase_info) = coinbase_utxo_info {
+                // Notify wallet to expect the coinbase UTXO, as we mined this block
+                gsm.wallet_state
+                    .add_expected_utxo(ExpectedUtxo::new(
+                        coinbase_info.utxo,
+                        coinbase_info.sender_randomness,
+                        coinbase_info.receiver_preimage,
+                        UtxoNotifier::OwnMiner,
+                    ))
+                    .await;
+            }
+        } // write-lock released
+
+        // update the mutator set with the UTXOs from this block
+        {
+            // obtain the backwards, forwards paths.
+            let (backwards, forwards) = self
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .init_update_mutator_set(&new_block)
+                .await?;
+
+            const BATCH_SIZE: usize = 5; // process 5 blocks at a time.
+
+            // process backwards path
+            for skip in (0..).map(|i| i * BATCH_SIZE) {
+                // read removal and addition records for this batch
+                let result = self
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .prepare_update_mutator_set(&new_block, &backwards, skip, BATCH_SIZE)
+                    .await?;
+                match result {
+                    Some(updates) => {
+                        // write removal/addition updates for this batch
+                        self.lock_guard_mut()
+                            .await
+                            .chain
+                            .archival_state_mut()
+                            .update_mutator_set_backwards(updates)
+                            .await?
+                    }
+                    None => break,
+                };
+            }
+            // process forwards path
+            for skip in (0..).map(|i| i * BATCH_SIZE) {
+                // read removal and addition records for this batch
+                let result = self
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .prepare_update_mutator_set(&new_block, &forwards, skip, BATCH_SIZE)
+                    .await?;
+                match result {
+                    Some(updates) => {
+                        // write removal/addition updates for this batch
+                        self.lock_guard_mut()
+                            .await
+                            .chain
+                            .archival_state_mut()
+                            .update_mutator_set_forwards(updates)
+                            .await?
+                    }
+                    None => break,
+                }
+            }
+            // perform final verification, set sync label, persist to disk.
+            self.lock_guard_mut()
+                .await
+                .chain
+                .archival_state_mut()
+                .finalize_update_mutator_set(&new_block)
+                .await?
+        }
+
+        // Get parent of tip for mutator-set data needed for various updates. Parent of the
+        // stored block will always exist since all blocks except the genesis block have a
+        // parent, and the genesis block is considered code, not data, so the genesis block
+        // will never be changed or updated through this method.
+        let tip_parent = self
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .get_tip_parent()
+            .await
+            .ok_or(anyhow::anyhow!(
+                "Parent must exist when storing a new block"
+            ))?;
+
+        // Sanity check that must always be true for a valid block
+        assert_eq!(
+            tip_parent.hash(),
+            new_block.header().prev_block_digest,
+            "Tip parent has must match indicated parent hash"
+        );
+        let previous_ms_accumulator = tip_parent.body().mutator_set_accumulator.clone();
+
+        // prepare to update wallet state with relevant UTXOs from this block
+        let result = self
+            .lock_guard()
+            .await
+            .wallet_state
+            .prepare_update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
+            .await?;
+
+        let mut gsm = self.lock_guard_mut().await;
+
+        if let Some(wallet_updates) = result {
+            // write updates
+            gsm.wallet_state
+                .finalize_update_wallet_state_with_new_block(wallet_updates)
+                .await?;
+        }
+
+        // Update mempool with UTXOs from this block. This is done by removing all transaction
+        // that became invalid/was mined by this block.
+        gsm.mempool
+            .update_with_block(previous_ms_accumulator, &new_block);
+
+        gsm.chain.light_state_mut().set_block(new_block);
+
+        // Flush databases
+        gsm.flush_databases().await?;
+
+        Ok(())
     }
 
     /// resync membership proofs
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// This method favors concurrency over (read+write) atomicity.
+    ///
+    /// The prepare/finalize pattern enables lengthy read operations to be
+    /// performed without requiring a write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not automatically atomic.
+    ///
+    /// This fn performs potentially lengthy operations.  The work has been
+    /// split into two: an immutable fn that prepares a batch of updates and a
+    /// mutable fn that finalizes (writes) the updates as quickly as possible.
+    /// In this way, we do not hold the write-lock any longer than necessary.
+    ///
+    /// Splitting the logic this way requires buffering updates in RAM.  We
+    /// batch the updates to avoid running out of mem.  The batch size is
+    /// initially set to 1000.  This is just a wild-ass-guess.  It seems high
+    /// enough that most wallets will only need a single batch, but low enough
+    /// that we shouldn't run out of mem if processing a huge wallet.
+    ///
+    /// see: <https://github.com/Neptune-Crypto/neptune-core/issues/183>
     pub async fn resync_membership_proofs(&mut self) -> Result<()> {
-        self.lock_guard_mut().await.resync_membership_proofs().await
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        // acquire read-lock
+        let gs = self.lock_guard().await;
+
+        // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
+        // have to sync many times, instead of just *one* time once we have caught up.
+        if gs.net.syncing {
+            debug!("Not syncing MS membership proofs because we are syncing");
+            return Ok(());
+        }
+
+        // is it necessary?
+        let tip_hash = gs.chain.light_state().hash();
+        if gs.wallet_state.is_synced_to(tip_hash).await {
+            debug!("Membership proof syncing not needed");
+            return Ok(());
+        }
+
+        // do we have blocks?
+        if !gs.chain.is_archival_node() {
+            todo!("We don't yet support non-archival nodes");
+            // request blocks from peers, etc.
+        }
+
+        drop(gs); // release read-lock.
+
+        // Process monitored_utxos in batches of 1000.  It seems unlikely many
+        // wallets would have more than 1000 mutxo that need resyncing but We do
+        // this as a safety valve to avoid blowing up memory too much.
+        const BATCH_SIZE: u64 = 1000;
+        for batch_idx in 0.. {
+            // perform lengthy op gathering updates with read-lock
+            let updates_batch = self
+                .lock_guard()
+                .await
+                .prepare_resync_membership_proofs(tip_hash, batch_idx, BATCH_SIZE)
+                .await?;
+            if updates_batch.len() == 0 {
+                // no more updates, we're done.
+                break;
+            }
+
+            // write updates as quickly as possible with write-lock.
+            self.lock_guard_mut()
+                .await
+                .finalize_resync_membership_proofs(tip_hash, updates_batch)
+                .await?;
+        }
+        Ok(())
     }
 
     pub async fn prune_abandoned_monitored_utxos(
@@ -282,15 +519,6 @@ impl GlobalState {
             .await
     }
 
-    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
-        let (height, time_secs) =
-            time_fn_call_async(self.get_latest_balance_height_internal()).await;
-
-        debug!("call to get_latest_balance_height() took {time_secs} seconds");
-
-        height
-    }
-
     /// Retrieve block height of last change to wallet balance.
     ///
     /// note: this fn could be implemented as:
@@ -305,7 +533,9 @@ impl GlobalState {
     /// Presently this is o(n) with the number of monitored utxos.
     /// if storage could keep track of latest spend utxo for the active
     /// tip, then this could be o(1).
-    async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
+    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let current_tip_digest = self.chain.light_state().hash();
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
@@ -362,6 +592,8 @@ impl GlobalState {
 
     /// Retrieve wallet balance history
     pub async fn get_balance_history(&self) -> Vec<(Digest, Timestamp, BlockHeight, NeptuneCoins)> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let current_tip_digest = self.chain.light_state().hash();
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
@@ -846,6 +1078,8 @@ impl GlobalState {
     /// are not synced with a valid mutator set membership proof. And this corruption
     /// can only happen if the wallet database is deleted or corrupted.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
@@ -959,16 +1193,49 @@ impl GlobalState {
         Ok(())
     }
 
-    ///  Locking:
-    ///   * acquires `monitored_utxos_lock` for write
-    pub async fn resync_membership_proofs_from_stored_blocks(
-        &mut self,
+    /// prepare a batch of updates for re-syncing membership proofs
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    ///
+    /// perf: this fn in o(n) with the number of monitored_utxos in the wallet.
+    ///
+    /// ```text
+    /// lengthy, i/o calls, foreach mutxo:
+    ///   monitored_utxos.get()
+    ///   ArchivalState::find_path()
+    ///   ArchivalState::get_block()
+    ///      called twice per block in a backwards loop along path
+    ///      called twice per block in a forwards loop along path
+    ///
+    ///      it should be possible to reduce this to 1 call per block
+    ///      for each loop by storing prev block in a temp var.
+    /// ```
+    ///
+    /// see <https://github.com/Neptune-Crypto/neptune-core/issues/183>
+    async fn prepare_resync_membership_proofs(
+        &self,
         tip_hash: Digest,
-    ) -> Result<()> {
-        // loop over all monitored utxos
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
+        batch_idx: u64,
+        batch_size: u64,
+    ) -> Result<impl ExactSizeIterator<Item = (Index, MonitoredUtxo)> + Send> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-        'outer: for i in 0..monitored_utxos.len().await {
+        // loop over all monitored utxos
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
+
+        let mut mutxo_updates: BTreeMap<Index, MonitoredUtxo> = Default::default();
+
+        let start = batch_idx * batch_size;
+        let end = std::cmp::min(start + batch_size, monitored_utxos.len().await);
+
+        'outer: for i in start..end {
             let i = i as Index;
             let monitored_utxo = monitored_utxos.get(i).await;
 
@@ -1126,9 +1393,36 @@ impl GlobalState {
             // store updated membership proof
             monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
 
-            // update storage.
-            monitored_utxos.set(i, monitored_utxo).await
+            mutxo_updates.insert(i, monitored_utxo);
         }
+
+        Ok(mutxo_updates.into_iter())
+    }
+
+    /// write/persist a list of [MonitoredUtxo].
+    ///
+    /// see <https://github.com/Neptune-Crypto/neptune-core/issues/183>
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    async fn finalize_resync_membership_proofs(
+        &mut self,
+        tip_hash: Digest,
+        monitored_utxos: impl IntoIterator<Item = (Index, MonitoredUtxo)> + Send,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        self.wallet_state
+            .wallet_db
+            .monitored_utxos_mut()
+            .set_many(monitored_utxos)
+            .await;
 
         // Update sync label and persist
         self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
@@ -1148,6 +1442,8 @@ impl GlobalState {
         &mut self,
         block_depth_threshhold: usize,
     ) -> Result<usize> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
         if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
             bail!(
@@ -1243,139 +1539,93 @@ impl GlobalState {
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW.
-    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<()> {
-        self.set_new_tip_internal(new_block, None).await
+    pub async fn set_new_tip_atomic(&mut self, new_block: Block) -> Result<()> {
+        self.set_new_tip_atomic_internal(new_block, None).await
     }
 
     /// Update client's state with a new block that was mined locally. Block is assumed to be valid,
     /// also wrt. to PoW. The received block will be set as the new tip, regardless of its
     /// accumulated PoW.
-    pub async fn set_new_self_mined_tip(
+    pub async fn set_new_self_mined_tip_atomic(
         &mut self,
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
     ) -> Result<()> {
-        self.set_new_tip_internal(new_block, Some(coinbase_utxo_info))
+        self.set_new_tip_atomic_internal(new_block, Some(coinbase_utxo_info))
             .await
     }
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW. or its
     /// validity.
-    async fn set_new_tip_internal(
+    async fn set_new_tip_atomic_internal(
         &mut self,
         new_block: Block,
         coinbase_utxo_info: Option<ExpectedUtxo>,
     ) -> Result<()> {
-        // note: we make this fn internal so we can log its duration and ensure it will
-        // never be called directly by another fn, without the timings.
-        async fn set_new_tip_internal_worker(
-            myself: &mut GlobalState,
-            new_block: Block,
-            coinbase_utxo_info: Option<ExpectedUtxo>,
-        ) -> Result<()> {
-            // Apply the updates
-            myself
-                .chain
-                .archival_state_mut()
-                .write_block_as_tip(&new_block)
-                .await?;
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-            // update the mutator set with the UTXOs from this block
-            myself
-                .chain
-                .archival_state_mut()
-                .update_mutator_set(&new_block)
-                .await
-                .expect("Updating mutator set must succeed");
+        // Apply the updates
+        self.chain
+            .archival_state_mut()
+            .write_block_as_tip(&new_block)
+            .await?;
 
-            if let Some(coinbase_info) = coinbase_utxo_info {
-                // Notify wallet to expect the coinbase UTXO, as we mined this block
-                myself
-                    .wallet_state
-                    .add_expected_utxo(ExpectedUtxo::new(
-                        coinbase_info.utxo,
-                        coinbase_info.sender_randomness,
-                        coinbase_info.receiver_preimage,
-                        UtxoNotifier::OwnMiner,
-                    ))
-                    .await;
-            }
+        // update the mutator set with the UTXOs from this block
+        self.chain
+            .archival_state_mut()
+            .update_mutator_set_atomic(&new_block)
+            .await?;
 
-            // Get parent of tip for mutator-set data needed for various updates. Parent of the
-            // stored block will always exist since all blocks except the genesis block have a
-            // parent, and the genesis block is considered code, not data, so the genesis block
-            // will never be changed or updated through this method.
-            let tip_parent = myself
-                .chain
+        if let Some(coinbase_info) = coinbase_utxo_info {
+            // Notify wallet to expect the coinbase UTXO, as we mined this block
+            self.wallet_state
+                .add_expected_utxo(ExpectedUtxo::new(
+                    coinbase_info.utxo,
+                    coinbase_info.sender_randomness,
+                    coinbase_info.receiver_preimage,
+                    UtxoNotifier::OwnMiner,
+                ))
+                .await;
+        }
+
+        // Get parent of tip for mutator-set data needed for various updates. Parent of the
+        // stored block will always exist since all blocks except the genesis block have a
+        // parent, and the genesis block is considered code, not data, so the genesis block
+        // will never be changed or updated through this method.
+        let tip_parent =
+            self.chain
                 .archival_state()
                 .get_tip_parent()
                 .await
-                .expect("Parent must exist when storing a new block");
+                .ok_or(anyhow::anyhow!(
+                    "Parent must exist when storing a new block"
+                ))?;
 
-            // Sanity check that must always be true for a valid block
-            assert_eq!(
-                tip_parent.hash(),
-                new_block.header().prev_block_digest,
-                "Tip parent has must match indicated parent hash"
-            );
-            let previous_ms_accumulator = tip_parent.body().mutator_set_accumulator.clone();
+        // Sanity check that must always be true for a valid block
+        assert_eq!(
+            tip_parent.hash(),
+            new_block.header().prev_block_digest,
+            "Tip parent has must match indicated parent hash"
+        );
+        let previous_ms_accumulator = tip_parent.body().mutator_set_accumulator.clone();
 
-            // update wallet state with relevant UTXOs from this block
-            myself
-                .wallet_state
-                .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
-                .await?;
+        // update wallet state with relevant UTXOs from this block
+        self.wallet_state
+            .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
+            .await?;
 
-            // Update mempool with UTXOs from this block. This is done by removing all transaction
-            // that became invalid/was mined by this block.
-            myself
-                .mempool
-                .update_with_block(previous_ms_accumulator, &new_block)
-                .await;
+        // Update mempool with UTXOs from this block. This is done by removing all transaction
+        // that became invalid/was mined by this block.
+        self.mempool
+            .update_with_block(previous_ms_accumulator, &new_block);
 
-            myself.chain.light_state_mut().set_block(new_block);
+        self.chain.light_state_mut().set_block(new_block);
 
-            // Flush databases
-            myself.flush_databases().await?;
+        // Flush databases
+        self.flush_databases().await?;
 
-            Ok(())
-        }
-
-        crate::macros::duration_async_info!(set_new_tip_internal_worker(
-            self,
-            new_block,
-            coinbase_utxo_info
-        ))
-    }
-
-    /// resync membership proofs
-    pub async fn resync_membership_proofs(&mut self) -> Result<()> {
-        // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
-        // have to sync many times, instead of just *one* time once we have caught up.
-        if self.net.syncing {
-            debug!("Not syncing MS membership proofs because we are syncing");
-            return Ok(());
-        }
-
-        // is it necessary?
-        let current_tip_digest = self.chain.light_state().hash();
-        if self.wallet_state.is_synced_to(current_tip_digest).await {
-            debug!("Membership proof syncing not needed");
-            return Ok(());
-        }
-
-        // do we have blocks?
-        if self.chain.is_archival_node() {
-            return self
-                .resync_membership_proofs_from_stored_blocks(current_tip_digest)
-                .await;
-        }
-
-        // request blocks from peers
-        todo!("We don't yet support non-archival nodes");
-
-        // Ok(())
+        Ok(())
     }
 
     #[inline]
@@ -1700,8 +1950,12 @@ mod global_state_tests {
         );
 
         // Call resync
+        let mutxo_updates = global_state
+            .prepare_resync_membership_proofs(mock_block_1a.hash(), 0, 1000)
+            .await
+            .unwrap();
         global_state
-            .resync_membership_proofs_from_stored_blocks(mock_block_1a.hash())
+            .finalize_resync_membership_proofs(mock_block_1a.hash(), mutxo_updates)
             .await
             .unwrap();
 
@@ -1740,7 +1994,7 @@ mod global_state_tests {
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
             make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
         global_state
-            .set_new_self_mined_tip(
+            .set_new_self_mined_tip_atomic(
                 mock_block_1a.clone(),
                 ExpectedUtxo::new(
                     coinbase_utxo,
@@ -1768,18 +2022,21 @@ mod global_state_tests {
         for _ in 0..5 {
             let (next_block, _, _) =
                 make_mock_block(&parent_block, None, other_receiving_address, rng.gen());
-            global_state.set_new_tip(next_block.clone()).await.unwrap();
+            global_state
+                .set_new_tip_atomic(next_block.clone())
+                .await
+                .unwrap();
             parent_block = next_block;
         }
+        drop(global_state);
 
         // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
-        global_state
-            .resync_membership_proofs_from_stored_blocks(parent_block.hash())
-            .await
-            .unwrap();
+        global_state_lock.resync_membership_proofs().await.unwrap();
+
+        let gs = global_state_lock.lock_guard().await;
 
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
-        let wallet_status_after_forking = global_state
+        let wallet_status_after_forking = gs
             .wallet_state
             .get_wallet_status_from_lock(parent_block.hash())
             .await;
@@ -1788,19 +2045,19 @@ mod global_state_tests {
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+        let monitored_utxos = gs.wallet_state.wallet_db.monitored_utxos();
         assert!(
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(parent_block.hash(), gs.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(parent_block.hash(), gs.chain.archival_state())
                 .await
         );
 
@@ -1830,7 +2087,7 @@ mod global_state_tests {
             make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
         {
             global_state
-                .set_new_self_mined_tip(
+                .set_new_self_mined_tip_atomic(
                     mock_block_1a.clone(),
                     ExpectedUtxo::new(
                         coinbase_utxo_1a,
@@ -1856,7 +2113,7 @@ mod global_state_tests {
             let (next_a_block, _, _) =
                 make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen());
             global_state
-                .set_new_tip(next_a_block.clone())
+                .set_new_tip_atomic(next_a_block.clone())
                 .await
                 .unwrap();
             fork_a_block = next_a_block;
@@ -1876,7 +2133,7 @@ mod global_state_tests {
             let (next_b_block, _, _) =
                 make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen());
             global_state
-                .set_new_tip(next_b_block.clone())
+                .set_new_tip_atomic(next_b_block.clone())
                 .await
                 .unwrap();
             fork_b_block = next_b_block;
@@ -1896,12 +2153,13 @@ mod global_state_tests {
             wallet_status_on_b_fork_before_resync.unsynced_unspent.len()
         );
 
+        drop(global_state);
+
         // Run the resync and verify that MPs are synced
-        global_state
-            .resync_membership_proofs_from_stored_blocks(fork_b_block.hash())
-            .await
-            .unwrap();
-        let wallet_status_on_b_fork_after_resync = global_state
+        global_state_lock.resync_membership_proofs().await.unwrap();
+
+        let mut gsm = global_state_lock.lock_guard_mut().await;
+        let wallet_status_on_b_fork_after_resync = gsm
             .wallet_state
             .get_wallet_status_from_lock(fork_b_block.hash())
             .await;
@@ -1918,15 +2176,12 @@ mod global_state_tests {
         for _ in 0..100 {
             let (next_c_block, _, _) =
                 make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen());
-            global_state
-                .set_new_tip(next_c_block.clone())
-                .await
-                .unwrap();
+            gsm.set_new_tip_atomic(next_c_block.clone()).await.unwrap();
             fork_c_block = next_c_block;
         }
 
         // Verify that there are zero MUTXOs with synced MPs
-        let wallet_status_on_c_fork_before_resync = global_state
+        let wallet_status_on_c_fork_before_resync = gsm
             .wallet_state
             .get_wallet_status_from_lock(fork_c_block.hash())
             .await;
@@ -1938,14 +2193,13 @@ mod global_state_tests {
             2,
             wallet_status_on_c_fork_before_resync.unsynced_unspent.len()
         );
+        drop(gsm);
 
         // Run the resync and verify that UTXO from genesis is synced, but that
         // UTXO from 1a is not synced.
-        global_state
-            .resync_membership_proofs_from_stored_blocks(fork_c_block.hash())
-            .await
-            .unwrap();
-        let wallet_status_on_c_fork_after_resync = global_state
+        global_state_lock.resync_membership_proofs().await.unwrap();
+        let gs = global_state_lock.lock_guard().await;
+        let wallet_status_on_c_fork_after_resync = gs
             .wallet_state
             .get_wallet_status_from_lock(fork_c_block.hash())
             .await;
@@ -1956,19 +2210,19 @@ mod global_state_tests {
         );
 
         // Also check that UTXO from 1a is considered abandoned
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+        let monitored_utxos = gs.wallet_state.wallet_db.monitored_utxos();
         assert!(
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(fork_c_block.hash(), gs.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(fork_c_block.hash(), gs.chain.archival_state())
                 .await
         );
 
@@ -2138,7 +2392,7 @@ mod global_state_tests {
         genesis_state_lock
             .lock_guard_mut()
             .await
-            .set_new_self_mined_tip(
+            .set_new_self_mined_tip_atomic(
                 block_1.clone(),
                 ExpectedUtxo::new(
                     cb_utxo,
@@ -2152,7 +2406,7 @@ mod global_state_tests {
 
         for state_lock in [&mut alice_state_lock, &mut bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
-            state.set_new_tip(block_1.clone()).await.unwrap();
+            state.set_new_tip_atomic(block_1.clone()).await.unwrap();
         }
 
         assert_eq!(
@@ -2305,7 +2559,7 @@ mod global_state_tests {
         let (block_1, _cb_utxo, _cb_output_randomness) =
             make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen());
 
-        global_state.set_new_tip(block_1).await.unwrap();
+        global_state.set_new_tip_atomic(block_1).await.unwrap();
 
         assert!(global_state
             .chain
@@ -2496,7 +2750,7 @@ mod global_state_tests {
                     .await;
 
                 // alice's node learns of the new block.
-                alice_state_mut.set_new_tip(block_1.clone()).await?;
+                alice_state_mut.set_new_tip_atomic(block_1.clone()).await?;
 
                 // alice should have 2 monitored utxos.
                 assert_eq!(
@@ -2533,7 +2787,7 @@ mod global_state_tests {
                 let mut bob_state_mut = bob_state_lock.lock_guard_mut().await;
 
                 // bob's node adds block1 to the chain.
-                bob_state_mut.set_new_tip(block_1.clone()).await?;
+                bob_state_mut.set_new_tip_atomic(block_1.clone()).await?;
 
                 // Now Bob should have a balance of 20, from Alice
                 assert_eq!(
@@ -2568,7 +2822,7 @@ mod global_state_tests {
                 assert_eq!(alice_initial_balance, 20000u32.into());
 
                 // now alice must replay old blocks.  (there's only one so far)
-                alice_state_mut.set_new_tip(block_1).await?;
+                alice_state_mut.set_new_tip_atomic(block_1).await?;
 
                 // Now alice should have a balance of 19979.
                 // 20000 from premine - 21 (20 to Bob + 1 fee)

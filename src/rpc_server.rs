@@ -1423,7 +1423,7 @@ mod rpc_server_tests {
         state_lock
             .lock_guard_mut()
             .await
-            .set_new_self_mined_tip(
+            .set_new_self_mined_tip_atomic(
                 block_1,
                 ExpectedUtxo::new(
                     cb_utxo,

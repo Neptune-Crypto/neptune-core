@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -5,6 +6,8 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
+use async_stream::stream;
+use futures::Stream;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde_derive::Deserialize;
@@ -25,6 +28,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::{traits::*, Index};
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
@@ -224,14 +228,21 @@ impl WalletState {
                 }
             }
 
-            // note: this will write modified state to disk.
-            wallet_state
-                .update_wallet_state_with_new_block(
+            // generate updates.  (read-only)
+            if let Some(updates) = wallet_state
+                .prepare_update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
                     &Block::genesis_block(cli_args.network),
                 )
                 .await
-                .expect("Updating wallet state with genesis block must succeed");
+                .expect("generating wallet state updates must succeed")
+            {
+                // write modified state to disk.
+                wallet_state
+                    .finalize_update_wallet_state_with_new_block(updates)
+                    .await
+                    .expect("Updating wallet state with genesis block must succeed");
+            }
         }
 
         wallet_state
@@ -250,6 +261,8 @@ impl WalletState {
         &self,
         transaction: &Transaction,
     ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let confirmed_absolute_index_sets = transaction
             .kernel
             .inputs
@@ -283,6 +296,8 @@ impl WalletState {
         &'a self,
         transaction: &'a Transaction,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         // scan for announced utxos for every known key of every key type.
         self.get_all_known_spending_keys()
             .into_iter()
@@ -309,13 +324,15 @@ impl WalletState {
     ///   n = number of ExpectedUtxo in database. (all-time)
     ///   m = number of transaction outputs.
     ///
-    /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
+    /// see <https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025>
     ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
     pub async fn scan_for_expected_utxos<'a>(
         &'a self,
         transaction: &'a Transaction,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
         let eu_map: HashMap<_, _> = expected_utxos
             .into_iter()
@@ -353,6 +370,8 @@ impl WalletState {
     ///       So it is implemented by clearing all ExpectedUtxo from DB and
     ///       adding back those that are not stale.
     pub async fn prune_stale_expected_utxos(&mut self) {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         // prune un-received ExpectedUtxo after 28 days in secs
         const UNRECEIVED_UTXO_SECS: u64 = 28 * 24 * 60 * 60;
 
@@ -392,6 +411,8 @@ impl WalletState {
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
     // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         self.get_all_known_spending_keys()
             .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
@@ -399,6 +420,8 @@ impl WalletState {
 
     /// returns all spending keys of all key types with derivation index less than current counter
     pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         KeyType::all_types()
             .into_iter()
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
@@ -479,13 +502,34 @@ impl WalletState {
         self.wallet_secret.nth_symmetric_key(0)
     }
 
-    /// Update wallet state with new block. Assume the given block
-    /// is valid and that the wallet state is not up to date yet.
-    pub async fn update_wallet_state_with_new_block(
-        &mut self,
+    /// prepares to update wallet state with new block.
+    ///
+    /// This immutable method returns a [WalletBlockUpdate] record that must be
+    /// applied with [Self::finalize_update_wallet_state_with_new_block()].
+    ///
+    /// note: assumes the given block is valid and that the wallet state is not
+    /// up to date yet.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn prepare_update_wallet_state_with_new_block(
+        &self,
         current_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
-    ) -> Result<()> {
+    ) -> Result<Option<WalletBlockUpdate>> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        // make a cache for local processing of monitored-utxos.
+        // (writes are local, reads fetch from db if needed)
+        let mut mutxo_cache =
+            MonitoredUtxoReadOnlyCache::new(self.wallet_db.monitored_utxos()).await;
+
         let transaction: Transaction = new_block.kernel.body.transaction.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
@@ -522,16 +566,15 @@ impl WalletState {
         // the process update existing membership proofs with
         // updates from this block
 
-        let monitored_utxos = self.wallet_db.monitored_utxos_mut();
         let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
         // block does not affect our balance
         if spent_inputs.is_empty()
             && addition_record_to_utxo_info.is_empty()
-            && monitored_utxos.is_empty().await
+            && mutxo_cache.is_empty()
         {
-            return Ok(());
+            return Ok(None);
         }
 
         // Find the membership proofs that were valid at the previous tip. They have
@@ -542,7 +585,7 @@ impl WalletState {
         > = HashMap::default();
 
         {
-            let stream = monitored_utxos.stream().await;
+            let stream = mutxo_cache.stream().await;
             pin_mut!(stream); // needed for iteration
 
             while let Some((i, monitored_utxo)) = stream.next().await {
@@ -657,7 +700,7 @@ impl WalletState {
                 };
                 incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
 
-                let mutxos_len = monitored_utxos.len().await;
+                let mutxos_len = mutxo_cache.len();
 
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
@@ -674,7 +717,7 @@ impl WalletState {
                     new_block.kernel.header.timestamp,
                     new_block.kernel.header.height,
                 ));
-                monitored_utxos.push(mutxo).await;
+                mutxo_cache.push(mutxo);
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
@@ -683,7 +726,7 @@ impl WalletState {
 
         // sanity check
         {
-            let stream = monitored_utxos.stream_values().await;
+            let stream = mutxo_cache.stream_values().await;
             pin_mut!(stream); // needed for iteration
 
             let mutxo_with_valid_mps = stream
@@ -710,6 +753,7 @@ impl WalletState {
             new_block.kernel.body.transaction.kernel.inputs.len()
         );
         let mut block_tx_input_count: usize = 0;
+
         while let Some(removal_record) = removal_records.pop() {
             let res = MsMembershipProof::batch_update_from_remove(
                 &mut valid_membership_proofs_and_own_utxo_count
@@ -741,13 +785,13 @@ impl WalletState {
                         block_tx_input_count
                     );
 
-                    let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index).await;
+                    let mut spent_mutxo = mutxo_cache.get(*mutxo_list_index).await;
                     spent_mutxo.spent_in_block = Some((
                         new_block.hash(),
                         new_block.kernel.header.timestamp,
                         new_block.kernel.header.height,
                     ));
-                    monitored_utxos.set(*mutxo_list_index, spent_mutxo).await;
+                    mutxo_cache.set(*mutxo_list_index, spent_mutxo);
                 }
             }
 
@@ -769,7 +813,7 @@ impl WalletState {
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
         let num_unspent_utxos = {
-            let stream = monitored_utxos.stream_values().await;
+            let stream = mutxo_cache.stream_values().await;
             pin_mut!(stream); // needed for iteration
 
             stream
@@ -784,7 +828,7 @@ impl WalletState {
             valid_membership_proofs_and_own_utxo_count.iter()
         {
             let StrongUtxoKey { utxo_digest, .. } = strong_utxo_key;
-            let mut monitored_utxo = monitored_utxos.get(*own_utxo_index).await;
+            let mut monitored_utxo = mutxo_cache.get(*own_utxo_index).await;
             monitored_utxo.add_membership_proof_for_tip(new_block.hash(), updated_ms_mp.to_owned());
 
             // Sanity check that membership proofs of non-spent transactions are still valid
@@ -793,7 +837,7 @@ impl WalletState {
                     || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
-            monitored_utxos.set(*own_utxo_index, monitored_utxo).await;
+            mutxo_cache.set(*own_utxo_index, monitored_utxo);
 
             // TODO: What if a newly added transaction replaces a transaction that was in another fork?
             // How do we ensure that this transaction is not counted twice?
@@ -801,20 +845,15 @@ impl WalletState {
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
-        // write these to disk.
-        for item in incoming_utxo_recovery_data_list.into_iter() {
-            self.store_utxo_ms_recovery_data(item).await?;
-        }
-
         // Mark all expected UTXOs that were received in this block as received
-        let updates = self
+        let expected_utxos = self
             .wallet_db
             .expected_utxos()
             .get_all()
             .await
             .into_iter()
             .enumerate()
-            .filter(|(_, eu)| {
+            .filter(move |(_, eu)| {
                 offchain_received_outputs
                     .iter()
                     .any(|au| au.addition_record == eu.addition_record)
@@ -822,12 +861,103 @@ impl WalletState {
             .map(|(idx, mut eu)| {
                 eu.mined_in_block = Some((new_block.hash(), new_block.kernel.header.timestamp));
                 (idx as Index, eu)
-            });
-        self.wallet_db.expected_utxos_mut().set_many(updates).await;
+            })
+            .collect_vec();
 
-        self.wallet_db.set_sync_label(new_block.hash()).await;
+        let (mutxo_updates, mutxo_additions) = mutxo_cache.into_updates_and_additions();
+        Ok(Some(WalletBlockUpdate {
+            new_block_hash: new_block.hash(),
+            incoming_utxo_recovery_data_list,
+            mutxo_updates,
+            mutxo_additions,
+            expected_utxos,
+        }))
+    }
+
+    /// updates wallet state with new block.
+    ///
+    /// This mutable method applies updates generated by
+    /// [Self::prepare_update_wallet_state_with_new_block()].
+    ///
+    /// note: assumes the input data is valid/correct.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn finalize_update_wallet_state_with_new_block(
+        &mut self,
+        updates: WalletBlockUpdate,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        let WalletBlockUpdate {
+            new_block_hash,
+            incoming_utxo_recovery_data_list,
+            mutxo_updates,
+            mutxo_additions,
+            expected_utxos,
+        } = updates;
+
+        // write these to disk.
+        for item in incoming_utxo_recovery_data_list {
+            self.store_utxo_ms_recovery_data(item).await?;
+        }
+
+        // add new mutxos
+        for (_, mutxo) in mutxo_additions {
+            self.wallet_db.monitored_utxos_mut().push(mutxo).await;
+        }
+
+        // update existing mutxos
+        self.wallet_db
+            .monitored_utxos_mut()
+            .set_many(mutxo_updates)
+            .await;
+
+        // update expected utxos
+        self.wallet_db
+            .expected_utxos_mut()
+            .set_many(expected_utxos)
+            .await;
+
+        self.wallet_db.set_sync_label(new_block_hash).await;
         self.wallet_db.persist().await;
 
+        Ok(())
+    }
+
+    /// updates wallet state with new block.
+    ///
+    /// This mutable method is a wrapper for [Self::prepare_update_wallet_state_with_new_block()]
+    /// and [Self::finalize_update_wallet_state_with_new_block()].
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// This method is atomic over read+write.  It is not concurrent.
+    ///
+    /// Calling this method requires the caller to hold the global write-lock
+    /// for both the lengthy read operations and the shorter write operations.
+    /// All other tasks that read/write app state are blocked while this
+    /// processes.
+    pub(crate) async fn update_wallet_state_with_new_block(
+        &mut self,
+        current_mutator_set_accumulator: &MutatorSetAccumulator,
+        new_block: &Block,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        if let Some(updates) = self
+            .prepare_update_wallet_state_with_new_block(current_mutator_set_accumulator, new_block)
+            .await?
+        {
+            self.finalize_update_wallet_state_with_new_block(updates)
+                .await?;
+        }
         Ok(())
     }
 
@@ -850,6 +980,8 @@ impl WalletState {
     }
 
     pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -901,6 +1033,8 @@ impl WalletState {
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> Result<TxInputList> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
@@ -988,6 +1122,131 @@ impl WalletState {
             own_coins.push(coin);
         }
         own_coins
+    }
+}
+
+/// represents updates to apply to wallet state for a new block
+pub(crate) struct WalletBlockUpdate {
+    new_block_hash: Digest,
+    incoming_utxo_recovery_data_list: Vec<IncomingUtxoRecoveryData>,
+    mutxo_updates: BTreeMap<Index, MonitoredUtxo>,
+    mutxo_additions: BTreeMap<Index, MonitoredUtxo>,
+    expected_utxos: Vec<(Index, ExpectedUtxo)>,
+}
+
+/// A read-only wrapper for DbtVec<MonitoredUtxo>.
+///
+/// This type enables code to work with `monitored_utxos` such that reads query
+/// the database if necessary but modifications do not modify DB.
+///
+/// The purpose is to facilitate the prepare/finalize pattern in which length
+/// read ops are performed (with read-lock) to generate a set of updates which
+/// can be quickly applied (with write lock)
+///
+/// Built for `WalletState::prepare_update_wallet_state_with_new_block()`.  Only
+/// impls a subset of DbtVec methods that are used by that fn.
+///
+/// When using this type all read+writes in a logical operation must be
+/// performed with this API.  Mixing with reads/writes directly from the DB may
+/// result in inconsistent data.
+///
+/// When finished with processing Updates and Additions can be queried in order
+/// to write them to DB in batch(es).
+struct MonitoredUtxoReadOnlyCache<'a> {
+    mutxos: &'a DbtVec<MonitoredUtxo>,
+    len: Index,
+    updates: BTreeMap<Index, MonitoredUtxo>,
+    additions: BTreeMap<Index, MonitoredUtxo>,
+}
+
+impl<'a> MonitoredUtxoReadOnlyCache<'a> {
+    /// create new instance
+    pub async fn new(mutxos: &'a DbtVec<MonitoredUtxo>) -> Self {
+        Self {
+            mutxos,
+            len: mutxos.len().await,
+            updates: Default::default(),
+            additions: Default::default(),
+        }
+    }
+
+    /// returns true if empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// returns count of [MonitoredUtxo]
+    pub fn len(&self) -> Index {
+        self.len
+    }
+
+    /// retrieves element matching `index`
+    pub async fn get(&self, index: Index) -> MonitoredUtxo {
+        if let Some(v) = self.additions.get(&index) {
+            v.to_owned()
+        } else if let Some(v) = self.updates.get(&index) {
+            v.to_owned()
+        } else {
+            self.mutxos.get(index).await
+        }
+    }
+
+    /// append element
+    pub fn push(&mut self, mutxo: MonitoredUtxo) {
+        self.additions.insert(self.len, mutxo);
+        self.len += 1;
+    }
+
+    /// overwrite element at `index`
+    ///
+    /// returned value will reflect any local changes (not yet written to DB)
+    pub fn set(&mut self, index: Index, mutxo: MonitoredUtxo) {
+        use std::collections::btree_map::Entry::Vacant;
+        if let Vacant(_) = self
+            .additions
+            .entry(index)
+            .and_modify(|m| *m = mutxo.clone())
+        {
+            if index >= self.len - self.additions.len() as Index {
+                panic!("index out of range");
+            }
+            self.updates
+                .entry(index)
+                .and_modify(|m| *m = mutxo.clone())
+                .or_insert(mutxo);
+        }
+    }
+
+    /// returns async [Stream] of ([Index], [MonitoredUtxo])
+    ///
+    /// values will reflect any local changes (not yet written to DB)
+    pub async fn stream(&self) -> impl Stream<Item = (Index, MonitoredUtxo)> + '_ {
+        self.mutxos
+            .stream()
+            .await
+            .map(|(i, v)| (i, self.updates.get(&i).unwrap_or(&v).to_owned()))
+            .chain(stream! {
+                for (i, v) in self.additions.iter() {
+                    yield (*i, v.to_owned())
+                }
+            })
+    }
+
+    /// returns async [Stream] of [MonitoredUtxo]
+    ///
+    /// values will reflect any local changes (not yet written to DB)
+    pub async fn stream_values(&self) -> impl Stream<Item = MonitoredUtxo> + '_ {
+        self.stream().await.map(|(_, v)| v)
+    }
+
+    /// convert into tuple of modified data: (updates, additions)
+    pub fn into_updates_and_additions(
+        self,
+    ) -> (
+        BTreeMap<Index, MonitoredUtxo>,
+        BTreeMap<Index, MonitoredUtxo>,
+    ) {
+        (self.updates, self.additions)
     }
 }
 
@@ -1099,7 +1358,7 @@ mod tests {
                 rng.gen(),
             );
         own_global_state
-            .set_new_self_mined_tip(
+            .set_new_self_mined_tip_atomic(
                 block_3a,
                 ExpectedUtxo::new(
                     block_3a_coinbase_utxo,
@@ -1142,7 +1401,7 @@ mod tests {
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
             make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
-            .set_new_tip(block_3b.clone())
+            .set_new_tip_atomic(block_3b.clone())
             .await
             .unwrap();
 
@@ -1173,7 +1432,7 @@ mod tests {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
             own_global_state
-                .set_new_tip(new_block.clone())
+                .set_new_tip_atomic(new_block.clone())
                 .await
                 .unwrap();
 
@@ -1205,7 +1464,7 @@ mod tests {
         let (block_12, _, _) =
             make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
-            .set_new_tip(block_12.clone())
+            .set_new_tip_atomic(block_12.clone())
             .await
             .unwrap();
 

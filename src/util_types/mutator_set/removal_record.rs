@@ -37,7 +37,7 @@ use super::shared::NUM_TRIALS;
 use super::MutatorSetError;
 
 #[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
-pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
+pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]); // 720 bytes
 
 impl GetSize for AbsoluteIndexSet {
     fn get_stack_size() -> usize {
@@ -167,7 +167,7 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary,
 )]
 pub struct RemovalRecord {
-    pub absolute_indices: AbsoluteIndexSet,
+    pub absolute_indices: AbsoluteIndexSet, // 720 bytes
     pub target_chunks: ChunkDictionary,
 }
 
@@ -203,16 +203,11 @@ impl RemovalRecord {
         // Collect all indices for all removal records that are being updated
         let mut chunk_index_to_rr_index: HashMap<u64, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
-            let indices = &rr.absolute_indices;
-            let chunks_set: HashSet<u64> = indices
+            rr.absolute_indices
                 .to_array()
                 .iter()
                 .map(|x| (x / CHUNK_SIZE as u128) as u64)
-                .collect();
-
-            chunks_set
-                .iter()
-                .for_each(|chnkidx| chunk_index_to_rr_index.entry(*chnkidx).or_default().push(i));
+                .for_each(|chnkidx| chunk_index_to_rr_index.entry(chnkidx).or_default().push(i));
         });
 
         // Find the removal records that need a new dictionary entry for the chunk

@@ -327,7 +327,14 @@ impl Block {
             difficulty: MINIMUM_DIFFICULTY.into(),
         };
 
-        Self::new(header, body, BlockType::Genesis)
+        let block = Self::new(header, body, BlockType::Genesis);
+
+        debug!(
+            "Instantiated genesis block with digest\n  str: {}\n  hex: {}",
+            block.hash(),
+            block.hash().to_hex()
+        );
+        block
     }
 
     fn premine_distribution(_network: Network) -> Vec<(ReceivingAddress, NeptuneCoins)> {

@@ -345,7 +345,7 @@ impl MainLoopHandler {
                 }
 
                 global_state_mut
-                    .set_new_self_mined_tip(
+                    .set_new_self_mined_tip_atomic(
                         new_block.as_ref().clone(),
                         new_block_info.coinbase_utxo_info.as_ref().clone(),
                     )
@@ -429,7 +429,7 @@ impl MainLoopHandler {
                             new_block.kernel.header.timestamp.standard_format()
                         );
 
-                        global_state_mut.set_new_tip(new_block).await?;
+                        global_state_mut.set_new_tip_atomic(new_block).await?;
                     }
                 }
 
