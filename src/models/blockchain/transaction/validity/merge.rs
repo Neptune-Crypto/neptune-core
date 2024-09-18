@@ -181,275 +181,163 @@ pub struct Merge;
 impl ConsensusProgram for Merge {
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
-        let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
+        let new_txk_digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         // read the hash of the program relative to which the transactions were proven valid
         let single_proof_program_hash = tasmlib::tasmlib_io_read_stdin___digest();
+        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_hash);
 
         // divine the witness for this proof
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let mw: MergeWitness = tasmlib::decode_from_memory(start_address);
+        let start_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+        let mw = tasmlib::decode_from_memory::<MergeWitness>(start_address);
 
         // divine the left and right kernels of the operand transactions
-        let left_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
-        let left_txk_digest_as_input: Vec<BFieldElement> =
-            left_txk_digest.reversed().values().to_vec();
-        let right_txk_digest: Digest = tasmlib::tasmlib_io_read_secin___digest();
-        let right_txk_digest_as_input: Vec<BFieldElement> =
-            right_txk_digest.reversed().values().to_vec();
+        let left_txk_digest = tasmlib::tasmlib_io_read_secin___digest();
+        let right_txk_digest = tasmlib::tasmlib_io_read_secin___digest();
 
         // verify the proofs of the operand transactions
-        let left_claim: Claim = Claim {
-            program_digest: single_proof_program_hash,
-            input: left_txk_digest_as_input,
-            output: vec![],
-        };
-        let left_proof: &Proof = &mw.left_proof;
-        tasmlib::verify_stark(Stark::default(), &left_claim, left_proof);
-        let right_claim: Claim = Claim {
-            program_digest: single_proof_program_hash,
-            input: right_txk_digest_as_input,
-            output: vec![],
-        };
-        let right_proof: &Proof = &mw.right_proof;
-        tasmlib::verify_stark(Stark::default(), &right_claim, right_proof);
+        let left_claim = Claim::new(single_proof_program_hash)
+            .with_input(left_txk_digest.reversed().values().to_vec());
+        let right_claim = Claim::new(single_proof_program_hash)
+            .with_input(right_txk_digest.reversed().values().to_vec());
+
+        tasmlib::verify_stark(Stark::default(), &left_claim, &mw.left_proof);
+        tasmlib::verify_stark(Stark::default(), &right_claim, &mw.right_proof);
+
+        let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2();
 
         // new inputs are a permutation of the operands' inputs' concatenation
         let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::Inputs as u32,
-            Hash::hash(left_inputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut preshuffle_inputs: Vec<Digest> = Vec::new();
-        let mut i: usize = 0;
-        while i < left_inputs.len() {
-            preshuffle_inputs.push(Hash::hash(&left_inputs[i]));
-            i += 1;
-        }
         let right_inputs: &Vec<RemovalRecord> = &mw.right_kernel.inputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::Inputs as u32,
-            Hash::hash(right_inputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        i = 0;
-        while i < right_inputs.len() {
-            preshuffle_inputs.push(Hash::hash(&right_inputs[i]));
-            i += 1;
-        }
         let new_inputs: &Vec<RemovalRecord> = &mw.new_kernel.inputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Inputs as u32,
-            Hash::hash(new_inputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut postshuffle_inputs: Vec<Digest> = Vec::new();
-        i = 0;
-        while i < new_inputs.len() {
-            postshuffle_inputs.push(Hash::hash(&new_inputs[i]));
-        }
-        preshuffle_inputs.sort();
-        postshuffle_inputs.sort();
-        assert_eq!(preshuffle_inputs, postshuffle_inputs);
+
+        let assert_input_integrity = |merkle_root, inputs| {
+            let leaf_index = TransactionKernelField::Inputs as u32;
+            let leaf = Tip5::hash(inputs);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_input_integrity(left_txk_digest, left_inputs);
+        assert_input_integrity(right_txk_digest, right_inputs);
+        assert_input_integrity(new_txk_digest, new_inputs);
+
+        let to_merge_inputs = left_inputs
+            .iter()
+            .chain(right_inputs)
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        let merged_inputs = new_inputs.iter().map(Tip5::hash).sorted().collect_vec();
+        assert_eq!(to_merge_inputs, merged_inputs);
 
         // new outputs are a permutation of the operands' outputs' concatenation
-        let left_outputs: &Vec<AdditionRecord> = &mw.left_kernel.outputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::Outputs as u32,
-            Hash::hash(left_outputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut preshuffle_outputs: Vec<Digest> = Vec::new();
-        i = 0;
-        while i < left_outputs.len() {
-            preshuffle_outputs.push(Hash::hash(&left_outputs[i]));
-            i += 1;
-        }
-        let right_outputs: &Vec<AdditionRecord> = &mw.right_kernel.outputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::Outputs as u32,
-            Hash::hash(right_outputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        i = 0;
-        while i < right_outputs.len() {
-            preshuffle_inputs.push(Hash::hash(&right_outputs[i]));
-            i += 1;
-        }
-        let new_outputs: &Vec<AdditionRecord> = &mw.new_kernel.outputs;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Outputs as u32,
-            Hash::hash(new_outputs),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut postshuffle_outputs: Vec<Digest> = Vec::new();
-        i = 0;
-        while i < new_outputs.len() {
-            postshuffle_outputs.push(Hash::hash(&new_outputs[i]));
-        }
-        preshuffle_outputs.sort();
-        postshuffle_outputs.sort();
-        assert_eq!(preshuffle_outputs, postshuffle_outputs);
+        let left_outputs = &mw.left_kernel.outputs;
+        let right_outputs = &mw.right_kernel.outputs;
+        let new_outputs = &mw.new_kernel.outputs;
+
+        let assert_output_integrity = |merkle_root, outputs| {
+            let leaf_index = TransactionKernelField::Outputs as u32;
+            let leaf = Tip5::hash(outputs);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height)
+        };
+        assert_output_integrity(left_txk_digest, left_outputs);
+        assert_output_integrity(right_txk_digest, right_outputs);
+        assert_output_integrity(new_txk_digest, new_outputs);
+
+        // todo vvvvv from here
+        let to_merge_outputs = left_outputs
+            .iter()
+            .chain(right_outputs)
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
+        assert_eq!(to_merge_outputs, merged_outputs);
+        // todo ^^^^
 
         // new public announcements is a permutation of operands' public
         // announcements' concatenation
-        let left_public_announcements: &Vec<PublicAnnouncement> =
-            &mw.left_kernel.public_announcements;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::PublicAnnouncements as u32,
-            Hash::hash(left_public_announcements),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut preshuffle_public_announcements: Vec<Digest> = Vec::new();
-        i = 0;
-        while i < left_public_announcements.len() {
-            preshuffle_public_announcements.push(Hash::hash(&left_public_announcements[i]));
-            i += 1;
-        }
-        let right_public_announcements: &Vec<PublicAnnouncement> =
-            &mw.right_kernel.public_announcements;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::PublicAnnouncements as u32,
-            Hash::hash(right_public_announcements),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        i = 0;
-        while i < right_public_announcements.len() {
-            preshuffle_public_announcements.push(Hash::hash(&right_public_announcements[i]));
-            i += 1;
-        }
-        let new_public_announcements: &Vec<PublicAnnouncement> =
-            &mw.new_kernel.public_announcements;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::PublicAnnouncements as u32,
-            Hash::hash(new_public_announcements),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let mut postshuffle_public_announcements: Vec<Digest> = Vec::new();
-        i = 0;
-        while i < new_outputs.len() {
-            postshuffle_public_announcements.push(Hash::hash(&new_public_announcements[i]));
-        }
-        preshuffle_public_announcements.sort();
-        postshuffle_public_announcements.sort();
-        assert_eq!(
-            preshuffle_public_announcements,
-            postshuffle_public_announcements
-        );
+        let left_public_announcements = &mw.left_kernel.public_announcements;
+        let right_public_announcements = &mw.right_kernel.public_announcements;
+        let new_public_announcements = &mw.new_kernel.public_announcements;
+
+        let assert_public_announcement_integrity = |merkle_root, announcements| {
+            let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
+            let leaf = Tip5::hash(announcements);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
+        assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
+        assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
+
+        let to_merge_public_announcements = left_public_announcements
+            .iter()
+            .chain(right_public_announcements)
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        let merged_public_announcements = new_public_announcements
+            .iter()
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        assert_eq!(to_merge_public_announcements, merged_public_announcements);
 
         // new fee is sum of operand fees
-        let left_fee: NeptuneCoins = mw.left_kernel.fee;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::Fee as u32,
-            Hash::hash(&left_fee),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let right_fee: NeptuneCoins = mw.right_kernel.fee;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::Fee as u32,
-            Hash::hash(&right_fee),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let new_fee: NeptuneCoins = left_fee + right_fee;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Fee as u32,
-            Hash::hash(&new_fee),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
+        let left_fee = mw.left_kernel.fee;
+        let right_fee = mw.right_kernel.fee;
+        let new_fee = left_fee + right_fee;
+
+        let assert_fee_integrity = |merkle_root, fee| {
+            let leaf_index = TransactionKernelField::Fee as u32;
+            let leaf = Tip5::hash(fee);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_fee_integrity(left_txk_digest, &left_fee);
+        assert_fee_integrity(right_txk_digest, &right_fee);
+        assert_fee_integrity(new_txk_digest, &new_fee);
 
         // at most one coinbase is set
-        let left_coinbase: Option<NeptuneCoins> = mw.left_kernel.coinbase;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            Hash::hash(&left_coinbase),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        let right_coinbase: Option<NeptuneCoins> = mw.right_kernel.coinbase;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            Hash::hash(&right_coinbase),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
+        let left_coinbase = mw.left_kernel.coinbase;
+        let right_coinbase = mw.right_kernel.coinbase;
+        let new_coinbase = left_coinbase.or(right_coinbase);
         assert!(left_coinbase.is_none() || right_coinbase.is_none());
 
-        // new coinbase is whichever is set, or none
-        let new_coinbase: Option<NeptuneCoins> = if left_coinbase.is_some() {
-            left_coinbase
-        } else {
-            right_coinbase
+        let assert_coinbase_integrity = |merkle_root, coinbase| {
+            let leaf_index = TransactionKernelField::Coinbase as u32;
+            let leaf = Tip5::hash(coinbase);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
         };
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Coinbase as u32,
-            Hash::hash(&new_coinbase),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
+        assert_coinbase_integrity(left_txk_digest, &left_coinbase);
+        assert_coinbase_integrity(right_txk_digest, &right_coinbase);
+        assert_coinbase_integrity(new_txk_digest, &new_coinbase);
 
         // new timestamp is whichever is larger
         let left_timestamp: Timestamp = mw.left_kernel.timestamp;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::Timestamp as u32,
-            Hash::hash(&left_timestamp),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
         let right_timestamp: Timestamp = mw.right_kernel.timestamp;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::Timestamp as u32,
-            Hash::hash(&right_timestamp),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
         let new_timestamp: Timestamp = if left_timestamp < right_timestamp {
             right_timestamp
         } else {
             left_timestamp
         };
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::Timestamp as u32,
-            Hash::hash(&new_timestamp),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
+
+        let assert_timestamp_integrity = |merkle_root, timestamp| {
+            let leaf_index = TransactionKernelField::Timestamp as u32;
+            let leaf = Tip5::hash(timestamp);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_timestamp_integrity(left_txk_digest, &left_timestamp);
+        assert_timestamp_integrity(right_txk_digest, &right_timestamp);
+        assert_timestamp_integrity(new_txk_digest, &new_timestamp);
 
         // mutator set hash is identical
-        let mutator_set_hash: Digest = mw.left_kernel.mutator_set_hash;
-        tasmlib::tasmlib_hashing_merkle_verify(
-            left_txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&mutator_set_hash),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            right_txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&mutator_set_hash),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::MutatorSetHash as u32,
-            Hash::hash(&mutator_set_hash),
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
-        );
-
-        // output hash of program against which the out-of-date transaction was proven valid
-        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_hash);
+        let assert_mutator_set_hash_integrity = |merkle_root| {
+            let leaf_index = TransactionKernelField::MutatorSetHash as u32;
+            let leaf = Tip5::hash(&mw.left_kernel.mutator_set_hash);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_mutator_set_hash_integrity(left_txk_digest);
+        assert_mutator_set_hash_integrity(right_txk_digest);
+        assert_mutator_set_hash_integrity(new_txk_digest);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
