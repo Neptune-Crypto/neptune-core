@@ -300,7 +300,7 @@ pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
     let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(stark_parameters);
 
     let num_digests_consumed =
-        stark_verify_snippet.number_of_nondeterministic_digests_consumed(proof, claim);
+        stark_verify_snippet.number_of_nondeterministic_digests_consumed(proof);
     ND_DIGESTS.with_borrow_mut(|digest_stream| {
         (0..num_digests_consumed).for_each(|_| {
             digest_stream.pop_front().expect(

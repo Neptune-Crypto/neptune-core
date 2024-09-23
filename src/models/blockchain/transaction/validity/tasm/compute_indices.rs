@@ -327,9 +327,9 @@ mod tests {
         stack.push(main_list_address);
 
         // run map snippet
-        let shadowed_snippet = ShadowedFunction::new(Map {
-            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
-        });
+        let shadowed_snippet = ShadowedFunction::new(Map::new(InnerFunction::BasicSnippet(
+            Box::new(ComputeIndices),
+        )));
         let init_stack = stack.clone();
         let vm_output_state = link_and_run_tasm_for_test(
             &shadowed_snippet,
@@ -340,9 +340,9 @@ mod tests {
         );
 
         // write debug output (maybe)
-        let program = Program::new(&link_for_isolated_run(Rc::new(RefCell::new(Map {
-            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
-        }))));
+        let program = Program::new(&link_for_isolated_run(Rc::new(RefCell::new(Map::new(
+            InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
+        )))));
 
         let mut vm_state = VMState::new(
             &program,

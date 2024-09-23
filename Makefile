@@ -26,7 +26,7 @@ endif
 
 # Tests that require proofs that are expensive to create
 expensive-proofs:
-	CARGO_TARGET_DIR=./makefile-target-opt-level3 RUSTFLAGS="-C opt-level=3 -C debug-assertions=no -Z threads=180 --cfg=tokio_unstable" cargo t can_verify_transaction_ -- --nocapture
+	CARGO_TARGET_DIR=./makefile-target-opt-level3 RUSTFLAGS="-C opt-level=3 -C debug-assertions=no -Z threads=180 --cfg=tokio_unstable" cargo t can_verify_transaction_ -- --nocapture --test-threads=1
 
 build:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
