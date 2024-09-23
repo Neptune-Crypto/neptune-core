@@ -280,7 +280,10 @@ pub async fn add_block_to_archival_state(
 ) -> Result<()> {
     archival_state.write_block_as_tip(&new_block).await?;
 
-    archival_state.update_mutator_set(&new_block).await.unwrap();
+    archival_state
+        .update_mutator_set_atomic(&new_block)
+        .await
+        .unwrap();
 
     Ok(())
 }

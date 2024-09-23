@@ -962,7 +962,7 @@ mod wallet_tests {
                 .await;
         }
         premine_receiver_global_state
-            .set_new_tip(block_1.clone())
+            .set_new_tip_atomic(block_1.clone())
             .await
             .unwrap();
 
@@ -1026,7 +1026,7 @@ mod wallet_tests {
                 )
                 .await?;
             premine_receiver_global_state
-                .set_new_tip(next_block.clone())
+                .set_new_tip_atomic(next_block.clone())
                 .await
                 .unwrap();
         }
@@ -1097,7 +1097,7 @@ mod wallet_tests {
             )
             .await?;
         premine_receiver_global_state
-            .set_new_tip(block_2_b.clone())
+            .set_new_tip_atomic(block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state

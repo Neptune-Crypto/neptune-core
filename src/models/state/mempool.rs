@@ -315,7 +315,7 @@ impl Mempool {
     /// Remove from the mempool all transactions that become invalid because
     /// of a newly received block. Also update all mutator set data for mempool
     /// transactions that were not removed.
-    pub async fn update_with_block(
+    pub fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
@@ -653,11 +653,11 @@ mod tests {
             ))
             .await;
         other_global_state
-            .set_new_tip(block_1.clone())
+            .set_new_tip_atomic(block_1.clone())
             .await
             .unwrap();
         premine_receiver_global_state
-            .set_new_tip(block_1.clone())
+            .set_new_tip_atomic(block_1.clone())
             .await
             .unwrap();
 
@@ -736,12 +736,10 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool
-            .update_with_block(
-                block_1.kernel.body.mutator_set_accumulator.clone(),
-                &block_2,
-            )
-            .await;
+        mempool.update_with_block(
+            block_1.kernel.body.mutator_set_accumulator.clone(),
+            &block_2,
+        );
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -780,12 +778,10 @@ mod tests {
         for _ in 0..11 {
             let (next_block, _, _) =
                 make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
-            mempool
-                .update_with_block(
-                    previous_block.kernel.body.mutator_set_accumulator.clone(),
-                    &next_block,
-                )
-                .await;
+            mempool.update_with_block(
+                previous_block.kernel.body.mutator_set_accumulator.clone(),
+                &next_block,
+            );
             previous_block = next_block;
         }
 
@@ -805,12 +801,10 @@ mod tests {
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool
-            .update_with_block(
-                previous_block.kernel.body.mutator_set_accumulator.clone(),
-                &block_14,
-            )
-            .await;
+        mempool.update_with_block(
+            previous_block.kernel.body.mutator_set_accumulator.clone(),
+            &block_14,
+        );
 
         assert!(
             mempool.is_empty(),
@@ -894,7 +888,7 @@ mod tests {
                 rng.gen(),
             );
             premine_receiver_global_state
-                .set_new_tip(next_block.clone())
+                .set_new_tip_atomic(next_block.clone())
                 .await
                 .unwrap();
 
@@ -942,7 +936,7 @@ mod tests {
             "Sanity check that new tip has height 1"
         );
         premine_receiver_global_state
-            .set_new_tip(block_1b.clone())
+            .set_new_tip_atomic(block_1b.clone())
             .await
             .unwrap();
 

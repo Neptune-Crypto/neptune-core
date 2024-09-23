@@ -680,14 +680,31 @@ impl ArchivalState {
         ret
     }
 
-    /// Update the mutator set with a block after this block has been stored to the database.
-    /// Handles rollback of the mutator set if needed but requires that all blocks that are
-    /// rolled back are present in the DB. The input block is considered chain tip. All blocks
-    /// stored in the database are assumed to be valid.
-    pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
-        let (forwards, backwards) = {
+    /// obtain the backwards, forwards paths from synced block to new block.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn init_update_mutator_set(
+        &self,
+        new_block: &Block,
+    ) -> Result<(Vec<Digest>, Vec<Digest>)> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        debug!(
+            "new_block prev_block_digest: {}",
+            new_block.kernel.header.prev_block_digest.to_hex()
+        );
+
+        let (backwards, forwards) = {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label().await;
+            debug!("ms_block_sync_digest: {}", ms_block_sync_digest.to_hex());
 
             // Find path from mutator set sync digest to new block. Optimize for the common case,
             // where the new block is the child block of block that the mutator set is synced to.
@@ -705,128 +722,171 @@ impl ArchivalState {
                 };
             let forwards = [forwards, vec![new_block.hash()]].concat();
 
-            (forwards, backwards)
+            (backwards, forwards)
         };
 
-        for digest in backwards {
-            // Roll back mutator set
-            let roll_back_block = self
-                .get_block(digest)
-                .await
-                .expect("Fetching block must succeed")
-                .unwrap();
+        Ok((backwards, forwards))
+    }
 
-            debug!(
-                "Updating mutator set: rolling back block with height {}",
-                roll_back_block.kernel.header.height
-            );
+    /// reads removal and addition records for a batch of blocks
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn prepare_update_mutator_set(
+        &self,
+        new_block: &Block,
+        path: &[Digest],
+        skip: usize,
+        batch_size: usize,
+    ) -> Result<Option<MutatorSetBlockUpdate>> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-            // Roll back all addition records contained in block
-            for addition_record in roll_back_block
-                .kernel
-                .body
-                .transaction
-                .kernel
-                .outputs
-                .iter()
-                .rev()
-            {
-                assert!(
-                    self.archival_mutator_set
-                        .ams_mut()
-                        .add_is_reversible(addition_record)
-                        .await,
-                    "Addition record must be in sync with block being rolled back."
-                );
-                self.archival_mutator_set
-                    .ams_mut()
-                    .revert_add(addition_record)
-                    .await;
-            }
+        let mut block_records = vec![];
 
-            // Roll back all removal records contained in block
-            for removal_record in roll_back_block.kernel.body.transaction.kernel.inputs.iter() {
-                self.archival_mutator_set
-                    .ams_mut()
-                    .revert_remove(removal_record)
-                    .await;
-            }
-        }
-
-        for digest in forwards {
-            // Add block to mutator set
-            let apply_forward_block = if digest == new_block.hash() {
-                new_block.to_owned()
-            } else {
-                self.get_block(digest)
-                    .await
-                    .expect("Fetching block must succeed")
-                    .unwrap()
+        for digest in path.iter().skip(skip).take(batch_size) {
+            let block = match *digest == new_block.hash() {
+                true => new_block,
+                false => &self.get_block(*digest).await?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "block not found with digest: {} hex: {}",
+                        digest,
+                        digest.to_hex()
+                    )
+                })?,
             };
-            debug!(
-                "Updating mutator set: adding block with height {}.  Mined: {}",
-                apply_forward_block.kernel.header.height,
-                apply_forward_block
-                    .kernel
-                    .header
-                    .timestamp
-                    .standard_format()
-            );
 
-            let mut addition_records: Vec<AdditionRecord> = apply_forward_block
-                .kernel
-                .body
-                .transaction
-                .kernel
-                .outputs
-                .clone();
-            addition_records.reverse();
-            let mut removal_records = apply_forward_block
-                .kernel
-                .body
-                .transaction
-                .kernel
-                .inputs
-                .clone();
-            removal_records.reverse();
-            let mut removal_records: Vec<&mut RemovalRecord> =
-                removal_records.iter_mut().collect::<Vec<_>>();
+            block_records.push((
+                block.kernel.body.transaction.kernel.inputs.clone(),
+                block.kernel.body.transaction.kernel.outputs.clone(),
+            ));
+        }
 
-            // Add items, thus adding the output UTXOs to the mutator set
-            while let Some(addition_record) = addition_records.pop() {
-                // Batch-update all removal records to keep them valid after next addition
-                RemovalRecord::batch_update_from_addition(
-                    &mut removal_records,
-                    &self.archival_mutator_set.ams().accumulator().await,
-                );
+        Ok(match !block_records.is_empty() {
+            true => Some(MutatorSetBlockUpdate {
+                block_records,
+                skip,
+            }),
+            false => None,
+        })
+    }
 
-                // Add the element to the mutator set
-                self.archival_mutator_set
-                    .ams_mut()
-                    .add(&addition_record)
-                    .await;
+    /// write backwards-path removal/addition updates
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn update_mutator_set_backwards(
+        &mut self,
+        updates: MutatorSetBlockUpdate,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        let MutatorSetBlockUpdate {
+            block_records,
+            skip,
+            ..
+        } = updates;
+
+        debug!(
+            "Updating mutator set: walking blocks backwards. batch {}..{}",
+            skip,
+            skip + block_records.len(),
+        );
+
+        let ams = self.archival_mutator_set.ams_mut();
+
+        for (removals, additions) in block_records {
+            for addition_record in additions.into_iter().rev() {
+                ams.revert_add(&addition_record).await;
             }
-
-            // Remove items, thus removing the input UTXOs from the mutator set
-            while let Some(removal_record) = removal_records.pop() {
-                // Batch-update all removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
-
-                // Remove the element from the mutator set
-                self.archival_mutator_set
-                    .ams_mut()
-                    .remove(removal_record)
-                    .await;
+            for removal_record in removals {
+                ams.revert_remove(&removal_record).await;
             }
         }
+
+        Ok(())
+    }
+
+    /// write forwards-path removal/addition updates
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn update_mutator_set_forwards(
+        &mut self,
+        updates: MutatorSetBlockUpdate,
+    ) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        let MutatorSetBlockUpdate {
+            block_records,
+            skip,
+            ..
+        } = updates;
+
+        debug!(
+            "Updating mutator set: walking blocks forwards. batch {}..{}",
+            skip,
+            skip + block_records.len(),
+        );
+
+        let ams = self.archival_mutator_set.ams_mut();
+
+        for (mut removals, mut additions) in block_records {
+            removals.reverse();
+            additions.reverse();
+
+            let mut removals: Vec<&mut RemovalRecord> = removals.iter_mut().collect::<Vec<_>>();
+
+            while let Some(addition_record) = additions.pop() {
+                // Batch-update all removal records to keep them valid after next addition
+                RemovalRecord::batch_update_from_addition(&mut removals, &ams.accumulator().await);
+                ams.add(&addition_record).await;
+            }
+
+            while let Some(removal_record) = removals.pop() {
+                // Batch-update all removal records to keep them valid after next removal
+                RemovalRecord::batch_update_from_remove(&mut removals, removal_record);
+                ams.remove(removal_record).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// perform final verification, set sync label, persist to disk.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// The prepare/finalize pattern separates read ops from write ops so the
+    /// reads can be performed with either a read-lock or write-lock.
+    ///
+    /// The prepare/finalize pattern provides atomic read and atomic write with
+    /// improved concurrency however read+write is not atomic unless read+write
+    /// is performed within a single write-lock, which sacrifices concurrency.
+    pub(crate) async fn finalize_update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
         // Sanity check that archival mutator set has been updated consistently with the new block
-        debug!("sanity check: was AMS updated consistently with new block?");
+        let new_block_ams_hash = new_block.kernel.body.mutator_set_accumulator.hash();
         assert_eq!(
-            new_block
-                .kernel.body
-                .mutator_set_accumulator
-                .hash(),
+            new_block_ams_hash,
             self.archival_mutator_set.ams().hash().await,
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
         );
@@ -839,6 +899,61 @@ impl ArchivalState {
 
         Ok(())
     }
+
+    /// Updates the mutator set with a block
+    ///
+    /// Handles rollback of the mutator set if needed but requires that all
+    /// blocks that are rolled back are present in the DB. The input block is
+    /// considered chain tip. All blocks stored in the database are assumed to
+    /// be valid.
+    ///
+    /// concurrency and atomicity:
+    ///
+    /// This &mut self method is read+write atomic but is not concurrent.
+    ///
+    /// The caller must hold the global write-lock while calling this
+    /// which blocks all other tasks, read or write.
+    pub(crate) async fn update_mutator_set_atomic(&mut self, new_block: &Block) -> Result<()> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        // obtain the backwards, forwards paths.
+        let (backwards, forwards) = self.init_update_mutator_set(new_block).await?;
+
+        const BATCH_SIZE: usize = 5; // process 5 blocks at a time.
+
+        // process backwards path
+        for skip in (0..).map(|i| i * BATCH_SIZE) {
+            // read removal and addition records for this batch
+            match self
+                .prepare_update_mutator_set(new_block, &backwards, skip, BATCH_SIZE)
+                .await?
+            {
+                // write removal/addition updates for this batch
+                Some(updates) => self.update_mutator_set_backwards(updates).await?,
+                None => break,
+            }
+        }
+        // process forwards path
+        for skip in (0..).map(|i| i * BATCH_SIZE) {
+            // read removal and addition records for this batch
+            match self
+                .prepare_update_mutator_set(new_block, &forwards, skip, BATCH_SIZE)
+                .await?
+            {
+                // write removal/addition updates for this batch
+                Some(updates) => self.update_mutator_set_forwards(updates).await?,
+                None => break,
+            }
+        }
+        // perform final verification, set sync label, persist to disk.
+        self.finalize_update_mutator_set(new_block).await
+    }
+}
+
+/// contains removal and addition records for a batch of blocks.
+pub(crate) struct MutatorSetBlockUpdate {
+    block_records: Vec<(Vec<RemovalRecord>, Vec<AdditionRecord>)>,
+    skip: usize,
 }
 
 #[cfg(test)]
@@ -964,7 +1079,7 @@ mod archival_state_tests {
             rng.gen(),
         );
         archival_state
-            .update_mutator_set(&mock_block_1)
+            .update_mutator_set_atomic(&mock_block_1)
             .await
             .unwrap();
 
@@ -1011,7 +1126,7 @@ mod archival_state_tests {
 
         {
             genesis_receiver_global_state
-                .set_new_tip(mock_block_1.clone())
+                .set_new_tip_atomic(mock_block_1.clone())
                 .await
                 .unwrap();
             let ams_ref = &genesis_receiver_global_state
@@ -1060,7 +1175,7 @@ mod archival_state_tests {
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
             genesis_receiver_global_state
-                .set_new_tip(mock_block_2.clone())
+                .set_new_tip_atomic(mock_block_2.clone())
                 .await?;
 
             let ams_ref = &genesis_receiver_global_state
@@ -1096,7 +1211,7 @@ mod archival_state_tests {
 
         // 2. Update mutator set with this
         archival_state
-            .update_mutator_set(&mock_block_1a)
+            .update_mutator_set_atomic(&mock_block_1a)
             .await
             .unwrap();
 
@@ -1111,7 +1226,7 @@ mod archival_state_tests {
 
         // 4. Update mutator set with that
         archival_state
-            .update_mutator_set(&mock_block_1b)
+            .update_mutator_set_atomic(&mock_block_1b)
             .await
             .unwrap();
 
@@ -1195,7 +1310,10 @@ mod archival_state_tests {
             archival_state.write_block_as_tip(&block_1a).await.unwrap();
 
             // 2. Update mutator set with this
-            archival_state.update_mutator_set(&block_1a).await.unwrap();
+            archival_state
+                .update_mutator_set_atomic(&block_1a)
+                .await
+                .unwrap();
 
             // 3. Create competing block 1 and store it to DB
             let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
@@ -1212,7 +1330,7 @@ mod archival_state_tests {
 
             // 4. Update mutator set with that and verify rollback
             archival_state
-                .update_mutator_set(&mock_block_1b)
+                .update_mutator_set_atomic(&mock_block_1b)
                 .await
                 .unwrap();
         }
@@ -1334,7 +1452,7 @@ mod archival_state_tests {
                 global_state
                     .chain
                     .archival_state_mut()
-                    .update_mutator_set(&next_block)
+                    .update_mutator_set_atomic(&next_block)
                     .await
                     .unwrap();
 
@@ -1345,8 +1463,7 @@ mod archival_state_tests {
                         &previous_block.kernel.body.mutator_set_accumulator,
                         &next_block,
                     )
-                    .await
-                    .unwrap();
+                    .await?;
             }
 
             // Genesis block may have a different number of outputs than the blocks produced above
@@ -1380,7 +1497,7 @@ mod archival_state_tests {
             global_state
                 .chain
                 .archival_state_mut()
-                .update_mutator_set(&mock_block_1b)
+                .update_mutator_set_atomic(&mock_block_1b)
                 .await
                 .unwrap();
         }
@@ -1633,7 +1750,7 @@ mod archival_state_tests {
             &mut bob_state_lock,
         ] {
             let mut state = state_lock.lock_guard_mut().await;
-            state.set_new_tip(block_1.clone()).await.unwrap();
+            state.set_new_tip_atomic(block_1.clone()).await.unwrap();
         }
 
         {
@@ -1827,7 +1944,7 @@ mod archival_state_tests {
             &mut bob_state_lock,
         ] {
             let mut state = state_lock.lock_guard_mut().await;
-            state.set_new_tip(block_2.clone()).await.unwrap();
+            state.set_new_tip_atomic(block_2.clone()).await.unwrap();
         }
 
         assert!(alice_state_lock

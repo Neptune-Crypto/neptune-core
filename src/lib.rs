@@ -284,6 +284,47 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         .await
 }
 
+pub struct ScopeDurationLogger<'a> {
+    start: Instant,
+    description: &'a str,
+    log_slow_fn_threshold: f64,
+}
+impl<'a> ScopeDurationLogger<'a> {
+    pub fn new_with_threshold(description: &'a str, log_slow_fn_threshold: f64) -> Self {
+        Self {
+            start: Instant::now(),
+            description,
+            log_slow_fn_threshold,
+        }
+    }
+
+    pub fn new(description: &'a str) -> Self {
+        Self::new_with_threshold(
+            description,
+            match env::var("LOG_SLOW_FN_THRESHOLD") {
+                Ok(t) => t.parse().unwrap(),
+                Err(_) => 0.1,
+            },
+        )
+    }
+}
+
+impl Drop for ScopeDurationLogger<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        let duration = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+
+        if duration >= self.log_slow_fn_threshold {
+            let msg = format!(
+                "\n-- slow fn threshold of {} secs exceeded --\n executed {} in {} secs",
+                self.log_slow_fn_threshold, self.description, duration,
+            );
+
+            tracing::warn!("{}", msg);
+        }
+    }
+}
+
 /// Time a fn call.  Duration is returned as a float in seconds.
 pub fn time_fn_call<O>(f: impl FnOnce() -> O) -> (O, f64) {
     let start = Instant::now();
