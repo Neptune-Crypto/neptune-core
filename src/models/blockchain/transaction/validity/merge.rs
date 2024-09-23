@@ -1,21 +1,17 @@
 use std::cmp::max;
 use std::collections::HashMap;
 
-use arbitrary::Arbitrary;
 use itertools::Itertools;
-use num_traits::ConstOne;
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
-use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
@@ -23,16 +19,13 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use super::single_proof::SingleProof;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::TransactionKernel;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -41,7 +34,6 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::triton_vm::prelude::Program;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]

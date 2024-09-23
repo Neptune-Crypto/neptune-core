@@ -22,6 +22,7 @@ use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 /// Given a mutator set item and its membership proof, compute its removal record indices.
 #[derive(Debug, Clone)]
+#[allow(dead_code, reason = "under construction")]
 pub(crate) struct ComputeIndices;
 
 impl BasicSnippet for ComputeIndices {

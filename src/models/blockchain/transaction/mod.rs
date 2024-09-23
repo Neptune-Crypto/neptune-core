@@ -218,6 +218,9 @@ impl Transaction {
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
     ///  4. Use resulting proof as new witness.
+    #[expect(clippy::diverging_sub_expression, reason = "under development")]
+    #[expect(unreachable_code, reason = "under development")]
+    #[expect(unused_variables, reason = "under development")]
     fn new_with_updated_mutator_set_records_given_proof(
         old_transaction: &Transaction,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
@@ -276,7 +279,7 @@ impl Transaction {
                 )
                 .map_err(|_| TransactionProofError::CannotUpdatePrimitiveWitness)
             }
-            TransactionProof::SingleProof(proof) => {
+            TransactionProof::SingleProof(_proof) => {
                 Self::new_with_updated_mutator_set_records_given_proof(
                     self,
                     previous_mutator_set_accumulator,
@@ -296,6 +299,7 @@ impl Transaction {
         self.proof.verify(kernel_hash).await
     }
 
+    #[expect(dead_code, reason = "under development")]
     fn merge_primitive_witnesses(
         self_witness: PrimitiveWitness,
         other_witness: PrimitiveWitness,
@@ -343,6 +347,9 @@ impl Transaction {
     /// Merge two transactions. Both input transactions must have a valid
     /// Proof witness for this operation to work. The mutator sets are
     /// assumed to be identical; this is the responsibility of the caller.
+    #[expect(clippy::diverging_sub_expression, reason = "under development")]
+    #[expect(unreachable_code, reason = "under development")]
+    #[expect(unused_variables, reason = "under development")]
     pub fn merge_with(self, other: Transaction) -> Transaction {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,

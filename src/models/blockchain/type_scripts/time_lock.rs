@@ -843,6 +843,7 @@ pub fn arbitrary_primitive_witness_with_expired_timelocks(
     .boxed()
 }
 
+#[expect(unused_variables, reason = "under development")]
 fn arbitrary_primitive_witness_with_timelocks(
     num_inputs: usize,
     num_outputs: usize,

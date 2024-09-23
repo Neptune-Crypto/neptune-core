@@ -140,7 +140,7 @@ impl Mempool {
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
-        let _proof = match transaction.proof {
+        match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => panic!("can only insert single-proof transactions into mempool; not accepting witnesses"),
             TransactionProof::SingleProof(_) => {},

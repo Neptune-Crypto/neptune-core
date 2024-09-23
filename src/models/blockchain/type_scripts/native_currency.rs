@@ -13,7 +13,6 @@ use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;

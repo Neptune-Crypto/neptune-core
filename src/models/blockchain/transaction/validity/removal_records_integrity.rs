@@ -26,7 +26,6 @@ use tasm_lib::neptune::mutator_set;
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;

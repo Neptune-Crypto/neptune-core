@@ -5,7 +5,6 @@ use tasm_lib::list::new::New;
 use tasm_lib::list::push::Push;
 use tasm_lib::mmr::MAX_MMR_HEIGHT;
 use tasm_lib::prelude::BasicSnippet;
-use tasm_lib::prelude::DynMalloc;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
@@ -174,7 +173,6 @@ mod tests {
     use proptest::test_runner::TestRng;
     use proptest::test_runner::TestRunner;
     use rand::Rng;
-    use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -222,7 +220,6 @@ mod tests {
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
             let digests = (0..N)
-                .into_iter()
                 .map(|_| stack.pop().unwrap())
                 .flat_map(|rrs_ptr| {
                     *Vec::<RemovalRecord>::decode_from_memory(memory, rrs_ptr).unwrap()

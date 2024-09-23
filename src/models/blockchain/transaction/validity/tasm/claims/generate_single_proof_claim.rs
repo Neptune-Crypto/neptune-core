@@ -86,7 +86,7 @@ mod tests {
             &self,
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
-            nondeterminism: &NonDeterminism,
+            _: &NonDeterminism,
         ) {
             fn pop_digest(stack: &mut Vec<BFieldElement>) -> Digest {
                 Digest::new([
@@ -123,7 +123,7 @@ mod tests {
         fn pseudorandom_initial_state(
             &self,
             seed: [u8; 32],
-            bench_case: Option<BenchmarkCase>,
+            _: Option<BenchmarkCase>,
         ) -> AlgorithmInitialState {
             let mut rng: StdRng = rand::prelude::SeedableRng::from_seed(seed);
             let mast_hash = rng.gen::<Digest>();
