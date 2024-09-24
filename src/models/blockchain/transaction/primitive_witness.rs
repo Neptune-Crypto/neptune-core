@@ -671,6 +671,10 @@ impl PrimitiveWitness {
             |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
         let nested_vec_strategy_pubann =
             |counts: [usize; N]| counts.map(|count| vec(arb::<PublicAnnouncement>(), count));
+        let nested_vec_strategy_amounts =
+            |counts: [usize; N]| counts.map(|count| vec(arb::<NeptuneCoins>(), count));
+        let nested_vec_strategy_utxos =
+            |counts: [usize; N]| counts.map(|count| vec(arb::<Utxo>(), count));
         let input_counts: [usize; N] = param_sets
             .iter()
             .map(|p| p.0)
@@ -695,12 +699,12 @@ impl PrimitiveWitness {
 
         (
             (
-                vec(arb::<NeptuneCoins>(), total_num_inputs),
-                vec(arb::<Digest>(), total_num_inputs),
-                vec(arb::<Utxo>(), total_num_outputs),
+                nested_vec_strategy_amounts(input_counts),
+                nested_vec_strategy_digests(input_counts),
+                nested_vec_strategy_utxos(output_counts),
                 nested_vec_strategy_pubann(announcement_counts),
                 arb::<Option<NeptuneCoins>>(),
-                arb::<NeptuneCoins>(),
+                [arb::<NeptuneCoins>(); N],
                 0..N,
                 vec(arb::<Digest>(), total_num_inputs),
                 vec(arb::<Digest>(), total_num_inputs),
@@ -719,12 +723,12 @@ impl PrimitiveWitness {
             .prop_flat_map(
                 move |(
                     (
-                        input_amounts,
-                        input_address_seeds,
+                        input_amountss,
+                        input_address_seedss,
                         mut output_utxos,
                         public_announcements_nested,
                         maybe_coinbase,
-                        mut fee,
+                        mut fees,
                         coinbase_transaction_index,
                         mut input_sender_randomnesses,
                         mut input_receiver_preimages,
@@ -738,46 +742,67 @@ impl PrimitiveWitness {
                         outputs_salts,
                     ),
                 )| {
-                    let total_input_amount = input_amounts.iter().copied().sum::<NeptuneCoins>();
-                    let mut output_utxo_amounts = output_utxos
-                        .iter()
-                        .map(|utxo| utxo.get_native_currency_amount())
-                        .collect_vec();
+                    let input_amounts_per_tx: [NeptuneCoins; N] = input_amountss
+                        .clone()
+                        .map(|amounts| amounts.iter().copied().sum::<NeptuneCoins>());
+                    let mut output_utxo_amounts_per_tx = output_utxos.clone().map(|utxos| {
+                        utxos
+                            .iter()
+                            .map(|utxo| utxo.get_native_currency_amount())
+                            .collect_vec()
+                    });
 
-                    Self::find_balanced_output_amounts_and_fee(
-                        total_input_amount,
-                        maybe_coinbase,
-                        &mut output_utxo_amounts,
-                        &mut fee,
-                    );
+                    for i in 0..N {
+                        let maybe_coinbase = if coinbase_transaction_index == i {
+                            maybe_coinbase
+                        } else {
+                            None
+                        };
+                        Self::find_balanced_output_amounts_and_fee(
+                            input_amounts_per_tx[i],
+                            maybe_coinbase,
+                            &mut output_utxo_amounts_per_tx[i],
+                            &mut fees[i],
+                        );
+                    }
 
                     output_utxos
                         .iter_mut()
-                        .zip(output_utxo_amounts)
-                        .for_each(|(utxo, amount)| {
-                            utxo.set_native_currency_amount(amount);
+                        .zip(output_utxo_amounts_per_tx)
+                        .for_each(|(utxos, amounts)| {
+                            utxos.iter_mut().zip_eq(amounts).for_each(|(utxo, amount)| {
+                                utxo.set_native_currency_amount(amount);
+                            })
                         });
 
-                    let (input_utxos, input_lock_scripts_and_witnesses) =
-                        Self::transaction_inputs_from_address_seeds_and_amounts(
-                            &input_address_seeds,
-                            &input_amounts,
-                        );
-                    let input_triples = input_utxos
+                    let a = input_amountss
                         .iter()
-                        .map(|utxo| {
-                            (
-                                Hash::hash(utxo),
-                                input_sender_randomnesses.pop().unwrap(),
-                                input_receiver_preimages.pop().unwrap(),
+                        .zip_eq(input_address_seedss)
+                        .map(|(input_amounts, input_address_seeds)| {
+                            Self::transaction_inputs_from_address_seeds_and_amounts(
+                                &input_address_seeds,
+                                input_amounts,
                             )
                         })
                         .collect_vec();
-                    let input_utxos = split_list_by(input_utxos, input_counts);
-                    let input_lock_scripts_and_witnesses =
-                        split_list_by(input_lock_scripts_and_witnesses, input_counts);
-                    let output_utxos = split_list_by(output_utxos, output_counts);
-                    MsaAndRecords::arbitrary_with((input_triples, aocl_size))
+                    let (input_utxoss, input_lock_scripts_and_witnesses): (Vec<_>, Vec<_>) =
+                        a.into_iter().unzip();
+                    let input_utxoss: [_; N] = input_utxoss.try_into().unwrap();
+                    let input_lock_scripts_and_witnesses: [_; N] =
+                        input_lock_scripts_and_witnesses.try_into().unwrap();
+
+                    let mut all_input_triples = vec![];
+                    for input_utxos in input_utxoss.iter() {
+                        for input_utxo in input_utxos.iter() {
+                            all_input_triples.push((
+                                Hash::hash(input_utxo),
+                                input_sender_randomnesses.pop().unwrap(),
+                                input_receiver_preimages.pop().unwrap(),
+                            ));
+                        }
+                    }
+
+                    MsaAndRecords::arbitrary_with((all_input_triples, aocl_size))
                         .prop_map(move |msa_and_records| {
                             let split_msa_and_records = msa_and_records.split_by(input_counts);
                             izip!(
@@ -787,11 +812,12 @@ impl PrimitiveWitness {
                                 public_announcements_nested.clone(),
                                 output_sender_randomnesses_nested.clone(),
                                 output_receiver_digests_nested.clone(),
+                                fees,
                                 inputs_salts,
                                 outputs_salts,
-                                input_utxos.clone(),
+                                input_utxoss.clone(),
                                 input_lock_scripts_and_witnesses.clone(),
-                                output_utxos.clone()
+                                output_utxos.clone(),
                             )
                             .map(
                                 |(
@@ -801,11 +827,12 @@ impl PrimitiveWitness {
                                     public_announcements,
                                     output_sender_randomnesses,
                                     output_receiver_digests,
+                                    fee,
                                     inputs_salt,
                                     outputs_salt,
                                     input_utxos,
-                                    input_lock_scripts_and_witnesses,
-                                    output_utxos,
+                                    input_lock_scripts_and_witnesses_,
+                                    output_utxos_,
                                 )| {
                                     let maybe_coinbase = if index == coinbase_transaction_index {
                                         maybe_coinbase
@@ -815,8 +842,8 @@ impl PrimitiveWitness {
                                     Self::from_msa_and_records(
                                         msaar,
                                         input_utxos,
-                                        input_lock_scripts_and_witnesses,
-                                        output_utxos,
+                                        input_lock_scripts_and_witnesses_,
+                                        output_utxos_,
                                         public_announcements,
                                         output_sender_randomnesses,
                                         output_receiver_digests,
