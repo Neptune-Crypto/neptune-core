@@ -25,7 +25,7 @@ use super::shared::CHUNK_SIZE;
 use crate::util_types::mutator_set::commit;
 use crate::Hash;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MsaAndRecords {
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub removal_records: Vec<RemovalRecord>,
@@ -52,6 +52,38 @@ impl MsaAndRecords {
             "some membership proofs are not valid!"
         );
         all_removal_records_can_remove && all_membership_proofs_are_valid
+    }
+
+    /// Split an [MsaAndRecords] into multiple instances of the same type.
+    ///
+    /// input argument specifies the length of each returned instance.
+    ///
+    /// # Panics
+    /// Panics if input argument does not sum to the number of membership proofs
+    /// and removal records.
+    pub(crate) fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
+        let resulting_size: usize = lengths.into_iter().sum();
+        assert_eq!(self.membership_proofs.len(), resulting_size);
+        assert_eq!(self.removal_records.len(), resulting_size);
+
+        let ret = Self {
+            mutator_set_accumulator: self.mutator_set_accumulator.to_owned(),
+            ..Default::default()
+        };
+        let mut ret = vec![ret.clone(); N];
+
+        let mut counter = 0;
+        for (length, elem) in lengths.into_iter().zip(ret.iter_mut()) {
+            for _ in 0..length {
+                elem.membership_proofs
+                    .push(self.membership_proofs[counter].clone());
+                elem.removal_records
+                    .push(self.removal_records[counter].clone());
+                counter += 1;
+            }
+        }
+
+        ret.try_into().unwrap()
     }
 }
 
@@ -285,6 +317,8 @@ mod test {
     use test_strategy::proptest;
 
     use super::MsaAndRecords;
+    use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
+    use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     #[proptest(cases = 1)]
     fn msa_and_records_is_valid(
@@ -301,5 +335,48 @@ mod test {
                 .map(|(item, _sr, _rp)| *item)
                 .collect_vec()
         ));
+    }
+
+    #[test]
+    fn split_msa_and_records() {
+        split_prop([1]);
+        split_prop([0]);
+        split_prop([0, 5]);
+        split_prop([3, 4]);
+        split_prop([12, 2, 5]);
+    }
+
+    fn split_prop<const N: usize>(split: [usize; N]) {
+        let mut original = MsaAndRecords::default();
+        let total = split.into_iter().sum::<usize>();
+        for _ in 0..total {
+            original.removal_records.push(random_removal_record());
+            original
+                .membership_proofs
+                .push(random_mutator_set_membership_proof());
+        }
+
+        let split_msa_and_records = original.split_by(split);
+        for elem in split_msa_and_records.iter() {
+            assert_eq!(
+                elem.mutator_set_accumulator,
+                original.mutator_set_accumulator
+            );
+        }
+
+        let mut running_sum = 0;
+        for (i, count) in split.into_iter().enumerate() {
+            assert_eq!(
+                original.removal_records[running_sum..running_sum + count].to_vec(),
+                split_msa_and_records[i].removal_records.to_vec()
+            );
+            assert_eq!(
+                original.membership_proofs[running_sum..running_sum + count].to_vec(),
+                split_msa_and_records[i].membership_proofs.to_vec()
+            );
+            running_sum += 1;
+        }
+
+        assert_eq!(running_sum, total);
     }
 }

@@ -138,6 +138,22 @@ impl Utxo {
             .sum()
     }
 
+    /// Set the number of NeptuneCoins, overriding the pre-existing number attached
+    /// to the type script `NativeCurrency`, or adding a new coin with that amount
+    /// and type script hash to the coins list.
+    pub(crate) fn set_native_currency_amount(&mut self, amount: NeptuneCoins) {
+        let new_coin = amount.to_native_coins().first().unwrap().clone();
+        if let Some(coin) = self
+            .coins
+            .iter_mut()
+            .find(|coin| coin.type_script_hash == NativeCurrency.hash())
+        {
+            *coin = new_coin;
+        } else {
+            self.coins.push(new_coin);
+        }
+    }
+
     /// If the UTXO has a timelock, find out what the release date is.
     pub fn release_date(&self) -> Option<Timestamp> {
         self.coins
@@ -242,6 +258,9 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
 }
 
 impl<'a> Arbitrary<'a> for Utxo {
+    /// Produce a strategy for "arbitrary" UTXOs where "arbitrary" means:
+    ///  - lock script corresponding to an arbitrary generation address
+    ///  - one coin of type NativeCurrency and arbitrary amount.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let lock_script_hash: Digest = Digest::arbitrary(u)?;
         let type_script_hash = NativeCurrency.hash();

@@ -2,13 +2,18 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use get_size::GetSize;
+use itertools::izip;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use proptest::arbitrary::Arbitrary;
+use proptest::array::UniformArrayStrategy;
 use proptest::collection::vec;
+use proptest::collection::VecStrategy;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
+use proptest_arbitrary_interop::ArbInterop;
+use proptest_arbitrary_interop::ArbStrategy;
 use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
@@ -527,10 +532,10 @@ impl PrimitiveWitness {
         (
             vec(arb::<Digest>(), num_inputs),
             vec(arb::<Digest>(), num_inputs),
-            vec(arb::<BFieldElement>(), 3),
+            [arb::<BFieldElement>(); 3],
             vec(arb::<Digest>(), num_outputs),
             vec(arb::<Digest>(), num_outputs),
-            vec(arb::<BFieldElement>(), 3),
+            [arb::<BFieldElement>(); 3],
             0u64..=(u64::MAX >> 1),
         )
             .prop_flat_map(
@@ -539,7 +544,7 @@ impl PrimitiveWitness {
                     mut receiver_preimages_input,
                     inputs_salt,
                     output_sender_randomnesses,
-                    output_receiver_preimages,
+                    output_receiver_digests,
                     outputs_salt,
                     aocl_size,
                 )| {
@@ -564,85 +569,256 @@ impl PrimitiveWitness {
                     // unwrap random mutator set accumulator with membership proofs and removal records
                     MsaAndRecords::arbitrary_with((input_triples, aocl_size))
                         .prop_map(move |msa_and_records| {
-                            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
-                            let input_membership_proofs = msa_and_records.membership_proofs;
-                            let input_removal_records = msa_and_records.removal_records;
-
-                            // prepare to unwrap
-                            let input_utxos = input_utxos.clone();
-                            let input_lock_scripts_and_witnesses =
-                                input_lock_scripts_and_witnesses.clone();
-                            let input_removal_records = input_removal_records.clone();
-                            let input_membership_proofs = input_membership_proofs.clone();
-                            let output_utxos = output_utxos.clone();
-                            let public_announcements = public_announcements.clone();
-                            let sender_randomnesses_output = output_sender_randomnesses.clone();
-                            let receiver_preimages_output = output_receiver_preimages.clone();
-
-                            let output_commitments = output_utxos
-                                .iter()
-                                .zip(&sender_randomnesses_output)
-                                .zip(&receiver_preimages_output)
-                                .map(|((utxo, sender_randomness), receiver_preimage)| {
-                                    commit(
-                                        Hash::hash(utxo),
-                                        *sender_randomness,
-                                        Hash::hash(receiver_preimage),
-                                    )
-                                })
-                                .collect_vec();
-
-                            // prepare to unwrap
-                            let input_utxos = input_utxos.clone();
-                            let input_removal_records = input_removal_records.clone();
-                            let input_membership_proofs = input_membership_proofs.clone();
-                            let output_utxos = output_utxos.clone();
-                            let public_announcements = public_announcements.clone();
-
-                            let kernel = TransactionKernel {
-                                inputs: input_removal_records.clone(),
-                                outputs: output_commitments.clone(),
-                                public_announcements: public_announcements.to_vec(),
+                            Self::from_msa_and_records(
+                                msa_and_records,
+                                input_utxos.clone(),
+                                input_lock_scripts_and_witnesses.clone(),
+                                output_utxos.clone(),
+                                public_announcements.clone(),
+                                output_sender_randomnesses.clone(),
+                                output_receiver_digests.clone(),
                                 fee,
                                 coinbase,
                                 timestamp,
-                                mutator_set_hash: mutator_set_accumulator.hash(),
-                            };
+                                inputs_salt,
+                                outputs_salt,
+                            )
+                        })
+                        .boxed()
+                },
+            )
+            .boxed()
+    }
 
-                            let salted_input_utxos = SaltedUtxos {
-                                utxos: input_utxos.clone(),
-                                salt: inputs_salt.clone().try_into().unwrap(),
-                            };
-                            let salted_output_utxos = SaltedUtxos {
-                                utxos: output_utxos.clone(),
-                                salt: outputs_salt.clone().try_into().unwrap(),
-                            };
+    pub(crate) fn from_msa_and_records(
+        msa_and_records: MsaAndRecords,
+        input_utxos: Vec<Utxo>,
+        input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
+        output_utxos: Vec<Utxo>,
+        public_announcements: Vec<PublicAnnouncement>,
+        output_sender_randomnesses: Vec<Digest>,
+        output_receiver_digests: Vec<Digest>,
+        fee: NeptuneCoins,
+        coinbase: Option<NeptuneCoins>,
+        timestamp: Timestamp,
+        inputs_salt: [BFieldElement; 3],
+        outputs_salt: [BFieldElement; 3],
+    ) -> Self {
+        let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
+        let input_membership_proofs = msa_and_records.membership_proofs;
+        let input_removal_records = msa_and_records.removal_records;
 
-                            let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
-                                let native_currency_type_script_witness = NativeCurrencyWitness {
-                                    salted_input_utxos: salted_input_utxos.clone(),
-                                    salted_output_utxos: salted_output_utxos.clone(),
-                                    kernel: kernel.clone(),
-                                };
-                                vec![native_currency_type_script_witness.type_script_and_witness()]
-                            } else {
-                                vec![]
-                            };
+        let output_commitments = output_utxos
+            .iter()
+            .zip(output_sender_randomnesses.clone())
+            .zip(output_receiver_digests.clone())
+            .map(|((utxo, sender_randomness), receiver_digest)| {
+                commit(Hash::hash(utxo), sender_randomness, receiver_digest)
+            })
+            .collect_vec();
 
-                            PrimitiveWitness {
-                                lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
-                                input_utxos: salted_input_utxos,
-                                input_membership_proofs: input_membership_proofs.clone(),
-                                type_scripts_and_witnesses,
-                                output_utxos: salted_output_utxos,
-                                output_sender_randomnesses: output_sender_randomnesses.clone(),
-                                output_receiver_digests: output_receiver_preimages
-                                    .iter()
-                                    .map(Hash::hash)
-                                    .collect_vec(),
-                                mutator_set_accumulator: mutator_set_accumulator.clone(),
-                                kernel,
-                            }
+        let kernel = TransactionKernel {
+            inputs: input_removal_records.clone(),
+            outputs: output_commitments.clone(),
+            public_announcements: public_announcements.to_vec(),
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+        };
+
+        let salted_input_utxos = SaltedUtxos {
+            utxos: input_utxos.clone(),
+            salt: inputs_salt.clone().try_into().unwrap(),
+        };
+        let salted_output_utxos = SaltedUtxos {
+            utxos: output_utxos.clone(),
+            salt: outputs_salt.clone().try_into().unwrap(),
+        };
+
+        let num_inputs = input_utxos.len();
+        let num_outputs = output_utxos.len();
+        let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
+            let native_currency_type_script_witness = NativeCurrencyWitness {
+                salted_input_utxos: salted_input_utxos.clone(),
+                salted_output_utxos: salted_output_utxos.clone(),
+                kernel: kernel.clone(),
+            };
+            vec![native_currency_type_script_witness.type_script_and_witness()]
+        } else {
+            vec![]
+        };
+
+        PrimitiveWitness {
+            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses.to_owned(),
+            input_utxos: salted_input_utxos,
+            input_membership_proofs: input_membership_proofs.clone(),
+            type_scripts_and_witnesses,
+            output_utxos: salted_output_utxos,
+            output_sender_randomnesses,
+            output_receiver_digests: output_receiver_digests.to_owned(),
+            mutator_set_accumulator: mutator_set_accumulator.clone(),
+            kernel,
+        }
+    }
+
+    pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
+        param_sets: [(usize, usize, usize); N],
+    ) -> BoxedStrategy<[PrimitiveWitness; N]> {
+        let nested_vec_strategy_digests =
+            |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
+        let nested_vec_strategy_pubann =
+            |counts: [usize; N]| counts.map(|count| vec(arb::<PublicAnnouncement>(), count));
+        let input_counts: [usize; N] = param_sets
+            .iter()
+            .map(|p| p.0)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let output_counts: [usize; N] = param_sets
+            .iter()
+            .map(|p| p.1)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let announcement_counts: [usize; N] = param_sets
+            .iter()
+            .map(|p| p.2)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let total_num_inputs: usize = input_counts.iter().sum();
+        let total_num_outputs: usize = output_counts.iter().sum();
+        let total_num_announcements: usize = announcement_counts.iter().sum();
+
+        (
+            (
+                vec(arb::<NeptuneCoins>(), total_num_inputs),
+                vec(arb::<Digest>(), total_num_inputs),
+                vec(arb::<Utxo>(), total_num_outputs),
+                nested_vec_strategy_pubann(announcement_counts),
+                arb::<Option<NeptuneCoins>>(),
+                arb::<NeptuneCoins>(),
+                0..N,
+                vec(arb::<Digest>(), total_num_inputs),
+                vec(arb::<Digest>(), total_num_inputs),
+            ),
+            // we broke the derive macro of Arbitrary because it only supports
+            // tuples of size up to twelve
+            (
+                arb::<u64>(),
+                nested_vec_strategy_digests(output_counts),
+                nested_vec_strategy_digests(output_counts),
+                [arb::<Timestamp>(); N],
+                [arb::<[BFieldElement; 3]>(); N],
+                [arb::<[BFieldElement; 3]>(); N],
+            ),
+        )
+            .prop_flat_map(
+                move |(
+                    (
+                        input_amounts,
+                        input_address_seeds,
+                        mut output_utxos,
+                        public_announcements_nested,
+                        maybe_coinbase,
+                        mut fee,
+                        coinbase_transaction_index,
+                        mut input_sender_randomnesses,
+                        mut input_receiver_preimages,
+                    ),
+                    (
+                        aocl_size,
+                        output_sender_randomnesses_nested,
+                        output_receiver_digests_nested,
+                        timestamps,
+                        inputs_salts,
+                        outputs_salts,
+                    ),
+                )| {
+                    let total_input_amount = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    let mut output_utxo_amounts = output_utxos
+                        .iter()
+                        .map(|utxo| utxo.get_native_currency_amount())
+                        .collect_vec();
+
+                    Self::find_balanced_output_amounts_and_fee(
+                        total_input_amount,
+                        maybe_coinbase,
+                        &mut output_utxo_amounts,
+                        &mut fee,
+                    );
+
+                    output_utxos
+                        .iter_mut()
+                        .zip(output_utxo_amounts)
+                        .for_each(|(utxo, amount)| {
+                            utxo.set_native_currency_amount(amount);
+                        });
+
+                    let (input_utxos, input_lock_scripts_and_witnesses) =
+                        Self::transaction_inputs_from_address_seeds_and_amounts(
+                            &input_address_seeds,
+                            &input_amounts,
+                        );
+                    let input_triples = input_utxos
+                        .iter()
+                        .map(|utxo| {
+                            (
+                                Hash::hash(utxo),
+                                input_sender_randomnesses.pop().unwrap(),
+                                input_receiver_preimages.pop().unwrap(),
+                            )
+                        })
+                        .collect_vec();
+                    MsaAndRecords::arbitrary_with((input_triples, aocl_size))
+                        .prop_map(move |msa_and_records| {
+                            let split_msa_and_records = msa_and_records.split_by(input_counts);
+                            izip!(
+                                0..N,
+                                split_msa_and_records,
+                                timestamps,
+                                public_announcements_nested.clone(),
+                                output_sender_randomnesses_nested.clone(),
+                                output_receiver_digests_nested.clone(),
+                                inputs_salts,
+                                outputs_salts
+                            )
+                            .map(
+                                |(
+                                    index,
+                                    msaar,
+                                    timestamp,
+                                    public_announcements,
+                                    output_sender_randomnesses,
+                                    output_receiver_digests,
+                                    inputs_salt,
+                                    outputs_salt,
+                                )| {
+                                    let maybe_coinbase = if index == coinbase_transaction_index {
+                                        maybe_coinbase
+                                    } else {
+                                        None
+                                    };
+                                    Self::from_msa_and_records(
+                                        msaar,
+                                        input_utxos.clone(),
+                                        input_lock_scripts_and_witnesses.clone(),
+                                        output_utxos.clone(),
+                                        public_announcements,
+                                        output_sender_randomnesses,
+                                        output_receiver_digests,
+                                        fee,
+                                        maybe_coinbase,
+                                        timestamp,
+                                        inputs_salt,
+                                        outputs_salt,
+                                    )
+                                },
+                            )
+                            .collect_vec()
+                            .try_into()
+                            .unwrap()
                         })
                         .boxed()
                 },

@@ -182,6 +182,17 @@ impl SecretWitness for SingleProofWitness {
 #[derive(Debug, Clone)]
 pub struct SingleProof;
 
+impl SingleProof {
+    /// Not to be confused with SingleProofWitness::claim
+    pub(crate) fn claim(kernel_mast_hash: Digest) -> Claim {
+        Claim {
+            program_digest: Self.hash(),
+            input: kernel_mast_hash.reversed().values().to_vec(),
+            output: vec![],
+        }
+    }
+}
+
 impl ConsensusProgram for SingleProof {
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
