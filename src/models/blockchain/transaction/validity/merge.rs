@@ -377,7 +377,7 @@ impl ConsensusProgram for Merge {
             // _ *merge_witness
 
             read_io {Digest::LEN}
-                                hint new_tx_kernel_digest: Digest = stack[0..6]
+                                hint new_tx_kernel_digest: Digest = stack[0..5]
             // _ *merge_witness [new_txk_digest; 5]
 
             push {new_txk_mast_hash_alloc.write_address()}
@@ -385,11 +385,11 @@ impl ConsensusProgram for Merge {
             pop 1               // _ *merge_witness
 
             read_io {Digest::LEN}
-                                hint single_proof_program_digest: Digest = stack[0..6]
+                                hint single_proof_program_digest: Digest = stack[0..5]
             // _ *merge_witness [single_proof_program_digest; 5]
 
             divine {Digest::LEN}
-                                hint left_tx_kernel_digest: Digest = stack[0..6]
+                                hint left_tx_kernel_digest: Digest = stack[0..5]
             // _ *merge_witness [single_proof_program_digest; 5] [left_txk_digest; 5]
 
             dup 4 dup 4 dup 4 dup 4 dup 4
@@ -403,7 +403,7 @@ impl ConsensusProgram for Merge {
             // _ *merge_witness [single_proof_program_digest; 5] *left_claim
 
             divine {Digest::LEN}
-                                hint right_tx_kernel_digest: Digest = stack[0..6]
+                                hint right_tx_kernel_digest: Digest = stack[0..5]
             // _ *merge_witness [single_proof_program_digest; 5] *left_claim [right_txk_digest; 5]
 
             dup 4 dup 4 dup 4 dup 4 dup 4
@@ -416,21 +416,25 @@ impl ConsensusProgram for Merge {
                                 hint right_claim: Pointer = stack[0]
             // _ *merge_witness [single_proof_program_digest; 5] *left_claim *right_claim
 
-            place 6
-            place 6
-            pop 5               // _ *merge_witness *left_claim *right_claim
+            swap 6
+            pop 1
+            swap 4
+            pop 4
+            // _ *merge_witness *right_claim *left_claim
 
             dup 2
-            {&field!(MergeWitness::right_proof)}
-            // _ *merge_witness *left_claim *right_claim *right_proof
+            {&field!(MergeWitness::left_proof)}
+            // _ *merge_witness *right_claim *left_claim *left_proof
 
-            call {stark_verify} // _ *merge_witness *left_claim
+            call {stark_verify}
+            // _ *merge_witness *right_claim
 
             dup 1
-            {&field!(MergeWitness::left_proof)}
-            // _ *merge_witness *left_claim *left_proof
+            {&field!(MergeWitness::right_proof)}
+            // _ *merge_witness *right_claim *right_proof
 
-            call {stark_verify} // _ *merge_witness
+            call {stark_verify}
+            // _ *merge_witness
 
             dup 0
             {&field!(MergeWitness::left_kernel)}
@@ -442,6 +446,7 @@ impl ConsensusProgram for Merge {
             {&field!(MergeWitness::new_kernel)}
                                 hint new_tx_kernel: Pointer = stack[0]
             // _ *merge_witness *left_tx_kernel *right_tx_kernel *new_tx_kernel
+
 
             /* new inputs are a permutation of the operands' inputs' concatenation */
             push {left_txk_mast_hash_alloc.read_address()}
@@ -486,6 +491,7 @@ impl ConsensusProgram for Merge {
             call {hash_2_removal_record_index_sets}
             call {multiset_equality}
             assert              // _ *merge_witness *l_txk *r_txk *n_txk
+
 
             /* new outputs are a permutation of the operands' outputs' concatenation */
             push {left_txk_mast_hash_alloc.read_address()}
