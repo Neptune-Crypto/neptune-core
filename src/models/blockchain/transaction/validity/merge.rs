@@ -558,6 +558,8 @@ mod test {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
+        println!("primitive_witness_1: {primitive_witness_1}");
+        println!("primitive_witness_2: {primitive_witness_2}");
 
         let shuffle_seed = arb::<[u8; 32]>()
             .new_tree(&mut test_runner)

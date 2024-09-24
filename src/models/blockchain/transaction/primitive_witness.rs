@@ -44,6 +44,7 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::split_list_by;
 use crate::Hash;
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
@@ -607,6 +608,7 @@ impl PrimitiveWitness {
         let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
         let input_membership_proofs = msa_and_records.membership_proofs;
         let input_removal_records = msa_and_records.removal_records;
+        assert_eq!(input_membership_proofs.len(), input_removal_records.len());
 
         let output_commitments = output_utxos
             .iter()
@@ -629,11 +631,11 @@ impl PrimitiveWitness {
 
         let salted_input_utxos = SaltedUtxos {
             utxos: input_utxos.clone(),
-            salt: inputs_salt.clone().try_into().unwrap(),
+            salt: inputs_salt.try_into().unwrap(),
         };
         let salted_output_utxos = SaltedUtxos {
             utxos: output_utxos.clone(),
-            salt: outputs_salt.clone().try_into().unwrap(),
+            salt: outputs_salt.try_into().unwrap(),
         };
 
         let num_inputs = input_utxos.len();
@@ -771,6 +773,10 @@ impl PrimitiveWitness {
                             )
                         })
                         .collect_vec();
+                    let input_utxos = split_list_by(input_utxos, input_counts);
+                    let input_lock_scripts_and_witnesses =
+                        split_list_by(input_lock_scripts_and_witnesses, input_counts);
+                    let output_utxos = split_list_by(output_utxos, output_counts);
                     MsaAndRecords::arbitrary_with((input_triples, aocl_size))
                         .prop_map(move |msa_and_records| {
                             let split_msa_and_records = msa_and_records.split_by(input_counts);
@@ -782,7 +788,10 @@ impl PrimitiveWitness {
                                 output_sender_randomnesses_nested.clone(),
                                 output_receiver_digests_nested.clone(),
                                 inputs_salts,
-                                outputs_salts
+                                outputs_salts,
+                                input_utxos.clone(),
+                                input_lock_scripts_and_witnesses.clone(),
+                                output_utxos.clone()
                             )
                             .map(
                                 |(
@@ -794,6 +803,9 @@ impl PrimitiveWitness {
                                     output_receiver_digests,
                                     inputs_salt,
                                     outputs_salt,
+                                    input_utxos,
+                                    input_lock_scripts_and_witnesses,
+                                    output_utxos,
                                 )| {
                                     let maybe_coinbase = if index == coinbase_transaction_index {
                                         maybe_coinbase
@@ -802,9 +814,9 @@ impl PrimitiveWitness {
                                     };
                                     Self::from_msa_and_records(
                                         msaar,
-                                        input_utxos.clone(),
-                                        input_lock_scripts_and_witnesses.clone(),
-                                        output_utxos.clone(),
+                                        input_utxos,
+                                        input_lock_scripts_and_witnesses,
+                                        output_utxos,
                                         public_announcements,
                                         output_sender_randomnesses,
                                         output_receiver_digests,
