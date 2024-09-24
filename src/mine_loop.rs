@@ -51,7 +51,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
 /// Prepare a Block for mining
-fn make_block_template(
+pub(crate) fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     mut block_timestamp: Timestamp,
@@ -299,7 +299,7 @@ fn make_coinbase_transaction(
 /// Create the transaction that goes into the block template. The transaction is
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
-fn create_block_transaction(
+pub(crate) fn create_block_transaction(
     latest_block: &Block,
     global_state: &GlobalState,
     timestamp: Timestamp,
@@ -604,7 +604,7 @@ mod mine_loop_tests {
 
         premine_receiver_global_state
             .mempool
-            .insert(&tx_by_preminer);
+            .insert(tx_by_preminer)?;
         assert_eq!(1, premine_receiver_global_state.mempool.len());
 
         // Build transaction

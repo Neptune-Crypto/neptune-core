@@ -529,7 +529,7 @@ impl MainLoopHandler {
                 // Insert into mempool
                 global_state_mut
                     .mempool
-                    .insert(&pt2m_transaction.transaction);
+                    .insert(pt2m_transaction.transaction.to_owned())?;
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
@@ -970,7 +970,7 @@ impl MainLoopHandler {
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
                     debug!("Timer: mempool-cleaner job");
-                    self.global_state_lock.lock_mut(|s| s.mempool.prune_stale_transactions()).await;
+                    self.global_state_lock.lock_guard_mut().await.mempool.prune_stale_transactions()?;
 
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
@@ -1026,8 +1026,10 @@ impl MainLoopHandler {
 
                 // insert transaction into mempool
                 self.global_state_lock
-                    .lock_mut(|s| s.mempool.insert(&transaction))
-                    .await;
+                    .lock_guard_mut()
+                    .await
+                    .mempool
+                    .insert(*transaction)?;
 
                 // do not shut down
                 Ok(false)

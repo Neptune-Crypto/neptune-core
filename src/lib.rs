@@ -90,16 +90,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path()).await?;
     info!("Data directory is {}", data_dir);
 
-    // Get wallet object, create various wallet secret files
-    let wallet_dir = data_dir.wallet_directory_path();
-    DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
-    let (wallet_secret, _) =
-        WalletSecret::read_from_file_or_create(&data_dir.wallet_directory_path())?;
-    info!("Now getting wallet state. This may take a while if the database needs pruning.");
-    let wallet_state =
-        WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await;
-    info!("Got wallet state.");
-
     // Connect to or create databases for block index, peers, mutator set, block sync
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
     info!("Got block index database");
@@ -111,7 +101,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     info!("Got archival mutator set");
 
     let archival_state = ArchivalState::new(
-        data_dir,
+        data_dir.clone(),
         block_index_db,
         archival_mutator_set,
         cli_args.network,
@@ -149,6 +139,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size, latest_block.hash());
+
+    // Get wallet object, create various wallet secret files
+    let wallet_dir = data_dir.wallet_directory_path();
+    DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
+    let (wallet_secret, _) =
+        WalletSecret::read_from_file_or_create(&data_dir.wallet_directory_path())?;
+    info!("Now getting wallet state. This may take a while if the database needs pruning.");
+    let wallet_state =
+        WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await;
+    info!("Got wallet state.");
+
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
@@ -176,8 +177,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         .await?;
     info!("UTXO restoration check complete");
 
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
     let mut task_join_handles = vec![];
+
+    task_join_handles.push(spawn_wallet_task(global_state_lock.clone()).await?);
+
+    // Connect to peers, and provide each peer task with a thread-safe copy of the state
     for peer_address in global_state_lock.cli().peers.clone() {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
@@ -282,6 +286,33 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             task_join_handles,
         )
         .await
+}
+
+pub(crate) async fn spawn_wallet_task(
+    mut global_state_lock: GlobalStateLock,
+) -> Result<tokio::task::JoinHandle<()>> {
+    let mut mempool_subscriber = global_state_lock.lock_guard().await.mempool.subscribe();
+
+    let wallet_join_handle = tokio::task::Builder::new()
+        .name("wallet_mempool_listener")
+        .spawn(async move {
+            let mut events: std::collections::VecDeque<_> = Default::default();
+
+            while let Ok(event) = mempool_subscriber.recv().await {
+                events.push_back(event);
+
+                if let Ok(mut gs) = global_state_lock.try_lock_guard_mut() {
+                    while let Some(e) = events.pop_front() {
+                        gs.wallet_state
+                            .handle_mempool_event(e)
+                            .await
+                            .expect("Wallet should handle mempool event without error");
+                    }
+                }
+            }
+        })?;
+
+    Ok(wallet_join_handle)
 }
 
 /// Time a fn call.  Duration is returned as a float in seconds.
