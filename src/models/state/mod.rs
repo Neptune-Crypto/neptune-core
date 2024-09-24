@@ -1331,7 +1331,7 @@ impl GlobalState {
             myself
                 .mempool
                 .update_with_block(previous_ms_accumulator, &new_block)
-                .await;
+                .await?;
 
             myself.chain.light_state_mut().set_block(new_block);
 

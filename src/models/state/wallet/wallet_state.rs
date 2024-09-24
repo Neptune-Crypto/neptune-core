@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
@@ -35,6 +36,7 @@ use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
+
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::*;
@@ -50,6 +52,7 @@ use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -63,8 +66,10 @@ pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-
     wallet_directory_path: PathBuf,
+
+    mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_unspent_utxos: HashMap<Digest, Vec<AnnouncedUtxo>>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -200,6 +205,8 @@ impl WalletState {
             wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
             wallet_directory_path: data_dir.wallet_directory_path(),
+            mempool_spent_utxos: Default::default(),
+            mempool_unspent_utxos: Default::default(),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -260,6 +267,78 @@ impl WalletState {
                 )
             })
             .collect_vec()
+    }
+
+    pub async fn handle_mempool_event(&mut self, event: MempoolEvent) -> Result<()> {
+        match event {
+            MempoolEvent::AddTx(tx) => {
+                debug!("handling mempool AddTx event.");
+
+                let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
+
+                let announced_utxos = self
+                    .scan_for_announced_utxos(&tx.kernel)
+                    .chain(self.scan_for_expected_utxos(&tx.kernel).await)
+                    .collect_vec();
+
+                let tx_hash = Hash::hash(&tx);
+                self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
+                self.mempool_unspent_utxos.insert(tx_hash, announced_utxos);
+            }
+            MempoolEvent::RemoveTx(tx) => {
+                debug!("handling mempool RemoveTx event.");
+                let tx_hash = Hash::hash(&tx);
+                self.mempool_spent_utxos.remove(&tx_hash);
+                self.mempool_unspent_utxos.remove(&tx_hash);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+        self.mempool_spent_utxos
+            .values()
+            .flatten()
+            .map(|(utxo, ..)| utxo)
+    }
+
+    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+        self.mempool_unspent_utxos
+            .values()
+            .flatten()
+            .map(|a| &a.utxo)
+    }
+
+    pub async fn confirmed_balance(
+        &self,
+        tip_digest: Digest,
+        timestamp: Timestamp,
+    ) -> NeptuneCoins {
+        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
+
+        wallet_status.synced_unspent_available_amount(timestamp)
+    }
+
+    pub async fn unconfirmed_balance(
+        &self,
+        tip_digest: Digest,
+        timestamp: Timestamp,
+    ) -> NeptuneCoins {
+        self.confirmed_balance(tip_digest, timestamp)
+            .await
+            .checked_sub(
+                &self
+                    .mempool_spent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .unwrap()
+            .safe_add(
+                self.mempool_unspent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .unwrap()
     }
 
     // note: does not verify we do not have any dups.
@@ -1303,6 +1382,112 @@ mod tests {
                 .body()
                 .mutator_set_accumulator
                 .verify(Hash::hash(&utxo), &ms_membership_proof));
+        }
+    }
+
+    mod wallet_balance {
+        use generation_address::GenerationReceivingAddress;
+
+        use super::*;
+        use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
+        use crate::models::state::wallet::address::ReceivingAddress;
+        use crate::tests::shared::mine_block_to_wallet;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn confirmed_and_unconfirmed_balance() -> Result<()> {
+            let mut rng = thread_rng();
+            let network = Network::RegTest;
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 0, WalletSecret::new_random()).await;
+            let _wallet_task_jh = crate::spawn_wallet_task(global_state_lock.clone()).await?;
+            let change_key = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation);
+            let coinbase_amt = NeptuneCoins::new(100);
+            let send_amt = NeptuneCoins::new(5);
+
+            let tip_digest = mine_block_to_wallet(&mut global_state_lock).await?.hash();
+
+            let tx = {
+                let gs = global_state_lock.lock_guard().await;
+                assert_eq!(
+                    gs.wallet_state
+                        .confirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+                assert_eq!(
+                    gs.wallet_state
+                        .unconfirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+
+                // --- Setup. generate an output that our wallet cannot claim. ---
+                let outputs = vec![(
+                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                    send_amt,
+                )];
+
+                let tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotificationMedium::OnChain);
+
+                let (tx, _change_output) = gs.create_transaction(
+                    tx_outputs,
+                    change_key,
+                    UtxoNotificationMedium::OnChain,
+                    NeptuneCoins::zero(),
+                    Timestamp::now(),
+                )
+                .await?;
+                tx
+            };
+
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool
+                .insert(tx)?;
+
+            // we must yield so the wallet task can process the mempool events
+            tokio::task::yield_now().await;
+
+            {
+                let gs = global_state_lock.lock_guard().await;
+                assert_eq!(
+                    gs.wallet_state
+                        .confirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+                debug!("calculated confirmed balance");
+                assert_eq!(
+                    gs.wallet_state
+                        .unconfirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt.checked_sub(&send_amt).unwrap()
+                );
+                debug!("calculated unconfirmed balance");
+            }
+
+            global_state_lock.lock_guard_mut().await.mempool.clear()?;
+
+            // we must yield so the wallet task can process the mempool events
+            tokio::task::yield_now().await;
+
+            assert_eq!(
+                global_state_lock
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .unconfirmed_balance(tip_digest, Timestamp::now())
+                    .await,
+                coinbase_amt
+            );
+
+            Ok(())
         }
     }
 

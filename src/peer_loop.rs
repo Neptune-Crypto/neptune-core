@@ -2454,7 +2454,7 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn populated_mempool_request_tx_test() {
+    async fn populated_mempool_request_tx_test() -> Result<()> {
         let network = Network::Main;
         // In this scenario the peer is informed of a transaction that it already knows
         let (
@@ -2507,7 +2507,7 @@ mod peer_loop_tests {
             .lock_guard_mut()
             .await
             .mempool
-            .insert(&transaction_1);
+            .insert(transaction_1.clone())?;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
             "Mempool must be non-empty after insertion"
@@ -2532,5 +2532,6 @@ mod peer_loop_tests {
             Err(TryRecvError::Disconnected) => panic!("to_main channel must still be open"),
             Ok(_) => panic!("to_main channel must be empty"),
         };
+        Ok(())
     }
 }
