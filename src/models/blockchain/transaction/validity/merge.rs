@@ -558,6 +558,90 @@ impl ConsensusProgram for Merge {
 
         };
 
+        let kernel_field_mutator_set_hash = field!(TransactionKernel::mutator_set_hash);
+        let compare_digests = DataType::Digest.compare();
+        let authenticate_kernel_field_mutator_set_hash = library.import(Box::new(
+            AuthenticateTxkField(TransactionKernelField::MutatorSetHash),
+        ));
+
+        let assert_all_kernels_agree_on_mutator_set_hash = triton_asm! {
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            // read left msh
+            dup 2 {&kernel_field_mutator_set_hash}
+            addi {Digest::LEN - 1}
+            read_mem {Digest::LEN}
+            addi 1
+            place {Digest::LEN}
+            // _ *merge_witness *l_txk *r_txk *n_txk *left_msh [left_msh; 5]
+
+            // authenticate against left txkmh
+            push {left_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk *left_msh [left_msh; 5] [left_txkmh]
+
+            pick {2*Digest::LEN}
+            push {Digest::LEN}
+            call {authenticate_kernel_field_mutator_set_hash}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5]
+
+            // read right msh
+            dup 6 {&kernel_field_mutator_set_hash}
+            addi {Digest::LEN - 1}
+            read_mem {Digest::LEN}
+            addi 1
+            place {Digest::LEN}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *right_msh [right_msh; 5]
+
+            // assert equal
+            dup 10 dup 10 dup 10 dup 10 dup 10
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *right_msh [right_msh; 5] [left_msh; 5]
+
+            {&compare_digests} assert
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *right_msh
+
+            // authenticate against right txkmh
+            push {right_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *right_msh [right_txkmh]
+
+            pick {Digest::LEN}
+            push {Digest::LEN}
+            call {authenticate_kernel_field_mutator_set_hash}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5]
+
+            // read new msh
+            dup 5 {&kernel_field_mutator_set_hash}
+            addi {Digest::LEN - 1}
+            read_mem {Digest::LEN}
+            addi 1
+            place {Digest::LEN}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *new_msh [new_msh; 5]
+
+            // assert equal
+            dup 10 dup 10 dup 10 dup 10 dup 10
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *new_msh [new_msh; 5] [left_msh; 5]
+
+            {&compare_digests} assert
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *new_msh
+
+            // authenticate against new txkmh
+            push {new_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5] *new_msh [new_txkmh]
+
+            pick {Digest::LEN}
+            push {Digest::LEN}
+            call {authenticate_kernel_field_mutator_set_hash}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_msh; 5]
+
+            pop 5
+            // _ *merge_witness *l_txk *r_txk *n_txk
+        };
+
         let main = triton_asm! {
             // _
 
@@ -739,6 +823,13 @@ impl ConsensusProgram for Merge {
             /* TODO: Add code for verifying new coinbase */
 
             {&assert_new_timestamp_is_max_of_left_and_right}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            {&assert_all_kernels_agree_on_mutator_set_hash}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            pop 4
+            // _
 
             halt
         };
