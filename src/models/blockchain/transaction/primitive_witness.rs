@@ -692,8 +692,6 @@ impl PrimitiveWitness {
             .try_into()
             .unwrap();
         let total_num_inputs: usize = input_counts.iter().sum();
-        let total_num_outputs: usize = output_counts.iter().sum();
-        let total_num_announcements: usize = announcement_counts.iter().sum();
 
         (
             (

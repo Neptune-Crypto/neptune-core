@@ -119,6 +119,10 @@ pub fn prove_consensus_program(
     nondeterminism: NonDeterminism,
 ) -> Proof {
     assert_eq!(program.hash(), claim.program_digest);
+
+    let init_vm_state = VMState::new(&program, claim.input.clone().into(), nondeterminism.clone());
+    maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
+
     #[cfg(test)]
     let proof = test::load_proof_or_produce_and_save(
         claim.clone(),
