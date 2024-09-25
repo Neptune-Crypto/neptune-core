@@ -10,6 +10,7 @@ use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
 use tasm_lib::list::higher_order::inner_function::InnerFunction;
 use tasm_lib::list::higher_order::inner_function::RawCode;
@@ -154,15 +155,12 @@ impl SecretWitness for MergeWitness {
             self.left_kernel.mast_path(TransactionKernelField::Outputs),
             self.right_kernel.mast_path(TransactionKernelField::Outputs),
             self.new_kernel.mast_path(TransactionKernelField::Outputs),
-            // TODO: Uncomment me back in when TASM code for pubanns is
-            // written!!!
-            // self.left_kernel
-            //     .mast_path(TransactionKernelField::PublicAnnouncements),
-            // self.right_kernel
-            //     .mast_path(TransactionKernelField::PublicAnnouncements),
-            // self.new_kernel
-            //     .mast_path(TransactionKernelField::PublicAnnouncements),
-            //
+            self.left_kernel
+                .mast_path(TransactionKernelField::PublicAnnouncements),
+            self.right_kernel
+                .mast_path(TransactionKernelField::PublicAnnouncements),
+            self.new_kernel
+                .mast_path(TransactionKernelField::PublicAnnouncements),
             self.left_kernel.mast_path(TransactionKernelField::Fee),
             self.right_kernel.mast_path(TransactionKernelField::Fee),
             self.new_kernel.mast_path(TransactionKernelField::Fee),
@@ -269,36 +267,33 @@ impl ConsensusProgram for Merge {
         let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
         assert_eq!(to_merge_outputs, merged_outputs);
 
-        // todo vvvvv from here
         // new public announcements is a permutation of operands' public
         // announcements' concatenation
-        // let left_public_announcements = &mw.left_kernel.public_announcements;
-        // let right_public_announcements = &mw.right_kernel.public_announcements;
-        // let new_public_announcements = &mw.new_kernel.public_announcements;
+        let left_public_announcements = &mw.left_kernel.public_announcements;
+        let right_public_announcements = &mw.right_kernel.public_announcements;
+        let new_public_announcements = &mw.new_kernel.public_announcements;
 
-        // TODO: Uncommnet back in when pubann logic is written!!!
-        // let assert_public_announcement_integrity = |merkle_root, announcements| {
-        //     let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
-        //     let leaf = Tip5::hash(announcements);
-        //     tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        // };
-        // assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
-        // assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
-        // assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
+        let assert_public_announcement_integrity = |merkle_root, announcements| {
+            let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
+            let leaf = Tip5::hash(announcements);
+            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+        };
+        assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
+        assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
+        assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
 
-        // let to_merge_public_announcements = left_public_announcements
-        //     .iter()
-        //     .chain(right_public_announcements)
-        //     .map(Tip5::hash)
-        //     .sorted()
-        //     .collect_vec();
-        // let merged_public_announcements = new_public_announcements
-        //     .iter()
-        //     .map(Tip5::hash)
-        //     .sorted()
-        //     .collect_vec();
-        // assert_eq!(to_merge_public_announcements, merged_public_announcements);
-        // todo ^^^^
+        let to_merge_public_announcements = left_public_announcements
+            .iter()
+            .chain(right_public_announcements)
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        let merged_public_announcements = new_public_announcements
+            .iter()
+            .map(Tip5::hash)
+            .sorted()
+            .collect_vec();
+        assert_eq!(to_merge_public_announcements, merged_public_announcements);
 
         // new fee is sum of operand fees
         let left_fee = mw.left_kernel.fee;
@@ -370,6 +365,9 @@ impl ConsensusProgram for Merge {
         let authenticate_txk_output_field = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Outputs,
         )));
+        let authenticate_txk_pub_announcement_field = library.import(Box::new(
+            AuthenticateTxkField(TransactionKernelField::PublicAnnouncements),
+        ));
         let authenticate_txk_fee_field =
             library.import(Box::new(AuthenticateTxkField(TransactionKernelField::Fee)));
         let hash_1_removal_record_index_set =
@@ -395,6 +393,19 @@ impl ConsensusProgram for Merge {
         ))));
         let hash_2_lists_of_outputs = library.import(Box::new(ChainMap::<2>::new(
             InnerFunction::RawCode(hash_transaction_output),
+        )));
+
+        let hash_varlen = library.import(Box::new(HashVarlen));
+        let hash_public_announcement = RawCode::new(
+            triton_asm! {hash_public_announcement: call {hash_varlen} return },
+            DataType::VoidPointer,
+            DataType::Digest,
+        );
+        let hash_1_list_of_announcements = library.import(Box::new(Map::new(
+            InnerFunction::RawCode(hash_public_announcement.clone()),
+        )));
+        let hash_2_lists_of_announcements = library.import(Box::new(ChainMap::<2>::new(
+            InnerFunction::RawCode(hash_public_announcement),
         )));
 
         let digest_len = u32::try_from(Digest::LEN).unwrap();
@@ -848,6 +859,54 @@ impl ConsensusProgram for Merge {
             call {hash_2_lists_of_outputs}
             call {multiset_equality}
             assert
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            /* Check integrity of public announcement fields */
+            push {left_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1               // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest; 5]
+            dup 7
+            {&field_with_size!(TransactionKernel::public_announcements)}
+            // _ *merge_witness *l_txk *r_txk *n_txk [left_txk_digest; 5] *l_txk_pa size
+
+            dup 1
+            place 7             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa [left_txk_digest; 5] *l_txk_pa size
+            call {authenticate_txk_pub_announcement_field}
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa
+
+            push {right_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1               // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa [right_txk_digest; 5]
+            dup 7
+            {&field_with_size!(TransactionKernel::public_announcements)}
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa [right_txk_digest; 5] *r_txk_pa size
+
+            dup 1
+            place 7             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa [right_txk_digest; 5] *r_txk_pa size
+            call {authenticate_txk_pub_announcement_field}
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa
+
+            push {new_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa [new_txk_digest; 5]
+
+            dup 7
+            {&field_with_size!(TransactionKernel::public_announcements)}
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa [new_txk_digest; 5] *n_txk_pa size
+
+            dup 1
+            place 7             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa *n_txk_pa [new_txk_digest; 5] *n_txk_pa size
+            call {authenticate_txk_pub_announcement_field}
+            // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_pa *r_txk_pa *n_txk_pa
+
+            /* left + right announcements must equal new announcements */
+            call {hash_1_list_of_announcements}
+            place 2
+            call {hash_2_lists_of_announcements}
+            call {multiset_equality}
+            assert
+            // _ *merge_witness *l_txk *r_txk *n_txk
 
             /* New kernel fee must be sum of old fees */
             {&assert_new_fee_is_sum_of_left_and_right}
