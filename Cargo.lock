@@ -818,7 +818,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=c524e21b#c524e21b91186232f7a801e2701e33aed44c4654"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=c963bb57#c963bb5744bc01314fc6fd45c2ccce135e264a3b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2749,7 +2749,7 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=c524e21b#c524e21b91186232f7a801e2701e33aed44c4654"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=c963bb57#c963bb5744bc01314fc6fd45c2ccce135e264a3b"
 dependencies = [
  "anyhow",
  "arbitrary",
