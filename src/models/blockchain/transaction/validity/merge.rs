@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::collections::HashMap;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;

@@ -12,6 +12,7 @@ pub mod test_shared;
 /// # Panics
 /// Panics if input argument does not sum to the number of elements in the
 /// input list.
+#[expect(dead_code, reason = "under development")]
 pub(crate) fn split_list_by<const N: usize, T: Clone + Debug>(
     list: Vec<T>,
     lengths: [usize; N],

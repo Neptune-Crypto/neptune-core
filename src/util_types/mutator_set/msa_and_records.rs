@@ -61,6 +61,7 @@ impl MsaAndRecords {
     /// # Panics
     /// Panics if input argument does not sum to the number of membership proofs
     /// and removal records.
+    #[allow(dead_code, reason = "under development")]
     pub(crate) fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
         let resulting_size: usize = lengths.into_iter().sum();
         assert_eq!(self.membership_proofs.len(), resulting_size);

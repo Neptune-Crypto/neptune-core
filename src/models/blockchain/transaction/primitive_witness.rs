@@ -6,14 +6,10 @@ use itertools::izip;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use proptest::arbitrary::Arbitrary;
-use proptest::array::UniformArrayStrategy;
 use proptest::collection::vec;
-use proptest::collection::VecStrategy;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use proptest_arbitrary_interop::ArbInterop;
-use proptest_arbitrary_interop::ArbStrategy;
 use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
@@ -44,7 +40,6 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::split_list_by;
 use crate::Hash;
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
@@ -591,6 +586,7 @@ impl PrimitiveWitness {
             .boxed()
     }
 
+    #[expect(clippy::too_many_arguments, reason = "under development")]
     pub(crate) fn from_msa_and_records(
         msa_and_records: MsaAndRecords,
         input_utxos: Vec<Utxo>,
@@ -631,11 +627,11 @@ impl PrimitiveWitness {
 
         let salted_input_utxos = SaltedUtxos {
             utxos: input_utxos.clone(),
-            salt: inputs_salt.try_into().unwrap(),
+            salt: inputs_salt,
         };
         let salted_output_utxos = SaltedUtxos {
             utxos: output_utxos.clone(),
-            salt: outputs_salt.try_into().unwrap(),
+            salt: outputs_salt,
         };
 
         let num_inputs = input_utxos.len();
@@ -664,6 +660,8 @@ impl PrimitiveWitness {
         }
     }
 
+    #[expect(unused_variables, reason = "under development")]
+    #[allow(dead_code, reason = "under development")]
     pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
         param_sets: [(usize, usize, usize); N],
     ) -> BoxedStrategy<[PrimitiveWitness; N]> {
