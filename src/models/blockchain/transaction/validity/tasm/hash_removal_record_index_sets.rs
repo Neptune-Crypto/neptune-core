@@ -36,9 +36,10 @@ impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<N
         let hash_varlen = library.import(Box::new(HashVarlen));
 
         let hash_one_index_set = triton_asm! {
-            // BEFORE: _ *removal_record
+            // BEFORE: _ *removal_record len
             // AFTER:  _ [index_set_digest; 5]
             hash_one_index_set:
+                pop 1
                 {&field_with_size!(RemovalRecord::absolute_indices)}
                 call {hash_varlen}
                 return

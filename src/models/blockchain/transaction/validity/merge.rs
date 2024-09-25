@@ -11,6 +11,10 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::library::Library;
+use tasm_lib::list::higher_order::inner_function::InnerFunction;
+use tasm_lib::list::higher_order::inner_function::RawCode;
+use tasm_lib::list::higher_order::map::ChainMap;
+use tasm_lib::list::higher_order::map::Map;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -37,6 +41,7 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::triton_vm::prelude::Program;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
@@ -254,7 +259,6 @@ impl ConsensusProgram for Merge {
         assert_output_integrity(right_txk_digest, right_outputs);
         assert_output_integrity(new_txk_digest, new_outputs);
 
-        // todo vvvvv from here
         let to_merge_outputs = left_outputs
             .iter()
             .chain(right_outputs)
@@ -263,13 +267,13 @@ impl ConsensusProgram for Merge {
             .collect_vec();
         let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
         assert_eq!(to_merge_outputs, merged_outputs);
-        // todo ^^^^
 
+        // todo vvvvv from here
         // new public announcements is a permutation of operands' public
         // announcements' concatenation
-        let left_public_announcements = &mw.left_kernel.public_announcements;
-        let right_public_announcements = &mw.right_kernel.public_announcements;
-        let new_public_announcements = &mw.new_kernel.public_announcements;
+        // let left_public_announcements = &mw.left_kernel.public_announcements;
+        // let right_public_announcements = &mw.right_kernel.public_announcements;
+        // let new_public_announcements = &mw.new_kernel.public_announcements;
 
         // TODO: Uncommnet back in when pubann logic is written!!!
         // let assert_public_announcement_integrity = |merkle_root, announcements| {
@@ -293,6 +297,7 @@ impl ConsensusProgram for Merge {
         //     .sorted()
         //     .collect_vec();
         // assert_eq!(to_merge_public_announcements, merged_public_announcements);
+        // todo ^^^^
 
         // new fee is sum of operand fees
         let left_fee = mw.left_kernel.fee;
@@ -371,6 +376,25 @@ impl ConsensusProgram for Merge {
         let hash_2_removal_record_index_sets =
             library.import(Box::new(HashRemovalRecordIndexSets::<2>));
         let multiset_equality = library.import(Box::new(MultisetEqualityDigests));
+
+        debug_assert!(AdditionRecord::static_length().is_some());
+        let hash_transaction_output = RawCode::new(
+            triton_asm! {
+                hash_tx_output:
+                    push 0 push 0 push 0 push 0 push 0
+                    pick 9 pick 9 pick 9 pick 9 pick 9
+                    hash
+                    return
+            },
+            DataType::Digest, // domain knowledge
+            DataType::Digest,
+        );
+        let hash_1_list_of_outputs = library.import(Box::new(Map::new(InnerFunction::RawCode(
+            hash_transaction_output.clone(),
+        ))));
+        let hash_2_lists_of_outputs = library.import(Box::new(ChainMap::<2>::new(
+            InnerFunction::RawCode(hash_transaction_output),
+        )));
 
         let digest_len = u32::try_from(Digest::LEN).unwrap();
         let left_txk_mast_hash_alloc = library.kmalloc(digest_len);
@@ -691,10 +715,9 @@ impl ConsensusProgram for Merge {
             hint  right_claim: Pointer = stack[0]
             // _ *merge_witness [single_proof_program_digest; 5] *left_claim *right_claim
 
-            swap 6
-            pop 1
-            swap 4
-            pop 4
+            place 6
+            place 5
+            write_io 5
             // _ *merge_witness *right_claim *left_claim
 
             dup 2
@@ -812,9 +835,12 @@ impl ConsensusProgram for Merge {
             call {authenticate_txk_output_field}
             // _ *merge_witness *l_txk *r_txk *n_txk *l_txk_out *r_txk_out *n_txk_out
 
-            /* TODO: Add code for verifying that new output sets matches L & R */
-            pop 3 // TODO: INSERT CODE HERE!!1
-
+            /* left + right outputs must equal new outputs */
+            call {hash_1_list_of_outputs}
+            place 2
+            call {hash_2_lists_of_outputs}
+            call {multiset_equality}
+            assert
 
             /* New kernel fee must be sum of old fees */
             {&assert_new_fee_is_sum_of_left_and_right}
