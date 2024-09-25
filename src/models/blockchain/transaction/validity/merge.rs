@@ -29,6 +29,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
+use crate::models::blockchain::transaction::validity::tasm::merge::authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
@@ -400,6 +401,12 @@ impl ConsensusProgram for Merge {
         let left_txk_mast_hash_alloc = library.kmalloc(digest_len);
         let right_txk_mast_hash_alloc = library.kmalloc(digest_len);
         let new_txk_mast_hash_alloc = library.kmalloc(digest_len);
+
+        let assert_coinbase_rules = library.import(Box::new(AuthenticateCoinbaseFields::new(
+            left_txk_mast_hash_alloc,
+            right_txk_mast_hash_alloc,
+            new_txk_mast_hash_alloc,
+        )));
 
         let neptune_coins_size = NeptuneCoins::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
@@ -846,7 +853,11 @@ impl ConsensusProgram for Merge {
             {&assert_new_fee_is_sum_of_left_and_right}
             // _ *merge_witness *l_txk *r_txk *n_txk
 
-            /* TODO: Add code for verifying new coinbase */
+            dup 2
+            dup 2
+            dup 2
+            call {assert_coinbase_rules}
+            // _ *merge_witness *l_txk *r_txk *n_txk
 
             {&assert_new_timestamp_is_max_of_left_and_right}
             // _ *merge_witness *l_txk *r_txk *n_txk

@@ -1,1 +1,1 @@
-mod authenticate_coinbase_fields;
+pub(crate) mod authenticate_coinbase_fields;
