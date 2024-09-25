@@ -6,6 +6,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
 use tasm_lib::arithmetic::u128::safe_add::SafeAddU128;
+use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -471,6 +472,92 @@ impl ConsensusProgram for Merge {
             // _ *left_txk *right_txk *new_txk
         );
 
+        let lt_u64 = library.import(Box::new(LtU64ConsumeArgs));
+        let kernel_field_timestamp = field!(TransactionKernel::timestamp);
+        let authenticate_kernel_field_timestamp = library.import(Box::new(AuthenticateTxkField(
+            TransactionKernelField::Timestamp,
+        )));
+        let timestamp_size = Timestamp::static_length().unwrap();
+
+        let assert_new_timestamp_is_max_of_left_and_right = triton_asm! {
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            // read left timestamp
+            dup 2 {&kernel_field_timestamp}
+            read_mem 1 addi 1
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp *left_timestamp
+
+            // authenticate left timestamp against left txkmh
+            push {left_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk *left_timestamp left_timestamp [left_txkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_kernel_field_timestamp}
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp
+
+            // read right timestamp
+            dup 2 {&kernel_field_timestamp}
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp *right_timestamp
+            read_mem 1 addi 1
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp *right_timestamp
+
+            // authenticate right timestamp
+            push {right_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp *right_timestamp [right_txkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_kernel_field_timestamp}
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp
+
+            // compute max
+            dup 1 split
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp lhi llo
+
+            dup 2 split
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp lhi llo rhi rlo
+
+            call {lt_u64}
+            // _ *merge_witness *l_txk *r_txk *n_txk right_timestamp_hi right_timestamp_lo left_timestamp_hi left_timestamp_lo (right_timestamp < left_timestamp)
+            // _ *merge_witness *l_txk *r_txk *n_txk left_timestamp right_timestamp (r<l)
+
+            pick 2 dup 1 mul place 2
+            // _ *merge_witness *l_txk *r_txk *n_txk ((r<l)*left_timestamp) right_timestamp (r<l)
+
+            push 0 eq mul
+            // _ *merge_witness *l_txk *r_txk *n_txk ((r<l)*left_timestamp) ((r>=l)*right_timestamp)
+
+            add
+            // _ *merge_witness *l_txk *r_txk *n_txk max_timestamp
+
+            // read new kernel timestamp
+            dup 1 {&kernel_field_timestamp}
+            // _ *merge_witness *l_txk *r_txk *n_txk max_timestamp *new_timestamp
+
+            read_mem 1 addi 1
+            // _ *merge_witness *l_txk *r_txk *n_txk max_timestamp new_timestamp *new_timestamp
+
+            place 2 eq assert
+            // _ *merge_witness *l_txk *r_txk *n_txk *new_timestamp
+
+            // authenticate new timestamp
+            push {new_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ *merge_witness *l_txk *r_txk *n_txk *new_timestamp [new_txkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_kernel_field_timestamp}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+        };
+
         let main = triton_asm! {
             // _
 
@@ -647,6 +734,11 @@ impl ConsensusProgram for Merge {
 
             /* New kernel fee must be sum of old fees */
             {&assert_new_fee_is_sum_of_left_and_right}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            /* TODO: Add code for verifying new coinbase */
+
+            {&assert_new_timestamp_is_max_of_left_and_right}
 
             halt
         };
