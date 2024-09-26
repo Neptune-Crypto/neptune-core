@@ -36,7 +36,8 @@ pub(crate) struct WitnessOfUpdate {
 }
 
 impl WitnessOfUpdate {
-    pub(crate) fn claim(&self) -> Claim {
+    /// [`Claim`] that some transaction was updated.
+    pub(crate) fn claim_of_update(&self) -> Claim {
         let own_program_digest = SingleProof.hash();
         Claim::new(Update.hash()).with_input(
             [self.new_kernel_mast_hash, own_program_digest]
@@ -48,7 +49,7 @@ impl WitnessOfUpdate {
 }
 
 #[derive(Debug, Clone, BFieldCodec)]
-pub enum SingleProofWitness {
+pub(crate) enum SingleProofWitness {
     Collection(Box<ProofCollection>),
     Update(WitnessOfUpdate),
     // Merger(MergerWitness)
@@ -225,7 +226,7 @@ impl SecretWitness for SingleProofWitness {
                 stark_verify_snippet.update_nondeterminism(
                     &mut nondeterminism,
                     &witness_of_update.proof,
-                    &witness_of_update.claim(),
+                    &witness_of_update.claim_of_update(),
                 );
             }
         }
@@ -659,11 +660,15 @@ mod test {
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
+    use crate::models::blockchain::transaction::validity::update::test::deterministic_update_witness;
+    use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
+
+    use super::*;
 
     #[test]
     fn can_verify_transaction_via_valid_proof_collection() {
@@ -731,6 +736,35 @@ mod test {
 
         let tasm_result = SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
+            .expect("tasm run should pass");
+
+        assert_eq!(rust_result, tasm_result);
+    }
+
+    #[test]
+    fn can_verify_via_valid_update() {
+        let witness_for_update = deterministic_update_witness(2, 2, 2);
+
+        let claim_for_update = witness_for_update.claim();
+        let nondeterminism_for_update = witness_for_update.nondeterminism();
+
+        let proof = Update.prove(&claim_for_update, nondeterminism_for_update);
+
+        let witness_of_update = WitnessOfUpdate {
+            proof,
+            new_kernel_mast_hash: witness_for_update.new_kernel_mast_hash(),
+        };
+        let single_proof_witness = SingleProofWitness::Update(witness_of_update);
+
+        let claim = single_proof_witness.claim();
+        let nondeterminism = single_proof_witness.nondeterminism();
+
+        let rust_result = SingleProof
+            .run_rust(&claim.input.clone().into(), nondeterminism.clone())
+            .expect("rust run should pass");
+
+        let tasm_result = SingleProof
+            .run_tasm(&claim.input.into(), nondeterminism)
             .expect("tasm run should pass");
 
         assert_eq!(rust_result, tasm_result);

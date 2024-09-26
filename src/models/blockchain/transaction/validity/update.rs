@@ -694,7 +694,7 @@ impl ConsensusProgram for Update {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
@@ -719,7 +719,13 @@ mod test {
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
 
-    fn deterministic_update_witness(
+    impl UpdateWitness {
+        pub(crate) fn new_kernel_mast_hash(&self) -> Digest {
+            self.new_kernel_mast_hash
+        }
+    }
+
+    pub(crate) fn deterministic_update_witness(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
