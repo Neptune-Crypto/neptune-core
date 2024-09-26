@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_type_scripts_claim::GenerateCollectTypeScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_k2o_claim::GenerateK2oClaim;
@@ -7,6 +8,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_loc
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use itertools::Itertools;
 use tasm_lib::data_type::DataType;
@@ -25,11 +27,30 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 
 use super::proof_collection::ProofCollection;
+use super::update::Update;
+
+#[derive(Debug, Clone, BFieldCodec)]
+pub(crate) struct WitnessOfUpdate {
+    proof: Proof,
+    new_kernel_mast_hash: Digest,
+}
+
+impl WitnessOfUpdate {
+    pub(crate) fn claim(&self) -> Claim {
+        let own_program_digest = SingleProof.hash();
+        Claim::new(Update.hash()).with_input(
+            [self.new_kernel_mast_hash, own_program_digest]
+                .into_iter()
+                .flat_map(|d| d.reversed().values())
+                .collect_vec(),
+        )
+    }
+}
 
 #[derive(Debug, Clone, BFieldCodec)]
 pub enum SingleProofWitness {
-    Collection(ProofCollection),
-    // Update(Box<SingleProofWitness>),
+    Collection(Box<ProofCollection>),
+    Update(WitnessOfUpdate),
     // Merger(MergerWitness)
 
     // Wait for Hard Fork One:
@@ -38,7 +59,14 @@ pub enum SingleProofWitness {
 
 impl SingleProofWitness {
     pub fn from_collection(proof_collection: ProofCollection) -> Self {
-        SingleProofWitness::Collection(proof_collection)
+        Self::Collection(Box::new(proof_collection))
+    }
+
+    pub fn from_update(update_proof: Proof, new_kernel: &TransactionKernel) -> Self {
+        Self::Update(WitnessOfUpdate {
+            proof: update_proof,
+            new_kernel_mast_hash: new_kernel.mast_hash(),
+        })
     }
 }
 
@@ -61,6 +89,8 @@ impl TasmObject for SingleProofWitness {
     fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
         iterator: &mut Itr,
     ) -> std::result::Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
+        const COLLECTION_DISCRIMINANT: u64 = 0;
+        const UPDATE_DISCRIMINANT: u64 = 1;
         // let Some(size) = iterator.next() else {
         //     return Err(Box::new(BFieldCodecError::EmptySequence));
         // };
@@ -73,8 +103,7 @@ impl TasmObject for SingleProofWitness {
         };
         println!("single proof witness discriminant: {}", discriminant);
         match discriminant.value() {
-            // Collection
-            0 => {
+            COLLECTION_DISCRIMINANT => {
                 let Some(proof_collection_size) = iterator.next() else {
                     return Err(Box::new(BFieldCodecError::EmptySequence));
                 };
@@ -82,7 +111,19 @@ impl TasmObject for SingleProofWitness {
                     .take(proof_collection_size.value() as usize)
                     .collect_vec();
                 let proof_collection = *ProofCollection::decode(&proof_collection_data)?;
-                Ok(Box::new(SingleProofWitness::Collection(proof_collection)))
+                Ok(Box::new(SingleProofWitness::Collection(Box::new(
+                    proof_collection,
+                ))))
+            }
+            UPDATE_DISCRIMINANT => {
+                let Some(witness_of_update_size) = iterator.next() else {
+                    return Err(Box::new(BFieldCodecError::EmptySequence));
+                };
+                let witness_of_update_data = iterator
+                    .take(witness_of_update_size.value() as usize)
+                    .collect_vec();
+                let witness_of_update = *WitnessOfUpdate::decode(&witness_of_update_data)?;
+                Ok(Box::new(SingleProofWitness::Update(witness_of_update)))
             }
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
@@ -101,11 +142,11 @@ impl TasmObject for SingleProofWitness {
 
 impl SecretWitness for SingleProofWitness {
     fn standard_input(&self) -> PublicInput {
-        match self {
-            SingleProofWitness::Collection(pc) => {
-                PublicInput::new(pc.kernel_mast_hash.reversed().values().to_vec())
-            } // SingleProofWitness::Update(_) => todo!(),
-        }
+        let kernel_mast_hash = match self {
+            Self::Collection(pc) => pc.kernel_mast_hash,
+            Self::Update(witness) => witness.new_kernel_mast_hash,
+        };
+        kernel_mast_hash.reversed().values().into()
     }
 
     fn program(&self) -> Program {
@@ -122,46 +163,70 @@ impl SecretWitness for SingleProofWitness {
         );
 
         let mut nondeterminism = NonDeterminism::default().with_ram(memory);
+        let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
 
-        #[allow(irrefutable_let_patterns)] // drop this line when there is more than 1 variant
-        if let SingleProofWitness::Collection(proof_collection) = self {
-            // removal records integrity
-            let rri_claim = proof_collection.removal_records_integrity_claim();
-            let rri_proof = &proof_collection.removal_records_integrity;
-            let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
-            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, rri_proof, &rri_claim);
+        match self {
+            SingleProofWitness::Collection(proof_collection) => {
+                // removal records integrity
+                let rri_claim = proof_collection.removal_records_integrity_claim();
+                let rri_proof = &proof_collection.removal_records_integrity;
+                stark_verify_snippet.update_nondeterminism(
+                    &mut nondeterminism,
+                    rri_proof,
+                    &rri_claim,
+                );
 
-            // kernel to outputs
-            let k2o_claim = proof_collection.kernel_to_outputs_claim();
-            let k2o_proof = &proof_collection.kernel_to_outputs;
-            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, k2o_proof, &k2o_claim);
+                // kernel to outputs
+                let k2o_claim = proof_collection.kernel_to_outputs_claim();
+                let k2o_proof = &proof_collection.kernel_to_outputs;
+                stark_verify_snippet.update_nondeterminism(
+                    &mut nondeterminism,
+                    k2o_proof,
+                    &k2o_claim,
+                );
 
-            // collect lock scripts
-            let cls_claim = proof_collection.collect_lock_scripts_claim();
-            let cls_proof = &proof_collection.collect_lock_scripts;
-            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, cls_proof, &cls_claim);
+                // collect lock scripts
+                let cls_claim = proof_collection.collect_lock_scripts_claim();
+                let cls_proof = &proof_collection.collect_lock_scripts;
+                stark_verify_snippet.update_nondeterminism(
+                    &mut nondeterminism,
+                    cls_proof,
+                    &cls_claim,
+                );
 
-            // collect type scripts
-            let cts_claim = proof_collection.collect_type_scripts_claim();
-            let cts_proof = &proof_collection.collect_type_scripts;
-            stark_verify_snippet.update_nondeterminism(&mut nondeterminism, cts_proof, &cts_claim);
+                // collect type scripts
+                let cts_claim = proof_collection.collect_type_scripts_claim();
+                let cts_proof = &proof_collection.collect_type_scripts;
+                stark_verify_snippet.update_nondeterminism(
+                    &mut nondeterminism,
+                    cts_proof,
+                    &cts_claim,
+                );
 
-            // lock scripts
-            for (claim, proof) in proof_collection
-                .lock_script_claims()
-                .into_iter()
-                .zip(&proof_collection.lock_scripts_halt)
-            {
-                stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+                // lock scripts
+                for (claim, proof) in proof_collection
+                    .lock_script_claims()
+                    .into_iter()
+                    .zip(&proof_collection.lock_scripts_halt)
+                {
+                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+                }
+
+                // type scripts
+                for (claim, proof) in proof_collection
+                    .type_script_claims()
+                    .into_iter()
+                    .zip(&proof_collection.type_scripts_halt)
+                {
+                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+                }
             }
-
-            // type scripts
-            for (claim, proof) in proof_collection
-                .type_script_claims()
-                .into_iter()
-                .zip(&proof_collection.type_scripts_halt)
-            {
-                stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+            SingleProofWitness::Update(witness_of_update) => {
+                stark_verify_snippet.update_nondeterminism(
+                    &mut nondeterminism,
+                    &witness_of_update.proof,
+                    &witness_of_update.claim(),
+                );
             }
         }
 
@@ -251,7 +316,24 @@ impl ConsensusProgram for SingleProof {
                     tasmlib::verify_stark(Stark::default(), claim, type_script_halts_proof);
                     i += 1;
                 }
-            } // SingleProofWitness::Update(_) => todo!(),
+            }
+            SingleProofWitness::Update(witness_of_update) => {
+                let own_program_digest = tasmlib::own_program_digest();
+                let new_kernel_mast_hash = tasmlib::tasmlib_io_read_stdin___digest();
+                let update_program_hash = Update.hash();
+                debug_assert_eq!(new_kernel_mast_hash, witness_of_update.new_kernel_mast_hash);
+                let claim_for_update = Claim::new(update_program_hash).with_input(
+                    [new_kernel_mast_hash, own_program_digest]
+                        .into_iter()
+                        .flat_map(|d| d.reversed().values())
+                        .collect_vec(),
+                );
+                tasmlib::verify_stark(
+                    Stark::default(),
+                    &claim_for_update,
+                    &witness_of_update.proof,
+                );
+            }
         }
     }
 
