@@ -398,7 +398,7 @@ impl ConsensusProgram for Merge {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let hash_public_announcement = RawCode::new(
             triton_asm! {hash_public_announcement: call {hash_varlen} return },
-            DataType::VoidPointer,
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Bfe]),
             DataType::Digest,
         );
         let hash_1_list_of_announcements = library.import(Box::new(Map::new(

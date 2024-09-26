@@ -47,7 +47,7 @@ impl<const NUM_INPUT_LISTS: usize> BasicSnippet for HashRemovalRecordIndexSets<N
         let map = library.import(Box::new(ChainMap::<NUM_INPUT_LISTS>::new(
             InnerFunction::RawCode(RawCode::new(
                 hash_one_index_set,
-                DataType::VoidPointer,
+                DataType::Tuple(vec![DataType::VoidPointer, DataType::Bfe]),
                 DataType::Digest,
             )),
         )));
