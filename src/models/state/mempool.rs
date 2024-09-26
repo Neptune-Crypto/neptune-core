@@ -60,10 +60,21 @@ pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (Digest, &'a Transaction);
 
+/// Represents a mempool state change.
+///
+/// For purpose of notifying interested parties
 #[derive(Debug, Clone)]
 pub enum MempoolEvent {
+    /// a transaction was added to the mempool
     AddTx(Transaction),
+
+    /// a transaction was removed from the mempool
     RemoveTx(Transaction),
+
+    /// the mutator-set of a transaction was updated in the mempool.
+    ///
+    /// (Digest of Tx before update, Tx after mutator-set updated)
+    UpdateTxMutatorSet(Digest, Transaction),
 }
 
 #[derive(Debug, GetSize)]
@@ -76,21 +87,20 @@ pub struct Mempool {
 
     /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
     /// both descending and ascending order.
-    #[get_size(ignore)] // This is relatively small compared to `LookupTable`
+    #[get_size(ignore)] // This is relatively small compared to `tx_dictionary`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
 
     /// Records the digest of the block that the transactions were synced to.
     /// Used to discover reorganizations.
     tip_digest: Digest,
-
-    /// a mpmc channel for interested parties to listen to mempool events
-    #[get_size(ignore)] // does not impl GetSize
-    event_channel: (
-        tokio::sync::broadcast::Sender<MempoolEvent>,
-        tokio::sync::broadcast::Receiver<MempoolEvent>,
-    ),
 }
 
+/// note that all methods that modify state and result in a MempoolEvent
+/// notification are private or pub(super).  This enforces that these methods
+/// can only be called from/via GlobalState.
+///
+/// Mempool updates must go through GlobalState so that it can
+/// forward mempool events to the wallet in atomic fashion.
 impl Mempool {
     /// instantiate a new, empty `Mempool`
     pub fn new(max_total_size: ByteSize, tip_digest: Digest) -> Self {
@@ -102,12 +112,11 @@ impl Mempool {
             tx_dictionary: table,
             queue,
             tip_digest,
-            event_channel: tokio::sync::broadcast::channel(100),
         }
     }
 
     /// Update the block digest to which all transactions are synced.
-    fn set_tip_digest_sync_label(&mut self, tip_digest: Digest) {
+    pub(super) fn set_tip_digest_sync_label(&mut self, tip_digest: Digest) {
         self.tip_digest = tip_digest;
     }
 
@@ -159,28 +168,32 @@ impl Mempool {
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future.
     ///
-    /// # Panics
-    ///
-    /// Panics if the transaction's proof is of the wrong type.
-    pub fn insert(&mut self, transaction: Transaction) -> Result<Digest> {
+    /// this method may return:
+    ///   2 events: RemoveTx,AddTx.  tx replaces an older one with lower fee.
+    ///   1 event:  AddTx. tx does not replace an older one.
+    ///   0 events: tx not added because an older matching tx has a higher fee.
+    pub(super) fn insert(&mut self, transaction: Transaction) -> Result<Vec<MempoolEvent>> {
+        let mut events = vec![];
+
         match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => {}
             TransactionProof::SingleProof(_) => {}
             TransactionProof::ProofCollection(_) => {}
         };
-
         // If transaction to be inserted conflicts with a transaction that's already
         // in the mempool we preserve only the one with the highest fee density.
         if let Some((txid, tx)) = self.transaction_conflicts_with(&transaction) {
             if tx.fee_density() < transaction.fee_density() {
                 // If new transaction has a higher fee density than the one previously seen
                 // remove the old one.
-                self.remove(txid)?;
+                if let Some(e) = self.remove(txid)? {
+                    events.push(e);
+                }
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
                 // ignore it. Stop execution here.
-                return Ok(txid);
+                return Ok(events);
             }
         };
 
@@ -201,26 +214,33 @@ impl Mempool {
             "mempool's table and queue length must agree after shrink"
         );
 
-        self.sender().send(MempoolEvent::AddTx(transaction))?;
+        events.push(MempoolEvent::AddTx(transaction));
 
-        Ok(transaction_id)
+        Ok(events)
     }
 
     /// remove a transaction from the `Mempool`
-    pub fn remove(&mut self, transaction_id: Digest) -> Result<bool> {
+    pub(super) fn remove(&mut self, transaction_id: Digest) -> Result<Option<MempoolEvent>> {
         match self.tx_dictionary.remove(&transaction_id) {
             Some(tx) => {
                 self.queue.remove(&transaction_id);
                 debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
-                self.sender().send(MempoolEvent::RemoveTx(tx))?;
-                Ok(true)
+                Ok(Some(MempoolEvent::RemoveTx(tx)))
             }
-            None => Ok(false),
+            None => Ok(None),
         }
     }
 
     /// Delete all transactions from the mempool.
-    pub fn clear(&mut self) -> Result<()> {
+    ///
+    /// note that this will return a MempoolEvent for every removed Tx.
+    /// In the case of a full block, that could be a lot of Tx and
+    /// significant memory usage.  Of course the mempool itself will
+    /// be emptied at the same time.
+    ///
+    /// If the mem usage ever becomes a problem we could accept a closure
+    /// to handle the events individually as each Tx is removed.
+    pub(super) fn clear(&mut self) -> Result<Vec<MempoolEvent>> {
         // note: this causes event listeners to be notified of each removed tx.
         self.retain(|_| false)
     }
@@ -274,15 +294,14 @@ impl Mempool {
     ///
     /// Computes in θ(lg N)
     #[allow(dead_code)]
-    pub fn pop_max(&mut self) -> Result<Option<(Transaction, FeeDensity)>> {
+    fn pop_max(&mut self) -> Result<Option<(MempoolEvent, FeeDensity)>> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
             if let Some(transaction) = self.tx_dictionary.remove(&transaction_digest) {
                 debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
 
-                self.sender()
-                    .send(MempoolEvent::RemoveTx(transaction.clone()))?;
+                let event = MempoolEvent::RemoveTx(transaction);
 
-                return Ok(Some((transaction, fee_density)));
+                return Ok(Some((event, fee_density)));
             }
         }
         Ok(None)
@@ -292,15 +311,14 @@ impl Mempool {
     /// Returns the removed value.
     ///
     /// Computes in θ(lg N)
-    pub fn pop_min(&mut self) -> Result<Option<(Transaction, FeeDensity)>> {
+    fn pop_min(&mut self) -> Result<Option<(MempoolEvent, FeeDensity)>> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
             if let Some(transaction) = self.tx_dictionary.remove(&transaction_digest) {
                 debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
 
-                self.sender()
-                    .send(MempoolEvent::RemoveTx(transaction.clone()))?;
+                let event = MempoolEvent::RemoveTx(transaction);
 
-                return Ok(Some((transaction, fee_density)));
+                return Ok(Some((event, fee_density)));
             }
         }
         Ok(None)
@@ -311,7 +329,7 @@ impl Mempool {
     /// Modelled after [HashMap::retain](std::collections::HashMap::retain())
     ///
     /// Computes in O(capacity) >= O(N)
-    pub fn retain<F>(&mut self, mut predicate: F) -> Result<()>
+    fn retain<F>(&mut self, mut predicate: F) -> Result<Vec<MempoolEvent>>
     where
         F: FnMut(LookupItem) -> bool,
     {
@@ -324,21 +342,24 @@ impl Mempool {
             }
         }
 
+        let mut events = Vec::with_capacity(victims.len());
         for t in victims {
-            self.remove(t)?;
+            if let Some(e) = self.remove(t)? {
+                events.push(e);
+            }
         }
 
         debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
         self.shrink_to_fit();
 
-        Ok(())
+        Ok(events)
     }
 
     /// Remove transactions from mempool that are older than the specified
     /// timestamp. Prunes base on the transaction's timestamp.
     ///
     /// Computes in O(n)
-    pub fn prune_stale_transactions(&mut self) -> Result<()> {
+    pub(super) fn prune_stale_transactions(&mut self) -> Result<Vec<MempoolEvent>> {
         let cutoff = Timestamp::now() - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
@@ -351,11 +372,11 @@ impl Mempool {
     /// Remove from the mempool all transactions that become invalid because
     /// of a newly received block. Also update all mutator set data for mempool
     /// transactions that were not removed.
-    pub async fn update_with_block(
+    pub(super) async fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
-    ) -> Result<()> {
+    ) -> Result<Vec<MempoolEvent>> {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
         // proofs back to previous blocks. It would be nice if we could handle a
@@ -403,20 +424,21 @@ impl Mempool {
         };
 
         // Remove the transactions that become invalid with this block
-        self.retain(keep)?;
+        let mut events = self.retain(keep)?;
 
         // Update the remaining transactions so their mutator set data is still valid
-        // But kick out those transactions that we were unable to update.
-        let mut kick_outs = vec![];
+        let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if let Ok(new_tx) = tx
                 .clone()
                 .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
             {
                 *tx = new_tx;
+                events.push(MempoolEvent::UpdateTxMutatorSet(*tx_id, (*tx).clone()));
             } else {
                 error!("Failed to update transaction {tx_id}. Removing from mempool.");
                 kick_outs.push(*tx_id);
+                events.push(MempoolEvent::RemoveTx(tx.clone()));
             }
         }
 
@@ -431,7 +453,7 @@ impl Mempool {
         let current_block_digest = block.hash();
         self.set_tip_digest_sync_label(current_block_digest);
 
-        Ok(())
+        Ok(events)
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -480,15 +502,6 @@ impl Mempool {
     pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
         let dpq_clone = self.queue.clone();
         dpq_clone.into_sorted_iter().rev()
-    }
-
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<MempoolEvent> {
-        self.sender().subscribe()
-    }
-
-    fn sender(&self) -> &tokio::sync::broadcast::Sender<MempoolEvent> {
-        let (sender, _) = &self.event_channel;
-        sender
     }
 }
 
@@ -540,10 +553,10 @@ mod tests {
         assert_eq!(Some(&txs[0]), transaction_get_option);
         assert!(mempool.contains(transaction_digests[0]));
 
-        assert!(mempool.remove(transaction_digests[0])?);
+        assert!(mempool.remove(transaction_digests[0])?.is_some());
         assert!(!mempool.contains(transaction_digests[0]));
 
-        assert!(mempool.remove(transaction_digests[0])?);
+        assert!(mempool.remove(transaction_digests[0])?.is_some());
         assert!(!mempool.contains(transaction_digests[0]));
 
         let transaction_second_get_option = mempool.get(transaction_digests[0]);
@@ -994,7 +1007,11 @@ mod tests {
         assert_eq!(0, preminer.lock_guard().await.mempool.len());
 
         // Inser transaction into mempool
-        preminer.lock_guard_mut().await.mempool.insert(tx_low_fee.clone())?;
+        preminer
+            .lock_guard_mut()
+            .await
+            .mempool
+            .insert(tx_low_fee.clone())?;
 
         assert_eq!(1, preminer.lock_guard().await.mempool.len());
         assert_eq!(
@@ -1011,7 +1028,11 @@ mod tests {
         // Verify that this replaces the previous transaction.
         let tx_high_fee =
             make_transaction_with_fee(NeptuneCoins::new(10), preminer.clone(), rng.gen()).await;
-        preminer.lock_guard_mut().await.mempool.insert(tx_high_fee.clone())?;
+        preminer
+            .lock_guard_mut()
+            .await
+            .mempool
+            .insert(tx_high_fee.clone())?;
         assert_eq!(1, preminer.lock_guard().await.mempool.len());
         assert_eq!(
             &tx_high_fee,
