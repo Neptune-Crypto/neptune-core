@@ -12,6 +12,7 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
@@ -96,7 +97,6 @@ impl ConsensusProgram for CollectLockScripts {
 
     fn code(&self) -> Vec<LabelledInstruction> {
         let mut library = Library::new();
-        // let field_salted_input_utxos = field!(CollectLockScriptsWitness::salted_input_utxos);
         let field_with_size_salted_input_utxos =
             field_with_size!(CollectLockScriptsWitness::salted_input_utxos);
         let field_utxos = field!(SaltedUtxos::utxos);
@@ -106,37 +106,52 @@ impl ConsensusProgram for CollectLockScripts {
         let write_all_lock_script_digests =
             "neptune_consensus_transaction_collect_lock_scripts_write_all_lock_script_digests"
                 .to_string();
+
+        let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
+            CollectLockScriptsWitness,
+        >::default()));
+
         let payload = triton_asm! {
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             // _ *clsw
 
+            dup 0
+            call {audit_preloaded_data}
+            // _ *clsw witness_size
+
+            dup 1
+            // _ *clsw witness_size *clsw
+
             {&field_with_size_salted_input_utxos}
-            // _ *salted_input_utxos size
+            // _ *clsw witness_size *salted_input_utxos size
 
             dup 1 swap 1
-            // _ *salted_input_utxos *salted_input_utxos size
+            // _ *clsw witness_size *salted_input_utxos *salted_input_utxos size
 
             call {hash_varlen}
-            // _ *salted_input_utxos [salted_input_utxos_hash]
+            // _ *clsw witness_size *salted_input_utxos [salted_input_utxos_hash]
 
             read_io 5
-            // _ *salted_input_utxos [salted_input_utxos_hash] [siud]
+            // _ *clsw witness_size *salted_input_utxos [salted_input_utxos_hash] [siud]
 
             call {eq_digest} assert
-            // _ *salted_input_utxos
+            // _ *clsw witness_size *salted_input_utxos
 
             {&field_utxos}
-            // _ *utxos_li
+            // _ *clsw witness_size *utxos_li
 
             read_mem 1 push 2 add
-            // _ N *utxos[0]_si
+            // _ *clsw witness_size N *utxos[0]_si
 
             push 0 swap 1
-            // _ N 0 *utxos[0]_si
+            // _ *clsw witness_size N 0 *utxos[0]_si
 
             call {write_all_lock_script_digests}
-            // _ N N *
+            // _ *clsw witness_size N N *ptr
+
+            pop 5
+            // _
 
             halt
 

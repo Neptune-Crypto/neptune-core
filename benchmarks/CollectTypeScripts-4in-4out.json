@@ -1,0 +1,13 @@
+[
+  {
+    "name": "CollectTypeScripts-4in-4out",
+    "benchmark_result": {
+      "clock_cycle_count": 2659,
+      "hash_table_height": 578,
+      "u32_table_height": 195,
+      "op_stack_table_height": 2401,
+      "ram_table_height": 743
+    },
+    "case": "CommonCase"
+  }
+]

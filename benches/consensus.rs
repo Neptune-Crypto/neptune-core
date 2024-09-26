@@ -148,7 +148,7 @@ mod transaction {
         );
     }
 
-    #[divan::bench(sample_count = 1, args = [COMMON])]
+    #[divan::bench(sample_count = 1, args = [COMMON, LARGEISH])]
     fn collect_lock_scripts(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
@@ -166,7 +166,7 @@ mod transaction {
         );
     }
 
-    #[divan::bench(sample_count = 1, args = [COMMON])]
+    #[divan::bench(sample_count = 1, args = [COMMON, LARGEISH])]
     fn collect_type_scripts(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
@@ -193,7 +193,7 @@ mod transaction {
         );
     }
 
-    #[divan::bench(sample_count = 1, args = [COMMON])]
+    #[divan::bench(sample_count = 1, args = [COMMON, LARGEISH])]
     fn kernel_to_outputs(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
