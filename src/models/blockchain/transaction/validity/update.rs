@@ -106,7 +106,7 @@ impl SecretWitness for UpdateWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        SingleProof.program().hash().values().to_vec()
+        vec![]
     }
 
     fn program(&self) -> Program {
