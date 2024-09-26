@@ -241,6 +241,9 @@ impl<T> AtomicRw<T> {
         AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
     }
 
+    /// Attempt to acquire write lock immediately.
+    ///
+    /// If the lock cannot be acquired without waiting, an error is returned.
     pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
         self.try_acquire_write_cb();
         let guard = self.inner.try_write()?;

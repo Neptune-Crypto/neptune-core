@@ -636,12 +636,11 @@ mod mine_loop_tests {
         // no need to inform wallet of expected utxos; block template validity
         // is what is being tested
 
-        alice
-            .lock_guard_mut()
-            .await
-            .mempool
-            .insert(tx_by_preminer)?;
-        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        {
+            let mut alice_gsm = alice.lock_guard_mut().await;
+            alice_gsm.mempool_insert(tx_by_preminer).await?;
+            assert_eq!(1, alice_gsm.mempool.len());
+        }
 
         // Build transaction for block
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
