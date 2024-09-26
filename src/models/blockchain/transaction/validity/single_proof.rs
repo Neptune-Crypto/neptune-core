@@ -1,5 +1,17 @@
 use std::collections::HashMap;
 
+use itertools::Itertools;
+use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Library;
+use tasm_lib::prelude::TasmObject;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::error::BFieldCodecError;
+use tasm_lib::verifier::stark_verify::StarkVerify;
+use tasm_lib::Digest;
+
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_type_scripts_claim::GenerateCollectTypeScriptsClaim;
@@ -10,18 +22,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use itertools::Itertools;
-use tasm_lib::data_type::DataType;
-use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::Library;
-use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::error::BFieldCodecError;
-use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
-use tasm_lib::memory::encode_to_memory;
-use tasm_lib::field;
-
+use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
@@ -29,7 +30,7 @@ use crate::BFieldElement;
 use super::proof_collection::ProofCollection;
 use super::update::Update;
 
-#[derive(Debug, Clone, BFieldCodec)]
+#[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub(crate) struct WitnessOfUpdate {
     proof: Proof,
     new_kernel_mast_hash: Digest,
@@ -338,6 +339,9 @@ impl ConsensusProgram for SingleProof {
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
+        const DISCRIMINANT_FOR_PROOF_COLLECTION: isize = 0;
+        const DISCRIMINANT_FOR_UPDATE: isize = 1;
+
         let mut library = Library::new();
 
         // imports
@@ -345,6 +349,14 @@ impl ConsensusProgram for SingleProof {
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
+
+        let push_digest = |Digest([d0, d1, d2, d3, d4])| {
+            triton_asm! {
+                // BEFORE: _
+                // AFTER:  _ [digest; 5]
+                push {d4} push {d3} push {d2} push {d1} push {d0}
+            }
+        };
 
         let load_digest = triton_asm! {
             // _ *digest
@@ -355,8 +367,7 @@ impl ConsensusProgram for SingleProof {
             // _ [digest]
         };
 
-        let discriminant_for_proof_collection = 0;
-
+        let new_claim = library.import(Box::new(NewClaim));
         let assemble_rri_claim = library.import(Box::new(GenerateRriClaim));
         let assemble_k2o_claim = library.import(Box::new(GenerateK2oClaim));
         let assemble_cls_claim = library.import(Box::new(GenerateCollectLockScriptsClaim));
@@ -439,7 +450,7 @@ impl ConsensusProgram for SingleProof {
                 hint txk_digest = stack[2..7]
                 // [txk_digest] *single_proof_witness discriminant
 
-                dup 1 push 2 add
+                dup 1 addi 2
                 hint proof_collection_ptr = stack[0]
                 // [txk_digest] *spw disc *proof_collection
 
@@ -611,8 +622,62 @@ impl ConsensusProgram for SingleProof {
 
                 call {verify_scripts_loop_label}
 
-                pop 5 pop 1
-                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim
+                pop 5 pop 4
+                addi {-DISCRIMINANT_FOR_PROOF_COLLECTION - 1}
+                // [txk_digest] *spw -1
+
+                return
+        };
+
+        let update_case_label = "neptune_transaction_single_proof_case_update";
+        let update_case_body = triton_asm! {
+            // BEFORE: _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            // AFTER:  _ [own_digest; 5] [txk_digest] *single_proof_witness -1
+            {update_case_label}:
+                /* construct Claim */
+                push {Digest::LEN * 2}      hint claim_input_len = stack[0]
+                push 0                      hint claim_output_len = stack[0]
+                call {new_claim}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input *program_digest
+
+                /* populate Claim's program digest */
+                {&push_digest(Update.hash())}
+                pick 5
+                write_mem 5
+                pop 1
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input
+
+                /* populate Claim's input */
+                dup 5
+                dup 7
+                dup 9
+                dup 11
+                dup 13
+                pick 5
+                write_mem {Digest::LEN}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input'
+
+                dup 14 dup 14 dup 14 dup 14 dup 14
+                pick 1 pick 2 pick 3 pick 4
+                pick 5 write_mem {Digest::LEN}
+                pop 1
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output
+
+                pop 1
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim
+
+                dup 2
+                addi 2                      hint witness_of_update = stack[0]
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update
+
+                {&field!(WitnessOfUpdate::proof)}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *proof_of_update
+
+                call {stark_verify}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+
+                addi {-DISCRIMINANT_FOR_UPDATE - 1}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness -1
 
                 return
         };
@@ -620,25 +685,38 @@ impl ConsensusProgram for SingleProof {
         let main = triton_asm! {
             //
 
+            dup 15 dup 15 dup 15 dup 15 dup 15
+            // [own_digest; 5]
+
             read_io 5
-            // [txk_digest]
+            // [own_digest; 5] [txk_digest]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // [txk_digest] *single_proof_witness
+            // [own_digest; 5] [txk_digest] *single_proof_witness
 
             read_mem 1 push 1 add swap 1
-            // [txk_digest] *single_proof_witness discriminant
+            // [own_digest; 5] [txk_digest] *single_proof_witness discriminant
 
-            dup 0 push {discriminant_for_proof_collection} eq
+            dup 0 push {DISCRIMINANT_FOR_PROOF_COLLECTION} eq
             skiz call {proof_collection_case_label}
-            // [txk_digest] *single_proof_witness discriminant
+            // [own_digest; 5] [txk_digest] *single_proof_witness discriminant
 
+            dup 0 push {DISCRIMINANT_FOR_UPDATE} eq
+            skiz call {update_case_label}
+
+            // a discriminant of -1 indicates that some branch was executed
+            push -1
+            eq
+            assert
+
+            pop 1 pop 5 pop 5
             halt
         };
 
         triton_asm! {
             {&main}
             {&proof_collection_case_body}
+            {&update_case_body}
             {&verify_scripts_loop_body}
             {&library.all_imports()}
         }
