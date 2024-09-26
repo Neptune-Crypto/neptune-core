@@ -2490,8 +2490,8 @@ mod peer_loop_tests {
         state_lock
             .lock_guard_mut()
             .await
-            .mempool
-            .insert(transaction_1)?;
+            .mempool_insert(transaction_1)
+            .await?;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
             "Mempool must be non-empty after insertion"

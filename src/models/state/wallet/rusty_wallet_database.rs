@@ -18,9 +18,6 @@ pub struct RustyWalletDatabase {
     // list of utxos we have already received in a block
     monitored_utxos: DbtVec<MonitoredUtxo>,
 
-    // list of utxos presently in the mempool
-    // monitored_mempool_utxos: DbtVec<Utxo>,
-
     // list of off-chain utxos we are expecting to receive in a future block
     expected_utxos: DbtVec<ExpectedUtxo>,
 

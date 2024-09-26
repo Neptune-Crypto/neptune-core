@@ -603,8 +603,8 @@ mod mine_loop_tests {
             .await?;
 
         premine_receiver_global_state
-            .mempool
-            .insert(tx_by_preminer)?;
+            .mempool_insert(tx_by_preminer)
+            .await?;
         assert_eq!(1, premine_receiver_global_state.mempool.len());
 
         // Build transaction
