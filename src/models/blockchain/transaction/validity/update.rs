@@ -351,9 +351,6 @@ impl ConsensusProgram for Update {
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
         assert!(new_timestamp >= old_timestamp);
-
-        // output hash of program against which the out-of-date transaction was proven valid
-        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_digest);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {
@@ -780,10 +777,10 @@ mod test {
         let nondeterminism = update_witness.nondeterminism();
 
         let rust_result = Update.run_rust(&input, nondeterminism.clone());
-        assert!(rust_result.is_ok());
 
         let tasm_result = Update.run_tasm(&input, nondeterminism);
-        assert!(tasm_result.is_ok());
+
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
     fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {

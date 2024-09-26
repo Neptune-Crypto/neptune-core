@@ -978,6 +978,7 @@ mod test {
     use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest::strategy::Just;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
@@ -1003,24 +1004,23 @@ mod test {
         #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_transaction_timestamp)))]
         time_lock_witness: TimeLockWitness,
     ) {
-        prop_assert!(
-            TimeLock {}
-                .run_rust(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
-            "time lock program did not halt gracefully"
+        let rust_result = TimeLock.run_rust(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
         );
         prop_assert!(
-            TimeLock {}
-                .run_tasm(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
+            rust_result.is_ok(),
             "time lock program did not halt gracefully"
         );
+        let tasm_result = TimeLock.run_tasm(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
+        );
+        prop_assert!(
+            tasm_result.is_ok(),
+            "time lock program did not halt gracefully"
+        );
+        prop_assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
     #[proptest(cases = 20)]
@@ -1069,24 +1069,23 @@ mod test {
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
-        prop_assert!(
-            TimeLock
-                .run_rust(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
-            "time lock program did not halt gracefully"
+        let rust_result = TimeLock.run_rust(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
         );
         prop_assert!(
-            TimeLock
-                .run_tasm(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
+            rust_result.is_ok(),
             "time lock program did not halt gracefully"
         );
+        let tasm_result = TimeLock.run_tasm(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
+        );
+        prop_assert!(
+            tasm_result.is_ok(),
+            "time lock program did not halt gracefully"
+        );
+        prop_assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
     #[proptest(cases = 5)]
@@ -1136,23 +1135,22 @@ mod test {
     ) {
         let time_lock_witness = TimeLockWitness::from(primitive_witness);
 
-        prop_assert!(
-            TimeLock
-                .run_rust(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
-            "time lock program did not halt gracefully"
+        let rust_result = TimeLock.run_rust(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
         );
         prop_assert!(
-            TimeLock
-                .run_tasm(
-                    &time_lock_witness.standard_input(),
-                    time_lock_witness.nondeterminism(),
-                )
-                .is_ok(),
+            rust_result.is_ok(),
             "time lock program did not halt gracefully"
         );
+        let tasm_result = TimeLock.run_tasm(
+            &time_lock_witness.standard_input(),
+            time_lock_witness.nondeterminism(),
+        );
+        prop_assert!(
+            tasm_result.is_ok(),
+            "time lock program did not halt gracefully"
+        );
+        prop_assert_eq!(tasm_result.unwrap(), rust_result.unwrap());
     }
 }

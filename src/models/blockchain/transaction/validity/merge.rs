@@ -995,9 +995,9 @@ mod test {
         let claim = merge_witness.claim();
         let public_input = PublicInput::new(claim.input);
         let rust_result = Merge.run_rust(&public_input, merge_witness.nondeterminism());
-        assert!(rust_result.is_ok());
 
         let tasm_result = Merge.run_tasm(&public_input, merge_witness.nondeterminism());
-        assert!(tasm_result.is_ok());
+
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 }

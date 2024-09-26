@@ -601,16 +601,18 @@ mod test {
 
         let nondeterminism = single_proof_witness.nondeterminism();
 
-        SingleProof
+        let rust_result = SingleProof
             .run_rust(
                 &txk_mast_hash_as_input_as_public_input,
                 nondeterminism.clone(),
             )
             .expect("rust run should pass");
 
-        SingleProof
+        let tasm_result = SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
             .expect("tasm run should pass");
+
+        assert_eq!(rust_result, tasm_result);
     }
 
     #[test]
@@ -638,15 +640,17 @@ mod test {
 
         let nondeterminism = single_proof_witness.nondeterminism();
 
-        SingleProof
+        let rust_result = SingleProof
             .run_rust(
                 &txk_mast_hash_as_input_as_public_input,
                 nondeterminism.clone(),
             )
             .expect("rust run should pass");
 
-        SingleProof
+        let tasm_result = SingleProof
             .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
             .expect("tasm run should pass");
+
+        assert_eq!(rust_result, tasm_result);
     }
 }
