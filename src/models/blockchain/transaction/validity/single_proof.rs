@@ -261,6 +261,7 @@ impl SingleProof {
 
 impl ConsensusProgram for SingleProof {
     fn source(&self) {
+        let own_program_digest = tasmlib::own_program_digest();
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let spw: SingleProofWitness = tasmlib::decode_from_memory(start_address);
@@ -319,12 +320,10 @@ impl ConsensusProgram for SingleProof {
                 }
             }
             SingleProofWitness::Update(witness_of_update) => {
-                let own_program_digest = tasmlib::own_program_digest();
-                let new_kernel_mast_hash = tasmlib::tasmlib_io_read_stdin___digest();
                 let update_program_hash = Update.hash();
-                debug_assert_eq!(new_kernel_mast_hash, witness_of_update.new_kernel_mast_hash);
+                debug_assert_eq!(txk_digest, witness_of_update.new_kernel_mast_hash);
                 let claim_for_update = Claim::new(update_program_hash).with_input(
-                    [new_kernel_mast_hash, own_program_digest]
+                    [txk_digest, own_program_digest]
                         .into_iter()
                         .flat_map(|d| d.reversed().values())
                         .collect_vec(),
