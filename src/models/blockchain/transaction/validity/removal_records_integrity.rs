@@ -25,6 +25,7 @@ use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecre
 use tasm_lib::neptune::mutator_set;
 use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::Digest;
@@ -573,6 +574,10 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness
         );
 
+        let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
+            RemovalRecordsIntegrityWitnessMemory,
+        >::default()));
+
         let payload = triton_asm! {
             /* read txkmh */
             read_io {Digest::LEN}
@@ -582,6 +587,13 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             /* point to witness */
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             hint witness = stack[0]
+            // _ [txk_mast_hash] *witness
+
+            dup 0
+            call {audit_preloaded_data}
+            // _ [txk_mast_hash] *witness witness_size
+
+            pop 1
             // _ [txk_mast_hash] *witness
 
             {&authenticate_mutator_set_acc_against_txkmh}
@@ -621,14 +633,22 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness
 
             /* compute and output hash of salted input UTXOs */
+            dup 0
+            place 6
+            // _ *witness [txk_mast_hash] *witness
+
             {&field_with_size_input_utxos}
-            // _ [txk_mast_hash] *salted_input_utxos size
+            // _ *witness [txk_mast_hash] *salted_input_utxos size
 
             call {hash_varlen}
-            // _ [txk_mast_hash] [salted_input_utxos_hash]
+            // _ *witness [txk_mast_hash] [salted_input_utxos_hash]
 
             write_io 5
-            // _ [txk_mast_hash]
+            // _ *witness [txk_mast_hash]
+
+            pop {Digest::LEN}
+            pop 1
+            // _
 
             halt
         };

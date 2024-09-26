@@ -97,7 +97,7 @@ mod transaction {
         profile_consensus_program(cp, input, nondeterminism, name);
     }
 
-    #[divan::bench(sample_count = 1, args = [COMMON])]
+    #[divan::bench(sample_count = 1, args = [COMMON, LARGEISH])]
     fn removal_records_integrity(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
