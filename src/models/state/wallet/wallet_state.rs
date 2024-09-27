@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
@@ -17,6 +18,7 @@ use tokio::io::BufWriter;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
+use tracing::trace;
 use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -37,6 +39,7 @@ use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::models::consensus::timestamp::Timestamp;
+use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -63,8 +66,12 @@ pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-
     wallet_directory_path: PathBuf,
+
+    /// these two fields are for monitoring wallet-affecting utxos in the mempool.
+    /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
+    mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_unspent_utxos: HashMap<Digest, Vec<AnnouncedUtxo>>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -200,6 +207,8 @@ impl WalletState {
             wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
             wallet_directory_path: data_dir.wallet_directory_path(),
+            mempool_spent_utxos: Default::default(),
+            mempool_unspent_utxos: Default::default(),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -235,6 +244,101 @@ impl WalletState {
         }
 
         wallet_state
+    }
+
+    /// handles a list of mempool events
+    pub(in crate::models::state) async fn handle_mempool_events(
+        &mut self,
+        events: impl IntoIterator<Item = MempoolEvent>,
+    ) -> Result<()> {
+        for event in events {
+            self.handle_mempool_event(event).await?
+        }
+        Ok(())
+    }
+
+    /// handles a single mempool event.
+    ///
+    /// note: the wallet watches the mempool in order to keep track of
+    /// unconfirmed utxos sent from or to the wallet. This enables
+    /// calculation of unconfirmed balance.  It also lays foundation for
+    /// spending unconfirmed utxos. (issue #189)
+    pub(in crate::models::state) async fn handle_mempool_event(
+        &mut self,
+        event: MempoolEvent,
+    ) -> Result<()> {
+        match event {
+            MempoolEvent::AddTx(tx) => {
+                trace!("handling mempool AddTx event.");
+
+                let spent_utxos = self.scan_for_spent_utxos(&tx).await;
+
+                let announced_utxos = self
+                    .scan_for_announced_utxos(&tx)
+                    .chain(self.scan_for_expected_utxos(&tx).await)
+                    .collect_vec();
+
+                let tx_hash = Hash::hash(&tx);
+                self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
+                self.mempool_unspent_utxos.insert(tx_hash, announced_utxos);
+            }
+            MempoolEvent::RemoveTx(tx) => {
+                trace!("handling mempool RemoveTx event.");
+                let tx_hash = Hash::hash(&tx);
+                self.mempool_spent_utxos.remove(&tx_hash);
+                self.mempool_unspent_utxos.remove(&tx_hash);
+            }
+            MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
+                // Utxos are not affected by MutatorSet update, so this is a no-op.
+            }
+        }
+        Ok(())
+    }
+
+    pub fn mempool_spent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+        self.mempool_spent_utxos
+            .values()
+            .flatten()
+            .map(|(utxo, ..)| utxo)
+    }
+
+    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+        self.mempool_unspent_utxos
+            .values()
+            .flatten()
+            .map(|a| &a.utxo)
+    }
+
+    pub async fn confirmed_balance(
+        &self,
+        tip_digest: Digest,
+        timestamp: Timestamp,
+    ) -> NeptuneCoins {
+        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
+
+        wallet_status.synced_unspent_available_amount(timestamp)
+    }
+
+    pub async fn unconfirmed_balance(
+        &self,
+        tip_digest: Digest,
+        timestamp: Timestamp,
+    ) -> NeptuneCoins {
+        self.confirmed_balance(tip_digest, timestamp)
+            .await
+            .checked_sub(
+                &self
+                    .mempool_spent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .unwrap()
+            .safe_add(
+                self.mempool_unspent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .unwrap()
     }
 
     // note: does not verify we do not have any dups.
@@ -1285,6 +1389,124 @@ mod tests {
                 .body()
                 .mutator_set_accumulator
                 .verify(Hash::hash(&utxo), &ms_membership_proof));
+        }
+    }
+
+    mod wallet_balance {
+        use generation_address::GenerationReceivingAddress;
+
+        use super::*;
+        use crate::models::blockchain::transaction::UtxoNotifyMethod;
+        use crate::models::state::wallet::address::ReceivingAddress;
+        use crate::tests::shared::mine_block_to_wallet;
+
+        /// basic test for confirmed and unconfirmed balance.
+        ///
+        /// This test:
+        ///  1. mines a block to self worth 100
+        ///  2. sends 5 to a 3rd party, and 95 change back to self.
+        ///  3. verifies that confirmed balance is 100
+        ///  4. verifies that unconfirmed balance is 95
+        ///  5. empties the mempool (removing our unconfirmed tx)
+        ///  6. verifies that unconfirmed balance is 100
+        #[traced_test]
+        #[tokio::test]
+        async fn confirmed_and_unconfirmed_balance() -> Result<()> {
+            let mut rng = thread_rng();
+            let network = Network::RegTest;
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 0, WalletSecret::new_random()).await;
+            let change_key = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation);
+
+            let coinbase_amt = NeptuneCoins::new(100);
+            let send_amt = NeptuneCoins::new(5);
+
+            // mine a block to our wallet.  we should have 100 coins after.
+            let tip_digest = mine_block_to_wallet(&mut global_state_lock).await?.hash();
+
+            let tx = {
+                // verify that confirmed and unconfirmed balance are both 100.
+                let gs = global_state_lock.lock_guard().await;
+                assert_eq!(
+                    gs.wallet_state
+                        .confirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+                assert_eq!(
+                    gs.wallet_state
+                        .unconfirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+
+                // generate an output that our wallet cannot claim.
+                let outputs = vec![(
+                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                    send_amt,
+                )];
+
+                // create tx, with 5 coins going to 3rd party and 95 coins change back to self.
+                let mut tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotifyMethod::OnChain)?;
+                gs.create_transaction(
+                    &mut tx_outputs,
+                    change_key,
+                    UtxoNotifyMethod::OnChain,
+                    NeptuneCoins::zero(),
+                    Timestamp::now(),
+                )
+                .await?
+            };
+
+            // add the tx to the mempool.
+            // note that the wallet should be notified of these changes.
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx)
+                .await?;
+
+            {
+                // verify that confirmed balance is still 100
+                let gs = global_state_lock.lock_guard().await;
+                assert_eq!(
+                    gs.wallet_state
+                        .confirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt
+                );
+                // verify that unconfirmed balance is now 95.
+                assert_eq!(
+                    gs.wallet_state
+                        .unconfirmed_balance(tip_digest, Timestamp::now())
+                        .await,
+                    coinbase_amt.checked_sub(&send_amt).unwrap()
+                );
+            }
+
+            // clear the mempool, which drops our unconfirmed tx.
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_clear()
+                .await?;
+
+            // verify that wallet's unconfirmed balance is 100 again.
+            assert_eq!(
+                global_state_lock
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .unconfirmed_balance(tip_digest, Timestamp::now())
+                    .await,
+                coinbase_amt
+            );
+
+            Ok(())
         }
     }
 
