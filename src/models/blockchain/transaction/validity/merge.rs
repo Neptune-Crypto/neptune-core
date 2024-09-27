@@ -113,7 +113,7 @@ impl SecretWitness for MergeWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        SingleProof.program().hash().values().to_vec()
+        vec![]
     }
 
     fn program(&self) -> Program {
@@ -200,7 +200,6 @@ impl ConsensusProgram for Merge {
 
         // read the hash of the program relative to which the transactions were proven valid
         let single_proof_program_hash = tasmlib::tasmlib_io_read_stdin___digest();
-        tasmlib::tasmlib_io_write_to_stdout___digest(single_proof_program_hash);
 
         // divine the witness for this proof
         let start_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -735,7 +734,7 @@ impl ConsensusProgram for Merge {
 
             place 6
             place 5
-            write_io 5
+            pop 5
             // _ *merge_witness *right_claim *left_claim
 
             dup 2
@@ -938,7 +937,7 @@ impl ConsensusProgram for Merge {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -951,17 +950,42 @@ mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::ProofCollection;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::triton_vm::prelude::Digest;
+
+    impl MergeWitness {
+        pub(crate) fn new_kernel_mast_hash(&self) -> Digest {
+            self.new_kernel.mast_hash()
+        }
+    }
 
     #[test]
     fn can_verify_transaction_merger() {
+        let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2));
+
+        let claim = merge_witness.claim();
+        let public_input = PublicInput::new(claim.input);
+        let rust_result = Merge.run_rust(&public_input, merge_witness.nondeterminism());
+        let tasm_result = Merge.run_tasm(&public_input, merge_witness.nondeterminism());
+
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+    }
+
+    pub(crate) fn deterministic_merge_witness(
+        params_left: (usize, usize, usize),
+        params_right: (usize, usize, usize),
+    ) -> MergeWitness {
         let mut test_runner = TestRunner::deterministic();
         let [primitive_witness_1, primitive_witness_2] =
-            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(2, 2, 2), (2, 2, 2)])
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                params_left,
+                params_right,
+            ])
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
         println!("primitive_witness_1: {primitive_witness_1}");
         println!("primitive_witness_2: {primitive_witness_2}");
 
@@ -984,20 +1008,12 @@ mod test {
             single_proof_witness_2.nondeterminism(),
         );
 
-        let merge_witness = MergeWitness::from_transactions(
+        MergeWitness::from_transactions(
             primitive_witness_1.kernel,
             proof_1,
             primitive_witness_2.kernel,
             proof_2,
             shuffle_seed,
-        );
-
-        let claim = merge_witness.claim();
-        let public_input = PublicInput::new(claim.input);
-        let rust_result = Merge.run_rust(&public_input, merge_witness.nondeterminism());
-
-        let tasm_result = Merge.run_tasm(&public_input, merge_witness.nondeterminism());
-
-        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        )
     }
 }
