@@ -1,20 +1,23 @@
 CollectTypeScripts-2in-2out:
-| Subroutine                                                             |            Processor |             Op Stack |                  RAM |                 Hash |                  U32 |
-|:-----------------------------------------------------------------------|---------------------:|---------------------:|---------------------:|---------------------:|---------------------:|
-| tasmlib_list_new___digest                                              |          32 (  2.0%) |          25 (  1.8%) |           3 (  0.8%) |           0 (  0.0%) |          32 ( 16.5%) |
-| ··tasmlib_memory_dyn_malloc                                            |          25 (  1.6%) |          21 (  1.5%) |           2 (  0.5%) |           0 (  0.0%) |          32 ( 16.5%) |
-| ····tasmlib_memory_dyn_malloc_initialize                               |           4 (  0.3%) |           2 (  0.1%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
-| tasmlib_hashing_algebraic_hasher_hash_varlen                           |         396 ( 24.8%) |         298 ( 21.0%) |         126 ( 32.2%) |          98 ( 19.4%) |          12 (  6.2%) |
-| ··tasmlib_hashing_absorb_multiple                                      |         368 ( 23.0%) |         268 ( 18.9%) |         126 ( 32.2%) |          84 ( 16.6%) |          12 (  6.2%) |
-| ····tasmlib_hashing_absorb_multiple_hash_all_full_chunks               |          84 (  5.3%) |          56 (  4.0%) |         120 ( 30.7%) |          72 ( 14.2%) |           0 (  0.0%) |
-| ····tasmlib_hashing_absorb_multiple_pad_varnum_zeros                   |         144 (  9.0%) |          92 (  6.5%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
-| ····tasmlib_hashing_absorb_multiple_read_remainder                     |          66 (  4.1%) |          38 (  2.7%) |           6 (  1.5%) |           0 (  0.0%) |           0 (  0.0%) |
-| tasmlib_hashing_eq_digest                                              |          32 (  2.0%) |          18 (  1.3%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
-| neptune_consensus_transaction_collect_type_script_hashes_from_utxo     |        1010 ( 63.2%) |         950 ( 67.0%) |         244 ( 62.4%) |           0 (  0.0%) |          90 ( 46.4%) |
-| ··neptune_consensus_transaction_collect_type_script_hashes_from_coin   |         866 ( 54.2%) |         830 ( 58.6%) |         232 ( 59.3%) |           0 (  0.0%) |          60 ( 30.9%) |
-| ····tasmlib_list_contains___digest                                     |         482 ( 30.1%) |         474 ( 33.5%) |         148 ( 37.9%) |           0 (  0.0%) |           0 (  0.0%) |
-| ······tasmlib_list_contains___digest_loop                              |         354 ( 22.1%) |         338 ( 23.9%) |         100 ( 25.6%) |           0 (  0.0%) |           0 (  0.0%) |
-| ····neptune_consensus_transaction_push_digest_to_list                  |          80 (  5.0%) |          76 (  5.4%) |          28 (  7.2%) |           0 (  0.0%) |           0 (  0.0%) |
-| ······tasmlib_list_push___digest                                       |          42 (  2.6%) |          40 (  2.8%) |          16 (  4.1%) |           0 (  0.0%) |           0 (  0.0%) |
-| netpune_consensus_transaction_write_all_digests                        |          34 (  2.1%) |          44 (  3.1%) |          10 (  2.6%) |           0 (  0.0%) |           0 (  0.0%) |
-| Total                                                                  |        1599 (100.0%) |        1417 (100.0%) |         391 (100.0%) |         506 (100.0%) |         194 (100.0%) |
+| Subroutine                                                                        |            Processor |             Op Stack |                  RAM |                 Hash |                  U32 |
+|:----------------------------------------------------------------------------------|---------------------:|---------------------:|---------------------:|---------------------:|---------------------:|
+| tasmlib_structure_verify_nd_si_integrity___CollectTypeScriptsWitness              |         792 ( 33.1%) |         524 ( 27.0%) |          42 (  9.7%) |           0 (  0.0%) |         250 ( 85.0%) |
+| ··tasmlib_structure_tasmobject_verify_size_indicators_dyn_elem_sizes___Utxo       |         684 ( 28.6%) |         456 ( 23.5%) |          36 (  8.3%) |           0 (  0.0%) |         180 ( 61.2%) |
+| ····tasmlib_structure_tasmobject_verify_size_indicators_dyn_elem_sizes___Coin     |         448 ( 18.7%) |         304 ( 15.6%) |          24 (  5.5%) |           0 (  0.0%) |         120 ( 40.8%) |
+| tasmlib_list_new___digest                                                         |          32 (  1.3%) |          25 (  1.3%) |           3 (  0.7%) |           0 (  0.0%) |          32 ( 10.9%) |
+| ··tasmlib_memory_dyn_malloc                                                       |          25 (  1.0%) |          21 (  1.1%) |           2 (  0.5%) |           0 (  0.0%) |          32 ( 10.9%) |
+| ····tasmlib_memory_dyn_malloc_initialize                                          |           4 (  0.2%) |           2 (  0.1%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
+| tasmlib_hashing_algebraic_hasher_hash_varlen                                      |         396 ( 16.5%) |         298 ( 15.3%) |         126 ( 29.1%) |          98 ( 13.2%) |          12 (  4.1%) |
+| ··tasmlib_hashing_absorb_multiple                                                 |         368 ( 15.4%) |         268 ( 13.8%) |         126 ( 29.1%) |          84 ( 11.4%) |          12 (  4.1%) |
+| ····tasmlib_hashing_absorb_multiple_hash_all_full_chunks                          |          84 (  3.5%) |          56 (  2.9%) |         120 ( 27.7%) |          72 (  9.7%) |           0 (  0.0%) |
+| ····tasmlib_hashing_absorb_multiple_pad_varnum_zeros                              |         144 (  6.0%) |          92 (  4.7%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
+| ····tasmlib_hashing_absorb_multiple_read_remainder                                |          66 (  2.8%) |          38 (  2.0%) |           6 (  1.4%) |           0 (  0.0%) |           0 (  0.0%) |
+| tasmlib_hashing_eq_digest                                                         |          32 (  1.3%) |          18 (  0.9%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
+| neptune_consensus_transaction_collect_type_script_hashes_from_utxo                |        1010 ( 42.2%) |         950 ( 48.9%) |         244 ( 56.4%) |           0 (  0.0%) |           0 (  0.0%) |
+| ··neptune_consensus_transaction_collect_type_script_hashes_from_coin              |         866 ( 36.2%) |         830 ( 42.7%) |         232 ( 53.6%) |           0 (  0.0%) |           0 (  0.0%) |
+| ····tasmlib_list_contains___digest                                                |         482 ( 20.1%) |         474 ( 24.4%) |         148 ( 34.2%) |           0 (  0.0%) |           0 (  0.0%) |
+| ······tasmlib_list_contains___digest_loop                                         |         354 ( 14.8%) |         338 ( 17.4%) |         100 ( 23.1%) |           0 (  0.0%) |           0 (  0.0%) |
+| ····neptune_consensus_transaction_push_digest_to_list                             |          80 (  3.3%) |          76 (  3.9%) |          28 (  6.5%) |           0 (  0.0%) |           0 (  0.0%) |
+| ······tasmlib_list_push___digest                                                  |          42 (  1.8%) |          40 (  2.1%) |          16 (  3.7%) |           0 (  0.0%) |           0 (  0.0%) |
+| netpune_consensus_transaction_write_all_digests                                   |          34 (  1.4%) |          44 (  2.3%) |          10 (  2.3%) |           0 (  0.0%) |           0 (  0.0%) |
+| Total                                                                             |        2393 (100.0%) |        1943 (100.0%) |         433 (100.0%) |         740 (100.0%) |         294 (100.0%) |

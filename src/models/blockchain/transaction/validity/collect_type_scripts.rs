@@ -16,6 +16,7 @@ use tasm_lib::list::push::Push;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
@@ -174,6 +175,7 @@ impl ConsensusProgram for CollectTypeScripts {
         }));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let eq_digest = library.import(Box::new(EqDigest));
+
         let collect_type_script_hashes_from_utxos =
             "neptune_consensus_transaction_collect_type_script_hashes_from_utxo".to_string();
         let collect_type_script_hashes_from_coins =
@@ -211,9 +213,20 @@ impl ConsensusProgram for CollectTypeScripts {
             pop 3
             // _ *ctsw *type_script_hashes
         };
+
+        let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
+            CollectTypeScriptsWitness,
+        >::default()));
         let payload = triton_asm! {
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _ *ctsw
+
+            dup 0
+            call {audit_preloaded_data}
+            // _ *ctsw witness_size
+
+            pop 1
             // _ *ctsw
 
             call {new_list}
