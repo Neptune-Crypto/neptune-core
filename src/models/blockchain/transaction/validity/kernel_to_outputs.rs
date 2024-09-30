@@ -11,6 +11,7 @@ use tasm_lib::list;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfieldcodec_derive::BFieldCodec;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
@@ -47,6 +48,24 @@ pub struct KernelToOutputsWitness {
     pub kernel: TransactionKernel,
 }
 
+/// Contains the parts of the witness that the VM reads from memory
+#[derive(Clone, Debug, PartialEq, Eq, BFieldCodec, TasmObject)]
+struct KernelToOutputsWitnessMemory {
+    pub output_utxos: SaltedUtxos,
+    pub sender_randomnesses: Vec<Digest>,
+    pub receiver_digests: Vec<Digest>,
+}
+
+impl From<&KernelToOutputsWitness> for KernelToOutputsWitnessMemory {
+    fn from(value: &KernelToOutputsWitness) -> Self {
+        Self {
+            output_utxos: value.output_utxos.to_owned(),
+            sender_randomnesses: value.sender_randomnesses.to_owned(),
+            receiver_digests: value.receiver_digests.to_owned(),
+        }
+    }
+}
+
 impl From<&PrimitiveWitness> for KernelToOutputsWitness {
     fn from(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
@@ -70,10 +89,11 @@ impl SecretWitness for KernelToOutputsWitness {
     fn nondeterminism(&self) -> tasm_lib::triton_vm::prelude::NonDeterminism {
         // set memory
         let mut memory = HashMap::default();
+        let witness_for_memory: KernelToOutputsWitnessMemory = self.into();
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self,
+            &witness_for_memory,
         );
 
         // set authentication path digests
@@ -96,7 +116,7 @@ impl ConsensusProgram for KernelToOutputs {
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let ktow: KernelToOutputsWitness = tasmlib::decode_from_memory(start_address);
+        let ktow: KernelToOutputsWitnessMemory = tasmlib::decode_from_memory(start_address);
 
         // divine in the salted output UTXOs with hash
         let salted_output_utxos: &SaltedUtxos = &ktow.output_utxos;
@@ -149,17 +169,26 @@ impl ConsensusProgram for KernelToOutputs {
         ));
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
-        let field_salted_output_utxos = field!(KernelToOutputsWitness::output_utxos);
-        let field_sender_randomnesses = field!(KernelToOutputsWitness::sender_randomnesses);
-        let field_receiver_digests = field!(KernelToOutputsWitness::receiver_digests);
+        let field_salted_output_utxos = field!(KernelToOutputsWitnessMemory::output_utxos);
+        let field_sender_randomnesses = field!(KernelToOutputsWitnessMemory::sender_randomnesses);
+        let field_receiver_digests = field!(KernelToOutputsWitnessMemory::receiver_digests);
         let field_utxos = field!(SaltedUtxos::utxos);
 
         let calculate_canonical_commitments =
             "kernel_to_outputs_calculate_canonical_commitments".to_string();
 
+        let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
+            KernelToOutputsWitnessMemory,
+        >::default()));
+
         let tasm = triton_asm! {
             read_io 5       // [txkmh]
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+                            // [txkmh] *kernel_to_outputs_witness
+
+            dup 0
+            call {audit_preloaded_data}
+            pop 1
                             // [txkmh] *kernel_to_outputs_witness
 
             dup 0
