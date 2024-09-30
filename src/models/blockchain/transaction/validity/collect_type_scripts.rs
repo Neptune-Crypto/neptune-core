@@ -379,7 +379,6 @@ mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm;
-    use tasm_lib::triton_vm::proof::Claim;
     use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
@@ -462,7 +461,7 @@ mod test {
     }
 
     #[test]
-    fn collect_type_scripts_failing_proof() {
+    fn collect_type_scripts_proof_generation() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
@@ -482,9 +481,7 @@ mod test {
             "incorrect output"
         );
 
-        let claim = Claim::new(CollectTypeScripts.program().hash())
-            .with_input(collect_type_scripts.standard_input().individual_tokens)
-            .with_output(tasm_result);
+        let claim = collect_type_scripts.claim();
         let proof = triton_vm::prove(
             Stark::default(),
             &claim,
