@@ -38,16 +38,17 @@ pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord>,
 
-    // `outputs` contains the commitments (addition records) that go into the AOCL
+    /// `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
 
     pub public_announcements: Vec<PublicAnnouncement>,
     pub fee: NeptuneCoins,
     pub coinbase: Option<NeptuneCoins>,
 
-    // number of milliseconds since unix epoch
+    /// number of milliseconds since unix epoch
     pub timestamp: Timestamp,
 
+    /// mutator set hash *prior* to updating mutator set with this transaction.
     pub mutator_set_hash: Digest,
 }
 

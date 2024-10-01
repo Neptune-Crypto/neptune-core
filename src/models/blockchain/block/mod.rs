@@ -324,25 +324,15 @@ impl Block {
     }
 
     pub fn genesis_block(network: Network) -> Self {
-        let mut genesis_mutator_set = MutatorSetAccumulator::default();
-        let mut ms_update = MutatorSetUpdate::default();
-
         let premine_distribution = Self::premine_distribution(network);
         let total_premine_amount = premine_distribution
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum();
 
-        let mut genesis_txk = TransactionKernel {
-            inputs: vec![],
-            outputs: vec![],
-            fee: NeptuneCoins::new(0),
-            timestamp: network.launch_date(),
-            public_announcements: vec![],
-            coinbase: Some(total_premine_amount),
-            mutator_set_hash: MutatorSetAccumulator::default().hash(),
-        };
-
+        let mut ms_update = MutatorSetUpdate::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::default();
+        let mut genesis_tx_outputs = vec![];
         for ((receiving_address, _amount), utxo) in premine_distribution
             .iter()
             .zip(Self::premine_utxos(network))
@@ -359,8 +349,18 @@ impl Block {
             genesis_mutator_set.add(&addition_record);
 
             // Add pre-mine UTXO + commitment to coinbase transaction
-            genesis_txk.outputs.push(addition_record)
+            genesis_tx_outputs.push(addition_record)
         }
+
+        let genesis_txk = TransactionKernel {
+            inputs: vec![],
+            outputs: genesis_tx_outputs,
+            fee: NeptuneCoins::new(0),
+            timestamp: network.launch_date(),
+            public_announcements: vec![],
+            coinbase: Some(total_premine_amount),
+            mutator_set_hash: MutatorSetAccumulator::default().hash(),
+        };
 
         let body: BlockBody = BlockBody {
             transaction_kernel: genesis_txk,
