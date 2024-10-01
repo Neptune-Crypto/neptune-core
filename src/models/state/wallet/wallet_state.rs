@@ -328,7 +328,7 @@ impl WalletState {
         self.mempool_unspent_utxos
             .values()
             .flatten()
-            .map(|a| &a.utxo)
+            .map(|au| &au.utxo)
     }
 
     pub async fn confirmed_balance(
@@ -354,13 +354,13 @@ impl WalletState {
                     .map(|u| u.get_native_currency_amount())
                     .sum(),
             )
-            .unwrap()
+            .expect("balance must never be negative")
             .safe_add(
                 self.mempool_unspent_utxos_iter()
                     .map(|u| u.get_native_currency_amount())
                     .sum(),
             )
-            .unwrap()
+            .expect("balance must never overflow")
     }
 
     // note: does not verify we do not have any dups.
@@ -1055,6 +1055,7 @@ impl WalletState {
                 }
             }
         }
+
         WalletStatus {
             synced_unspent,
             unsynced_unspent,

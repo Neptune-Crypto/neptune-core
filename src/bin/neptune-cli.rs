@@ -106,6 +106,7 @@ enum Command {
         block_selector: BlockSelector,
     },
     SyncedBalance,
+    SyncedBalanceUnconfirmed,
     WalletStatus,
     OwnReceivingAddress,
     ListCoins,
@@ -413,6 +414,10 @@ async fn main() -> Result<()> {
         }
         Command::SyncedBalance => {
             let val = client.synced_balance(ctx).await?;
+            println!("{val}");
+        }
+        Command::SyncedBalanceUnconfirmed => {
+            let val = client.synced_balance_unconfirmed(ctx).await?;
             println!("{val}");
         }
         Command::WalletStatus => {
