@@ -7,6 +7,7 @@ use clap::builder::RangedI64ValueParser;
 use clap::Parser;
 
 use super::network::Network;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]
@@ -126,6 +127,11 @@ pub struct Args {
     /// coins. The default option is likely to change in the future.
     #[clap(long, default_value = "false")]
     pub privacy: bool,
+
+    /// Configure how complicated proofs this machine is capable of producing.
+    /// If no value is set, this parameter is estimated.
+    #[clap(long)]
+    pub tx_proving_capability: Option<TxProvingCapability>,
 
     /// Enable tokio tracing for consumption by the tokio-console application
     /// note: this will attempt to connect to localhost:6669

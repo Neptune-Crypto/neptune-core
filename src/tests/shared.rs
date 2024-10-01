@@ -188,7 +188,7 @@ pub async fn mock_genesis_global_state(
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db, syncing, None);
     let genesis_block = archival_state.get_tip().await;
 
     // Sanity check
