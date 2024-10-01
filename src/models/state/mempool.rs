@@ -36,6 +36,7 @@ use num_rational::BigRational as FeeDensity;
 use num_traits::Zero;
 use priority_queue::double_priority_queue::iterators::IntoSortedIter;
 use priority_queue::DoublePriorityQueue;
+use tracing::error;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -373,11 +374,20 @@ impl Mempool {
         self.retain(keep);
 
         // Update the remaining transactions so their mutator set data is still valid
-        for tx in self.tx_dictionary.values_mut() {
-            *tx = tx
-                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
-                .expect("Updating mempool transaction must succeed");
+        // But kick out those transactions that we were unable to update.
+        let mut kick_outs = vec![];
+        for (tx_id, tx) in self.tx_dictionary.iter_mut() {
+            if let Ok(new_tx) =
+                tx.new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+            {
+                *tx = new_tx;
+            } else {
+                error!("Failed to update transaction {tx_id}. Removing from mempool.");
+                kick_outs.push(*tx_id);
+            }
         }
+
+        self.retain(|(tx_id, _)| !kick_outs.contains(&tx_id));
 
         // Maintaining the mutator set data could have increased the size of the
         // transactions in the mempool. So we should shrink it to max size after
