@@ -35,14 +35,15 @@ pub enum Network {
     /// round timestamp.
     RegTest,
 }
+
 impl Network {
     pub(crate) fn launch_date(&self) -> Timestamp {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        const TEN_HOURS_AS_MS: u64 = 1000 * 60 * 60 * 10;
-        let now_rounded = (now / TEN_HOURS_AS_MS) * TEN_HOURS_AS_MS;
+        const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
+        let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
         match self {
             Network::RegTest => Timestamp(BFieldElement::new(now_rounded)),
             // 1 July 2024 (might be revised though)
