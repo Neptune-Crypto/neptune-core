@@ -702,6 +702,7 @@ impl GlobalState {
             timestamp,
             mutator_set_accumulator,
             privacy_setting,
+            self.net.tx_proving_capability,
         )
         .await
     }
@@ -799,6 +800,7 @@ impl GlobalState {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         privacy: bool,
+        proving_power: TxProvingCapability,
     ) -> Result<Transaction> {
         // upgrade data to owned so we can spawn a thread that owns it
         let sender_randomnesses = sender_randomnesses.to_vec();
@@ -822,6 +824,7 @@ impl GlobalState {
                 timestamp,
                 mutator_set_accumulator,
                 privacy,
+                proving_power,
             )
         })
         .await?;
@@ -845,6 +848,7 @@ impl GlobalState {
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
         _privacy: bool,
+        proving_power: TxProvingCapability,
     ) -> Transaction {
         // complete transaction kernel
         let kernel = TransactionKernel {
@@ -874,7 +878,19 @@ impl GlobalState {
             primitive_witness.input_utxos.utxos.len(),
             primitive_witness.output_utxos.utxos.len()
         );
-        let proof = TransactionProof::ProofCollection(ProofCollection::produce(&primitive_witness));
+        let proof = match proving_power {
+            TxProvingCapability::LockScript => todo!(),
+            TxProvingCapability::ProofCollection => {
+                TransactionProof::ProofCollection(ProofCollection::produce(&primitive_witness))
+            }
+            TxProvingCapability::SingleProof => {
+                let proof_collection = ProofCollection::produce(&primitive_witness);
+                let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+                let claim = single_proof_witness.claim();
+                let nondeterminism = single_proof_witness.nondeterminism();
+                TransactionProof::SingleProof(SingleProof.prove(&claim, nondeterminism))
+            }
+        };
         info!("Done generating proof collection");
 
         Transaction { kernel, proof }
@@ -1531,6 +1547,7 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
+            TxProvingCapability::ProofCollection,
         )
         .await
     }
