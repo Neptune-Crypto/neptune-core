@@ -4,6 +4,7 @@ pub mod address;
 pub mod coin_with_possible_timelock;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
+pub mod unlocked_utxo;
 pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
@@ -351,8 +352,6 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-
-    use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
@@ -793,10 +792,6 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
         let msa_tip_previous = next_block.kernel.body.mutator_set_accumulator.clone();
-        let input_utxos_mps_keys = two_utxos
-            .into_iter()
-            .map(|(utxo, _lock_script, mp)| (utxo, mp, own_spending_key))
-            .collect_vec();
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
@@ -807,7 +802,7 @@ mod wallet_tests {
             public_announcement: PublicAnnouncement::default(),
         }];
         let tx = make_mock_transaction_with_generation_key(
-            input_utxos_mps_keys,
+            two_utxos,
             receiver_data,
             NeptuneCoins::zero(),
             msa_tip_previous.clone(),

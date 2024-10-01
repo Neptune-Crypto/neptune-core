@@ -382,9 +382,19 @@ mod mine_loop_tests {
             "Mempool must be empty at startup"
         );
 
-        // Verify constructed coinbase transaction and block template when mempool is empty
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp;
+        let future_timestamp = now + Timestamp::months(7);
+        assert!(
+            !premine_receiver_global_state
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_available_amount(future_timestamp)
+                .is_zero(),
+            "Assumed to be premine-recipient"
+        );
+
+        // Verify constructed coinbase transaction and block template when mempool is empty
         let (transaction_empty_mempool, _coinbase_sender_randomness) =
             premine_receiver_global_state.make_coinbase_transaction(NeptuneCoins::zero(), now);
         assert_eq!(
@@ -428,7 +438,7 @@ mod mine_loop_tests {
                     }),
                 ],
                 NeptuneCoins::new(1),
-                now + Timestamp::months(7),
+                future_timestamp,
             )
             .await
             .unwrap();
@@ -440,7 +450,7 @@ mod mine_loop_tests {
         // Build transaction
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
             premine_receiver_global_state
-                .make_coinbase_transaction(NeptuneCoins::zero(), now + Timestamp::months(7));
+                .make_coinbase_transaction(NeptuneCoins::zero(), future_timestamp);
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -452,16 +462,14 @@ mod mine_loop_tests {
         let (block_header_template, block_body, new_block_proof) = Block::make_block_template(
             &genesis_block,
             transaction_non_empty_mempool,
-            now + Timestamp::months(7),
+            future_timestamp,
             None,
         );
         let block_template_non_empty_mempool =
             Block::new(block_header_template, block_body, new_block_proof);
         assert!(
-            block_template_non_empty_mempool.is_valid(
-                &genesis_block,
-                now + Timestamp::months(7) + Timestamp::seconds(2)
-            ),
+            block_template_non_empty_mempool
+                .is_valid(&genesis_block, future_timestamp + Timestamp::seconds(2)),
             "Block template created by miner with non-empty mempool must be valid"
         );
 

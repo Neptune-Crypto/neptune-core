@@ -35,7 +35,6 @@ use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -51,7 +50,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
-use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
@@ -83,6 +81,7 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
@@ -91,7 +90,6 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
@@ -607,16 +605,16 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
-pub async fn make_mock_transaction_with_generation_key(
-    input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
+pub(crate) async fn make_mock_transaction_with_generation_key(
+    utxo_unlockers: Vec<UnlockedUtxo>,
     receiver_data: Vec<UtxoReceiverData>,
     fee: NeptuneCoins,
     tip_msa: MutatorSetAccumulator,
 ) -> Transaction {
     // Generate removal records
     let mut inputs = vec![];
-    for (input_utxo, input_mp, _) in input_utxos_mps_keys.iter() {
-        let removal_record = tip_msa.drop(Hash::hash(input_utxo), input_mp);
+    for unlocker in utxo_unlockers.iter() {
+        let removal_record = tip_msa.drop(unlocker.mutator_set_item(), unlocker.mutator_set_mp());
         inputs.push(removal_record);
     }
 
@@ -650,30 +648,20 @@ pub async fn make_mock_transaction_with_generation_key(
         mutator_set_hash: tip_msa.hash(),
     };
 
-    let input_utxos = input_utxos_mps_keys
+    let input_utxos = utxo_unlockers
         .iter()
-        .map(|(utxo, _mp, _)| utxo)
-        .cloned()
+        .map(|unlocker| unlocker.utxo.clone())
         .collect_vec();
     let type_scripts_and_witnesses = vec![TypeScriptAndWitness::new(NativeCurrency.program())];
-    let input_membership_proofs = input_utxos_mps_keys
+    let input_membership_proofs = utxo_unlockers
         .iter()
-        .map(|(_utxo, mp, _)| mp)
+        .map(|unlocker| unlocker.mutator_set_mp())
         .cloned()
         .collect_vec();
-    let spending_key_unlock_keys = input_utxos_mps_keys
+    let input_lock_scripts_and_witnesses = utxo_unlockers
         .iter()
-        .map(|(_utxo, _mp, sk)| sk.unlock_key.encode())
+        .map(|unlocker| unlocker.lock_script_and_witness().to_owned())
         .collect_vec();
-    let input_lock_scripts = input_utxos_mps_keys
-        .iter()
-        .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
-        .collect_vec();
-    let input_lock_scripts_and_witnesses = input_lock_scripts
-        .into_iter()
-        .zip(spending_key_unlock_keys.into_iter())
-        .map(|(ls, wt)| LockScriptAndWitness::new_with_tokens(ls.program, wt))
-        .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),

@@ -13,6 +13,7 @@ use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use wallet::unlocked_utxo::UnlockedUtxo;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -29,9 +30,11 @@ use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
+use super::blockchain::transaction::validity::proof_collection::ProofCollection;
 use super::blockchain::transaction::PublicAnnouncement;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::transaction::TransactionProof;
+use super::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::time_lock::TimeLock;
@@ -405,12 +408,12 @@ impl GlobalState {
         &mut self,
         total_spend: NeptuneCoins,
         timestamp: Timestamp,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
+    ) -> Result<Vec<UnlockedUtxo>> {
         // Get the block tip as the transaction is made relative to it
         let block_tip = self.chain.light_state();
 
         // collect spendable inputs
-        let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)> = self
+        let spendable_utxos_and_mps = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(total_spend, block_tip.hash(), timestamp)
             .await?;
@@ -421,12 +424,13 @@ impl GlobalState {
     /// Given a list of spendable UTXOs, generate the corresponding removal
     /// recods relative to the current mutator set accumulator.
     pub fn generate_removal_records(
-        spendable_utxos_and_mps: &[(Utxo, LockScript, MsMembershipProof)],
+        utxo_unlockers: &[UnlockedUtxo],
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> Vec<RemovalRecord> {
         let mut inputs: Vec<RemovalRecord> = vec![];
-        for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
-            let removal_record = mutator_set_accumulator.drop(Hash::hash(spendable_utxo), mp);
+        for unlocker in utxo_unlockers.iter() {
+            let removal_record = mutator_set_accumulator
+                .drop(unlocker.mutator_set_item(), unlocker.mutator_set_mp());
             inputs.push(removal_record);
         }
         inputs
@@ -515,10 +519,10 @@ impl GlobalState {
         )
     }
 
-    /// Generate a change UTXO and transaction output to ensure that the difference
-    /// in input amount and output amount goes back to us. Also, make sure to expect
-    /// the UTXO so that we can synchronize it after it is confirmed.
-    pub async fn add_change(&mut self, change_amount: NeptuneCoins) -> (AdditionRecord, Utxo) {
+    /// Generate a change UTXO to ensure that the difference in input amount
+    /// and output amount goes back to us. Also, add the change UTXO to the
+    /// list of expected UTXOs.
+    pub async fn create_change_utxo(&mut self, change_amount: NeptuneCoins) -> UtxoReceiverData {
         // generate utxo
         let own_spending_key_for_change = self
             .wallet_state
@@ -532,15 +536,9 @@ impl GlobalState {
             lock_script_hash,
         };
 
-        // generate addition record
         let receiver_digest = own_receiving_address.privacy_digest;
         let change_sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
             self.chain.light_state().kernel.header.height,
-            receiver_digest,
-        );
-        let change_addition_record = commit(
-            Hash::hash(&change_utxo),
-            change_sender_randomness,
             receiver_digest,
         );
 
@@ -557,48 +555,66 @@ impl GlobalState {
             )
             .expect("Adding change UTXO to UTXO notification pool must succeed");
 
-        (change_addition_record, change_utxo)
+        UtxoReceiverData {
+            utxo: change_utxo,
+            sender_randomness: change_sender_randomness,
+            receiver_privacy_digest: receiver_preimage.hash(),
+            public_announcement: PublicAnnouncement::default(),
+        }
     }
 
     /// Generate a primitive witness for a transaction from various disparate witness data.
-    pub fn generate_primitive_witness(
-        spending_key: SpendingKey,
-        spendable_utxos_and_mps: &[(Utxo, LockScript, MsMembershipProof)],
+    ///
+    /// # Panics
+    /// Panics if transaction validity cannot be satisfied.
+    pub(crate) fn generate_primitive_witness(
+        unlocked_utxos: &[UnlockedUtxo],
         output_utxos: &[Utxo],
         sender_randomnesses: &[Digest],
         receiver_digests: &[Digest],
         transaction_kernel: &TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> PrimitiveWitness {
-        let secret_input = spending_key.unlock_key.encode();
-        let type_scripts_and_witnesses = [NativeCurrency.program(), TimeLock.program()]
-            .map(TypeScriptAndWitness::new)
-            .to_vec();
-        let input_utxos = spendable_utxos_and_mps
+        let salted_output_utxos = SaltedUtxos::new(output_utxos.to_vec());
+        let input_utxos = unlocked_utxos
             .iter()
-            .map(|(utxo, _lock_script, _mp)| utxo.clone())
+            .map(|unlocker| unlocker.utxo.to_owned())
             .collect_vec();
-        let input_lock_scripts_and_witnesses = spendable_utxos_and_mps
+        let type_script_hashes = input_utxos
             .iter()
-            .map(|(_utxo, lock_script, _mp)| {
-                LockScriptAndWitness::new_with_tokens(
-                    lock_script.program.clone(),
-                    secret_input.clone(),
+            .chain(output_utxos.iter())
+            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
+            .unique()
+            .collect_vec();
+        let salted_input_utxos = SaltedUtxos::new(input_utxos);
+        let type_scripts_and_witnesses = type_script_hashes
+            .into_iter()
+            .map(|type_script_hash| {
+                match_type_script_and_generate_witness(
+                    type_script_hash,
+                    transaction_kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
                 )
+                .expect("type script hash should be known.")
             })
             .collect_vec();
-        let input_membership_proofs = spendable_utxos_and_mps
+        let input_lock_scripts_and_witnesses = unlocked_utxos
             .iter()
-            .map(|(_utxo, _lock_script, mp)| mp)
+            .map(|unlocker| unlocker.lock_script_and_witness())
             .cloned()
+            .collect_vec();
+        let input_membership_proofs = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.mutator_set_mp().to_owned())
             .collect_vec();
 
         PrimitiveWitness {
-            input_utxos: SaltedUtxos::new(input_utxos),
+            input_utxos: salted_input_utxos,
             lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
             type_scripts_and_witnesses,
             input_membership_proofs,
-            output_utxos: SaltedUtxos::new(output_utxos.to_vec()),
+            output_utxos: salted_output_utxos,
             output_sender_randomnesses: sender_randomnesses.to_vec(),
             output_receiver_digests: receiver_digests.to_vec(),
             mutator_set_accumulator,
@@ -613,11 +629,10 @@ impl GlobalState {
     /// the fee that they are willing to spend to have this
     /// transaction mined.
     ///
-    /// Returns the transaction and a vector containing the sender
-    /// randomness for each output UTXO.
+    /// Returns the transaction with some proof.
     pub async fn create_transaction(
         &mut self,
-        receiver_data: Vec<UtxoReceiverData>,
+        mut receiver_data: Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -630,7 +645,7 @@ impl GlobalState {
             sender_randomnesses,
             receiver_digests,
         ) = self
-            .generate_utxo_data_for_transaction(&receiver_data, fee, timestamp)
+            .generate_utxo_data_for_transaction(&mut receiver_data, fee, timestamp)
             .await?;
 
         // other data
@@ -647,15 +662,8 @@ impl GlobalState {
             .clone();
         let privacy_setting = self.cli().privacy;
 
-        // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
-        let spending_key = self
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
-
         // assemble transaction object (lengthy operation)
         Self::create_transaction_from_data(
-            spending_key,
             inputs,
             spendable_utxos_and_mps,
             outputs,
@@ -672,18 +680,20 @@ impl GlobalState {
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
-    /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary, and
+    /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary,
     /// and produce a list of removal records, input UTXOs (with lock scripts and
     /// membership proofs), addition records, output UTXOs, their canonical commitments,
     /// and the randmnesses used to produce them.
+    ///
+    /// Modifies the input receiver data to add a change-UTXO if needed.
     async fn generate_utxo_data_for_transaction(
         &mut self,
-        receiver_data: &[UtxoReceiverData],
+        receiver_data: &mut Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(
         Vec<RemovalRecord>,
-        Vec<(Utxo, LockScript, MsMembershipProof)>,
+        Vec<UnlockedUtxo>,
         Vec<AdditionRecord>,
         Vec<Utxo>,
         Vec<Digest>,
@@ -697,12 +707,12 @@ impl GlobalState {
             + fee;
 
         // collect enough spendable UTXOs
-        let spendable_utxos_and_mps = self
+        let unlockers = self
             .assemble_inputs_for_transaction(total_spend, timestamp)
             .await?;
-        let input_amount = spendable_utxos_and_mps
+        let input_amount = unlockers
             .iter()
-            .map(|(utxo, _lock_script, _mp)| utxo.get_native_currency_amount())
+            .map(|unlocker| unlocker.utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>();
 
         // sanity check: do we even have enough funds?
@@ -712,13 +722,20 @@ impl GlobalState {
 
         // create removal records (inputs)
         let inputs = Self::generate_removal_records(
-            &spendable_utxos_and_mps,
+            &unlockers,
             &self.chain.light_state().kernel.body.mutator_set_accumulator,
         );
 
+        // Add change-UTXO to transaction
+        if total_spend < input_amount {
+            let change_amount = input_amount.checked_sub(&total_spend).unwrap();
+            let change = self.create_change_utxo(change_amount).await;
+            receiver_data.push(change);
+        }
+
         // create addition records (outputs)
-        let mut outputs = Self::generate_addition_records(receiver_data);
-        let mut output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
+        let outputs = Self::generate_addition_records(receiver_data);
+        let output_utxos = receiver_data.iter().map(|rd| rd.utxo.clone()).collect_vec();
 
         // collect commitment randomness for reproducing addition records
         let sender_randomnesses = receiver_data
@@ -730,17 +747,9 @@ impl GlobalState {
             .map(|rd| rd.receiver_privacy_digest)
             .collect_vec();
 
-        // keep track of change (if any)
-        if total_spend < input_amount {
-            let change_amount = input_amount.checked_sub(&total_spend).unwrap();
-            let (change_addition_record, change_utxo) = self.add_change(change_amount).await;
-            outputs.push(change_addition_record);
-            output_utxos.push(change_utxo.clone());
-        }
-
         Ok((
             inputs,
-            spendable_utxos_and_mps,
+            unlockers,
             outputs,
             output_utxos,
             sender_randomnesses,
@@ -752,9 +761,8 @@ impl GlobalState {
     /// the given transaction data.
     #[allow(clippy::too_many_arguments)]
     async fn create_transaction_from_data(
-        spending_key: SpendingKey,
         inputs: Vec<RemovalRecord>,
-        spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
+        unlocked_utxos: Vec<UnlockedUtxo>,
         outputs: Vec<AdditionRecord>,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: &[Digest],
@@ -776,9 +784,8 @@ impl GlobalState {
         //       and other async tasks.
         let transaction = tokio::task::spawn_blocking(move || {
             Self::create_transaction_from_data_worker(
-                spending_key,
                 inputs,
-                spendable_utxos_and_mps,
+                unlocked_utxos,
                 outputs,
                 output_utxos,
                 sender_randomnesses,
@@ -800,9 +807,8 @@ impl GlobalState {
     /// one into a newly spawned thread.
     #[allow(clippy::too_many_arguments)]
     fn create_transaction_from_data_worker(
-        spending_key: SpendingKey,
         inputs: Vec<RemovalRecord>,
-        spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)>,
+        unlocked_utxos: Vec<UnlockedUtxo>,
         outputs: Vec<AdditionRecord>,
         output_utxos: Vec<Utxo>,
         sender_randomnesses: Vec<Digest>,
@@ -826,8 +832,7 @@ impl GlobalState {
 
         // populate witness
         let primitive_witness = Self::generate_primitive_witness(
-            spending_key,
-            &spendable_utxos_and_mps,
+            &unlocked_utxos,
             &output_utxos,
             &sender_randomnesses,
             &receiver_digests,
@@ -835,12 +840,16 @@ impl GlobalState {
             mutator_set_accumulator,
         );
 
-        // Generate a proof for the transaction.
-        // Down the line we want to support proving only the lock scripts, or only
-        // the lock scripts and removal records integrity, but nothing else.
-        // That's a concern for later though. Right now we don't even support
-        // proving, so we just wrap the primitive witness.
-        let proof = TransactionProof::Witness(primitive_witness);
+        debug!("primitive witness for transaction: {}", primitive_witness);
+
+        info!(
+            "Start: generate proof collection for {}-in {}-out transaction",
+            primitive_witness.input_utxos.utxos.len(),
+            primitive_witness.output_utxos.utxos.len()
+        );
+        let proof = TransactionProof::ProofCollection(ProofCollection::produce(&primitive_witness));
+        info!("Done generating proof collection");
+
         Transaction { kernel, proof }
     }
 
@@ -1448,7 +1457,7 @@ mod global_state_tests {
     /// as opposed to now.
     pub(super) async fn create_transaction_with_timestamp(
         global_state_lock: &GlobalStateLock,
-        receiver_data: &[UtxoReceiverData],
+        mut receiver_data: Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -1463,7 +1472,7 @@ mod global_state_tests {
         ) = global_state_lock
             .lock_guard_mut()
             .await
-            .generate_utxo_data_for_transaction(receiver_data, fee, timestamp)
+            .generate_utxo_data_for_transaction(&mut receiver_data, fee, timestamp)
             .await?;
 
         // other data
@@ -1482,17 +1491,8 @@ mod global_state_tests {
             .clone();
         let privacy = global_state_lock.cli().privacy;
 
-        // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
-        let spending_key = global_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
-
         // assemble transaction object
         GlobalState::create_transaction_from_data(
-            spending_key,
             inputs,
             spendable_utxos_and_mps,
             outputs,
@@ -1552,7 +1552,7 @@ mod global_state_tests {
         let one_month = Timestamp::months(1);
         assert!(create_transaction_with_timestamp(
             &global_state_lock,
-            &receiver_data,
+            receiver_data.clone(),
             NeptuneCoins::new(1),
             launch + six_months - one_month,
         )
@@ -1562,7 +1562,7 @@ mod global_state_tests {
         // one month after though, we should be
         let mut tx = create_transaction_with_timestamp(
             &global_state_lock,
-            &receiver_data,
+            receiver_data,
             NeptuneCoins::new(1),
             launch + six_months + one_month,
         )
@@ -1616,7 +1616,7 @@ mod global_state_tests {
 
         let new_tx: Transaction = create_transaction_with_timestamp(
             &global_state_lock,
-            &other_receiver_data,
+            other_receiver_data,
             NeptuneCoins::new(1),
             launch + six_months + one_month,
         )
@@ -2133,7 +2133,7 @@ mod global_state_tests {
 
         let tx_to_alice_and_bob = create_transaction_with_timestamp(
             &genesis_state_lock,
-            &[
+            [
                 receiver_data_for_alice.clone(),
                 receiver_data_for_bob.clone(),
             ]

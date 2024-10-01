@@ -19,6 +19,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::Digest;
+use twenty_first::error::BFieldCodecError;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -27,6 +28,7 @@ use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -48,6 +50,25 @@ impl TimeLock {
             type_script_hash: TimeLock.hash(),
             state: vec![date.0],
         }
+    }
+
+    /// Get the release date from a `Utxo`, if any. If there aren't any, return
+    /// the null release date.
+    pub fn extract_release_date(utxo: &Utxo) -> Timestamp {
+        utxo.coins
+            .iter()
+            .find(|coin| coin.type_script_hash == Self.hash())
+            .cloned()
+            .map(|coin| {
+                coin.state
+                    .first()
+                    .copied()
+                    .map(Timestamp)
+                    // state is empty; interpret as null-timelock
+                    .unwrap_or_else(Timestamp::zero)
+            })
+            // no time lock coin found; interpret as null-timelock
+            .unwrap_or_else(Timestamp::zero)
     }
 }
 
@@ -675,6 +696,24 @@ impl TypeScriptWitness for TimeLockWitness {
     fn type_script_and_witness(&self) -> TypeScriptAndWitness {
         TypeScriptAndWitness::new_with_nondeterminism(TimeLock.program(), self.nondeterminism())
     }
+
+    fn new(
+        transaction_kernel: TransactionKernel,
+        salted_input_utxos: SaltedUtxos,
+        _salted_output_utxos: SaltedUtxos,
+    ) -> Self {
+        let release_dates = salted_input_utxos
+            .utxos
+            .iter()
+            .map(TimeLock::extract_release_date)
+            .collect_vec();
+
+        Self {
+            release_dates,
+            input_utxos: salted_input_utxos,
+            transaction_kernel,
+        }
+    }
 }
 
 impl From<PrimitiveWitness> for TimeLockWitness {
@@ -683,23 +722,11 @@ impl From<PrimitiveWitness> for TimeLockWitness {
             .input_utxos
             .utxos
             .iter()
-            .map(|utxo| {
-                utxo.coins
-                    .iter()
-                    .find(|coin| coin.type_script_hash == TimeLock.hash())
-                    .cloned()
-                    .map(|coin| {
-                        coin.state
-                            .first()
-                            .copied()
-                            .unwrap_or_else(|| BFieldElement::new(0))
-                    })
-                    .unwrap_or_else(|| BFieldElement::new(0))
-            })
-            .map(Timestamp)
+            .map(TimeLock::extract_release_date)
             .collect_vec();
         let transaction_kernel = TransactionKernel::from(primitive_witness.clone());
         let input_utxos = primitive_witness.input_utxos.clone();
+
         Self {
             release_dates,
             input_utxos,

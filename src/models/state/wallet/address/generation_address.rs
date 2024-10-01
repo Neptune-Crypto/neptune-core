@@ -40,7 +40,7 @@ pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
     pub privacy_preimage: Digest,
-    pub unlock_key: Digest,
+    unlock_key: Digest,
     pub seed: Digest,
 }
 

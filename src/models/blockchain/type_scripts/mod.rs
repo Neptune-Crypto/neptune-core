@@ -21,6 +21,7 @@ use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::Hash;
 
+pub mod known_type_scripts;
 pub mod native_currency;
 pub mod neptune_coins;
 pub mod time_lock;
@@ -70,6 +71,11 @@ impl TypeScript {
 }
 
 pub trait TypeScriptWitness {
+    fn new(
+        transaction_kernel: TransactionKernel,
+        salted_input_utxos: SaltedUtxos,
+        salted_output_utxos: SaltedUtxos,
+    ) -> Self;
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;

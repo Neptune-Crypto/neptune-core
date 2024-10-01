@@ -1492,7 +1492,7 @@ mod archival_state_tests {
         ];
         let tx_to_alice_and_bob = create_transaction_with_timestamp(
             &genesis_state_lock,
-            &[
+            [
                 receiver_data_for_alice.clone(),
                 receiver_data_for_bob.clone(),
             ]
@@ -1670,7 +1670,7 @@ mod archival_state_tests {
         ];
         let tx_from_bob = create_transaction_with_timestamp(
             &bob_state_lock,
-            &receiver_data_from_bob.clone(),
+            receiver_data_from_bob.clone(),
             NeptuneCoins::new(2),
             launch + seven_months,
         )

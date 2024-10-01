@@ -567,6 +567,18 @@ pub struct NativeCurrencyWitness {
 }
 
 impl TypeScriptWitness for NativeCurrencyWitness {
+    fn new(
+        transaction_kernel: TransactionKernel,
+        salted_input_utxos: SaltedUtxos,
+        salted_output_utxos: SaltedUtxos,
+    ) -> Self {
+        Self {
+            salted_input_utxos,
+            salted_output_utxos,
+            kernel: transaction_kernel,
+        }
+    }
+
     fn transaction_kernel(&self) -> TransactionKernel {
         self.kernel.clone()
     }

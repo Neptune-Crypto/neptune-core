@@ -24,6 +24,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
+use super::unlocked_utxo::UnlockedUtxo;
 use super::utxo_notification_pool::UtxoNotificationPool;
 use super::utxo_notification_pool::UtxoNotifier;
 use super::wallet_status::WalletStatus;
@@ -687,12 +688,12 @@ impl WalletState {
         }
     }
 
-    pub async fn allocate_sufficient_input_funds_from_lock(
+    pub(crate) async fn allocate_sufficient_input_funds_from_lock(
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
         timestamp: Timestamp,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
+    ) -> Result<Vec<UnlockedUtxo>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
@@ -712,21 +713,17 @@ impl WalletState {
                 tip_digest);
         }
 
-        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof)> = vec![];
+        let mut ret = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
-        let lock_script = self
-            .wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address()
-            .lock_script();
+        let spending_key = self.wallet_secret.nth_generation_spending_key(0);
         while allocated_amount < requested_amount {
             let (wallet_status_element, membership_proof) =
                 wallet_status.synced_unspent[ret.len()].clone();
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
-            ret.push((
+            ret.push(UnlockedUtxo::unlock(
                 wallet_status_element.utxo,
-                lock_script.clone(),
+                spending_key,
                 membership_proof,
             ));
         }
@@ -736,11 +733,11 @@ impl WalletState {
 
     // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
     // paid in the transaction.
-    pub async fn allocate_sufficient_input_funds(
+    pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
+    ) -> Result<Vec<UnlockedUtxo>> {
         let now = Timestamp::now();
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await

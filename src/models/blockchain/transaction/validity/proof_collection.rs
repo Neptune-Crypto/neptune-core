@@ -9,6 +9,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
+use tracing::debug;
 
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
@@ -143,37 +144,53 @@ impl ProofCollection {
         let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
         let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
         let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
-        println!("proving, txk hash: {}", txk_mast_hash);
-        println!("proving, salted inputs hash: {}", salted_inputs_hash);
-        println!("proving, salted outputs hash: {}", salted_outputs_hash);
+        debug!("proving, txk hash: {}", txk_mast_hash);
+        debug!("proving, salted inputs hash: {}", salted_inputs_hash);
+        debug!("proving, salted outputs hash: {}", salted_outputs_hash);
 
         // prove
+        debug!("proving RemovalRecordsIntegrity");
         let removal_records_integrity = RemovalRecordsIntegrity.prove(
             &removal_records_integrity_witness.claim(),
             removal_records_integrity_witness.nondeterminism(),
         );
+
+        debug!("proving CollectLockScripts");
         let collect_lock_scripts = CollectLockScripts.prove(
             &collect_lock_scripts_witness.claim(),
             collect_lock_scripts_witness.nondeterminism(),
         );
+
+        debug!("proving KernelToOutputs");
         let kernel_to_outputs = KernelToOutputs.prove(
             &kernel_to_outputs_witness.claim(),
             kernel_to_outputs_witness.nondeterminism(),
         );
+
+        debug!("proving CollectTypeScripts");
         let collect_type_scripts = CollectTypeScripts.prove(
             &collect_type_scripts_witness.claim(),
             collect_type_scripts_witness.nondeterminism(),
         );
+
+        debug!("proving lock scripts");
         let lock_scripts_halt = primitive_witness
             .lock_scripts_and_witnesses
             .iter()
             .map(|lsaw| lsaw.prove(txk_mast_hash_as_input.clone()))
             .collect_vec();
+
+        debug!("proving type scripts");
         let type_scripts_halt = primitive_witness
             .type_scripts_and_witnesses
             .iter()
-            .map(|tsaw| tsaw.prove(txk_mast_hash, salted_inputs_hash, salted_outputs_hash))
+            .enumerate()
+            .map(|(i, tsaw)| {
+                debug!("proving type script number {i}: {}", tsaw.program.hash());
+                tsaw.prove(txk_mast_hash, salted_inputs_hash, salted_outputs_hash)
+            })
             .collect_vec();
+        debug!("done proving");
 
         // collect hashes
         let lock_script_hashes = primitive_witness
