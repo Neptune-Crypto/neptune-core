@@ -114,7 +114,7 @@ pub enum BlockType {
 // initialized digest field and the other has not.
 //
 // The field should not be serialized, so it has the `#[serde(skip)]` attribute.
-// Upon deserialization, the field will have Digest::default() which is desired
+// Upon deserialization, the field will have Default::default() which is desired
 // so that the digest will be recomputed if/when hash() is called.
 //
 // We likewise skip the field for `BFieldCodec`, and `GetSize` because there
@@ -290,7 +290,7 @@ impl Block {
             let utxo_digest = Hash::hash(&utxo);
             // generate randomness for mutator set commitment
             // Sender randomness cannot be random because there is no sender.
-            let bad_randomness = Digest::default();
+            let bad_randomness = Default::default();
             let receiver_digest = receiving_address.privacy_digest();
 
             // Add pre-mine UTXO to MutatorSet

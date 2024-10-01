@@ -471,7 +471,6 @@ mod connect_tests {
     use anyhow::Result;
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
-    use twenty_first::math::digest::Digest;
 
     use crate::config_models::network::Network;
     use crate::models::peer::ConnectionStatus;
@@ -479,7 +478,6 @@ mod connect_tests {
     use crate::models::peer::PeerMessage;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::peer::PeerStanding;
-    use crate::prelude::twenty_first;
     use crate::tests::shared::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
@@ -650,7 +648,7 @@ mod connect_tests {
             standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
-                Digest::default(),
+                Default::default(),
             ))),
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
@@ -937,7 +935,7 @@ mod connect_tests {
             standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
-                Digest::default(),
+                Default::default(),
             ))),
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };

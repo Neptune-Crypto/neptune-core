@@ -47,7 +47,7 @@ mod addition_record_tests {
     fn get_size_test() {
         let addition_record_0: AdditionRecord = commit(
             Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
+            Hash::hash(&1522u128).into(),
             Hash::hash(&1521u128),
         );
 
@@ -58,13 +58,13 @@ mod addition_record_tests {
     fn hash_identity_test() {
         let addition_record_0: AdditionRecord = commit(
             Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
+            Hash::hash(&1522u128).into(),
             Hash::hash(&1521u128),
         );
 
         let addition_record_1: AdditionRecord = commit(
             Hash::hash(&1492u128),
-            Hash::hash(&1522u128),
+            Hash::hash(&1522u128).into(),
             Hash::hash(&1521u128),
         );
 
@@ -76,7 +76,7 @@ mod addition_record_tests {
 
         let addition_record_2: AdditionRecord = commit(
             Hash::hash(&1451u128),
-            Hash::hash(&1480u128),
+            Hash::hash(&1480u128).into(),
             Hash::hash(&1481u128),
         );
 
@@ -91,7 +91,7 @@ mod addition_record_tests {
     #[test]
     fn serialization_test() {
         let item = Hash::hash(&1492u128);
-        let sender_randomness = Hash::hash(&1522u128);
+        let sender_randomness = crate::SenderRandomness::from(Hash::hash(&1522u128));
         let receiver_digest = Hash::hash(&1583u128);
         let addition_record: AdditionRecord = commit(item, sender_randomness, receiver_digest);
         let json = serde_json::to_string(&addition_record).unwrap();

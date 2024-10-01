@@ -156,7 +156,7 @@ impl ReceivingAddress {
     pub fn generate_public_announcement(
         &self,
         utxo: &Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
     ) -> Result<PublicAnnouncement> {
         let ciphertext = [
             &[KeyType::from(self).into(), self.receiver_identifier()],
@@ -185,7 +185,11 @@ impl ReceivingAddress {
     }
 
     /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
+    pub fn encrypt(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: crate::SenderRandomness,
+    ) -> Result<Vec<BFieldElement>> {
         match self {
             Self::Generation(a) => a.encrypt(utxo, sender_randomness),
             Self::Symmetric(a) => Ok(a.encrypt(utxo, sender_randomness)?),
@@ -299,7 +303,10 @@ impl SpendingKey {
     }
 
     /// decrypts an array of BFieldElement into a [Utxo] and [Digest] representing `sender_randomness`.
-    pub fn decrypt(&self, ciphertext_bfes: &[BFieldElement]) -> Result<(Utxo, Digest)> {
+    pub fn decrypt(
+        &self,
+        ciphertext_bfes: &[BFieldElement],
+    ) -> Result<(Utxo, crate::SenderRandomness)> {
         match self {
             Self::Generation(k) => k.decrypt(ciphertext_bfes),
             Self::Symmetric(k) => Ok(k.decrypt(ciphertext_bfes)?),
@@ -458,7 +465,7 @@ mod test {
             let utxo = Utxo::new_native_coin(key.to_address().lock_script(), NeptuneCoins::new(10));
 
             // 2. generate sender randomness
-            let sender_randomness: Digest = random();
+            let sender_randomness: crate::SenderRandomness = random();
 
             // 3. create an addition record to verify against later.
             let expected_addition_record = commit(
@@ -514,7 +521,7 @@ mod test {
             let utxo = Utxo::new_native_coin(key.to_address().lock_script(), amount);
 
             // 2. generate sender randomness
-            let sender_randomness: Digest = random();
+            let sender_randomness: crate::SenderRandomness = random();
 
             // 3. encrypt secrets (utxo, sender_randomness)
             let ciphertext = key.to_address().encrypt(&utxo, sender_randomness).unwrap();

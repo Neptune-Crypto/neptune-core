@@ -96,7 +96,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             ),
             Hash::hash_pair(
                 removal_record_integrity_witness.swbfa_hash,
-                Digest::default(),
+                Default::default(),
             ),
         );
         assert_eq!(

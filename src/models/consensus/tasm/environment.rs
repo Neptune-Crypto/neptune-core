@@ -22,7 +22,7 @@ thread_local! {
     pub(super) static ND_MEMORY: RefCell<HashMap<BFieldElement, BFieldElement>> =
         RefCell::new(HashMap::default());
 
-    pub(super) static PROGRAM_DIGEST: RefCell<Digest> = RefCell::new(Digest::default());
+    pub(super) static PROGRAM_DIGEST: RefCell<Digest> = RefCell::new(Default::default());
 }
 
 pub(crate) fn init(

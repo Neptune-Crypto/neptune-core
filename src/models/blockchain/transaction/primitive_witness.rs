@@ -270,10 +270,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
     //  - salt (output)
     //  - aocl size
     (
-        vec(arb::<Digest>(), num_inputs),
+        vec(arb::<crate::SenderRandomness>(), num_inputs),
         vec(arb::<Digest>(), num_inputs),
         vec(arb::<BFieldElement>(), 3),
-        vec(arb::<Digest>(), num_outputs),
+        vec(arb::<crate::SenderRandomness>(), num_outputs),
         vec(arb::<Digest>(), num_outputs),
         vec(arb::<BFieldElement>(), 3),
         0u64..=u64::MAX,

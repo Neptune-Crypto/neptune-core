@@ -72,7 +72,7 @@ pub struct WalletState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct IncomingUtxoRecoveryData {
     pub utxo: Utxo,
-    pub sender_randomness: Digest,
+    pub sender_randomness: crate::SenderRandomness,
     pub receiver_preimage: Digest,
     pub aocl_index: u64,
 }
@@ -207,7 +207,7 @@ impl WalletState {
         // This also ensures that any premine outputs are added to the file containing the
         // incoming randomness such that a wallet-DB recovery will include genesis block
         // outputs.
-        if sync_label == Digest::default() {
+        if sync_label == Default::default() {
             // Check if we are premine recipients
             let own_spending_key = wallet_state.next_unused_spending_key(KeyType::Generation);
             let own_receiving_address = own_spending_key.to_address();
@@ -216,7 +216,7 @@ impl WalletState {
                     wallet_state
                         .add_expected_utxo(ExpectedUtxo::new(
                             utxo,
-                            Digest::default(), // sender_randomness
+                            Default::default(), // sender_randomness
                             own_spending_key.privacy_preimage(),
                             UtxoNotifier::Premine,
                         ))
@@ -501,15 +501,17 @@ impl WalletState {
         let all_received_outputs =
             onchain_received_outputs.chain(offchain_received_outputs.iter().cloned());
 
-        let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
-            all_received_outputs
-                .map(|au| {
-                    (
-                        au.addition_record,
-                        (au.utxo, au.sender_randomness, au.receiver_preimage),
-                    )
-                })
-                .collect();
+        let addition_record_to_utxo_info: HashMap<
+            AdditionRecord,
+            (Utxo, crate::SenderRandomness, Digest),
+        > = all_received_outputs
+            .map(|au| {
+                (
+                    au.addition_record,
+                    (au.utxo, au.sender_randomness, au.receiver_preimage),
+                )
+            })
+            .collect();
 
         debug!(
             "announced outputs received: onchain: {}, offchain: {}, total: {}",
@@ -1307,7 +1309,7 @@ mod tests {
             let mock_utxo =
                 Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(10));
 
-            let sender_randomness: Digest = rand::random();
+            let sender_randomness: crate::SenderRandomness = rand::random();
             let receiver_preimage: Digest = rand::random();
             let expected_addition_record = commit(
                 Hash::hash(&mock_utxo),
@@ -1390,7 +1392,7 @@ mod tests {
 
             // modify mined_in_block field.
             eu.mined_in_block = Some((
-                Digest::default(),
+                Default::default(),
                 Timestamp::now() - Timestamp::seconds(two_weeks_as_sec),
             ));
 

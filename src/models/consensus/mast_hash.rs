@@ -29,7 +29,7 @@ pub trait MastHash {
 
         // pad until length is a power of two
         while digests.len() & (digests.len() - 1) != 0 {
-            digests.push(Digest::default());
+            digests.push(Default::default());
         }
 
         CpuParallel::from_digests(&digests).unwrap()

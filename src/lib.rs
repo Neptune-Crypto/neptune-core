@@ -23,9 +23,11 @@ pub mod tests;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 use anyhow::Context;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use chrono::DateTime;
 use chrono::Local;
 use chrono::NaiveDateTime;
@@ -34,12 +36,19 @@ use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+use get_size::GetSize;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::PeerInfo;
+use num_bigint::BigUint;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
+use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
@@ -75,6 +84,9 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
+use crate::twenty_first::error::TryFromDigestError;
+use crate::twenty_first::math::digest::Digest;
+use crate::twenty_first::prelude::BFieldCodec;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -83,6 +95,114 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(
+    Copy,
+    Debug,
+    Clone,
+    Default,
+    Hash,
+    GetSize,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    BFieldCodec,
+    Arbitrary,
+)]
+pub struct SenderRandomness(Digest);
+impl std::ops::Deref for SenderRandomness {
+    type Target = Digest;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::fmt::Display for SenderRandomness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl From<Digest> for SenderRandomness {
+    fn from(d: Digest) -> Self {
+        Self(d)
+    }
+}
+impl From<SenderRandomness> for Digest {
+    fn from(sr: SenderRandomness) -> Self {
+        *sr
+    }
+}
+impl Distribution<SenderRandomness> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> SenderRandomness {
+        SenderRandomness(rng.gen())
+    }
+}
+
+impl FromStr for SenderRandomness {
+    type Err = TryFromDigestError;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        Ok(Digest::from_str(string)?.into())
+    }
+}
+
+impl TryFrom<&[BFieldElement]> for SenderRandomness {
+    type Error = TryFromDigestError;
+
+    fn try_from(value: &[BFieldElement]) -> Result<Self, Self::Error> {
+        Ok(Digest::try_from(value)?.into())
+    }
+}
+
+impl TryFrom<Vec<BFieldElement>> for SenderRandomness {
+    type Error = TryFromDigestError;
+
+    fn try_from(value: Vec<BFieldElement>) -> Result<Self, Self::Error> {
+        Ok(Digest::try_from(value)?.into())
+    }
+}
+
+impl From<SenderRandomness> for Vec<BFieldElement> {
+    fn from(val: SenderRandomness) -> Self {
+        val.0.into()
+    }
+}
+
+impl From<SenderRandomness> for [u8; Digest::BYTES] {
+    fn from(item: SenderRandomness) -> Self {
+        item.0.into()
+    }
+}
+
+impl TryFrom<[u8; Digest::BYTES]> for SenderRandomness {
+    type Error = TryFromDigestError;
+
+    fn try_from(item: [u8; Digest::BYTES]) -> Result<Self, Self::Error> {
+        Ok(Self(Digest::try_from(item)?))
+    }
+}
+
+impl TryFrom<&[u8]> for SenderRandomness {
+    type Error = TryFromDigestError;
+
+    fn try_from(slice: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(Digest::try_from(slice)?))
+    }
+}
+
+impl TryFrom<BigUint> for SenderRandomness {
+    type Error = TryFromDigestError;
+
+    fn try_from(value: BigUint) -> Result<Self, Self::Error> {
+        Ok(Self(Digest::try_from(value)?))
+    }
+}
+
+impl From<SenderRandomness> for BigUint {
+    fn from(digest: SenderRandomness) -> Self {
+        digest.0.into()
+    }
+}
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Get data directory (wallet, block database), create one if none exists

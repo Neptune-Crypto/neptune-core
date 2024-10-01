@@ -882,15 +882,15 @@ mod rpc_server_tests {
         let _ = rpc_server.clone().latest_tip_digests(ctx, 2).await;
         let _ = rpc_server
             .clone()
-            .header(ctx, BlockSelector::Digest(Digest::default()))
+            .header(ctx, BlockSelector::Digest(Default::default()))
             .await;
         let _ = rpc_server
             .clone()
-            .block_info(ctx, BlockSelector::Digest(Digest::default()))
+            .block_info(ctx, BlockSelector::Digest(Default::default()))
             .await;
         let _ = rpc_server
             .clone()
-            .block_digest(ctx, BlockSelector::Digest(Digest::default()))
+            .block_digest(ctx, BlockSelector::Digest(Default::default()))
             .await;
         let _ = rpc_server.clone().utxo_digest(ctx, 0).await;
         let _ = rpc_server.clone().synced_balance(ctx).await;
@@ -1309,10 +1309,10 @@ mod rpc_server_tests {
             .await
             .is_none());
 
-        // should not find any block when Digest selector is Digest::default()
+        // should not find any block when Digest selector is Default::default()
         assert!(rpc_server
             .clone()
-            .block_info(ctx, BlockSelector::Digest(Digest::default()))
+            .block_info(ctx, BlockSelector::Digest(Default::default()))
             .await
             .is_none());
     }
@@ -1375,10 +1375,10 @@ mod rpc_server_tests {
             .await
             .is_none());
 
-        // should not find any block when Digest selector is Digest::default()
+        // should not find any block when Digest selector is Default::default()
         assert!(rpc_server
             .clone()
-            .block_digest(ctx, BlockSelector::Digest(Digest::default()))
+            .block_digest(ctx, BlockSelector::Digest(Default::default()))
             .await
             .is_none());
     }

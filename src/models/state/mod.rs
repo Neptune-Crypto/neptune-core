@@ -1454,7 +1454,7 @@ mod global_state_tests {
             coins: twenty_coins,
             lock_script_hash: main_lock_script.hash(),
         };
-        let sender_randomness = Digest::default();
+        let sender_randomness = Default::default();
         let receiver_privacy_digest = recipient_address.privacy_digest();
         let public_announcement = recipient_address
             .generate_public_announcement(&output_utxo, sender_randomness)
@@ -1537,7 +1537,7 @@ mod global_state_tests {
                 coins: that_many_coins,
                 lock_script_hash: lock_script.hash(),
             };
-            let other_sender_randomness = Digest::default();
+            let other_sender_randomness = Default::default();
             let other_receiver_digest = receiving_address.privacy_digest();
             let other_public_announcement = receiving_address
                 .generate_public_announcement(&utxo, other_sender_randomness)
@@ -2029,7 +2029,7 @@ mod global_state_tests {
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
-        let sender_randomness: Digest = rng.gen();
+        let sender_randomness: crate::SenderRandomness = rng.gen();
         let tx_outputs_for_alice = vec![
             TxOutput::fake_address(
                 Utxo {

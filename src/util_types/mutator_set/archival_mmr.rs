@@ -181,7 +181,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     /// is the empty vector. This method fixes that.
     pub async fn fix_dummy_async(&mut self) {
         if self.digests.len().await == 0 {
-            self.digests.push(Digest::default()).await;
+            self.digests.push(Default::default()).await;
         }
     }
 

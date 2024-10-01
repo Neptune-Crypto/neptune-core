@@ -374,7 +374,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         let mut kernel: TransactionKernel = u.arbitrary()?;
         kernel.mutator_set_hash = Hash::hash_pair(
             Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-            Hash::hash_pair(swbfa_hash, Digest::default()),
+            Hash::hash_pair(swbfa_hash, Default::default()),
         );
         kernel.inputs = input_utxos
             .iter()
