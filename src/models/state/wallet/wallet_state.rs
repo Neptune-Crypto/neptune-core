@@ -71,7 +71,7 @@ pub struct WalletState {
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
     mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
-    mempool_unspent_utxos: HashMap<Digest, Vec<AnnouncedUtxo>>,
+    mempool_unspent_utxos: HashMap<Digest, Vec<(AnnouncedUtxo, MsMembershipProof)>>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -249,10 +249,11 @@ impl WalletState {
     /// handles a list of mempool events
     pub(in crate::models::state) async fn handle_mempool_events(
         &mut self,
+        tip_block: &Block,
         events: impl IntoIterator<Item = MempoolEvent>,
     ) -> Result<()> {
         for event in events {
-            self.handle_mempool_event(event).await?
+            self.handle_mempool_event(tip_block, event).await?
         }
         Ok(())
     }
@@ -265,6 +266,7 @@ impl WalletState {
     /// spending unconfirmed utxos. (issue #189)
     pub(in crate::models::state) async fn handle_mempool_event(
         &mut self,
+        tip_block: &Block,
         event: MempoolEvent,
     ) -> Result<()> {
         match event {
@@ -275,12 +277,19 @@ impl WalletState {
 
                 let announced_utxos = self
                     .scan_for_announced_utxos(&tx)
-                    .chain(self.scan_for_expected_utxos(&tx).await)
+                    .chain(self.scan_for_expected_utxos(&tx).await);
+
+                let announced_with_proofs = announced_utxos.into_iter()
+                    .map(|au| {
+                        let utxo_hash = Hash::hash(&au.utxo);
+                        let proof = tip_block.body().mutator_set_accumulator.prove(utxo_hash, au.sender_randomness, au.receiver_preimage);
+                        (au, proof)
+                    })
                     .collect_vec();
 
                 let tx_hash = Hash::hash(&tx);
                 self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
-                self.mempool_unspent_utxos.insert(tx_hash, announced_utxos);
+                self.mempool_unspent_utxos.insert(tx_hash, announced_with_proofs);
             }
             MempoolEvent::RemoveTx(tx) => {
                 trace!("handling mempool RemoveTx event.");
@@ -302,12 +311,16 @@ impl WalletState {
             .map(|(utxo, ..)| utxo)
     }
 
-    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    pub fn mempool_unspent_utxos_iter(&self) -> impl Iterator<Item = (&Utxo, &MsMembershipProof)> {
         self.mempool_unspent_utxos
             .values()
             .flatten()
-            .map(|a| &a.utxo)
+            .map(|(au, p)| (&au.utxo, p))
     }
+
+    // pub fn mempool_utxos_iter(&self) -> impl Iterator<Item = &Utxo> {
+    //     self.mempool_spent_utxos_iter().chain(self.mempool_unspent_utxos_iter())
+    // }
 
     pub async fn confirmed_balance(
         &self,
@@ -332,13 +345,13 @@ impl WalletState {
                     .map(|u| u.get_native_currency_amount())
                     .sum(),
             )
-            .unwrap()
+            .expect("balance must never be negative")
             .safe_add(
                 self.mempool_unspent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
+                    .map(|(u, _)| u.get_native_currency_amount())
                     .sum(),
             )
-            .unwrap()
+            .expect("balance must never overflow")
     }
 
     // note: does not verify we do not have any dups.
@@ -954,6 +967,14 @@ impl WalletState {
     }
 
     pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
+        self.get_wallet_status_from_lock_internal(tip_digest, false).await
+    }
+
+    pub async fn get_wallet_unconfirmed_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
+        self.get_wallet_status_from_lock_internal(tip_digest, true).await
+    }
+
+    pub async fn get_wallet_status_from_lock_internal(&self, tip_digest: Digest, include_unconfirmed: bool) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -971,10 +992,9 @@ impl WalletState {
                 if spent {
                     synced_spent.push(WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo));
                 } else {
-                    synced_unspent.push((
-                        WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo),
-                        mp.clone(),
-                    ));
+                    synced_unspent.push(
+                        (WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo), mp)
+                    );
                 }
             } else {
                 let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
@@ -991,6 +1011,18 @@ impl WalletState {
                 }
             }
         }
+
+        if include_unconfirmed {
+            for utxo in self.mempool_spent_utxos_iter() {
+                synced_spent.push(WalletStatusElement::new(0, utxo.clone()));
+            }
+            for (utxo, ms_proof) in self.mempool_unspent_utxos_iter() {
+                synced_unspent.push((
+                    WalletStatusElement::new(0, utxo.clone()), ms_proof.clone()
+                ));
+            }
+        }
+
         WalletStatus {
             synced_unspent,
             unsynced_unspent,
@@ -1007,7 +1039,7 @@ impl WalletState {
     ) -> Result<TxInputList> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
+        let wallet_status = self.get_wallet_unconfirmed_status_from_lock(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {

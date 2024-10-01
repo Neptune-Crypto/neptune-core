@@ -50,6 +50,7 @@ pub struct DashBoardOverviewDataFromClient {
     pub syncing: bool,
     pub available_balance: NeptuneCoins,
     pub timelocked_balance: NeptuneCoins,
+    pub available_unconfirmed_balance: NeptuneCoins,
     pub mempool_size: usize,
     pub mempool_tx_count: usize,
 
@@ -114,6 +115,9 @@ pub trait RPC {
 
     /// Get sum of unspent UTXOs.
     async fn synced_balance() -> NeptuneCoins;
+
+    /// Get sum of unspent UTXOs including mempool transactions.
+    async fn synced_balance_unconfirmed() -> NeptuneCoins;
 
     /// Get the client's wallet transaction history
     async fn history() -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>;
@@ -449,6 +453,15 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn synced_balance_unconfirmed(self, _context: tarpc::context::Context) -> NeptuneCoins {
+        let gs = self.state.lock_guard().await;
+
+        gs.wallet_state
+            .unconfirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
+            .await
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
         self.state
             .lock_guard()
@@ -537,6 +550,10 @@ impl RPC for NeptuneRPCServer {
         let mempool_size = state.mempool.get_size();
         let mempool_tx_count = state.mempool.len();
         let cpu_temp = Self::cpu_temp_inner();
+        let unconfirmed_balance = state
+            .wallet_state
+            .unconfirmed_balance(tip_digest, now)
+            .await;
 
         let peer_count = Some(state.net.peer_map.len());
 
@@ -551,6 +568,7 @@ impl RPC for NeptuneRPCServer {
             syncing,
             available_balance: wallet_status.synced_unspent_available_amount(now),
             timelocked_balance: wallet_status.synced_unspent_timelocked_amount(now),
+            available_unconfirmed_balance: unconfirmed_balance,
             mempool_size,
             mempool_tx_count,
             peer_count,
