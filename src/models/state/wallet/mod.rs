@@ -274,7 +274,7 @@ impl WalletSecret {
         &self,
         block_height: BlockHeight,
         receiver_digest: Digest,
-    ) -> Digest {
+    ) -> crate::SenderRandomness {
         const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
         Hash::hash_varlen(
             &[
@@ -287,6 +287,7 @@ impl WalletSecret {
             ]
             .concat(),
         )
+        .into()
     }
 
     /// Read Wallet from file as JSON
@@ -1334,7 +1335,7 @@ mod wallet_tests {
         let wallet = WalletSecret::new(SecretKeyMaterial(secret));
         assert_ne!(
             wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
-            secret_as_digest
+            secret_as_digest.into()
         );
     }
 

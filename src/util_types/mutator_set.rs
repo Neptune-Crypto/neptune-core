@@ -52,7 +52,7 @@ pub enum MutatorSetError {
 /// Get the (absolute) indices for removing this item from the mutator set.
 pub fn get_swbf_indices(
     item: Digest,
-    sender_randomness: Digest,
+    sender_randomness: crate::SenderRandomness,
     receiver_preimage: Digest,
     aocl_leaf_index: u64,
 ) -> [u128; NUM_TRIALS as usize] {
@@ -79,9 +79,15 @@ pub fn get_swbf_indices(
 
 /// Generates an addition record from an item and explicit random-
 /// ness. The addition record is itself a commitment to the item.
-pub fn commit(item: Digest, sender_randomness: Digest, receiver_digest: Digest) -> AdditionRecord {
-    let canonical_commitment =
-        Hash::hash_pair(Hash::hash_pair(item, sender_randomness), receiver_digest);
+pub fn commit(
+    item: Digest,
+    sender_randomness: crate::SenderRandomness,
+    receiver_digest: Digest,
+) -> AdditionRecord {
+    let canonical_commitment = Hash::hash_pair(
+        Hash::hash_pair(item, sender_randomness.into()),
+        receiver_digest,
+    );
 
     AdditionRecord::new(canonical_commitment)
 }

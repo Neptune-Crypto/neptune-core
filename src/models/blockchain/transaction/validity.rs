@@ -102,7 +102,7 @@ impl TransactionValidationLogic {
             ValidityTree::none(),
             ValidityTree::none(),
             ValidityTree::new(
-                ValidityAstType::Atomic(None, Claim::new(Digest::default()), WhichProgram::Merger),
+                ValidityAstType::Atomic(None, Claim::new(Default::default()), WhichProgram::Merger),
                 WitnessType::Faith,
             ),
         )
@@ -155,7 +155,7 @@ impl TransactionValidationLogic {
             ValidityTree::new(
                 ValidityAstType::Atomic(
                     None,
-                    Claim::new(Digest::default()),
+                    Claim::new(Default::default()),
                     WhichProgram::MutatorSetUpdate,
                 ),
                 WitnessType::Faith,

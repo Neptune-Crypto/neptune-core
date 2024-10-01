@@ -64,7 +64,7 @@ impl Arbitrary for MsaAndRecords {
     ///     - receiver preimage
     ///  - aocl_size : u64 which counts the total number of items added to the mutator
     ///    set.
-    type Parameters = (Vec<(Digest, Digest, Digest)>, u64);
+    type Parameters = (Vec<(Digest, crate::SenderRandomness, Digest)>, u64);
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
@@ -287,8 +287,8 @@ mod test {
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
-        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
-        removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(vec((arb::<Digest>(), arb::<crate::SenderRandomness>(), arb::<Digest>()), #_num_removals))]
+        removables: Vec<(Digest, crate::SenderRandomness, Digest)>,
         #[strategy(MsaAndRecords::arbitrary_with((#removables, #_aocl_size)))]
         msa_and_records: MsaAndRecords,
     ) {

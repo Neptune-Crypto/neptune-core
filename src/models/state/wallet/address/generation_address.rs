@@ -101,8 +101,11 @@ impl GenerationSpendingKey {
         spending_key
     }
 
-    /// Decrypt a Generation Address ciphertext
-    pub(super) fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
+    /// Decrypt a Generation Address ciphertext into (Utxo, SenderRandomness)
+    pub(super) fn decrypt(
+        &self,
+        ciphertext: &[BFieldElement],
+    ) -> Result<(Utxo, crate::SenderRandomness)> {
         // parse ciphertext
         if ciphertext.len() <= CIPHERTEXT_SIZE_IN_BFES {
             bail!("Ciphertext does not have nonce.");
@@ -166,7 +169,11 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
+    pub fn encrypt(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: crate::SenderRandomness,
+    ) -> Result<Vec<BFieldElement>> {
         // derive shared key
         let mut randomness = [0u8; 32];
         let mut rng = thread_rng();

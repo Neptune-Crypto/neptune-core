@@ -20,7 +20,6 @@ use tasm_lib::InitVmState;
 use triton_vm::prelude::BFieldElement;
 use triton_vm::triton_asm;
 use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
 use twenty_first::math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -364,7 +363,7 @@ impl Function for TransactionKernelMastHash {
         // address += BFieldElement::one() + BFieldElement::new(mutator_set_hash_size as u64);
 
         // padding
-        let zero = Digest::default();
+        let zero = Default::default();
 
         // Merkleize
         let leafs = [
@@ -435,6 +434,7 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::twenty_first::math::tip5::Tip5;
     use twenty_first::math::bfield_codec::BFieldCodec;
+    use twenty_first::math::digest::Digest;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
     use crate::models::consensus::mast_hash::MastHash;

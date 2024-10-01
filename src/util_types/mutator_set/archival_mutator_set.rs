@@ -44,7 +44,7 @@ where
     pub async fn prove(
         &self,
         item: Digest,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         MutatorSetAccumulator::new(
@@ -208,7 +208,7 @@ where
     pub async fn restore_membership_proof(
         &self,
         item: Digest,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_preimage: Digest,
         aocl_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
@@ -1066,7 +1066,7 @@ mod archival_mutator_set_tests {
         rng: &mut StdRng,
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
         let item: Digest = rng.gen();
-        let sender_randomness: Digest = rng.gen();
+        let sender_randomness: crate::SenderRandomness = rng.gen();
         let receiver_preimage: Digest = rng.gen();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
         let membership_proof = archival_mutator_set

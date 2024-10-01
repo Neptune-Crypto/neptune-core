@@ -247,9 +247,8 @@ fn make_coinbase_transaction(
     block_height: BlockHeight,
     mutator_set_accumulator: MutatorSetAccumulator,
     timestamp: Timestamp,
-) -> (Transaction, Digest) {
-    let sender_randomness: Digest =
-        wallet_secret.generate_sender_randomness(block_height, receiver_digest);
+) -> (Transaction, crate::SenderRandomness) {
+    let sender_randomness = wallet_secret.generate_sender_randomness(block_height, receiver_digest);
 
     let coinbase_amount = coinbase_utxo
         .coins
@@ -578,8 +577,8 @@ mod mine_loop_tests {
 
         // Add a transaction to the mempool
         let four_neptune_coins = NeptuneCoins::new(4).to_native_coins();
-        let receiver_privacy_digest = Digest::default();
-        let sender_randomness = Digest::default();
+        let receiver_privacy_digest = Default::default();
+        let sender_randomness = Default::default();
         let tx_output = Utxo {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),

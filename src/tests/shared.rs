@@ -454,7 +454,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
     );
     kernel.mutator_set_hash = Hash::hash_pair(
         Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-        Hash::hash_pair(swbfa_hash, Digest::default()),
+        Hash::hash_pair(swbfa_hash, Default::default()),
     );
     kernel.inputs = input_utxos
         .iter()
@@ -658,7 +658,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 // pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) -> DevNetInput {
 //     let mut rng = thread_rng();
 //     let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
-//     let sender_randomness: Digest = rng.gen();
+//     let sender_randomness: crate::SenderRandomness = rng.gen();
 //     let receiver_preimage: Digest = rng.gen();
 //     let mock_ms_membership_proof = MsMembershipProof {
 //         sender_randomness,
@@ -812,7 +812,7 @@ pub fn make_mock_block(
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
+) -> (Block, Utxo, crate::SenderRandomness) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
 
@@ -820,7 +820,7 @@ pub fn make_mock_block(
     let lock_script = coinbase_beneficiary.lock_script();
     let coinbase_amount = Block::get_mining_reward(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
-    let coinbase_output_randomness: Digest = rng.gen();
+    let coinbase_output_randomness: crate::SenderRandomness = rng.gen();
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
@@ -903,7 +903,7 @@ pub fn make_mock_block_with_valid_pow(
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
+) -> (Block, Utxo, crate::SenderRandomness) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let (mut block, mut utxo, mut digest) = make_mock_block(
         previous_block,
@@ -930,7 +930,7 @@ pub fn make_mock_block_with_invalid_pow(
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
+) -> (Block, Utxo, crate::SenderRandomness) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let (mut block, mut utxo, mut digest) = make_mock_block(
         previous_block,

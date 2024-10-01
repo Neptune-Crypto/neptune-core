@@ -23,9 +23,11 @@ pub mod tests;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 use anyhow::Context;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use chrono::DateTime;
 use chrono::Local;
 use chrono::NaiveDateTime;
@@ -34,12 +36,19 @@ use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+use get_size::GetSize;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::PeerInfo;
+use num_bigint::BigUint;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
+use rand::Rng;
+use serde::Deserialize;
+use serde::Serialize;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
@@ -75,6 +84,9 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
+use crate::twenty_first::error::TryFromDigestError;
+use crate::twenty_first::math::digest::Digest;
+use crate::twenty_first::prelude::BFieldCodec;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -83,6 +95,9 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// a Digest new-type to represent sender-randomness, for type safety.
+crate::macros::digest_newtype!(SenderRandomness);
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Get data directory (wallet, block database), create one if none exists

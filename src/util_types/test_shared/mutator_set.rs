@@ -62,10 +62,10 @@ pub async fn get_all_indices_with_duplicates<
     ret
 }
 
-pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
+pub fn make_item_and_randomnesses() -> (Digest, crate::SenderRandomness, Digest) {
     let mut rng = rand::thread_rng();
     let item: Digest = rng.gen();
-    let sender_randomness: Digest = rng.gen();
+    let sender_randomness: crate::SenderRandomness = rng.gen();
     let receiver_preimage: Digest = rng.gen();
     (item, sender_randomness, receiver_preimage)
 }

@@ -226,11 +226,11 @@ impl MutatorSetAccumulator {
     pub fn prove(
         &self,
         item: Digest,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         // compute commitment
-        let item_commitment = Hash::hash_pair(item, sender_randomness);
+        let item_commitment = Hash::hash_pair(item, sender_randomness.into());
 
         // simulate adding to commitment list
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
@@ -257,7 +257,7 @@ impl MutatorSetAccumulator {
 
         // verify that a commitment to the item lives in the aocl mmr
         let leaf = Hash::hash_pair(
-            Hash::hash_pair(item, membership_proof.sender_randomness),
+            Hash::hash_pair(item, membership_proof.sender_randomness.into()),
             Hash::hash_pair(
                 membership_proof.receiver_preimage,
                 Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
@@ -366,7 +366,7 @@ impl MutatorSetAccumulator {
         let aocl_mmr_bagged = self.aocl.bag_peaks();
         let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
         let active_swbf_bagged = Hash::hash(&self.swbf_active);
-        let default = Digest::default();
+        let default = Default::default();
 
         Hash::hash_pair(
             Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
@@ -646,7 +646,7 @@ mod ms_accumulator_tests {
             let mut membership_proofs_batch: Vec<MsMembershipProof> = vec![];
             let mut membership_proofs_sequential: Vec<MsMembershipProof> = vec![];
             let mut items: Vec<Digest> = vec![];
-            let mut rands: Vec<(Digest, Digest)> = vec![];
+            let mut rands: Vec<(crate::SenderRandomness, Digest)> = vec![];
             let mut last_ms_commitment: Option<Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
@@ -906,7 +906,7 @@ mod ms_accumulator_tests {
             } else {
                 // addition
                 let item = rng.gen::<Digest>();
-                let sender_randomness = rng.gen::<Digest>();
+                let sender_randomness = rng.gen::<crate::SenderRandomness>();
                 let receiver_preimage = rng.gen::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
                 for (it, mp) in items_and_membership_proofs.iter_mut() {

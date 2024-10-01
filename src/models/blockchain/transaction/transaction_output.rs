@@ -68,7 +68,7 @@ pub enum UtxoNotification {
 #[derive(Debug, Clone)]
 pub struct TxOutput {
     pub utxo: Utxo,
-    pub sender_randomness: Digest,
+    pub sender_randomness: crate::SenderRandomness,
     pub receiver_privacy_digest: Digest,
     pub utxo_notification: UtxoNotification,
 }
@@ -142,7 +142,7 @@ impl TxOutput {
         wallet_state: &WalletState,
         address: &ReceivingAddress,
         amount: NeptuneCoins,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         owned_utxo_notify_method: UtxoNotifyMethod,
     ) -> Result<Self> {
         let onchain = || -> Result<TxOutput> {
@@ -180,7 +180,7 @@ impl TxOutput {
     /// For normal situations, auto() should be used instead.
     pub fn onchain(
         utxo: Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_privacy_digest: Digest,
         public_announcement: PublicAnnouncement,
     ) -> Self {
@@ -197,7 +197,7 @@ impl TxOutput {
     /// For normal situations, auto() should be used instead.
     pub fn offchain(
         utxo: Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_privacy_preimage: Digest,
     ) -> Self {
         ExpectedUtxo::new(
@@ -213,7 +213,7 @@ impl TxOutput {
     #[cfg(test)]
     pub fn fake_address(
         utxo: Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_privacy_digest: Digest,
     ) -> Self {
         use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;

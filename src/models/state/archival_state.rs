@@ -1508,7 +1508,7 @@ mod archival_state_tests {
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
-        let sender_randomness: Digest = random();
+        let sender_randomness: crate::SenderRandomness = random();
         let tx_outputs_for_alice = vec![
             TxOutput::fake_address(
                 Utxo {

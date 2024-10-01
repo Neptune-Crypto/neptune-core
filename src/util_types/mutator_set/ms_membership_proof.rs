@@ -57,7 +57,7 @@ pub enum MembershipProofError {
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject, Arbitrary,
 )]
 pub struct MsMembershipProof {
-    pub sender_randomness: Digest,
+    pub sender_randomness: crate::SenderRandomness,
     pub receiver_preimage: Digest,
     pub auth_path_aocl: MmrMembershipProof<Hash>,
     pub target_chunks: ChunkDictionary,
@@ -527,7 +527,7 @@ impl MsMembershipProof {
 /// purposes.
 pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembershipProof {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let sender_randomness: Digest = rng.gen();
+    let sender_randomness: crate::SenderRandomness = rng.gen();
     let receiver_preimage: Digest = rng.gen();
     let auth_path_aocl: MmrMembershipProof<Hash> = pseudorandom_mmr_membership_proof(rng.gen());
     let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.gen());
@@ -678,7 +678,7 @@ mod ms_proof_tests {
         // add items
         for i in 0..n {
             let item: Digest = random();
-            let sender_randomness: Digest = random();
+            let sender_randomness: crate::SenderRandomness = random();
             let receiver_preimage: Digest = random();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
 
@@ -810,7 +810,7 @@ mod ms_proof_tests {
         let ms_size = 30;
         for _ in 0..ms_size {
             let item: Digest = random();
-            let sender_randomness: Digest = random();
+            let sender_randomness: crate::SenderRandomness = random();
             let receiver_preimage: Digest = random();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             MsMembershipProof::batch_update_from_addition(
@@ -891,7 +891,7 @@ mod ms_proof_tests {
             let mut addition_records = vec![];
             for _ in 0..j {
                 let item: Digest = random();
-                let sender_randomness: Digest = random();
+                let sender_randomness: crate::SenderRandomness = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
@@ -941,7 +941,7 @@ mod ms_proof_tests {
             // Add `init_size` items to MSA
             for _ in 0..init_size {
                 let item: Digest = random();
-                let sender_randomness: Digest = random();
+                let sender_randomness: crate::SenderRandomness = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
@@ -950,7 +950,7 @@ mod ms_proof_tests {
 
             // Add own item with associated membership proof that we want to keep updated
             let own_item: Digest = random();
-            let own_sender_randomness: Digest = random();
+            let own_sender_randomness: crate::SenderRandomness = random();
             let own_receiver_preimage: Digest = random();
             let own_addition_record = commit(
                 own_item,
@@ -964,7 +964,7 @@ mod ms_proof_tests {
             // Apply 1st batch of additions
             for _ in 0..first_batch_size {
                 let item: Digest = random();
-                let sender_randomness: Digest = random();
+                let sender_randomness: crate::SenderRandomness = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
@@ -983,7 +983,7 @@ mod ms_proof_tests {
             // Apply 2nd batch of additions
             for _ in 0..last_batch_size {
                 let item: Digest = random();
-                let sender_randomness: Digest = random();
+                let sender_randomness: crate::SenderRandomness = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
@@ -1026,7 +1026,7 @@ mod ms_proof_tests {
         let mut addition_records = vec![];
         for i in 0..n {
             let item: Digest = random();
-            let sender_randomness: Digest = random();
+            let sender_randomness: crate::SenderRandomness = random();
             let receiver_preimage: Digest = random();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             addition_records.push(addition_record);
@@ -1125,7 +1125,7 @@ mod ms_proof_tests {
         let archival_mutator_set = rms.ams_mut();
 
         let own_index = rng.next_u32() as usize % 10;
-        let mut own_item = Digest::default();
+        let mut own_item = Default::default();
         let mut track_index = 0;
 
         let mut rates = HashMap::<String, f64>::new();
@@ -1149,7 +1149,7 @@ mod ms_proof_tests {
 
                 // generate item and randomness
                 let item: Digest = rng.gen();
-                let sender_randomness: Digest = rng.gen();
+                let sender_randomness: crate::SenderRandomness = rng.gen();
                 let receiver_preimage: Digest = rng.gen();
 
                 // generate addition record

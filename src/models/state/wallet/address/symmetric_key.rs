@@ -113,7 +113,7 @@ impl SymmetricKey {
     pub fn decrypt(
         &self,
         ciphertext_bfes: &[BFieldElement],
-    ) -> Result<(Utxo, Digest), DecryptError> {
+    ) -> Result<(Utxo, crate::SenderRandomness), DecryptError> {
         const NONCE_LEN: usize = 1;
 
         // 1. separate nonce from ciphertext.
@@ -141,7 +141,7 @@ impl SymmetricKey {
     pub fn encrypt(
         &self,
         utxo: &Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
     ) -> Result<Vec<BFieldElement>, EncryptError> {
         // 1. init randomness
         let mut randomness = [0u8; 32];

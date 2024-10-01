@@ -71,7 +71,7 @@ use super::type_scripts::TypeScript;
 pub struct AnnouncedUtxo {
     pub addition_record: AdditionRecord,
     pub utxo: Utxo,
-    pub sender_randomness: Digest,
+    pub sender_randomness: crate::SenderRandomness,
     pub receiver_preimage: Digest,
 }
 
@@ -642,7 +642,6 @@ impl Transaction {
 
 #[cfg(test)]
 mod witness_tests {
-    use tasm_lib::Digest;
     use witness_tests::primitive_witness::SaltedUtxos;
 
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -658,7 +657,7 @@ mod witness_tests {
             fee: NeptuneCoins::new(0),
             coinbase: None,
             timestamp: Default::default(),
-            mutator_set_hash: Digest::default(),
+            mutator_set_hash: Default::default(),
         };
         let primitive_witness = PrimitiveWitness {
             input_utxos: SaltedUtxos::empty(),

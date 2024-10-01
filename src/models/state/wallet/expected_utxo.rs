@@ -36,7 +36,7 @@ use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHa
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub addition_record: AdditionRecord,
-    pub sender_randomness: Digest,
+    pub sender_randomness: crate::SenderRandomness,
     pub receiver_preimage: Digest,
     pub received_from: UtxoNotifier,
     pub notification_received: Timestamp,
@@ -46,7 +46,7 @@ pub struct ExpectedUtxo {
 impl ExpectedUtxo {
     pub fn new(
         utxo: Utxo,
-        sender_randomness: Digest,
+        sender_randomness: crate::SenderRandomness,
         receiver_preimage: Digest,
         received_from: UtxoNotifier,
     ) -> Self {
