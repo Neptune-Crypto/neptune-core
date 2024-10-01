@@ -213,6 +213,18 @@ impl WalletSecret {
         generation_address::SpendingKey::derive_from_seed(key_seed)
     }
 
+    /// Return a deterministic seed that can be used to seed an RNG
+    pub(crate) fn deterministic_derived_seed(&self, block_height: BlockHeight) -> Digest {
+        const SEED_FLAG: u64 = 0x2315439570c4a85fu64;
+        Hash::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                vec![BFieldElement::new(SEED_FLAG), block_height.into()],
+            ]
+            .concat(),
+        )
+    }
+
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
     /// for the mutator set.
     pub fn generate_sender_randomness(
@@ -1186,7 +1198,7 @@ mod wallet_tests {
             .lock_guard_mut()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), now);
-        let merged_tx = coinbase_tx.merge_with(tx_from_preminer);
+        let merged_tx = coinbase_tx.merge_with(tx_from_preminer, Default::default());
         let block_3_b = Block::new_block_from_template(&block_2_b, merged_tx, now, None);
         assert!(
             block_3_b.is_valid(&block_2_b, now),

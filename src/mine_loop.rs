@@ -3,12 +3,18 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
+use block_height::BlockHeight;
 use futures::channel::oneshot;
+use itertools::Itertools;
 use num_traits::identities::Zero;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::prelude::Tip5;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -170,6 +176,19 @@ fn create_block_transaction(
     global_state: &GlobalState,
     timestamp: Timestamp,
 ) -> (Transaction, ExpectedUtxo) {
+    /// Return the seed that is used when shuffling inputs and outputs in the
+    /// transaction merger.
+    fn shuffle_seed(global_state: &GlobalState) -> [u8; 32] {
+        let block_height = global_state.chain.light_state().header().height;
+        let secure_seed_from_wallet = global_state
+            .wallet_state
+            .wallet_secret
+            .deterministic_derived_seed(block_height);
+        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
+
+        seed[0..32].try_into().unwrap()
+    }
+
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
@@ -186,10 +205,11 @@ fn create_block_transaction(
         global_state.make_coinbase_transaction(transaction_fees, timestamp);
 
     // Merge incoming transactions with the coinbase transaction
+    let shuffle_seed = shuffle_seed(global_state);
     let merged_transaction = transactions_to_include
         .into_iter()
         .fold(coinbase_transaction, |acc, transaction| {
-            Transaction::merge_with(acc, transaction)
+            Transaction::merge_with(acc, transaction, shuffle_seed)
         });
 
     (merged_transaction, utxo_info_for_coinbase)

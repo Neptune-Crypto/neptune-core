@@ -494,18 +494,14 @@ impl GlobalState {
             mutator_set_hash: mutator_set_accumulator.hash(),
         };
 
-        let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
-            input_utxos: SaltedUtxos::empty(),
-            lock_scripts_and_witnesses: vec![],
-            type_scripts_and_witnesses: vec![TypeScriptAndWitness::new(NativeCurrency.program())],
-            input_membership_proofs: vec![],
-            output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
-            output_sender_randomnesses: vec![sender_randomness],
-            output_receiver_digests: vec![receiver_digest],
+        let primitive_witness = GlobalState::generate_primitive_witness(
+            vec![],
+            vec![coinbase_utxo.clone()],
+            vec![sender_randomness],
+            vec![receiver_digest],
+            &kernel,
             mutator_set_accumulator,
-            kernel: kernel.clone(),
-        };
-        let transaction_proof = TransactionProof::Witness(primitive_witness);
+        );
 
         let utxo_info_for_coinbase = ExpectedUtxo::new(
             coinbase_utxo,
@@ -514,13 +510,20 @@ impl GlobalState {
             UtxoNotifier::OwnMiner,
         );
 
-        (
-            Transaction {
-                kernel,
-                proof: transaction_proof,
-            },
-            utxo_info_for_coinbase,
-        )
+        // A coinbase transaction implies mining. So you *must*
+        // be able to create a SingleProof.
+        info!("Start generating proof collection");
+        let proof_collection = ProofCollection::produce(&primitive_witness);
+        info!("Done: generating proof collection");
+        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+        let claim = single_proof_witness.claim();
+        let nondeterminism = single_proof_witness.nondeterminism();
+
+        info!("Start: generate single proof for coinbase transaction");
+        let proof = TransactionProof::SingleProof(SingleProof.prove(&claim, nondeterminism));
+        info!("Done: generating single proof for coinbase transaction");
+
+        (Transaction { kernel, proof }, utxo_info_for_coinbase)
     }
 
     /// Generate a change UTXO to ensure that the difference in input amount
@@ -2188,7 +2191,8 @@ mod global_state_tests {
         .await
         .unwrap();
 
-        let block_transaction = tx_to_alice_and_bob.merge_with(coinbase_transaction);
+        let block_transaction =
+            tx_to_alice_and_bob.merge_with(coinbase_transaction, Default::default());
 
         let block_1 = Block::new_block_from_template(
             &genesis_block,
@@ -2361,8 +2365,8 @@ mod global_state_tests {
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
         let block_transaction2 = coinbase_transaction2
-            .merge_with(tx_from_alice)
-            .merge_with(tx_from_bob);
+            .merge_with(tx_from_alice, Default::default())
+            .merge_with(tx_from_bob, Default::default());
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction2, Timestamp::now(), None);
 

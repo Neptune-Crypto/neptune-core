@@ -88,6 +88,13 @@ impl SingleProofWitness {
             new_kernel_mast_hash: new_kernel.mast_hash(),
         })
     }
+
+    pub(crate) fn from_merge(merge_proof: Proof, new_kernel: &TransactionKernel) -> Self {
+        Self::Merger(WitnessOfMerge {
+            proof: merge_proof,
+            new_kernel_mast_hash: new_kernel.mast_hash(),
+        })
+    }
 }
 
 // This implementation of `TasmObject` is required for `decode_iter` and the
@@ -756,6 +763,7 @@ mod test {
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
 
+    use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::merge::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -766,8 +774,6 @@ mod test {
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-
-    use super::*;
 
     #[test]
     fn can_verify_via_valid_proof_collection() {

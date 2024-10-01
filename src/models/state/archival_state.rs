@@ -1157,7 +1157,7 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let merged_tx = coinbase_tx.merge_with(sender_tx);
+        let merged_tx = coinbase_tx.merge_with(sender_tx, Default::default());
         let block_1a = Block::new_block_from_template(
             &archival_state.genesis_block,
             merged_tx,
@@ -1275,7 +1275,7 @@ mod archival_state_tests {
                 .unwrap();
             let (coinbase_tx, _) =
                 global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
-            let block_tx = coinbase_tx.merge_with(sender_tx);
+            let block_tx = coinbase_tx.merge_with(sender_tx, Default::default());
             let next_block =
                 Block::new_block_from_template(&previous_block, block_tx, now + seven_months, None);
 
@@ -1411,7 +1411,7 @@ mod archival_state_tests {
             .create_transaction(vec![receiver_data], one_money, now + seven_months)
             .await
             .unwrap();
-        let block_tx = sender_tx.merge_with(cbtx);
+        let block_tx = sender_tx.merge_with(cbtx, Default::default());
         let block_1_a = Block::new_block_from_template(&genesis_block, block_tx, now, None);
 
         // Verify that block_1 is valid
@@ -1508,7 +1508,7 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), now);
-        let block_tx = cbtx.merge_with(tx_to_alice_and_bob);
+        let block_tx = cbtx.merge_with(tx_to_alice_and_bob, Default::default());
 
         let block_1 = Block::new_block_from_template(&genesis_block, block_tx, now, None);
 
@@ -1684,7 +1684,9 @@ mod archival_state_tests {
             .lock_guard()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), launch + seven_months);
-        let block_tx2 = cbtx2.merge_with(tx_from_alice).merge_with(tx_from_bob);
+        let block_tx2 = cbtx2
+            .merge_with(tx_from_alice, Default::default())
+            .merge_with(tx_from_bob, Default::default());
         let block_2 =
             Block::new_block_from_template(&block_1, block_tx2, launch + seven_months, None);
 

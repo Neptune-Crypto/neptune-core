@@ -1,5 +1,7 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::twenty_first;
 
 pub mod lock_script;
@@ -24,10 +26,15 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::Digest;
 use tracing::error;
+use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use validity::merge::Merge;
+use validity::merge::MergeWitness;
 use validity::proof_collection::ProofCollection;
+use validity::single_proof::SingleProof;
+use validity::single_proof::SingleProofWitness;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -341,48 +348,68 @@ impl Transaction {
     }
 
     /// Merge two transactions. Both input transactions must have a valid
-    /// Proof witness for this operation to work. The mutator sets are
-    /// assumed to be identical; this is the responsibility of the caller.
+    /// Proof witness for this operation to work.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the two transactions cannot be merged, if e.g. the mutator
+    /// set hashes are not the same, if both transactions have coinbase a
+    /// coinbase UTXO, or if either of the transactions are *not* a single
+    /// proof.
     #[expect(clippy::diverging_sub_expression, reason = "under development")]
     #[expect(unreachable_code, reason = "under development")]
     #[expect(unused_variables, reason = "under development")]
-    pub fn merge_with(self, other: Transaction) -> Transaction {
+    pub fn merge_with(self, other: Transaction, shuffle_seed: [u8; 32]) -> Transaction {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
         );
-        let timestamp = max(self.kernel.timestamp, other.kernel.timestamp);
 
-        let merged_coinbase = match self.kernel.coinbase {
-            Some(_) => match other.kernel.coinbase {
-                Some(_) => {
-                    error!("Cannot merge two transactions with non-empty coinbase fields.");
-                    return self;
-                }
-                None => self.kernel.coinbase,
-            },
-            None => other.kernel.coinbase,
+        assert!(
+            self.kernel.coinbase.is_none() || other.kernel.coinbase.is_none(),
+            "Cannot merge two "
+        );
+
+        let as_single_proof = |tx_proof: &TransactionProof, indicator: &str| {
+            if let TransactionProof::SingleProof(single_proof) = tx_proof {
+                single_proof.to_owned()
+            } else {
+                let bad_type = match tx_proof {
+                    TransactionProof::Invalid => "invalid",
+                    TransactionProof::Witness(primitive_witness) => "primitive_witness",
+                    TransactionProof::SingleProof(proof) => unreachable!(),
+                    TransactionProof::ProofCollection(proof_collection) => "proof_collection",
+                };
+                panic!("Transaction proof must be a single proof. {indicator} was: {bad_type}",);
+            }
         };
+        let self_single_proof = as_single_proof(&self.proof, "self");
+        let other_single_proof = as_single_proof(&other.proof, "other");
 
-        let merged_kernel = TransactionKernel {
-            inputs: [self.kernel.inputs.clone(), other.kernel.inputs.clone()].concat(),
-            outputs: [self.kernel.outputs.clone(), other.kernel.outputs.clone()].concat(),
-            public_announcements: [
-                self.kernel.public_announcements.clone(),
-                other.kernel.public_announcements.clone(),
-            ]
-            .concat(),
-            fee: self.kernel.fee + other.kernel.fee,
-            coinbase: merged_coinbase,
-            timestamp,
-            mutator_set_hash: self.kernel.mutator_set_hash,
-        };
-
-        let merger_proof = todo!("transaction merging not implemented yet");
+        let merge_witness = MergeWitness::from_transactions(
+            self.kernel,
+            self_single_proof,
+            other.kernel,
+            other_single_proof,
+            shuffle_seed,
+        );
+        info!("Start: creating merge proof");
+        let merge_claim = merge_witness.claim();
+        let merge_proof = Merge.prove(&merge_claim, merge_witness.nondeterminism());
+        info!("Done: creating merge proof");
+        let new_single_proof_witness =
+            SingleProofWitness::from_merge(merge_proof, &merge_witness.new_kernel);
+        let new_single_proof_claim = new_single_proof_witness.claim();
+        info!("Start: creating new single proof");
+        let new_single_proof = SingleProof.prove(
+            &new_single_proof_claim,
+            new_single_proof_witness.nondeterminism(),
+        );
+        info!("Done: creating new single proof");
 
         Transaction {
-            kernel: merged_kernel,
-            proof: TransactionProof::SingleProof(merger_proof),
+            kernel: merge_witness.new_kernel,
+            proof: TransactionProof::SingleProof(new_single_proof),
         }
     }
 

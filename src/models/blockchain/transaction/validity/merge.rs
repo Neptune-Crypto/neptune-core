@@ -50,7 +50,7 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 pub struct MergeWitness {
     left_kernel: TransactionKernel,
     right_kernel: TransactionKernel,
-    new_kernel: TransactionKernel,
+    pub new_kernel: TransactionKernel,
     left_proof: Proof,
     right_proof: Proof,
 }

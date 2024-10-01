@@ -729,7 +729,7 @@ mod tests {
         // Create next block which includes preminer's transaction
         let (coinbase_transaction, _expected_utxo) = premine_receiver_global_state
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction = tx_by_preminer.merge_with(coinbase_transaction);
+        let block_transaction = tx_by_preminer.merge_with(coinbase_transaction, Default::default());
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction, Timestamp::now(), None);
 
@@ -756,7 +756,7 @@ mod tests {
             .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
         let block_transaction2 = tx_by_other_updated
             .clone()
-            .merge_with(coinbase_transaction2);
+            .merge_with(coinbase_transaction2, Default::default());
         let block_3 =
             Block::new_block_from_template(&block_2, block_transaction2, Timestamp::now(), None);
 
@@ -790,7 +790,8 @@ mod tests {
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         let (coinbase_transaction3, _expected_utxo3) =
             other_global_state.make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction3 = coinbase_transaction3.merge_with(tx_by_other_updated);
+        let block_transaction3 =
+            coinbase_transaction3.merge_with(tx_by_other_updated, Default::default());
         let block_14 = Block::new_block_from_template(
             &previous_block,
             block_transaction3,
