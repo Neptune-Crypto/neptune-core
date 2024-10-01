@@ -72,7 +72,6 @@ pub enum TransactionProof {
     Witness(PrimitiveWitness),
     SingleProof(Proof),
     ProofCollection(ProofCollection),
-    MultiClaimProof(([Claim; NUM_TX_SUBPROGRAMS], Proof)),
 }
 
 impl TransactionProof {
@@ -87,7 +86,6 @@ impl TransactionProof {
             TransactionProof::ProofCollection(proof_collection) => {
                 proof_collection.verify(kernel_mast_hash)
             }
-            TransactionProof::MultiClaimProof(_) => todo!(),
         }
     }
 }

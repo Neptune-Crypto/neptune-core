@@ -139,13 +139,16 @@ impl Mempool {
     /// this method accepts only fully proven transactions (or, for the time being, faith witnesses).
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction's proof does not have type `SingleProof`.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => panic!("can only insert single-proof transactions into mempool; not accepting witnesses"),
             TransactionProof::SingleProof(_) => {},
             TransactionProof::ProofCollection(_) => panic!("can only insert single-proof transactions into mempool; not accepting proof collections"),
-            TransactionProof::MultiClaimProof(_) => panic!("can only insert single-proof (single-claim) transactions into mempool; not accepting multi-claim proofs"),
         };
 
         // If transaction to be inserted conflicts with a transaction that's already

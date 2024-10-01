@@ -447,10 +447,9 @@ mod mine_loop_tests {
             .insert(&tx_by_preminer);
         assert_eq!(1, premine_receiver_global_state.mempool.len());
 
-        // Build transaction
+        // Build transaction for block
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
-            premine_receiver_global_state
-                .make_coinbase_transaction(NeptuneCoins::zero(), future_timestamp);
+            create_block_transaction(&premine_receiver_global_state, future_timestamp);
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
