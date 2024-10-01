@@ -63,8 +63,6 @@ impl PublicAnnouncement {
     }
 }
 
-const NUM_TX_SUBPROGRAMS: usize = 6;
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
 pub enum TransactionProof {
     #[default]

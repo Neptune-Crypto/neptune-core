@@ -7,18 +7,21 @@ use anyhow::Result;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use tasm_lib::triton_vm::prelude::Tip5;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tx_proving_capability::TxProvingCapability;
 use wallet::unlocked_utxo::UnlockedUtxo;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
-use self::wallet::address::generation_address::SpendingKey;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
@@ -37,7 +40,6 @@ use super::blockchain::transaction::TransactionProof;
 use super::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::blockchain::type_scripts::time_lock::TimeLock;
 use super::blockchain::type_scripts::TypeScriptAndWitness;
 use super::proof_abstractions::tasm::program::ConsensusProgram;
 use super::proof_abstractions::timestamp::Timestamp;
@@ -46,15 +48,16 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::peer::HandshakeData;
-use crate::models::state::transaction::lock_script::LockScript;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
@@ -66,6 +69,7 @@ pub mod light_state;
 pub mod mempool;
 pub mod networking_state;
 pub mod shared;
+pub mod tx_proving_capability;
 pub mod wallet;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -404,7 +408,7 @@ impl GlobalState {
     /// Given the desired outputs, assemble UTXOs that are both spendable
     /// (*i.e.*, synced and never or no longer timelocked) and that sum to
     /// enough funds.
-    pub async fn assemble_inputs_for_transaction(
+    pub(crate) async fn assemble_inputs_for_transaction(
         &mut self,
         total_spend: NeptuneCoins,
         timestamp: Timestamp,
@@ -423,7 +427,7 @@ impl GlobalState {
 
     /// Given a list of spendable UTXOs, generate the corresponding removal
     /// recods relative to the current mutator set accumulator.
-    pub fn generate_removal_records(
+    pub(crate) fn generate_removal_records(
         utxo_unlockers: &[UnlockedUtxo],
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> Vec<RemovalRecord> {
@@ -568,25 +572,48 @@ impl GlobalState {
     /// # Panics
     /// Panics if transaction validity cannot be satisfied.
     pub(crate) fn generate_primitive_witness(
-        unlocked_utxos: &[UnlockedUtxo],
-        output_utxos: &[Utxo],
-        sender_randomnesses: &[Digest],
-        receiver_digests: &[Digest],
+        unlocked_utxos: Vec<UnlockedUtxo>,
+        output_utxos: Vec<Utxo>,
+        sender_randomnesses: Vec<Digest>,
+        receiver_digests: Vec<Digest>,
         transaction_kernel: &TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> PrimitiveWitness {
-        let salted_output_utxos = SaltedUtxos::new(output_utxos.to_vec());
+        /// Generate a salt to use for [SaltedUtxos], deterministically.
+        fn generate_secure_pseudorandom_seed(
+            input_utxos: &Vec<Utxo>,
+            output_utxos: &Vec<Utxo>,
+            sender_randomnesses: &Vec<Digest>,
+        ) -> [u8; 32] {
+            let preimage = [
+                input_utxos.encode(),
+                output_utxos.encode(),
+                sender_randomnesses.encode(),
+            ]
+            .concat();
+            let seed = Tip5::hash_varlen(&preimage);
+            let seed: [u8; Digest::BYTES] = seed.into();
+
+            seed[0..32].try_into().unwrap()
+        }
+
         let input_utxos = unlocked_utxos
             .iter()
             .map(|unlocker| unlocker.utxo.to_owned())
             .collect_vec();
+        let salt_seed =
+            generate_secure_pseudorandom_seed(&input_utxos, &output_utxos, &sender_randomnesses);
+
+        let mut rng: StdRng = SeedableRng::from_seed(salt_seed);
+        let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
+        let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
+
         let type_script_hashes = input_utxos
             .iter()
             .chain(output_utxos.iter())
             .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
             .unique()
             .collect_vec();
-        let salted_input_utxos = SaltedUtxos::new(input_utxos);
         let type_scripts_and_witnesses = type_script_hashes
             .into_iter()
             .map(|type_script_hash| {
@@ -832,10 +859,10 @@ impl GlobalState {
 
         // populate witness
         let primitive_witness = Self::generate_primitive_witness(
-            &unlocked_utxos,
-            &output_utxos,
-            &sender_randomnesses,
-            &receiver_digests,
+            unlocked_utxos,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
             &kernel,
             mutator_set_accumulator,
         );

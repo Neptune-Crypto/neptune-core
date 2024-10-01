@@ -9,8 +9,10 @@ use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
+use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
+use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -72,6 +74,13 @@ impl SaltedUtxos {
         Self {
             utxos,
             salt: thread_rng().gen(),
+        }
+    }
+
+    pub fn new_with_rng(utxos: Vec<Utxo>, rng: &mut StdRng) -> Self {
+        Self {
+            utxos,
+            salt: rng.gen(),
         }
     }
 
