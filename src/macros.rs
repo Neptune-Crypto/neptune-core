@@ -138,11 +138,125 @@ macro_rules! duration_async_debug {
     };
 }
 
+macro_rules! digest_newtype {
+    ($target: ident) => {
+        #[derive(
+            Copy,
+            Debug,
+            Clone,
+            Default,
+            Hash,
+            GetSize,
+            PartialEq,
+            Eq,
+            Serialize,
+            Deserialize,
+            BFieldCodec,
+            Arbitrary,
+        )]
+        pub struct $target(Digest);
+        impl std::ops::Deref for $target {
+            type Target = Digest;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+        impl std::fmt::Display for $target {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+        impl From<Digest> for $target {
+            fn from(d: Digest) -> Self {
+                Self(d)
+            }
+        }
+        impl From<$target> for Digest {
+            fn from(sr: $target) -> Self {
+                *sr
+            }
+        }
+        impl Distribution<$target> for Standard {
+            fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> $target {
+                $target(rng.gen())
+            }
+        }
+
+        impl FromStr for $target {
+            type Err = TryFromDigestError;
+
+            fn from_str(string: &str) -> Result<Self, Self::Err> {
+                Ok(Digest::from_str(string)?.into())
+            }
+        }
+
+        impl TryFrom<&[BFieldElement]> for $target {
+            type Error = TryFromDigestError;
+
+            fn try_from(value: &[BFieldElement]) -> Result<Self, Self::Error> {
+                Ok(Digest::try_from(value)?.into())
+            }
+        }
+
+        impl TryFrom<Vec<BFieldElement>> for $target {
+            type Error = TryFromDigestError;
+
+            fn try_from(value: Vec<BFieldElement>) -> Result<Self, Self::Error> {
+                Ok(Digest::try_from(value)?.into())
+            }
+        }
+
+        impl From<$target> for Vec<BFieldElement> {
+            fn from(val: $target) -> Self {
+                val.0.into()
+            }
+        }
+
+        impl From<$target> for [u8; Digest::BYTES] {
+            fn from(item: $target) -> Self {
+                item.0.into()
+            }
+        }
+
+        impl TryFrom<[u8; Digest::BYTES]> for $target {
+            type Error = TryFromDigestError;
+
+            fn try_from(item: [u8; Digest::BYTES]) -> Result<Self, Self::Error> {
+                Ok(Self(Digest::try_from(item)?))
+            }
+        }
+
+        impl TryFrom<&[u8]> for $target {
+            type Error = TryFromDigestError;
+
+            fn try_from(slice: &[u8]) -> Result<Self, Self::Error> {
+                Ok(Self(Digest::try_from(slice)?))
+            }
+        }
+
+        impl TryFrom<BigUint> for $target {
+            type Error = TryFromDigestError;
+
+            fn try_from(value: BigUint) -> Result<Self, Self::Error> {
+                Ok(Self(Digest::try_from(value)?))
+            }
+        }
+
+        impl From<$target> for BigUint {
+            fn from(digest: $target) -> Self {
+                digest.0.into()
+            }
+        }
+    };
+}
+
 // These allow the macros to be used as
 // use crate::macros::xxxxx;
 //
 // see: https://stackoverflow.com/a/67140319/10087197
 
+#[allow(unused_imports)]
+pub(crate) use digest_newtype;
 #[allow(unused_imports)]
 pub(crate) use duration;
 #[allow(unused_imports)]
