@@ -137,19 +137,20 @@ impl Mempool {
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
     /// the transaction. Also, the caller must ensure that the witness type is correct --
-    /// this method accepts only fully proven transactions (or, for the time being, faith witnesses).
+    /// transaction with proofs of type [TransactionProof::ProofCollection],
+    /// [TransactionProof::SingleProof], [TransactionProof::Witness] maybe be
+    /// inserted.
+    ///
     /// The caller must also ensure that the transaction does not have a timestamp
     /// in the too distant future.
     ///
     /// # Panics
     ///
-    /// Panics if the transaction's proof does not have type `SingleProof`.
+    /// Panics if the transaction's proof is of the wrong type.
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
-            TransactionProof::Witness(_) => panic!(
-                "can only insert single-proof transactions into mempool; not accepting witnesses"
-            ),
+            TransactionProof::Witness(_) => {}
             TransactionProof::SingleProof(_) => {}
             TransactionProof::ProofCollection(_) => {}
         };
@@ -463,6 +464,7 @@ mod tests {
     use rand::SeedableRng;
     use tracing::debug;
     use tracing_test::traced_test;
+    use twenty_first::prelude::Tip5;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -478,63 +480,65 @@ mod tests {
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_wallet;
+    use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
+    use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
-        let network = Network::Alpha;
+        let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
-        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let transaction = make_mock_transaction_with_wallet(
-            vec![],
-            vec![],
-            NeptuneCoins::zero(),
-            &wallet_state,
-            None,
-        );
-        let transaction_digest = Hash::hash(&transaction);
-        assert!(!mempool.contains(transaction_digest));
-        mempool.insert(&transaction);
-        assert!(mempool.contains(transaction_digest));
 
-        let transaction_get_option = mempool.get(transaction_digest);
-        assert_eq!(Some(&transaction), transaction_get_option);
-        assert!(mempool.contains(transaction_digest));
+        let txs = make_plenty_mock_transaction_with_primitive_witness(2);
+        let transaction_digests = txs.iter().map(Tip5::hash).collect_vec();
+        assert!(!mempool.contains(transaction_digests[0]));
+        mempool.insert(&txs[0]);
+        assert!(mempool.contains(transaction_digests[0]));
 
-        let transaction_remove_option = mempool.remove(transaction_digest);
-        assert_eq!(Some(transaction), transaction_remove_option);
-        assert!(!mempool.contains(transaction_digest));
+        let transaction_get_option = mempool.get(transaction_digests[0]);
+        assert_eq!(Some(&txs[0]), transaction_get_option);
+        assert!(mempool.contains(transaction_digests[0]));
 
-        let transaction_second_remove_option = mempool.remove(transaction_digest);
+        let transaction_remove_option = mempool.remove(transaction_digests[0]);
+        assert_eq!(Some(txs[0].clone()), transaction_remove_option);
+        assert!(!mempool.contains(transaction_digests[0]));
+
+        let transaction_second_remove_option = mempool.remove(transaction_digests[0]);
         assert_eq!(None, transaction_second_remove_option);
-        assert!(!mempool.contains(transaction_digest))
+        assert!(!mempool.contains(transaction_digests[0]));
+
+        let transaction_second_get_option = mempool.get(transaction_digests[0]);
+        assert_eq!(None, transaction_second_get_option);
+
+        for tx_id in transaction_digests {
+            assert!(!mempool.contains(tx_id));
+        }
+
+        assert!(mempool.is_empty());
+        assert!(mempool.len().is_zero());
     }
 
-    // Create a mempool with n transactions.
-    async fn setup(transactions_count: u32, network: Network) -> Mempool {
+    /// Create a mempool with n transactions.
+    async fn setup_mock_mempool(transactions_count: usize, network: Network) -> Mempool {
         let genesis_block = Block::genesis_block(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
-        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        for i in 0..transactions_count {
-            let t = make_mock_transaction_with_wallet(
-                vec![],
-                vec![],
-                NeptuneCoins::new(i),
-                &wallet_state,
-                None,
-            );
-            mempool.insert(&t);
+        let txs = make_plenty_mock_transaction_with_primitive_witness(transactions_count);
+        for tx in txs {
+            mempool.insert(&tx);
         }
+
+        assert_eq!(transactions_count, mempool.len());
+
         mempool
     }
 
-    // #[traced_test]
+    #[traced_test]
     #[tokio::test]
     async fn get_densest_transactions() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let mempool = setup(10, Network::RegTest).await;
+        let mempool = setup_mock_mempool(10, Network::Main).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -551,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
-        let mempool = setup(10, Network::Alpha).await;
+        let mempool = setup_mock_mempool(10, Network::Main).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -566,38 +570,26 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_transactions() {
-        let network = Network::Alpha;
+        let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
-        let wallet_state = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
         );
 
-        let eight_days_ago = Timestamp::now() - Timestamp::days(8);
-        let timestamp = Some(eight_days_ago);
+        let now = Timestamp::now();
+        let eight_days_ago = now - Timestamp::days(8);
+        let old_txs = make_mock_txs_with_primitive_witness_with_timestamp(6, eight_days_ago);
 
-        for i in 0u32..6 {
-            let t = make_mock_transaction_with_wallet(
-                vec![],
-                vec![],
-                NeptuneCoins::new(i),
-                &wallet_state,
-                timestamp,
-            );
-            mempool.insert(&t);
+        for tx in old_txs {
+            mempool.insert(&tx);
         }
 
-        for i in 0u32..5 {
-            let t = make_mock_transaction_with_wallet(
-                vec![],
-                vec![],
-                NeptuneCoins::new(i),
-                &wallet_state,
-                None,
-            );
-            mempool.insert(&t);
+        let new_txs = make_mock_txs_with_primitive_witness_with_timestamp(5, now);
+
+        for tx in new_txs {
+            mempool.insert(&tx);
         }
 
         assert_eq!(mempool.len(), 11);
@@ -607,132 +599,100 @@ mod tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn remove_transactions_with_block_test() -> Result<()> {
-        // We need the global state to construct a transaction. This global state
-        // has a wallet which receives a premine-UTXO.
+    async fn remove_transactions_with_block_test() {
+        // Bob is premine receiver, Alice is not
+        let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
 
-        let seed = {
-            let mut rng: StdRng =
-                SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
-            let seed: [u8; 32] = rng.gen();
-            // let seed = [
-            //     0x19, 0xba, 0xc1, 0x55, 0xa7, 0xa0, 0x33, 0xcc, 0x85, 0x73, 0x47, 0xad, 0xd2, 0x1b,
-            //     0x4e, 0x30, 0x54, 0x4b, 0xd3, 0x2e, 0xe0, 0xc2, 0x21, 0xe6, 0x96, 0x82, 0x2a, 0x6, 0xe,
-            //     0xe2, 0xa, 0xda,
-            // ];
-            println!(
-                "seed: [{}]",
-                seed.iter().map(|h| format!("{:#x}", h)).join(", ")
-            );
-            seed
-        };
-
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-        let network = Network::RegTest;
+        let network = Network::Main;
         let devnet_wallet = WalletSecret::devnet_wallet();
-        let premine_receiver_global_state =
-            mock_genesis_global_state(network, 2, devnet_wallet).await;
-        let mut premine_receiver_global_state =
-            premine_receiver_global_state.lock_guard_mut().await;
+        let bob_global_state = mock_genesis_global_state(network, 2, devnet_wallet).await;
+        let mut bob = bob_global_state.lock_guard_mut().await;
 
-        let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
-        let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
-        let premine_receiver_address = premine_receiver_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
+        let bob_wallet_secret = &bob.wallet_state.wallet_secret;
+        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key(0);
+        let bob_address = bob_spending_key.to_address();
+        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
-        let other_global_state_lock =
-            mock_genesis_global_state(network, 2, other_wallet_secret.clone()).await;
-        let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
-        let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
-        let other_receiver_address = other_receiver_spending_key.to_address();
+        let alice_global_state_lock =
+            mock_genesis_global_state(network, 2, alice_wallet_secret.clone()).await;
+        let mut alice = alice_global_state_lock.lock_guard_mut().await;
+        let alice_spending_key = alice_wallet_secret.nth_generation_spending_key(0);
+        let alice_address = alice_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block(network);
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, alice_address, rng.gen());
 
         // Update both states with block 1
-        other_global_state
+        alice
             .wallet_state
             .expected_utxos
             .add_expected_utxo(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
-                other_receiver_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
             )
             .expect("UTXO notification from miner must be accepted");
-        other_global_state
-            .set_new_tip(block_1.clone())
-            .await
-            .unwrap();
-        premine_receiver_global_state
-            .set_new_tip(block_1.clone())
-            .await
-            .unwrap();
+        alice.set_new_tip(block_1.clone()).await.unwrap();
+        bob.set_new_tip(block_1.clone()).await.unwrap();
 
         // Create a transaction that's valid to be included in block 2
-        let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
-        for i in 0..7 {
+        let mut utxos_from_bob: Vec<UtxoReceiverData> = vec![];
+        for i in 0..4 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
             let new_utxo = Utxo {
                 coins: amount.to_native_coins(),
-                lock_script_hash: premine_receiver_address.lock_script().hash(),
+                lock_script_hash: bob_address.lock_script().hash(),
             };
 
-            output_utxos_generated_by_me.push(UtxoReceiverData {
+            utxos_from_bob.push(UtxoReceiverData {
                 public_announcement: PublicAnnouncement::default(),
-                receiver_privacy_digest: premine_receiver_address.privacy_digest,
-                sender_randomness: random(),
+                receiver_privacy_digest: bob_address.privacy_digest,
+                sender_randomness: rng.gen(),
                 utxo: new_utxo,
             });
         }
 
-        let mut now = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
-        let tx_by_preminer = premine_receiver_global_state
-            .create_transaction(
-                output_utxos_generated_by_me,
-                NeptuneCoins::new(1),
-                now + seven_months,
-            )
-            .await?;
+        let now = genesis_block.kernel.header.timestamp;
+        let in_seven_months = now + Timestamp::months(7);
+        let in_eight_months = now + Timestamp::months(8);
+        let tx_by_bob = bob
+            .create_transaction(utxos_from_bob, NeptuneCoins::new(1), in_seven_months)
+            .await
+            .unwrap();
 
         // Add this transaction to a mempool
         let mut mempool = Mempool::new(ByteSize::gb(1), block_1.hash());
-        mempool.insert(&tx_by_preminer);
+        mempool.insert(&tx_by_bob);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
         // included by the miner. This transaction is inserted into the mempool, but since it's
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let output_utxo_data_by_miner = vec![UtxoReceiverData {
+        let utxo_from_alice = vec![UtxoReceiverData {
             utxo: Utxo {
                 coins: NeptuneCoins::new(68).to_native_coins(),
-                lock_script_hash: other_receiver_address.lock_script().hash(),
+                lock_script_hash: alice_address.lock_script().hash(),
             },
-            sender_randomness: random(),
-            receiver_privacy_digest: other_receiver_address.privacy_digest,
+            sender_randomness: rng.gen(),
+            receiver_privacy_digest: alice_address.privacy_digest,
             public_announcement: PublicAnnouncement::default(),
         }];
-        let tx_by_other_original = other_global_state
-            .create_transaction(
-                output_utxo_data_by_miner,
-                NeptuneCoins::new(1),
-                now + seven_months,
-            )
+        let tx_from_alice_original = alice
+            .create_transaction(utxo_from_alice, NeptuneCoins::new(1), in_seven_months)
             .await
             .unwrap();
-        mempool.insert(&tx_by_other_original);
+        mempool.insert(&tx_from_alice_original);
 
         // Create next block which includes preminer's transaction
-        let (coinbase_transaction, _expected_utxo) = premine_receiver_global_state
-            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction = tx_by_preminer.merge_with(coinbase_transaction, Default::default());
+        let (coinbase_transaction, _expected_utxo) =
+            bob.make_coinbase_transaction(NeptuneCoins::zero(), in_eight_months);
+        let block_transaction = tx_by_bob.merge_with(coinbase_transaction, Default::default());
         let block_2 =
-            Block::new_block_from_template(&block_1, block_transaction, Timestamp::now(), None);
+            Block::new_block_from_template(&block_1, block_transaction, in_eight_months, None);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -746,39 +706,43 @@ mod tests {
 
         // Create a new block to verify that the non-mined transaction contains
         // updated and valid-again mutator set data
-        let mut tx_by_other_updated: Transaction =
+        let mut tx_by_alice_updated: Transaction =
             mempool.get_transactions_for_block(usize::MAX)[0].clone();
         assert!(
-            tx_by_other_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
+            tx_by_alice_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
         );
 
-        let (coinbase_transaction2, _expected_utxo2) = premine_receiver_global_state
-            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
-        let block_transaction2 = tx_by_other_updated
+        alice.set_new_tip(block_2.clone()).await.unwrap();
+        bob.set_new_tip(block_2.clone()).await.unwrap();
+        let (coinbase_transaction2, _expected_utxo2) =
+            bob.make_coinbase_transaction(NeptuneCoins::zero(), in_eight_months);
+        let block_transaction2 = tx_by_alice_updated
             .clone()
             .merge_with(coinbase_transaction2, Default::default());
-        let block_3 =
-            Block::new_block_from_template(&block_2, block_transaction2, Timestamp::now(), None);
+        let block_3_orphaned =
+            Block::new_block_from_template(&block_2, block_transaction2, in_eight_months, None);
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
-            tx_by_other_updated.kernel.mutator_set_hash
+            tx_by_alice_updated.kernel.mutator_set_hash
         );
 
-        now = block_2.kernel.header.timestamp;
         assert!(
-            block_3.is_valid(&block_2, now + seven_months),
+            block_3_orphaned.is_valid(&block_2, in_eight_months),
             "Block with tx with updated mutator set data must be valid"
         );
 
-        // Mine 11 blocks without including the transaction but while still keeping the
-        // mempool updated. After these 11 blocks are mined, the transaction must still be
-        // valid.
+        // Mine 4 blocks without including the transaction but while still keeping the
+        // mempool updated. After these 4 blocks are mined, the transaction must still be
+        // valid. Notic that `block_3_orphaned` was forked away, never added to mempool,
+        // since we want to keep the transaction in the mempool.
         let mut previous_block = block_2;
-        for _ in 0..11 {
+        for _ in 0..4 {
             let (next_block, _, _) =
-                make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
+                make_mock_block(&previous_block, None, alice_address, rng.gen());
+            alice.set_new_tip(next_block.clone()).await.unwrap();
+            bob.set_new_tip(next_block.clone()).await.unwrap();
             mempool
                 .update_with_block(
                     previous_block.kernel.body.mutator_set_accumulator.clone(),
@@ -788,28 +752,27 @@ mod tests {
             previous_block = next_block;
         }
 
-        tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
+        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         let (coinbase_transaction3, _expected_utxo3) =
-            other_global_state.make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+            alice.make_coinbase_transaction(NeptuneCoins::zero(), in_eight_months);
         let block_transaction3 =
-            coinbase_transaction3.merge_with(tx_by_other_updated, Default::default());
-        let block_14 = Block::new_block_from_template(
+            coinbase_transaction3.merge_with(tx_by_alice_updated, Default::default());
+        let block_7 = Block::new_block_from_template(
             &previous_block,
             block_transaction3,
-            Timestamp::now(),
+            in_eight_months,
             None,
         );
-        assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
-        now = previous_block.kernel.header.timestamp;
+        assert_eq!(Into::<BlockHeight>::into(7), block_7.kernel.header.height);
         assert!(
-            block_14.is_valid(&previous_block, now+seven_months),
+            block_7.is_valid(&previous_block, in_eight_months),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
         mempool
             .update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
-                &block_14,
+                &block_7,
             )
             .await;
 
@@ -817,8 +780,6 @@ mod tests {
             mempool.is_empty(),
             "Mempool must be empty after 2nd tx was mined"
         );
-
-        Ok(())
     }
 
     #[traced_test]
@@ -949,15 +910,16 @@ mod tests {
     #[tokio::test]
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
-        let network = Network::RegTest;
+        let network = Network::Main;
         let preminer_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let now = Block::genesis_block(network).kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months =
+            Block::genesis_block(network).kernel.header.timestamp + Timestamp::months(7);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
         let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_address = premine_spending_key.to_address();
+        let mut rng = StdRng::seed_from_u64(589111u64);
 
         // Create a transaction and insert it into the mempool
         let utxo = Utxo {
@@ -967,14 +929,14 @@ mod tests {
         let receiver_data = UtxoReceiverData {
             utxo,
             receiver_privacy_digest: premine_address.privacy_digest,
-            sender_randomness: random(),
+            sender_randomness: rng.gen(),
             public_announcement: PublicAnnouncement::default(),
         };
         let tx_by_preminer_low_fee = preminer_state
             .create_transaction(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(1),
-                now + seven_months,
+                in_seven_months,
             )
             .await?;
 
@@ -996,7 +958,7 @@ mod tests {
             .create_transaction(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(10),
-                now + seven_months,
+                in_seven_months,
             )
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
@@ -1012,11 +974,7 @@ mod tests {
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
         let tx_by_preminer_medium_fee = preminer_state
-            .create_transaction(
-                vec![receiver_data],
-                NeptuneCoins::new(4),
-                now + seven_months,
-            )
+            .create_transaction(vec![receiver_data], NeptuneCoins::new(4), in_seven_months)
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());
@@ -1035,8 +993,9 @@ mod tests {
     #[tokio::test]
     async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
-        let tx_count_small = 10;
-        let mempool_small = setup(10, Network::Alpha).await;
+        let network = Network::Main;
+        let tx_count_small = 2;
+        let mempool_small = setup_mock_mempool(tx_count_small, network).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
             .unwrap()
@@ -1051,14 +1010,17 @@ mod tests {
             size_serialized_small
         );
 
-        let tx_count_big = 100;
-        let mempool_big = setup(tx_count_big, Network::Alpha).await;
+        let tx_count_big = 6;
+        let mempool_big = setup_mock_mempool(tx_count_big, network).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
             .unwrap()
             .len();
         assert!(size_gs_big >= size_serialized_big);
-        assert!(size_gs_big >= 5 * size_gs_small);
+        assert!(
+            (size_gs_big * tx_count_small) as f64 * 1.2 >= (size_gs_small * tx_count_big) as f64,
+            "size_gs_big: {size_gs_big}\nsize_gs_small: {size_gs_small}"
+        );
         println!("size of mempool with {tx_count_big} empty txs reported as: {size_gs_big}",);
         println!(
             "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
