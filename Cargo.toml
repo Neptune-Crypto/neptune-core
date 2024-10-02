@@ -79,28 +79,50 @@ default-features = false
 features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
-# needed because it otherwise takes too long to sign transaction with STARK proofs
+# `opt-level = 3` is needed because it otherwise takes too long to sign
+# transaction with STARK proofs. The other flags are there to make compilation
+# of Triton VM faster.
 [profile.dev.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.release.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.bench.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.test.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
-# [profile.test]
-# opt-level = 0 # change to 3 for shorter test running times but much longer test compilation time
-# debug = true
-# debug-assertions = true
-# overflow-checks = true
-# lto = false
-# incremental = true
-# codegen-units = 256
-# rpath = false
+# Set to make compilation of Triton VM faster. Since it uses build scripts
+# that should run with `opt-level=3` set.
+[profile.test]
+build-override.opt-level = 3
+
+[profile.release]
+build-override.opt-level = 3
+
+[profile.bench]
+build-override.opt-level = 3
+
+[profile.dev]
+build-override.opt-level = 3
 
 ## We use harness = false on these so that the divan reports are output on stdout.
 
