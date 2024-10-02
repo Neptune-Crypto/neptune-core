@@ -116,20 +116,14 @@ pub struct Args {
     #[structopt(long, default_value = "3")]
     pub number_of_mps_per_utxo: usize,
 
-    /// Whether to enable privacy when initiating transactions. If this flag
-    /// is set to false, when the client initiates a transaction it will
-    /// supply the raw witness for the mutator set removal record integrity
-    /// proof rather than produce the proof directly, saving work and memory.
-    /// The drawback is that observers can link the transaction inputs to
-    /// their originating transaction outputs. This flag is set to false by
-    /// default. This flag has no bearing on the lock scripts; proving their
-    /// graceful halt is mandatory and therefore no-one else can spend your
-    /// coins. The default option is likely to change in the future.
-    #[clap(long, default_value = "false")]
-    pub privacy: bool,
-
     /// Configure how complicated proofs this machine is capable of producing.
-    /// If no value is set, this parameter is estimated.
+    /// If no value is set, this parameter is estimated. For privacy, this level
+    /// must not be set to [`TxProvingCapability::LockScript`], as this leaks
+    /// information about amounts and input/output UTXOs.
+    /// Proving the lockscripts is mandatory, since this is what prevents others
+    /// from spending your coins.
+    /// e.g. `--tx-proving-capability=singleproof` or
+    /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
     pub tx_proving_capability: Option<TxProvingCapability>,
 

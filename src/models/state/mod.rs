@@ -690,7 +690,6 @@ impl GlobalState {
             .body
             .mutator_set_accumulator
             .clone();
-        let privacy_setting = self.cli().privacy;
 
         // assemble transaction object (lengthy operation)
         Self::create_transaction_from_data(
@@ -704,8 +703,7 @@ impl GlobalState {
             public_announcements,
             timestamp,
             mutator_set_accumulator,
-            privacy_setting,
-            self.net.tx_proving_capability,
+            prover_capability,
         )
         .await
     }
@@ -802,7 +800,6 @@ impl GlobalState {
         public_announcements: Vec<PublicAnnouncement>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
-        privacy: bool,
         proving_power: TxProvingCapability,
     ) -> Result<Transaction> {
         // upgrade data to owned so we can spawn a thread that owns it
@@ -826,7 +823,6 @@ impl GlobalState {
                 public_announcements,
                 timestamp,
                 mutator_set_accumulator,
-                privacy,
                 proving_power,
             )
         })
@@ -850,7 +846,6 @@ impl GlobalState {
         public_announcements: Vec<PublicAnnouncement>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
-        _privacy: bool,
         proving_power: TxProvingCapability,
     ) -> Transaction {
         // complete transaction kernel
@@ -1535,7 +1530,6 @@ mod global_state_tests {
             .body
             .mutator_set_accumulator
             .clone();
-        let privacy = global_state_lock.cli().privacy;
 
         // assemble transaction object
         GlobalState::create_transaction_from_data(
@@ -1549,7 +1543,6 @@ mod global_state_tests {
             public_announcements,
             timestamp,
             mutator_set_accumulator,
-            privacy,
             TxProvingCapability::ProofCollection,
         )
         .await
