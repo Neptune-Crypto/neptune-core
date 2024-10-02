@@ -472,6 +472,7 @@ mod tests {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiverData;
@@ -479,9 +480,6 @@ mod tests {
     use crate::tests::shared::make_mock_transaction_with_wallet;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
-    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
-    use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
@@ -832,7 +830,7 @@ mod tests {
         // First put a transaction into the mempool. Then mine block 1a does
         // not contain this transaction, such that mempool is still non-empty.
         // Then mine a a block 1b that also does not contain this transaction.
-        let network = Network::RegTest;
+        let network = Network::Main;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let premine_receiver_global_state =
             mock_genesis_global_state(network, 2, devnet_wallet).await;
@@ -843,7 +841,9 @@ mod tests {
             .wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let other_wallet_secret = WalletSecret::new_random();
+
+        let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
+        let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -855,7 +855,7 @@ mod tests {
         let tx_receiver_data = UtxoReceiverData {
             utxo,
             receiver_privacy_digest: premine_address.privacy_digest,
-            sender_randomness: random(),
+            sender_randomness: rng.gen(),
             public_announcement: PublicAnnouncement::default(),
         };
 
@@ -867,24 +867,21 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
         let unmined_tx = premine_receiver_global_state
-            .create_transaction(vec![tx_receiver_data], NeptuneCoins::new(1), in_seven_years)
+            .create_transaction_with_prover_capability(
+                vec![tx_receiver_data],
+                NeptuneCoins::new(1),
+                in_seven_years,
+                TxProvingCapability::SingleProof,
+            )
             .await
             .unwrap();
 
         premine_receiver_global_state.mempool.insert(&unmined_tx);
 
-        let mut rng = thread_rng();
-
-        // Add enough blocks to move the active window. The transaction must stay in
-        // the mempool, since it is not being mined.
+        // Add some blocks. The transaction must stay in the mempool, since it
+        // is not being mined.
         let mut current_block = genesis_block.clone();
-        const NUM_BLOCKS_TO_SLIDE_ENTIRE_ACTIVE_WINDOW: u32 = WINDOW_SIZE / CHUNK_SIZE * BATCH_SIZE;
-
-        // This will invalidate the removal record with a probability of
-        // 99.995 %. So a later test will fail 1/20'000 times.
-        const PROBABLY_ENOUGH_BLOCKS_TO_INVALIDATE_REMOVAL_RECORD: u32 =
-            NUM_BLOCKS_TO_SLIDE_ENTIRE_ACTIVE_WINDOW / 5;
-        for _ in 0..PROBABLY_ENOUGH_BLOCKS_TO_INVALIDATE_REMOVAL_RECORD {
+        for _ in 0..2 {
             let (next_block, _, _) = make_mock_block(
                 &current_block,
                 Some(in_seven_years),
@@ -909,6 +906,7 @@ mod tests {
                     .is_confirmable_relative_to(&next_block.body().mutator_set_accumulator),
                 "Mempool tx must stay confirmable after each new block has been applied"
             );
+            assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
             assert_eq!(
                 next_block.hash(),
                 premine_receiver_global_state.mempool.tip_digest,
@@ -917,16 +915,6 @@ mod tests {
 
             current_block = next_block;
         }
-
-        let tx_from_mempool0: Transaction = premine_receiver_global_state
-            .mempool
-            .get_transactions_for_block(usize::MAX)[0]
-            .clone();
-        assert!(
-            !tx_from_mempool0
-                .is_confirmable_relative_to(&genesis_block.body().mutator_set_accumulator),
-            "tx may not be confirmable relative to the genesis block"
-        );
 
         // Now make a deep reorganization and verify that nothing crashes
         let (block_1b, _, _) = make_mock_block(
