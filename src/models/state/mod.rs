@@ -27,7 +27,6 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
-use super::blockchain::transaction;
 use super::blockchain::transaction::lock_script::LockScriptAndWitness;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -38,9 +37,7 @@ use super::blockchain::transaction::PublicAnnouncement;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::transaction::TransactionProof;
 use super::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
-use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::blockchain::type_scripts::TypeScriptAndWitness;
 use super::proof_abstractions::tasm::program::ConsensusProgram;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
@@ -662,9 +659,28 @@ impl GlobalState {
     /// Returns the transaction with some proof.
     pub async fn create_transaction(
         &mut self,
+        receiver_data: Vec<UtxoReceiverData>,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<Transaction> {
+        self.create_transaction_with_prover_capability(
+            receiver_data,
+            fee,
+            timestamp,
+            self.net.tx_proving_capability,
+        )
+        .await
+    }
+
+    /// Variant of [Self::create_transaction] that allows caller to specify
+    /// prover capability. [Self::create_transaction] is the preferred interface
+    /// for anything but tests.
+    pub(crate) async fn create_transaction_with_prover_capability(
+        &mut self,
         mut receiver_data: Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
+        prover_capability: TxProvingCapability,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
         let (

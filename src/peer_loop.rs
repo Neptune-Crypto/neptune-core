@@ -1198,7 +1198,9 @@ mod peer_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::TransactionNotification;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
@@ -2404,18 +2406,9 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn populated_mempool_request_tx_test() -> Result<()> {
         // In this scenario the peer is informed of a transaction that it already knows
+        let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 1).await?;
-
-        let transaction_1 = make_mock_transaction(vec![], vec![]);
-
-        // Build the resulting transaction notification
-        let tx_notification: TransactionNotification = transaction_1.clone().into();
-        let mock = Mock::new(vec![
-            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-            Action::Read(PeerMessage::Bye),
-        ]);
-
+            get_test_genesis_setup(network, 1).await?;
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
@@ -2426,6 +2419,20 @@ mod peer_loop_tests {
             1,
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
+        let transaction_1 = state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![],
+                NeptuneCoins::new(0),
+                now,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
 
         assert!(
             state_lock.lock_guard().await.mempool.is_empty(),
@@ -2441,6 +2448,12 @@ mod peer_loop_tests {
             "Mempool must be non-empty after insertion"
         );
 
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Read(PeerMessage::Bye),
+        ]);
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
             .await?;
