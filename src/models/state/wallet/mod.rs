@@ -859,14 +859,14 @@ mod wallet_tests {
         Ok(())
     }
 
-    // #[traced_test]
+    #[traced_test]
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
         // Bob is premine receiver, Alice is not. They send coins back and forth
         // and the blockchain forks.
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
-        let network = Network::RegTest;
-        let alice_wallet_secret = WalletSecret::new_random();
+        let network = Network::Main;
+        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let alice_global_state = mock_genesis_global_state(network, 2, alice_wallet_secret).await;
         let alice_spending_key = alice_global_state
             .lock_guard()
@@ -881,12 +881,11 @@ mod wallet_tests {
             .wallet_secret;
         let bob_receiver_global_state = mock_genesis_global_state(network, 2, bob_wallet).await;
         let mut bob_receiver_global_state = bob_receiver_global_state.lock_guard_mut().await;
-        let launch = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let bobs_original_balance = bob_receiver_global_state
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months);
+            .synced_unspent_available_amount(in_seven_months);
         assert!(
             !bobs_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -923,21 +922,20 @@ mod wallet_tests {
             },
         };
         let receiver_data_to_alice = vec![receiver_data_12_to_alice, receiver_data_one_to_alice];
-        let now = genesis_block.kernel.header.timestamp;
         let valid_tx = bob_receiver_global_state
             .create_transaction(
                 receiver_data_to_alice.clone(),
                 NeptuneCoins::new(2),
-                now + seven_months,
+                in_seven_months,
             )
             .await
             .unwrap();
 
         let block_1 =
-            Block::new_block_from_template(&genesis_block, valid_tx, now + seven_months, None);
+            Block::new_block_from_template(&genesis_block, valid_tx, in_seven_months, None);
 
         // Verify the validity of the merged transaction and block
-        assert!(block_1.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
         // Update wallet state with block_1
         let mut alice_monitored_utxos =
@@ -974,7 +972,7 @@ mod wallet_tests {
             bob_receiver_global_state
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months),
+                .synced_unspent_available_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -1008,12 +1006,18 @@ mod wallet_tests {
             )
         }
 
-        // Add 17 blocks (mined by Alice)
-        // and verify that all membership proofs are still valid
+        // Alice mines
+        let num_blocks_mined_by_alice = 4;
+        // verify that all membership proofs are still valid
         let mut next_block = block_1.clone();
-        for _ in 0..17 {
+        for _ in 0..num_blocks_mined_by_alice {
             let previous_block = next_block;
-            let ret = make_mock_block(&previous_block, None, alice_address, rng.gen());
+            let ret = make_mock_block(
+                &previous_block,
+                Some(in_seven_months),
+                alice_address,
+                rng.gen(),
+            );
             next_block = ret.0;
             alice_global_state
                 .lock_guard_mut()
@@ -1039,31 +1043,37 @@ mod wallet_tests {
                 .unwrap();
         }
 
-        let block_18 = next_block;
+        let first_block_after_spree = next_block;
         alice_monitored_utxos =
             get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state).await;
         assert_eq!(
-                2 + 17,
-                alice_monitored_utxos.len(),
-                "List of monitored UTXOs have length 19 after updating wallet state and mining 17 blocks"
-            );
+            2 + num_blocks_mined_by_alice,
+            alice_monitored_utxos.len(),
+            "List of monitored UTXOs must match blocks mined plus two"
+        );
         for monitored_utxo in alice_monitored_utxos {
             assert!(
-                block_18.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_18.hash())
-                        .unwrap()
-                ),
-                "All membership proofs must be valid after block 18"
+                first_block_after_spree
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(first_block_after_spree.hash())
+                            .unwrap()
+                    ),
+                "All membership proofs must be valid after this block"
             )
         }
 
         // Sanity check
         assert_eq!(
-            Into::<BlockHeight>::into(18u64),
-            block_18.kernel.header.height,
-            "Block height must be 18 after genesis and 18 blocks being mined"
+            Into::<BlockHeight>::into(1u64 + u64::try_from(num_blocks_mined_by_alice).unwrap()),
+            first_block_after_spree.kernel.header.height,
+            "Block height must be {} after genesis and {} blocks being mined in Alice's spree",
+            num_blocks_mined_by_alice + 1,
+            num_blocks_mined_by_alice
         );
 
         // Check that `WalletStatus` is returned correctly
@@ -1071,12 +1081,13 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .get_wallet_status_from_lock(block_18.hash())
+            .get_wallet_status_from_lock(first_block_after_spree.hash())
             .await;
         assert_eq!(
-            19,
+            num_blocks_mined_by_alice + 2,
             alice_wallet_status.synced_unspent.len(),
-            "Wallet must have 19 synced, unspent UTXOs"
+            "Wallet must have {} synced, unspent UTXOs",
+            num_blocks_mined_by_alice + 2
         );
         assert!(
             alice_wallet_status.synced_spent.is_empty(),
@@ -1091,7 +1102,7 @@ mod wallet_tests {
             "Wallet must have 0 unsynced unspent UTXOs"
         );
 
-        // verify that membership proofs are valid after forks
+        // Bob mines a block, ignoring Alice's spree and forking instead
         let bob_wallet_spending_key = bob_receiver_global_state
             .wallet_state
             .wallet_secret
@@ -1139,8 +1150,8 @@ mod wallet_tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let (block_19, _, _) = make_mock_block(
-            &block_18,
+        let (first_block_continuing_spree, _, _) = make_mock_block(
+            &first_block_after_spree,
             None,
             bob_wallet_spending_key.to_address(),
             rng.gen(),
@@ -1150,32 +1161,39 @@ mod wallet_tests {
             .await
             .wallet_state
             .update_wallet_state_with_new_block(
-                &block_18.kernel.body.mutator_set_accumulator,
-                &block_19,
+                &first_block_after_spree.kernel.body.mutator_set_accumulator,
+                &first_block_continuing_spree,
             )
             .await?;
-        let alice_monitored_utxos_block_19: Vec<_> =
+        let alice_monitored_utxos_after_continued_spree: Vec<_> =
             get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
-                .filter(|monitored_utxo| monitored_utxo.is_synced_to(block_19.hash()))
+                .filter(|monitored_utxo| {
+                    monitored_utxo.is_synced_to(first_block_continuing_spree.hash())
+                })
                 .collect();
         assert_eq!(
-            2 + 17,
-            alice_monitored_utxos_block_19.len(),
-            "List of monitored UTXOs have length 19 after returning to good fork"
+            2 + num_blocks_mined_by_alice,
+            alice_monitored_utxos_after_continued_spree.len(),
+            "List of monitored UTXOs have length {} after returning to good fork",
+            2 + num_blocks_mined_by_alice
         );
 
         // Verify that all monitored UTXOs have valid membership proofs
-        for monitored_utxo in alice_monitored_utxos_block_19.iter() {
+        for monitored_utxo in alice_monitored_utxos_after_continued_spree.iter() {
             assert!(
-                block_19.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_19.hash())
-                        .unwrap()
-                ),
-                "All membership proofs must be valid after block 19"
+                first_block_continuing_spree
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(first_block_continuing_spree.hash())
+                            .unwrap()
+                    ),
+                "All membership proofs must be valid after first block  of continued"
             )
         }
 
@@ -1185,27 +1203,28 @@ mod wallet_tests {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: alice_address.privacy_digest,
             utxo: Utxo {
-                coins: NeptuneCoins::new(4).to_native_coins(),
+                coins: NeptuneCoins::new(1).to_native_coins(),
                 lock_script_hash: alice_address.lock_script().hash(),
             },
-            sender_randomness: random(),
+            sender_randomness: rng.gen(),
         };
         let tx_from_bob = bob_receiver_global_state
             .create_transaction(
                 vec![alice_receiver_data_six.clone()],
                 NeptuneCoins::new(4),
-                now,
+                in_seven_months,
             )
             .await
             .unwrap();
         let (coinbase_tx, cb_expected) = alice_global_state
             .lock_guard_mut()
             .await
-            .make_coinbase_transaction(NeptuneCoins::zero(), now);
+            .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let merged_tx = coinbase_tx.merge_with(tx_from_bob, Default::default());
-        let block_3_b = Block::new_block_from_template(&block_2_b, merged_tx, now, None);
+        let block_3_b =
+            Block::new_block_from_template(&block_2_b, merged_tx, in_seven_months, None);
         assert!(
-            block_3_b.is_valid(&block_2_b, now),
+            block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"
         );
         alice_global_state
@@ -1277,8 +1296,8 @@ mod wallet_tests {
         }
 
         // Then fork back to A-chain
-        let (block_20, _, _) = make_mock_block(
-            &block_19,
+        let (second_block_continuing_spree, _, _) = make_mock_block(
+            &first_block_continuing_spree,
             None,
             bob_wallet_spending_key.to_address(),
             rng.gen(),
@@ -1288,33 +1307,42 @@ mod wallet_tests {
             .await
             .wallet_state
             .update_wallet_state_with_new_block(
-                &block_19.kernel.body.mutator_set_accumulator,
-                &block_20,
+                &first_block_continuing_spree
+                    .kernel
+                    .body
+                    .mutator_set_accumulator,
+                &second_block_continuing_spree,
             )
             .await?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
-        let alice_monitored_utxos_20: Vec<_> =
+        let alice_monitored_utxos_after_second_block_after_spree: Vec<_> =
             get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
-                .filter(|x| x.is_synced_to(block_20.hash()))
+                .filter(|x| x.is_synced_to(second_block_continuing_spree.hash()))
                 .collect();
         assert_eq!(
-                19,
-                alice_monitored_utxos_20.len(),
-                "List of monitored UTXOs must be two higher than after block 19 after returning to bad fork"
-            );
-        for monitored_utxo in alice_monitored_utxos_20.iter() {
+            2 + num_blocks_mined_by_alice,
+            alice_monitored_utxos_after_second_block_after_spree.len(),
+            "List of monitored UTXOs must be two higher after returning to bad fork"
+        );
+        for monitored_utxo in alice_monitored_utxos_after_second_block_after_spree.iter() {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_20.kernel.body.mutator_set_accumulator.verify(
-                        Hash::hash(&monitored_utxo.utxo),
-                        &monitored_utxo
-                            .get_membership_proof_for_block(block_20.hash())
-                            .unwrap()
-                    ),
-                "All membership proofs of unspent UTXOs must be valid after block 20"
+                    || second_block_continuing_spree
+                        .kernel
+                        .body
+                        .mutator_set_accumulator
+                        .verify(
+                            Hash::hash(&monitored_utxo.utxo),
+                            &monitored_utxo
+                                .get_membership_proof_for_block(
+                                    second_block_continuing_spree.hash()
+                                )
+                                .unwrap()
+                        ),
+                "All membership proofs of unspent UTXOs must be valid after block on longest chain"
             )
         }
 

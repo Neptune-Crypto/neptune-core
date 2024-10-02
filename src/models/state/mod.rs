@@ -259,6 +259,29 @@ pub struct UtxoReceiverData {
     pub public_announcement: PublicAnnouncement,
 }
 
+impl UtxoReceiverData {
+    pub(crate) fn new(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_privacy_digest: Digest,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_privacy_digest,
+            public_announcement: PublicAnnouncement::default(),
+        }
+    }
+
+    pub(crate) fn with_public_announcement(
+        mut self,
+        public_announcement: PublicAnnouncement,
+    ) -> Self {
+        self.public_announcement = public_announcement;
+        self
+    }
+}
+
 impl GlobalState {
     pub fn new(
         wallet_state: WalletState,
@@ -1510,13 +1533,14 @@ mod global_state_tests {
         true
     }
 
-    /// Similar to [GlobalState::create_transaction] but with a given timestamp,
-    /// as opposed to now.
-    pub(super) async fn create_transaction_with_timestamp(
+    /// Similar to [GlobalState::create_transaction_with_timestamp] but allows
+    /// caller to specify proving capability.
+    pub(super) async fn create_transaction_with_timestamp_and_prover_capability(
         global_state_lock: &GlobalStateLock,
         mut receiver_data: Vec<UtxoReceiverData>,
         fee: NeptuneCoins,
         timestamp: Timestamp,
+        prover_capability: TxProvingCapability,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
         let (
@@ -1559,7 +1583,30 @@ mod global_state_tests {
             public_announcements,
             timestamp,
             mutator_set_accumulator,
-            TxProvingCapability::ProofCollection,
+            prover_capability,
+        )
+        .await
+    }
+
+    /// Similar to [GlobalState::create_transaction] but with a given timestamp,
+    /// as opposed to now.
+    pub(super) async fn create_transaction_with_timestamp(
+        global_state_lock: &GlobalStateLock,
+        receiver_data: Vec<UtxoReceiverData>,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<Transaction> {
+        create_transaction_with_timestamp_and_prover_capability(
+            global_state_lock,
+            receiver_data,
+            fee,
+            timestamp,
+            global_state_lock
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .tx_proving_capability,
         )
         .await
     }
@@ -2092,29 +2139,15 @@ mod global_state_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn flaky_mutator_set_test() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         // Scenario: Three parties: Alice, Bob, and Premine Receiver, mine blocks and pass coins
         // around.
 
-        let seed = {
-            let mut rng: StdRng =
-                SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
-            let seed: [u8; 32] = rng.gen();
-            // let seed = [
-            //     0xf4, 0xc2, 0x1c, 0xd0, 0x5a, 0xac, 0x99, 0xe7, 0x3a, 0x1e, 0x29, 0x7f, 0x16, 0xc1,
-            //     0x50, 0x5e, 0x1e, 0xd, 0x4b, 0x49, 0x51, 0x9c, 0x1b, 0xa0, 0x38, 0x3c, 0xd, 0x83, 0x29,
-            //     0xdb, 0xab, 0xe2,
-            // ];
-            println!(
-                "seed: [{}]",
-                seed.iter().map(|h| format!("{:#x}", h)).join(", ")
-            );
-            seed
-        };
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let network = Network::RegTest;
+        let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
+        let network = Network::Main;
 
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
@@ -2133,13 +2166,12 @@ mod global_state_tests {
         let bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
-        let launch = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
         let (coinbase_transaction, coinbase_expected_utxo) = genesis_state_lock
             .lock_guard()
             .await
-            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+            .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -2151,7 +2183,7 @@ mod global_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(41).to_native_coins(),
+                    coins: NeptuneCoins::new(1).to_native_coins(),
                 },
             },
             UtxoReceiverData {
@@ -2160,7 +2192,7 @@ mod global_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(59).to_native_coins(),
+                    coins: NeptuneCoins::new(2).to_native_coins(),
                 },
             },
         ];
@@ -2173,7 +2205,7 @@ mod global_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(141).to_native_coins(),
+                    coins: NeptuneCoins::new(3).to_native_coins(),
                 },
             },
             UtxoReceiverData {
@@ -2182,12 +2214,12 @@ mod global_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(59).to_native_coins(),
+                    coins: NeptuneCoins::new(4).to_native_coins(),
                 },
             },
         ];
 
-        let tx_to_alice_and_bob = create_transaction_with_timestamp(
+        let tx_to_alice_and_bob = create_transaction_with_timestamp_and_prover_capability(
             &genesis_state_lock,
             [
                 receiver_data_for_alice.clone(),
@@ -2195,7 +2227,8 @@ mod global_state_tests {
             ]
             .concat(),
             fee,
-            launch + seven_months,
+            in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2206,12 +2239,11 @@ mod global_state_tests {
         let block_1 = Block::new_block_from_template(
             &genesis_block,
             block_transaction,
-            Timestamp::now(),
+            in_seven_months,
             None,
         );
 
-        let now = genesis_block.kernel.header.timestamp;
-        assert!(block_1.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2282,24 +2314,24 @@ mod global_state_tests {
                     .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
             );
 
-        // Now Alice should have a balance of 100 and Bob a balance of 200
+        // Now Alice should have a balance of 3 and Bob a balance of 7
         assert_eq!(
-            NeptuneCoins::new(100),
+            NeptuneCoins::new(3),
             alice_state_lock
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         assert_eq!(
-            NeptuneCoins::new(200),
+            NeptuneCoins::new(7),
             bob_state_lock
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
@@ -2307,7 +2339,7 @@ mod global_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
+                    coins: NeptuneCoins::new(1).to_native_coins(),
                 },
                 sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -2316,25 +2348,28 @@ mod global_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(49).to_native_coins(),
+                    coins: NeptuneCoins::new(1).to_native_coins(),
                 },
                 sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
         ];
-        let now2 = genesis_block.kernel.header.timestamp;
         let tx_from_alice = alice_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1), now2)
+            .create_transaction(
+                receiver_data_from_alice.clone(),
+                NeptuneCoins::new(1),
+                in_seven_months,
+            )
             .await
             .unwrap();
         let receiver_data_from_bob = vec![
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
+                    coins: NeptuneCoins::new(2).to_native_coins(),
                 },
                 sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -2343,7 +2378,7 @@ mod global_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
+                    coins: NeptuneCoins::new(2).to_native_coins(),
                 },
                 sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -2352,7 +2387,7 @@ mod global_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(98).to_native_coins(),
+                    coins: NeptuneCoins::new(2).to_native_coins(),
                 },
                 sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -2362,7 +2397,11 @@ mod global_state_tests {
         let tx_from_bob = bob_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2), now2)
+            .create_transaction(
+                receiver_data_from_bob.clone(),
+                NeptuneCoins::new(1),
+                in_seven_months,
+            )
             .await
             .unwrap();
 
@@ -2372,15 +2411,15 @@ mod global_state_tests {
         let (coinbase_transaction2, _expected_utxo) = genesis_state_lock
             .lock_guard()
             .await
-            .make_coinbase_transaction(NeptuneCoins::zero(), Timestamp::now());
+            .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let block_transaction2 = coinbase_transaction2
             .merge_with(tx_from_alice, Default::default())
             .merge_with(tx_from_bob, Default::default());
         let block_2 =
-            Block::new_block_from_template(&block_1, block_transaction2, Timestamp::now(), None);
+            Block::new_block_from_template(&block_1, block_transaction2, in_seven_months, None);
 
-        assert_eq!(2, block_2.kernel.body.transaction_kernel.inputs.len());
-        assert_eq!(3, block_2.kernel.body.transaction_kernel.outputs.len());
+        assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
+        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
     }
 
     #[traced_test]

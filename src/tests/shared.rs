@@ -19,6 +19,11 @@ use futures::task::Poll;
 use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
+use proptest::collection::vec;
+use proptest::prelude::Strategy;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
+use proptest_arbitrary_interop::arb;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use rand::random;
@@ -62,6 +67,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::channel::MainToPeerThread;
 use crate::models::channel::PeerThreadToMain;
@@ -602,6 +608,53 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 //     transaction_1
 // }
+
+pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
+    count: usize,
+    timestamp: Timestamp,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let primitive_witnesses = vec(
+        arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, timestamp),
+        count,
+    )
+    .new_tree(&mut test_runner)
+    .unwrap()
+    .current();
+
+    primitive_witnesses
+        .into_iter()
+        .map(|pw| Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        })
+        .collect_vec()
+}
+
+pub(crate) fn make_plenty_mock_transaction_with_primitive_witness(
+    count: usize,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let deterministic_now = arb::<Timestamp>()
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+    let primitive_witnesses = vec(
+        arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now),
+        count,
+    )
+    .new_tree(&mut test_runner)
+    .unwrap()
+    .current();
+
+    primitive_witnesses
+        .into_iter()
+        .map(|pw| Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        })
+        .collect_vec()
+}
 
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.

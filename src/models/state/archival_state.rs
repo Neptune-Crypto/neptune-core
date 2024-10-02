@@ -858,6 +858,7 @@ mod archival_state_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::global_state_tests::create_transaction_with_timestamp;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiverData;
@@ -1385,47 +1386,48 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Main;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
+        let mut rng = StdRng::seed_from_u64(87255549301u64);
 
         let (cbtx, _cb_expected) =
-            global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
+            global_state.make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let receiver_data = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
-            receiver_privacy_digest: random(),
-            sender_randomness: random(),
+            receiver_privacy_digest: rng.gen(),
+            sender_randomness: rng.gen(),
             utxo: Utxo {
                 coins: one_money.to_native_coins(),
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
         let sender_tx = global_state
-            .create_transaction(vec![receiver_data], one_money, now + seven_months)
+            .create_transaction(vec![receiver_data], one_money, in_seven_months)
             .await
             .unwrap();
         let block_tx = sender_tx.merge_with(cbtx, Default::default());
-        let block_1_a = Block::new_block_from_template(&genesis_block, block_tx, now, None);
+        let block_1_a =
+            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
 
         // Verify that block_1 is valid
         assert!(block_1_a.has_proof_of_work(&genesis_block));
-        assert!(block_1_a.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1_a.is_valid(&genesis_block, in_seven_months));
 
         Ok(())
     }
 
-    // #[traced_test]
+    #[traced_test]
     #[tokio::test]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
-        let network = Network::RegTest;
+        let network = Network::Main;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
@@ -1433,22 +1435,22 @@ mod archival_state_tests {
             .nth_generation_spending_key(0);
         let genesis_state_lock =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
+        let mut rng = StdRng::seed_from_u64(41251549301u64);
 
-        let wallet_secret_alice = WalletSecret::new_random();
+        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
         let alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
-        let wallet_secret_bob = WalletSecret::new_random();
+        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
-        let launch = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
-        let sender_randomness: Digest = random();
+        let sender_randomness: Digest = rng.gen();
         let receiver_data_for_alice = vec![
             UtxoReceiverData {
                 public_announcement: PublicAnnouncement::default(),
@@ -1498,22 +1500,22 @@ mod archival_state_tests {
             ]
             .concat(),
             fee,
-            launch + seven_months,
+            in_seven_months,
         )
         .await
         .unwrap();
 
-        let now = genesis_block.kernel.header.timestamp;
         let (cbtx, cb_expected) = genesis_state_lock
             .lock_guard_mut()
             .await
-            .make_coinbase_transaction(NeptuneCoins::zero(), now);
+            .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let block_tx = cbtx.merge_with(tx_to_alice_and_bob, Default::default());
 
-        let block_1 = Block::new_block_from_template(&genesis_block, block_tx, now, None);
+        let block_1 =
+            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
 
         // Verify validity
-        assert!(block_1.is_valid(&genesis_block, launch + seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -1595,7 +1597,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         assert_eq!(
             NeptuneCoins::new(200),
@@ -1604,7 +1606,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
 
         // Make two transactions: Alice sends two UTXOs to Genesis (50 + 49 coins and 1 in fee)
@@ -1615,7 +1617,7 @@ mod archival_state_tests {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
                 },
-                sender_randomness: random(),
+                sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
@@ -1624,7 +1626,7 @@ mod archival_state_tests {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(49).to_native_coins(),
                 },
-                sender_randomness: random(),
+                sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
@@ -1635,7 +1637,7 @@ mod archival_state_tests {
             .create_transaction(
                 receiver_data_from_alice.clone(),
                 NeptuneCoins::new(1),
-                launch + seven_months,
+                in_seven_months,
             )
             .await
             .unwrap();
@@ -1645,7 +1647,7 @@ mod archival_state_tests {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
                 },
-                sender_randomness: random(),
+                sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
@@ -1654,7 +1656,7 @@ mod archival_state_tests {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(50).to_native_coins(),
                 },
-                sender_randomness: random(),
+                sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
@@ -1663,7 +1665,7 @@ mod archival_state_tests {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: NeptuneCoins::new(98).to_native_coins(),
                 },
-                sender_randomness: random(),
+                sender_randomness: rng.gen(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
                 public_announcement: PublicAnnouncement::default(),
             },
@@ -1672,7 +1674,7 @@ mod archival_state_tests {
             &bob_state_lock,
             receiver_data_from_bob.clone(),
             NeptuneCoins::new(2),
-            launch + seven_months,
+            in_seven_months,
         )
         .await
         .unwrap();
@@ -1683,18 +1685,16 @@ mod archival_state_tests {
         let (cbtx2, cb_expected2) = genesis_state_lock
             .lock_guard()
             .await
-            .make_coinbase_transaction(NeptuneCoins::zero(), launch + seven_months);
+            .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let block_tx2 = cbtx2
             .merge_with(tx_from_alice, Default::default())
             .merge_with(tx_from_bob, Default::default());
-        let block_2 =
-            Block::new_block_from_template(&block_1, block_tx2, launch + seven_months, None);
+        let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);
 
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
-        let now2 = block_1.kernel.header.timestamp;
-        assert!(block_2.is_valid(&block_1, now2));
+        assert!(block_2.is_valid(&block_1, in_seven_months));
 
         // Expect incoming UTXOs
         for rec_data in receiver_data_from_alice {
@@ -1751,14 +1751,14 @@ mod archival_state_tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months)
+            .synced_unspent_available_amount(in_seven_months)
             .is_zero());
         assert!(bob_state_lock
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months)
+            .synced_unspent_available_amount(in_seven_months)
             .is_zero());
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO
