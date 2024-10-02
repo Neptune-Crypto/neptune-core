@@ -379,8 +379,9 @@ impl Mempool {
         // But kick out those transactions that we were unable to update.
         let mut kick_outs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
-            if let Ok(new_tx) =
-                tx.new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+            if let Ok(new_tx) = tx
+                .clone()
+                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
             {
                 *tx = new_tx;
             } else {

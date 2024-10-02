@@ -24,6 +24,9 @@ use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
 use tracing::error;
 use tracing::info;
@@ -35,6 +38,8 @@ use validity::merge::MergeWitness;
 use validity::proof_collection::ProofCollection;
 use validity::single_proof::SingleProof;
 use validity::single_proof::SingleProofWitness;
+use validity::update::Update;
+use validity::update::UpdateWitness;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -87,7 +92,10 @@ impl TransactionProof {
                 primitive_witness.validate().await
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
-            TransactionProof::SingleProof(_) => todo!(),
+            TransactionProof::SingleProof(single_proof) => {
+                let claim = SingleProof::claim(kernel_mast_hash);
+                triton_vm::verify(Stark::default(), &claim, single_proof)
+            }
             TransactionProof::ProofCollection(proof_collection) => {
                 proof_collection.verify(kernel_mast_hash)
             }
@@ -126,7 +134,7 @@ impl Transaction {
     /// `Transaction`) by updating the mutator set records according to a new
     /// `Block`.
     fn new_with_updated_mutator_set_records_given_primitive_witness(
-        old_primitive_witness: &PrimitiveWitness,
+        old_primitive_witness: PrimitiveWitness,
         block: &Block,
     ) -> Result<Transaction> {
         let mut msa_state: MutatorSetAccumulator =
@@ -221,28 +229,33 @@ impl Transaction {
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
     ///  4. Use resulting proof as new witness.
-    #[expect(clippy::diverging_sub_expression, reason = "under development")]
-    #[expect(unreachable_code, reason = "under development")]
-    #[expect(unused_variables, reason = "under development")]
     fn new_with_updated_mutator_set_records_given_proof(
-        old_transaction: &Transaction,
+        old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
+        old_single_proof: Proof,
     ) -> Result<Transaction> {
         let block_addition_records = block.kernel.body.transaction_kernel.outputs.clone();
         let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
         let mutator_set_update =
-            MutatorSetUpdate::new(block_removal_records, block_addition_records);
+            MutatorSetUpdate::new(block_removal_records, block_addition_records.clone());
 
         // apply mutator set update to get new mutator set accumulator
         let mut new_mutator_set_accumulator = previous_mutator_set_accumulator.clone();
-        let mut new_inputs = old_transaction.kernel.inputs.clone();
+        let mut new_inputs = old_transaction_kernel.inputs.clone();
         mutator_set_update
             .apply_to_accumulator_and_records(
                 &mut new_mutator_set_accumulator,
                 &mut new_inputs.iter_mut().collect_vec(),
             )
             .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
+        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
+            &previous_mutator_set_accumulator.aocl,
+            &block_addition_records
+                .iter()
+                .map(|addition_record| addition_record.canonical_commitment)
+                .collect_vec(),
+        );
 
         // Sanity check of block validity
         let msa_hash = new_mutator_set_accumulator.hash();
@@ -253,16 +266,38 @@ impl Transaction {
         );
 
         // compute new kernel
-        let mut new_kernel = old_transaction.kernel.clone();
+        let mut new_kernel = old_transaction_kernel.clone();
         new_kernel.inputs = new_inputs;
         new_kernel.mutator_set_hash = msa_hash;
 
         // compute updated proof through recursion
-        let update_proof = todo!();
+        let update_witness = UpdateWitness::from_old_transaction(
+            old_transaction_kernel.clone(),
+            old_single_proof.clone(),
+            previous_mutator_set_accumulator.clone(),
+            new_kernel.clone(),
+            block.kernel.body.mutator_set_accumulator.clone(),
+            aocl_successor_proof,
+        );
+        let update_claim = update_witness.claim();
+        let update_nondeterminism = update_witness.nondeterminism();
+        info!("updating transaction; starting update proof ...");
+        let update_proof = Update.prove(&update_claim, update_nondeterminism);
+        info!("done.");
+
+        let new_single_proof_witness = SingleProofWitness::from_update(update_proof, &new_kernel);
+        let new_single_proof_claim = new_single_proof_witness.claim();
+
+        info!("starting single proof via update ...");
+        let new_single_proof = SingleProof.prove(
+            &new_single_proof_claim,
+            new_single_proof_witness.nondeterminism(),
+        );
+        info!("done.");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(update_proof),
+            proof: TransactionProof::SingleProof(new_single_proof),
         })
     }
 
@@ -270,11 +305,11 @@ impl Transaction {
     /// compatibility with a new block. Note that for Proof witnesses, this will
     /// invalidate the proof, requiring an update.
     pub fn new_with_updated_mutator_set_records(
-        &self,
+        self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
     ) -> Result<Transaction, TransactionProofError> {
-        match &self.proof {
+        match self.proof {
             TransactionProof::Witness(primitive_witness) => {
                 Self::new_with_updated_mutator_set_records_given_primitive_witness(
                     primitive_witness,
@@ -282,11 +317,12 @@ impl Transaction {
                 )
                 .map_err(|_| TransactionProofError::CannotUpdatePrimitiveWitness)
             }
-            TransactionProof::SingleProof(_proof) => {
+            TransactionProof::SingleProof(proof) => {
                 Self::new_with_updated_mutator_set_records_given_proof(
-                    self,
+                    self.kernel,
                     previous_mutator_set_accumulator,
                     block,
+                    proof,
                 )
                 .map_err(|_| TransactionProofError::CannotUpdateSingleProof)
             }
@@ -426,6 +462,11 @@ impl Transaction {
     /// the given mutator set accumulator. Specifically, test whether the
     /// removal records determine indices absent in the mutator set sliding
     /// window Bloom filter, and whether the MMR membership proofs are valid.
+    ///
+    /// Why not testing AOCL MMR membership proofs? These are being verified in
+    /// PrimitiveWitness::validate and ProofCollection/RemovalRecordsIntegrity.
+    /// AOCL membership is a feature of *validity*, which is a pre-requisite to
+    /// confirmability.
     pub fn is_confirmable_relative_to(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
