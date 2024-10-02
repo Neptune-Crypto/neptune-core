@@ -147,9 +147,11 @@ impl Mempool {
     pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
-            TransactionProof::Witness(_) => panic!("can only insert single-proof transactions into mempool; not accepting witnesses"),
-            TransactionProof::SingleProof(_) => {},
-            TransactionProof::ProofCollection(_) => panic!("can only insert single-proof transactions into mempool; not accepting proof collections"),
+            TransactionProof::Witness(_) => panic!(
+                "can only insert single-proof transactions into mempool; not accepting witnesses"
+            ),
+            TransactionProof::SingleProof(_) => {}
+            TransactionProof::ProofCollection(_) => {}
         };
 
         // If transaction to be inserted conflicts with a transaction that's already
