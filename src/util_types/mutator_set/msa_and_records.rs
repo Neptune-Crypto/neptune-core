@@ -53,39 +53,6 @@ impl MsaAndRecords {
         );
         all_removal_records_can_remove && all_membership_proofs_are_valid
     }
-
-    /// Split an [MsaAndRecords] into multiple instances of the same type.
-    ///
-    /// input argument specifies the length of each returned instance.
-    ///
-    /// # Panics
-    /// Panics if input argument does not sum to the number of membership proofs
-    /// and removal records.
-    #[allow(dead_code, reason = "under development")]
-    pub(crate) fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
-        let resulting_size: usize = lengths.into_iter().sum();
-        assert_eq!(self.membership_proofs.len(), resulting_size);
-        assert_eq!(self.removal_records.len(), resulting_size);
-
-        let ret = Self {
-            mutator_set_accumulator: self.mutator_set_accumulator.to_owned(),
-            ..Default::default()
-        };
-        let mut ret = vec![ret.clone(); N];
-
-        let mut counter = 0;
-        for (length, elem) in lengths.into_iter().zip(ret.iter_mut()) {
-            for _ in 0..length {
-                elem.membership_proofs
-                    .push(self.membership_proofs[counter].clone());
-                elem.removal_records
-                    .push(self.removal_records[counter].clone());
-                counter += 1;
-            }
-        }
-
-        ret.try_into().unwrap()
-    }
 }
 
 impl Arbitrary for MsaAndRecords {
@@ -321,6 +288,40 @@ mod test {
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
 
+    impl MsaAndRecords {
+        /// Split an [MsaAndRecords] into multiple instances of the same type.
+        ///
+        /// input argument specifies the length of each returned instance.
+        ///
+        /// # Panics
+        /// Panics if input argument does not sum to the number of membership proofs
+        /// and removal records.
+        pub(crate) fn split_by<const N: usize>(&self, lengths: [usize; N]) -> [Self; N] {
+            let resulting_size: usize = lengths.into_iter().sum();
+            assert_eq!(self.membership_proofs.len(), resulting_size);
+            assert_eq!(self.removal_records.len(), resulting_size);
+
+            let ret = Self {
+                mutator_set_accumulator: self.mutator_set_accumulator.to_owned(),
+                ..Default::default()
+            };
+            let mut ret = vec![ret.clone(); N];
+
+            let mut counter = 0;
+            for (length, elem) in lengths.into_iter().zip(ret.iter_mut()) {
+                for _ in 0..length {
+                    elem.membership_proofs
+                        .push(self.membership_proofs[counter].clone());
+                    elem.removal_records
+                        .push(self.removal_records[counter].clone());
+                    counter += 1;
+                }
+            }
+
+            ret.try_into().unwrap()
+        }
+    }
+
     #[proptest(cases = 1)]
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
@@ -375,7 +376,7 @@ mod test {
                 original.membership_proofs[running_sum..running_sum + count].to_vec(),
                 split_msa_and_records[i].membership_proofs.to_vec()
             );
-            running_sum += 1;
+            running_sum += count;
         }
 
         assert_eq!(running_sum, total);
