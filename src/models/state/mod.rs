@@ -1384,7 +1384,7 @@ impl GlobalState {
 
     /// clears all Tx from mempool and notifies wallet of changes.
     pub async fn mempool_clear(&mut self) -> Result<()> {
-        let events = self.mempool.clear()?;
+        let events = self.mempool.clear();
         self.wallet_state
             .handle_mempool_events(self.chain.light_state(), events)
             .await
@@ -1406,7 +1406,7 @@ impl GlobalState {
         let events = self
             .mempool
             .update_with_block(prev_ms_accumulator, block)
-            .await?;
+            .await;
         self.wallet_state
             .handle_mempool_events(self.chain.light_state(), events)
             .await
@@ -1414,7 +1414,7 @@ impl GlobalState {
 
     /// prunes stale tx in mempool and notifies wallet of changes.
     pub async fn mempool_prune_stale_transactions(&mut self) -> Result<()> {
-        let events = self.mempool.prune_stale_transactions()?;
+        let events = self.mempool.prune_stale_transactions();
         self.wallet_state
             .handle_mempool_events(self.chain.light_state(), events)
             .await

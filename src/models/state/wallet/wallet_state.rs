@@ -327,14 +327,10 @@ impl WalletState {
                 self.mempool_unspent_utxos
                     .insert(tx_hash, announced_with_proofs);
             }
-            MempoolEvent::RemoveTx(tx) => {
+            MempoolEvent::RemoveTx(tx_hash) => {
                 trace!("handling mempool RemoveTx event.");
-                let tx_hash = Hash::hash(&tx);
                 self.mempool_spent_utxos.remove(&tx_hash);
                 self.mempool_unspent_utxos.remove(&tx_hash);
-            }
-            MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
-                // Utxos are not affected by MutatorSet update, so this is a no-op.
             }
         }
         Ok(())
