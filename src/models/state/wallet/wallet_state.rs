@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
+use futures::stream::StreamExt;
 use itertools::Itertools;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
@@ -62,6 +62,8 @@ use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 
+type SpentUtxo = (Utxo, AbsoluteIndexSet, MsMembershipProof, Option<u64>);
+
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
     pub wallet_secret: WalletSecret,
@@ -70,7 +72,7 @@ pub struct WalletState {
 
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
-    mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_spent_utxos: HashMap<Digest, Vec<SpentUtxo>>,
     mempool_unspent_utxos: HashMap<Digest, Vec<(AnnouncedUtxo, MsMembershipProof)>>,
 }
 
@@ -271,25 +273,59 @@ impl WalletState {
     ) -> Result<()> {
         match event {
             MempoolEvent::AddTx(tx) => {
-                trace!("handling mempool AddTx event.");
+                trace!(
+                    "handling mempool AddTx event for tx: {}.",
+                    Hash::hash(&tx).to_hex()
+                );
 
-                let spent_utxos = self.scan_for_spent_utxos(&tx).await;
+                let spent_utxos = self.scan_for_spent_utxos(&tx, true).await;
 
                 let announced_utxos = self
                     .scan_for_announced_utxos(&tx)
                     .chain(self.scan_for_expected_utxos(&tx).await);
 
-                let announced_with_proofs = announced_utxos.into_iter()
+                let announced_with_proofs = announced_utxos
+                    .into_iter()
                     .map(|au| {
                         let utxo_hash = Hash::hash(&au.utxo);
-                        let proof = tip_block.body().mutator_set_accumulator.prove(utxo_hash, au.sender_randomness, au.receiver_preimage);
+                        let proof = tip_block.body().mutator_set_accumulator.prove(
+                            utxo_hash,
+                            au.sender_randomness,
+                            au.receiver_preimage,
+                        );
                         (au, proof)
                     })
                     .collect_vec();
 
+                println!(
+                    "Found {} announced/expected utxos in mempool tx",
+                    announced_with_proofs.len()
+                );
+
                 let tx_hash = Hash::hash(&tx);
+                // for (u, _, _) in spent_utxos.iter() {
+                //     if let Some((idx, mut mutxo)) = self.wallet_db.monitored_utxos().get_all().await.into_iter().enumerate().find(|(_, m)| m.utxo == *u) {
+                //         // fixme:  MonitoredUtxo should have an enum Spent { Mempool, Block{...} }
+                //         mutxo.spent_in_block = Some((tip_block.hash(), tip_block.header().timestamp, tip_block.header().height));
+                //         self.wallet_db.monitored_utxos_mut().set(idx as Index, mutxo).await;
+                //     }
+                //     println!("added spent_utxo to mempool: {}", u.get_native_currency_amount());
+                // }
+                // for (au, proof) in announced_with_proofs.iter() {
+                //     let mut mutxo = MonitoredUtxo::new(au.utxo.clone(), self.number_of_mps_per_utxo);
+                //     mutxo.add_membership_proof_for_tip(tip_block.hash(), proof.clone());
+                //     self.wallet_db.monitored_utxos_mut().push(mutxo).await;
+                // }
+
+                for (u, ..) in spent_utxos.iter() {
+                    println!(
+                        "added spent_utxo to mempool: {}",
+                        u.get_native_currency_amount()
+                    );
+                }
                 self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
-                self.mempool_unspent_utxos.insert(tx_hash, announced_with_proofs);
+                self.mempool_unspent_utxos
+                    .insert(tx_hash, announced_with_proofs);
             }
             MempoolEvent::RemoveTx(tx) => {
                 trace!("handling mempool RemoveTx event.");
@@ -329,6 +365,39 @@ impl WalletState {
     ) -> NeptuneCoins {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
+        for wse in wallet_status.synced_spent.iter() {
+            println!(
+                "synced_spent utxo: {}",
+                wse.utxo.get_native_currency_amount()
+            )
+        }
+
+        for (wse, _) in wallet_status.synced_unspent.iter() {
+            println!(
+                "synced_unspent utxo: {}",
+                wse.utxo.get_native_currency_amount()
+            )
+        }
+
+        println!("-----");
+
+        for u in wallet_status.mempool_spent.iter() {
+            println!("mempool spent utxo: {}", u.get_native_currency_amount())
+        }
+        for (u, _) in wallet_status.mempool_unspent.iter() {
+            println!("mempool unspent utxo: {}", u.get_native_currency_amount())
+        }
+
+        println!("-----");
+
+        let utxos = wallet_status.unconfirmed_unspent_available_utxos_iter(timestamp);
+        for (u, _) in utxos {
+            println!(
+                "unconfirmed unspent utxo: {}",
+                u.get_native_currency_amount()
+            )
+        }
+
         wallet_status.synced_unspent_available_amount(timestamp)
     }
 
@@ -337,21 +406,9 @@ impl WalletState {
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> NeptuneCoins {
-        self.confirmed_balance(tip_digest, timestamp)
+        self.get_wallet_status_from_lock(tip_digest)
             .await
-            .checked_sub(
-                &self
-                    .mempool_spent_utxos_iter()
-                    .map(|u| u.get_native_currency_amount())
-                    .sum(),
-            )
-            .expect("balance must never be negative")
-            .safe_add(
-                self.mempool_unspent_utxos_iter()
-                    .map(|(u, _)| u.get_native_currency_amount())
-                    .sum(),
-            )
-            .expect("balance must never overflow")
+            .unconfirmed_unspent_available_amount(timestamp)
     }
 
     // note: does not verify we do not have any dups.
@@ -366,7 +423,8 @@ impl WalletState {
     async fn scan_for_spent_utxos(
         &self,
         transaction: &Transaction,
-    ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
+        include_mempool: bool,
+    ) -> Vec<SpentUtxo> {
         let confirmed_absolute_index_sets = transaction
             .kernel
             .inputs
@@ -381,13 +439,30 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some((i, monitored_utxo)) = stream.next().await {
-            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
+            let (proof, abs_i) = match monitored_utxo.get_latest_membership_proof_entry() {
+                Some((_, proof)) => (
+                    proof.clone(),
+                    proof.compute_indices(Hash::hash(&monitored_utxo.utxo)),
+                ),
                 None => continue,
             };
 
             if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((monitored_utxo.utxo, abs_i, i));
+                spent_own_utxos.push((monitored_utxo.utxo, abs_i, proof, Some(i)));
+            }
+        }
+
+        if include_mempool {
+            for (au, ms_proof) in self.mempool_unspent_utxos.values().flatten() {
+                let abs_i = ms_proof.compute_indices(Hash::hash(&au.utxo));
+                if transaction
+                    .kernel
+                    .inputs
+                    .iter()
+                    .any(|rr| rr.absolute_indices == abs_i)
+                {
+                    spent_own_utxos.push((au.utxo.clone(), abs_i, ms_proof.clone(), None));
+                }
             }
         }
         spent_own_utxos
@@ -605,8 +680,8 @@ impl WalletState {
     ) -> Result<()> {
         let transaction: Transaction = new_block.kernel.body.transaction.clone();
 
-        let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
-            self.scan_for_spent_utxos(&transaction).await;
+        let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, MsMembershipProof, Option<u64>)> =
+            self.scan_for_spent_utxos(&transaction, true).await;
 
         let onchain_received_outputs = self.scan_for_announced_utxos(&transaction);
 
@@ -849,22 +924,48 @@ impl WalletState {
             // membership proofs of spent UTXOs once they have been spent for M blocks.
             match spent_inputs
                 .iter()
-                .find(|(_, abs_i, _mutxo_list_index)| *abs_i == removal_record.absolute_indices)
+                .find(|(_, abs_i, ..)| *abs_i == removal_record.absolute_indices)
             {
                 None => (),
-                Some((_spent_utxo, _abs_i, mutxo_list_index)) => {
+                Some((spent_utxo, _abs_i, proof, maybe_mutxo_list_index)) => {
                     debug!(
-                        "Discovered own input at input {}, marking UTXO as spent.",
-                        block_tx_input_count
+                        "Discovered own input at input {} worth {}, marking UTXO as spent.",
+                        block_tx_input_count,
+                        spent_utxo.get_native_currency_amount(),
                     );
 
-                    let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index).await;
-                    spent_mutxo.spent_in_block = Some((
-                        new_block.hash(),
-                        new_block.kernel.header.timestamp,
-                        new_block.kernel.header.height,
-                    ));
-                    monitored_utxos.set(*mutxo_list_index, spent_mutxo).await;
+                    if let Some(mutxo_index) = maybe_mutxo_list_index {
+                        let mut found_spent_mutxo = monitored_utxos.get(*mutxo_index).await;
+                        found_spent_mutxo.spent_in_block = Some((
+                            new_block.hash(),
+                            new_block.kernel.header.timestamp,
+                            new_block.kernel.header.height,
+                        ));
+                        monitored_utxos.set(*mutxo_index, found_spent_mutxo).await;
+                    } else if let Some((i, mut mutxo)) = monitored_utxos
+                        .get_all()
+                        .await
+                        .into_iter()
+                        .enumerate()
+                        .find(|(_, m)| m.utxo == *spent_utxo)
+                    {
+                        mutxo.spent_in_block = Some((
+                            new_block.hash(),
+                            new_block.kernel.header.timestamp,
+                            new_block.kernel.header.height,
+                        ));
+                        monitored_utxos.set(i as Index, mutxo).await;
+                    } else {
+                        let mut mutxo =
+                            MonitoredUtxo::new(spent_utxo.clone(), self.number_of_mps_per_utxo);
+                        mutxo.add_membership_proof_for_tip(new_block.hash(), proof.clone());
+                        mutxo.spent_in_block = Some((
+                            new_block.hash(),
+                            new_block.kernel.header.timestamp,
+                            new_block.kernel.header.height,
+                        ));
+                        monitored_utxos.push(mutxo).await;
+                    }
                 }
             }
 
@@ -967,14 +1068,6 @@ impl WalletState {
     }
 
     pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
-        self.get_wallet_status_from_lock_internal(tip_digest, false).await
-    }
-
-    pub async fn get_wallet_unconfirmed_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
-        self.get_wallet_status_from_lock_internal(tip_digest, true).await
-    }
-
-    pub async fn get_wallet_status_from_lock_internal(&self, tip_digest: Digest, include_unconfirmed: bool) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -992,9 +1085,10 @@ impl WalletState {
                 if spent {
                     synced_spent.push(WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo));
                 } else {
-                    synced_unspent.push(
-                        (WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo), mp)
-                    );
+                    synced_unspent.push((
+                        WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo),
+                        mp,
+                    ));
                 }
             } else {
                 let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
@@ -1012,22 +1106,19 @@ impl WalletState {
             }
         }
 
-        if include_unconfirmed {
-            for utxo in self.mempool_spent_utxos_iter() {
-                synced_spent.push(WalletStatusElement::new(0, utxo.clone()));
-            }
-            for (utxo, ms_proof) in self.mempool_unspent_utxos_iter() {
-                synced_unspent.push((
-                    WalletStatusElement::new(0, utxo.clone()), ms_proof.clone()
-                ));
-            }
-        }
+        let mempool_spent = self.mempool_spent_utxos_iter().cloned().collect_vec();
+        let mempool_unspent = self
+            .mempool_unspent_utxos_iter()
+            .map(|(u, p)| (u.clone(), p.clone()))
+            .collect_vec();
 
         WalletStatus {
             synced_unspent,
             unsynced_unspent,
             synced_spent,
             unsynced_spent,
+            mempool_spent,
+            mempool_unspent,
         }
     }
 
@@ -1039,10 +1130,10 @@ impl WalletState {
     ) -> Result<TxInputList> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status = self.get_wallet_unconfirmed_status_from_lock(tip_digest).await;
+        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
-        if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {
+        if wallet_status.unconfirmed_unspent_available_amount(timestamp) < requested_amount {
             bail!(
                 "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
                 requested_amount,
@@ -1058,29 +1149,27 @@ impl WalletState {
         let mut ret = TxInputList::default();
         let mut allocated_amount = NeptuneCoins::zero();
 
-        while allocated_amount < requested_amount {
-            let (wallet_status_element, membership_proof) =
-                wallet_status.synced_unspent[ret.len()].clone();
+        for (utxo, ms_proof) in wallet_status.unconfirmed_unspent_available_utxos_iter(timestamp) {
+            if allocated_amount >= requested_amount {
+                break;
+            }
 
             // find spending key for this utxo.
-            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
+            let spending_key = match self.find_spending_key_for_utxo(utxo) {
                 Some(k) => k,
                 None => {
-                    warn!(
-                        "spending key not found for utxo: {:?}",
-                        wallet_status_element.utxo
-                    );
+                    warn!("spending key not found for utxo: {:?}", utxo);
                     continue;
                 }
             };
             let lock_script = spending_key.to_address().lock_script();
 
-            allocated_amount =
-                allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
+            allocated_amount += utxo.get_native_currency_amount();
+
             ret.push(TxInput {
-                utxo: wallet_status_element.utxo,
+                utxo: utxo.clone(),
                 lock_script: lock_script.clone(),
-                ms_membership_proof: membership_proof,
+                ms_membership_proof: ms_proof.clone(),
                 spending_key,
             });
         }
@@ -1426,6 +1515,7 @@ mod tests {
 
     mod wallet_balance {
         use generation_address::GenerationReceivingAddress;
+        use num_traits::CheckedSub;
 
         use super::*;
         use crate::models::blockchain::transaction::UtxoNotifyMethod;
@@ -1537,6 +1627,107 @@ mod tests {
                     .await,
                 coinbase_amt
             );
+
+            Ok(())
+        }
+    }
+
+    mod unconfirmed_transactions {
+        use generation_address::GenerationReceivingAddress;
+        use num_traits::CheckedSub;
+
+        use super::*;
+        use crate::models::blockchain::transaction::UtxoNotifyMethod;
+        use crate::models::state::wallet::address::ReceivingAddress;
+        use crate::models::state::GlobalStateLock;
+        use crate::tests::shared::mine_block_to_wallet;
+
+        async fn send_to_random_external_addr(
+            gsl: &mut GlobalStateLock,
+            amount: NeptuneCoins,
+        ) -> Result<()> {
+            let outputs = vec![(
+                ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(
+                    thread_rng().gen(),
+                )),
+                amount,
+            )];
+
+            send(gsl, outputs).await
+        }
+
+        async fn send(
+            gsl: &mut GlobalStateLock,
+            outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
+        ) -> Result<()> {
+            let change_key = gsl
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation);
+
+            let tx = {
+                let gs = gsl.lock_guard().await;
+                // create tx, with 5 coins going to 3rd party and 95 coins change back to self.
+                let mut tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotifyMethod::OnChain)?;
+                gs.create_transaction(
+                    &mut tx_outputs,
+                    change_key,
+                    UtxoNotifyMethod::OnChain,
+                    NeptuneCoins::zero(),
+                    Timestamp::now(),
+                )
+                .await?
+            };
+
+            // add the tx to the mempool.
+            // note that the wallet should be notified of these changes.
+            gsl.lock_guard_mut().await.mempool_insert(tx).await
+        }
+
+        async fn confirmed_balance(gsl: &mut GlobalStateLock) -> NeptuneCoins {
+            let gs = gsl.lock_guard().await;
+            gs.wallet_state
+                .confirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
+                .await
+        }
+
+        async fn unconfirmed_balance(gsl: &mut GlobalStateLock) -> NeptuneCoins {
+            let gs = gsl.lock_guard().await;
+            gs.wallet_state
+                .unconfirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
+                .await
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn spend_unconfirmed_tx() -> Result<()> {
+            let network = Network::RegTest;
+            let mut gsl = mock_genesis_global_state(network, 0, WalletSecret::new_random()).await;
+
+            let coinbase_amt = NeptuneCoins::new(100);
+            let send1_amt = NeptuneCoins::new(5);
+            let send2_amt = NeptuneCoins::new(10);
+
+            let unconfirmed_expected1 = coinbase_amt.checked_sub(&(send1_amt)).unwrap();
+            let unconfirmed_expected2 = coinbase_amt.checked_sub(&(send1_amt + send2_amt)).unwrap();
+            let block2_expected = unconfirmed_expected2 + coinbase_amt;
+
+            // mine a block to our wallet.  we should have 100 coins after.
+            mine_block_to_wallet(&mut gsl).await?;
+
+            send_to_random_external_addr(&mut gsl, send1_amt).await?;
+            // let _ = confirmed_balance(&mut gsl).await;
+            assert_eq!(confirmed_balance(&mut gsl).await, coinbase_amt);
+            assert_eq!(unconfirmed_balance(&mut gsl).await, unconfirmed_expected1);
+
+            send_to_random_external_addr(&mut gsl, send2_amt).await?;
+            assert_eq!(confirmed_balance(&mut gsl).await, coinbase_amt);
+            assert_eq!(unconfirmed_balance(&mut gsl).await, unconfirmed_expected2);
+
+            mine_block_to_wallet(&mut gsl).await?;
+            assert_eq!(confirmed_balance(&mut gsl).await, block2_expected);
+            assert_eq!(unconfirmed_balance(&mut gsl).await, block2_expected);
 
             Ok(())
         }

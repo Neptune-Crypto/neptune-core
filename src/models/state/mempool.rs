@@ -279,7 +279,7 @@ impl Mempool {
 
                 // Include transaction
                 remaining_storage -= transaction_size;
-                _fee_acc = _fee_acc + transaction_copy.kernel.fee;
+                _fee_acc += transaction_copy.kernel.fee;
                 transactions.push(transaction_copy)
             }
         }

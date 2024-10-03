@@ -1330,8 +1330,7 @@ impl GlobalState {
             // Update mempool with UTXOs from this block. This is done by removing all transaction
             // that became invalid/was mined by this block.
             myself
-                .mempool
-                .update_with_block(previous_ms_accumulator, &new_block)
+                .mempool_update_with_block(previous_ms_accumulator, &new_block)
                 .await?;
 
             myself.chain.light_state_mut().set_block(new_block);
@@ -1386,19 +1385,39 @@ impl GlobalState {
     /// clears all Tx from mempool and notifies wallet of changes.
     pub async fn mempool_clear(&mut self) -> Result<()> {
         let events = self.mempool.clear()?;
-        self.wallet_state.handle_mempool_events(self.chain.light_state(), events).await
+        self.wallet_state
+            .handle_mempool_events(self.chain.light_state(), events)
+            .await
     }
 
     /// adds Tx to mempool and notifies wallet of change.
     pub async fn mempool_insert(&mut self, transaction: Transaction) -> Result<()> {
         let events = self.mempool.insert(transaction)?;
-        self.wallet_state.handle_mempool_events(self.chain.light_state(), events).await
+        self.wallet_state
+            .handle_mempool_events(self.chain.light_state(), events)
+            .await
+    }
+
+    async fn mempool_update_with_block(
+        &mut self,
+        prev_ms_accumulator: MutatorSetAccumulator,
+        block: &Block,
+    ) -> Result<()> {
+        let events = self
+            .mempool
+            .update_with_block(prev_ms_accumulator, block)
+            .await?;
+        self.wallet_state
+            .handle_mempool_events(self.chain.light_state(), events)
+            .await
     }
 
     /// prunes stale tx in mempool and notifies wallet of changes.
     pub async fn mempool_prune_stale_transactions(&mut self) -> Result<()> {
         let events = self.mempool.prune_stale_transactions()?;
-        self.wallet_state.handle_mempool_events(self.chain.light_state(), events).await
+        self.wallet_state
+            .handle_mempool_events(self.chain.light_state(), events)
+            .await
     }
 }
 
