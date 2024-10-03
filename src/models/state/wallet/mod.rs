@@ -867,8 +867,8 @@ mod wallet_tests {
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let network = Network::Main;
         let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let alice_global_state = mock_genesis_global_state(network, 2, alice_wallet_secret).await;
-        let alice_spending_key = alice_global_state
+        let alice = mock_genesis_global_state(network, 2, alice_wallet_secret).await;
+        let alice_spending_key = alice
             .lock_guard()
             .await
             .wallet_state
@@ -880,9 +880,9 @@ mod wallet_tests {
             .await
             .wallet_secret;
         let bob_receiver_global_state = mock_genesis_global_state(network, 2, bob_wallet).await;
-        let mut bob_receiver_global_state = bob_receiver_global_state.lock_guard_mut().await;
+        let mut bob = bob_receiver_global_state.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-        let bobs_original_balance = bob_receiver_global_state
+        let bobs_original_balance = bob
             .get_wallet_status_for_tip()
             .await
             .synced_unspent_available_amount(in_seven_months);
@@ -894,13 +894,10 @@ mod wallet_tests {
         let receiver_data_12_to_alice = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: alice_address.privacy_digest,
-            sender_randomness: bob_receiver_global_state
-                .wallet_state
-                .wallet_secret
-                .generate_sender_randomness(
-                    genesis_block.kernel.header.height,
-                    alice_address.privacy_digest,
-                ),
+            sender_randomness: bob.wallet_state.wallet_secret.generate_sender_randomness(
+                genesis_block.kernel.header.height,
+                alice_address.privacy_digest,
+            ),
             utxo: Utxo {
                 coins: NeptuneCoins::new(12).to_native_coins(),
                 lock_script_hash: alice_address.lock_script().hash(),
@@ -909,20 +906,17 @@ mod wallet_tests {
         let receiver_data_one_to_alice = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: alice_address.privacy_digest,
-            sender_randomness: bob_receiver_global_state
-                .wallet_state
-                .wallet_secret
-                .generate_sender_randomness(
-                    genesis_block.kernel.header.height,
-                    alice_address.privacy_digest,
-                ),
+            sender_randomness: bob.wallet_state.wallet_secret.generate_sender_randomness(
+                genesis_block.kernel.header.height,
+                alice_address.privacy_digest,
+            ),
             utxo: Utxo {
                 coins: NeptuneCoins::new(1).to_native_coins(),
                 lock_script_hash: alice_address.lock_script().hash(),
             },
         };
         let receiver_data_to_alice = vec![receiver_data_12_to_alice, receiver_data_one_to_alice];
-        let valid_tx = bob_receiver_global_state
+        let valid_tx = bob
             .create_transaction(
                 receiver_data_to_alice.clone(),
                 NeptuneCoins::new(2),
@@ -939,7 +933,7 @@ mod wallet_tests {
 
         // Update wallet state with block_1
         let mut alice_monitored_utxos =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state).await;
+            get_monitored_utxos(&alice.lock_guard().await.wallet_state).await;
         assert!(
             alice_monitored_utxos.is_empty(),
             "List of monitored UTXOs must be empty prior to updating wallet state"
@@ -947,7 +941,7 @@ mod wallet_tests {
 
         // Expect the UTXO outputs
         for receive_data in receiver_data_to_alice {
-            alice_global_state
+            alice
                 .lock_guard_mut()
                 .await
                 .wallet_state
@@ -960,37 +954,32 @@ mod wallet_tests {
                 )
                 .unwrap();
         }
-        bob_receiver_global_state
-            .set_new_tip(block_1.clone())
-            .await
-            .unwrap();
+        bob.set_new_tip(block_1.clone()).await.unwrap();
 
         assert_eq!(
             bobs_original_balance
                 .checked_sub(&NeptuneCoins::new(15))
                 .unwrap(),
-            bob_receiver_global_state
-                .get_wallet_status_for_tip()
+            bob.get_wallet_status_for_tip()
                 .await
                 .synced_unspent_available_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .set_new_tip(block_1.clone())
             .await
             .unwrap();
 
-        // Verify that update added 4 UTXOs to list of monitored transactions:
-        // three as regular outputs, and one as coinbase UTXO
-        alice_monitored_utxos =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state).await;
+        // Verify that update added 2 UTXOs to list of monitored transactions,
+        // from Bob's tx.
+        alice_monitored_utxos = get_monitored_utxos(&alice.lock_guard().await.wallet_state).await;
         assert_eq!(
             2,
             alice_monitored_utxos.len(),
-            "List of monitored UTXOs have length 4 after updating wallet state"
+            "List of monitored UTXOs have length 2 after updating wallet state"
         );
 
         // Verify that all monitored UTXOs have valid membership proofs
@@ -1019,7 +1008,7 @@ mod wallet_tests {
                 rng.gen(),
             );
             next_block = ret.0;
-            alice_global_state
+            alice
                 .lock_guard_mut()
                 .await
                 .wallet_state
@@ -1031,21 +1020,17 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
-            alice_global_state
+            alice
                 .lock_guard_mut()
                 .await
                 .set_new_tip(next_block.clone())
                 .await
                 .unwrap();
-            bob_receiver_global_state
-                .set_new_tip(next_block.clone())
-                .await
-                .unwrap();
+            bob.set_new_tip(next_block.clone()).await.unwrap();
         }
 
         let first_block_after_spree = next_block;
-        alice_monitored_utxos =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state).await;
+        alice_monitored_utxos = get_monitored_utxos(&alice.lock_guard().await.wallet_state).await;
         assert_eq!(
             2 + num_blocks_mined_by_alice,
             alice_monitored_utxos.len(),
@@ -1077,7 +1062,7 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let alice_wallet_status = alice_global_state
+        let alice_wallet_status = alice
             .lock_guard()
             .await
             .wallet_state
@@ -1103,7 +1088,7 @@ mod wallet_tests {
         );
 
         // Bob mines a block, ignoring Alice's spree and forking instead
-        let bob_wallet_spending_key = bob_receiver_global_state
+        let bob_wallet_spending_key = bob
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -1113,18 +1098,15 @@ mod wallet_tests {
             bob_wallet_spending_key.to_address(),
             rng.gen(),
         );
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .set_new_tip(block_2_b.clone())
             .await
             .unwrap();
-        bob_receiver_global_state
-            .set_new_tip(block_2_b.clone())
-            .await
-            .unwrap();
+        bob.set_new_tip(block_2_b.clone()).await.unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
+            get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
                 .filter(|x| x.is_synced_to(block_2_b.hash()))
@@ -1156,7 +1138,7 @@ mod wallet_tests {
             bob_wallet_spending_key.to_address(),
             rng.gen(),
         );
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1166,7 +1148,7 @@ mod wallet_tests {
             )
             .await?;
         let alice_monitored_utxos_after_continued_spree: Vec<_> =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
+            get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
                 .filter(|monitored_utxo| {
@@ -1208,7 +1190,7 @@ mod wallet_tests {
             },
             sender_randomness: rng.gen(),
         };
-        let tx_from_bob = bob_receiver_global_state
+        let tx_from_bob = bob
             .create_transaction(
                 vec![alice_receiver_data_six.clone()],
                 NeptuneCoins::new(4),
@@ -1216,7 +1198,7 @@ mod wallet_tests {
             )
             .await
             .unwrap();
-        let (coinbase_tx, cb_expected) = alice_global_state
+        let (coinbase_tx, cb_expected) = alice
             .lock_guard_mut()
             .await
             .make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
@@ -1227,7 +1209,7 @@ mod wallet_tests {
             block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"
         );
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1239,7 +1221,7 @@ mod wallet_tests {
                 UtxoNotifier::OwnMiner,
             )
             .unwrap();
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1251,7 +1233,7 @@ mod wallet_tests {
                 UtxoNotifier::Cli,
             )
             .unwrap();
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1262,7 +1244,7 @@ mod wallet_tests {
             .await?;
 
         let alice_monitored_utxos_3b: Vec<_> =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
+            get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
                 .filter(|x| x.is_synced_to(block_3_b.hash()))
@@ -1302,7 +1284,7 @@ mod wallet_tests {
             bob_wallet_spending_key.to_address(),
             rng.gen(),
         );
-        alice_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1317,7 +1299,7 @@ mod wallet_tests {
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
         let alice_monitored_utxos_after_second_block_after_spree: Vec<_> =
-            get_monitored_utxos(&alice_global_state.lock_guard().await.wallet_state)
+            get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
                 .into_iter()
                 .filter(|x| x.is_synced_to(second_block_continuing_spree.hash()))
