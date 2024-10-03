@@ -133,7 +133,7 @@ mod tests {
         );
 
         for _ in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let mp = rusty_mutator_set
                 .ams()

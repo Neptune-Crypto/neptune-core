@@ -520,7 +520,7 @@ mod ms_accumulator_tests {
 
         // Insert batch-size items and verify that a new batch interval is reported
         for _ in 0..BATCH_SIZE + 1 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
             let (start, end) = accumulator.active_window_chunk_interval();
@@ -545,7 +545,7 @@ mod ms_accumulator_tests {
             prop_assert_eq!(batch_interval, start);
             prop_assert_eq!(batch_interval + (WINDOW_SIZE / CHUNK_SIZE) as u64, end);
 
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             accumulator.add(&addition_record);
         }
@@ -561,7 +561,7 @@ mod ms_accumulator_tests {
         // Add N elements to the MS
         let num_additions = 44;
         for _ in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
@@ -661,7 +661,7 @@ mod ms_accumulator_tests {
 
                 if rng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
-                    let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                    let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
                         commit(item, sender_randomness, receiver_preimage.hash());

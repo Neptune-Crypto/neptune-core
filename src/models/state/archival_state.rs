@@ -865,6 +865,7 @@ mod archival_state_tests {
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -1224,12 +1225,13 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() -> Result<()> {
-        let network = Network::RegTest;
-        let mut rng = thread_rng();
         // Make a rollback of multiple blocks that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
+
+        let network = Network::RegTest;
+        let mut rng = thread_rng();
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
@@ -1242,61 +1244,24 @@ mod archival_state_tests {
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
-        // this variable might come in handy for reporting purposes
-        let mut _aocl_index_of_consumed_input = 0;
+        let in_seven_months = Timestamp::now() + Timestamp::months(7);
 
-        let some_money = NeptuneCoins::new(54);
-
-        for i in 0..10 {
+        for _ in 0..10 {
             // Create next block with inputs and outputs
-            let seven_months = Timestamp::months(7);
-            let receiver_data = vec![
-                UtxoReceiverData::new(
-                    Utxo::new_native_coin(LockScript::anyone_can_spend(), some_money),
-                    rng.gen(),
-                    rng.gen(),
-                ),
-                UtxoReceiverData::new(
-                    Utxo::new_native_coin(LockScript::anyone_can_spend(), some_money),
-                    rng.gen(),
-                    rng.gen(),
-                ),
-            ];
-            let now = Timestamp::now();
-            let sender_tx = global_state
-                .create_transaction(receiver_data, NeptuneCoins::new(4), now + seven_months)
-                .await
-                .unwrap();
-            let (coinbase_tx, _) =
-                global_state.make_coinbase_transaction(NeptuneCoins::zero(), now + seven_months);
-            let block_tx = coinbase_tx.merge_with(sender_tx, Default::default());
+
+            let removal_records = {
+                let (_, _, rr0) = mock_item_mp_rr_for_init_msa();
+                let (_, _, rr1) = mock_item_mp_rr_for_init_msa();
+                vec![rr0, rr1]
+            };
+            let addition_records = vec![];
+
+            let tx = make_mock_transaction(removal_records, addition_records);
             let next_block =
-                Block::new_block_from_template(&previous_block, block_tx, now + seven_months, None);
+                Block::new_block_from_template(&previous_block, tx, in_seven_months, None);
 
-            assert!(
-                next_block.is_valid(&previous_block, now + seven_months),
-                "next block ({i}) not valid for devnet"
-            );
-
-            // Store the produced block as tip
-            {
-                // 2. Update archival-mutator set with produced block
-                global_state
-                    .chain
-                    .archival_state_mut()
-                    .update_mutator_set(&next_block)
-                    .await
-                    .unwrap();
-            }
-
-            // Genesis block may have a different number of outputs than the blocks produced above
-            if i == 0 {
-                _aocl_index_of_consumed_input +=
-                    genesis_block.kernel.body.transaction_kernel.outputs.len() as u64;
-            } else {
-                _aocl_index_of_consumed_input +=
-                    next_block.kernel.body.transaction_kernel.outputs.len() as u64;
-            }
+            // 2. Update archival-mutator set with produced block
+            global_state.set_new_tip(next_block.clone()).await.unwrap();
 
             previous_block = next_block;
         }
@@ -1309,11 +1274,6 @@ mod archival_state_tests {
                 own_receiving_address,
                 rng.gen(),
             );
-            global_state
-                .chain
-                .archival_state_mut()
-                .write_block_as_tip(&mock_block_1b)
-                .await?;
             num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
@@ -2868,6 +2828,7 @@ mod archival_state_tests {
 
     use crate::config_models::cli_args;
     use crate::config_models::data_directory::DataDirectory;
+    use crate::util_types::test_shared::mutator_set::mock_item_mp_rr_for_init_msa;
 
     #[traced_test]
     #[tokio::test]

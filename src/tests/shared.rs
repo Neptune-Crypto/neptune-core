@@ -99,6 +99,7 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
@@ -767,6 +768,22 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
         notification_received: SystemTime::now(),
         mined_in_block: None,
     }
+}
+
+pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
+    let mut rng = rand::thread_rng();
+    let item: Digest = rng.gen();
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
+    (item, sender_randomness, receiver_preimage)
+}
+
+pub(crate) fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, RemovalRecord) {
+    let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+    let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+    let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+    let removal_record: RemovalRecord = accumulator.drop(item, &mp);
+    (item, mp, removal_record)
 }
 
 // TODO: Change this function into something more meaningful!

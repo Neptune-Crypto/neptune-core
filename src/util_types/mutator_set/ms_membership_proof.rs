@@ -609,14 +609,14 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
+    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
 
     #[test]
     fn mp_equality_test() {
         let mut rng = thread_rng();
 
-        let (_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
         let base_mp = MsMembershipProof {
             sender_randomness,
@@ -686,7 +686,7 @@ mod ms_proof_tests {
         // in this code base as a macro. So this is basically a test of that macro.
         let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 

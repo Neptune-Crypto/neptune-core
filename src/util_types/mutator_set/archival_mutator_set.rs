@@ -468,7 +468,7 @@ mod archival_mutator_set_tests {
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
+    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
     #[tokio::test]
     async fn archival_set_commitment_test() {
@@ -480,7 +480,7 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for i in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = archival_mutator_set
@@ -921,7 +921,7 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for _ in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = archival_mutator_set
@@ -969,7 +969,7 @@ mod archival_mutator_set_tests {
             let mut membership_proofs: Vec<MsMembershipProof> = vec![];
             let mut items: Vec<Digest> = vec![];
             for _ in 0..num_additions {
-                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                 let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 let membership_proof = archival_mutator_set
@@ -1060,7 +1060,7 @@ mod archival_mutator_set_tests {
     >(
         archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         let membership_proof = archival_mutator_set
             .prove(item, sender_randomness, receiver_preimage)

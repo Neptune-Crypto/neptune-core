@@ -393,14 +393,6 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
 
-    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
-        let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
-        let removal_record: RemovalRecord = accumulator.drop(item, &mp);
-        (item, mp, removal_record)
-    }
-
     impl AbsoluteIndexSet {
         /// Test-function used for negative tests of removal records
         pub(crate) fn increment_bloom_filter_index(&mut self, index: usize) {
@@ -415,7 +407,7 @@ mod removal_record_tests {
 
     #[test]
     fn increment_bloom_filter_index_behaves_as_expected() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
         let original_index_set = removal_record.absolute_indices;
         for i in 0..NUM_TRIALS as usize {
             let mut mutated_index_set = original_index_set;
@@ -430,7 +422,7 @@ mod removal_record_tests {
 
     #[test]
     fn get_size_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let serialization_result = bincode::serialize(&removal_record).unwrap();
         let reported_size = removal_record.get_size();
@@ -444,7 +436,7 @@ mod removal_record_tests {
     #[test]
     fn split_by_activity_one_element_test() {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
         accumulator.add(&mp.addition_record(item));
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
@@ -467,7 +459,7 @@ mod removal_record_tests {
 
     #[test]
     fn verify_that_removal_records_and_mp_indices_agree() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+        let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
@@ -482,7 +474,7 @@ mod removal_record_tests {
 
     #[test]
     fn hash_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
@@ -502,7 +494,7 @@ mod removal_record_tests {
 
     #[test]
     fn get_chunkidx_to_indices_test() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+        let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
@@ -528,7 +520,7 @@ mod removal_record_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
 
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord>(&json).unwrap();
@@ -540,7 +532,7 @@ mod removal_record_tests {
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record: AdditionRecord =
             commit(item, sender_randomness, receiver_preimage.hash());
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
@@ -569,7 +561,7 @@ mod removal_record_tests {
             accumulator.active_window_chunk_interval();
         let num_chunks_in_active_window = max_index_in_active_window - min_index_in_active_window;
 
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record: AdditionRecord =
             commit(item, sender_randomness, receiver_preimage.hash());
 
@@ -602,7 +594,7 @@ mod removal_record_tests {
         let mut mps = vec![];
         let mut items = vec![];
         for j in 0..initial_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
@@ -654,7 +646,7 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
                     commit(item, sender_randomness, receiver_preimage.hash());
@@ -737,7 +729,7 @@ mod removal_record_tests {
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash());

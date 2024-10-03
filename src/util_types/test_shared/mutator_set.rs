@@ -60,12 +60,20 @@ pub async fn get_all_indices_with_duplicates<
     ret
 }
 
-pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
+pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
     let mut rng = rand::thread_rng();
     let item: Digest = rng.gen();
     let sender_randomness: Digest = rng.gen();
     let receiver_preimage: Digest = rng.gen();
     (item, sender_randomness, receiver_preimage)
+}
+
+pub(crate) fn mock_item_mp_rr_for_init_msa() -> (Digest, MsMembershipProof, RemovalRecord) {
+    let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+    let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+    let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+    let removal_record: RemovalRecord = accumulator.drop(item, &mp);
+    (item, mp, removal_record)
 }
 
 #[allow(clippy::type_complexity)]
@@ -78,7 +86,7 @@ pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
 }
 
 pub fn insert_mock_item(mutator_set: &mut MutatorSetAccumulator) -> (MsMembershipProof, Digest) {
-    let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+    let (new_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
     let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
     let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
@@ -379,7 +387,7 @@ mod shared_tests_test {
         let mut rms = empty_rusty_mutator_set().await;
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;
-        let _ = make_item_and_randomnesses();
+        let _ = mock_item_and_randomnesses();
         let _ = insert_mock_item(&mut ams.accumulator().await);
     }
 

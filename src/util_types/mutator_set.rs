@@ -95,6 +95,7 @@ mod accumulation_scheme_tests {
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;
+    use crate::tests::shared::mock_item_and_randomnesses;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::test_shared::mutator_set::*;
 
@@ -110,7 +111,7 @@ mod accumulation_scheme_tests {
         );
 
         for i in 0..BATCH_SIZE {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             mutator_set.add(&addition_record);
             assert_eq!(
@@ -121,7 +122,7 @@ mod accumulation_scheme_tests {
             );
         }
 
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         mutator_set.add(&addition_record);
         assert_eq!(
@@ -139,7 +140,7 @@ mod accumulation_scheme_tests {
         // Add one element to append-only commitment list
         let mut set_with_aocl_append = MutatorSetAccumulator::default();
 
-        let (item0, _sender_randomness, _receiver_preimage) = make_item_and_randomnesses();
+        let (item0, _sender_randomness, _receiver_preimage) = mock_item_and_randomnesses();
 
         set_with_aocl_append.aocl.append(item0);
         let hash_of_aocl_append = set_with_aocl_append.hash();
@@ -186,7 +187,7 @@ mod accumulation_scheme_tests {
         // that it always returns something of length `NUM_TRIALS`, and that the
         // returned values are in the expected range.
 
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let ret: [u128; NUM_TRIALS as usize] =
             get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
         assert_eq!(NUM_TRIALS as usize, ret.len());
@@ -199,7 +200,7 @@ mod accumulation_scheme_tests {
         // and always returns something of length `NUM_TRIALS`.
 
         for _ in 0..1000 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] =
                 get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
             assert_eq!(NUM_TRIALS as usize, ret.len());
@@ -207,7 +208,7 @@ mod accumulation_scheme_tests {
         }
 
         for _ in 0..1000 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices(
                 item,
                 sender_randomness,
@@ -250,7 +251,7 @@ mod accumulation_scheme_tests {
         let empty_mutator_set = MutatorSetAccumulator::default();
 
         for _ in 0..2 * BATCH_SIZE + 2 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash());
@@ -267,7 +268,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_membership_proof_update_from_add() {
         let mut mutator_set = MutatorSetAccumulator::default();
-        let (own_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (own_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
         let addition_record = commit(own_item, sender_randomness, receiver_preimage.hash());
         let mut membership_proof =
@@ -275,7 +276,7 @@ mod accumulation_scheme_tests {
         mutator_set.add_helper(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-        let (new_item, new_sender_randomness, new_receiver_preimage) = make_item_and_randomnesses();
+        let (new_item, new_sender_randomness, new_receiver_preimage) = mock_item_and_randomnesses();
         let new_addition_record = commit(
             new_item,
             new_sender_randomness,
@@ -336,7 +337,7 @@ mod accumulation_scheme_tests {
         for i in 0..num_additions {
             println!("loop iteration {}", i);
 
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
@@ -368,7 +369,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_add_and_prove() {
         let mut mutator_set = MutatorSetAccumulator::default();
-        let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
+        let (item0, sender_randomness0, receiver_preimage0) = mock_item_and_randomnesses();
 
         let addition_record = commit(item0, sender_randomness0, receiver_preimage0.hash());
         let membership_proof = mutator_set.prove(item0, sender_randomness0, receiver_preimage0);
@@ -380,7 +381,7 @@ mod accumulation_scheme_tests {
         assert!(mutator_set.verify(item0, &membership_proof));
 
         // Insert a new item and verify that this still works
-        let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
+        let (item1, sender_randomness1, receiver_preimage1) = mock_item_and_randomnesses();
         let new_ar = commit(item1, sender_randomness1, receiver_preimage1.hash());
         let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1);
         assert!(!mutator_set.verify(item1, &new_mp));
@@ -393,7 +394,7 @@ mod accumulation_scheme_tests {
         // is that we want to make sure that the window slides into a new
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let other_ar = commit(item, sender_randomness, receiver_preimage.hash());
             let other_mp = mutator_set.prove(item, sender_randomness, receiver_preimage);
             assert!(!mutator_set.verify(item, &other_mp));
@@ -425,7 +426,7 @@ mod accumulation_scheme_tests {
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
-                let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                let (new_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                 let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
                 let membership_proof =
@@ -489,7 +490,7 @@ mod accumulation_scheme_tests {
         let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
 
         for _ in 0..num_additions {
-            let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (new_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record = commit(new_item, sender_randomness, receiver_preimage.hash());
             let membership_proof =
