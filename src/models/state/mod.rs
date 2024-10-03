@@ -532,18 +532,17 @@ impl GlobalState {
 
         // A coinbase transaction implies mining. So you *must*
         // be able to create a SingleProof.
-        info!("Start generating proof collection");
-        let proof_collection = ProofCollection::produce(&primitive_witness);
-        info!("Done: generating proof collection");
-        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-        let claim = single_proof_witness.claim();
-        let nondeterminism = single_proof_witness.nondeterminism();
-
         info!("Start: generate single proof for coinbase transaction");
-        let proof = TransactionProof::SingleProof(SingleProof.prove(&claim, nondeterminism));
+        let proof = SingleProof::produce(&primitive_witness);
         info!("Done: generating single proof for coinbase transaction");
 
-        (Transaction { kernel, proof }, utxo_info_for_coinbase)
+        (
+            Transaction {
+                kernel,
+                proof: TransactionProof::SingleProof(proof),
+            },
+            utxo_info_for_coinbase,
+        )
     }
 
     /// Generate a change UTXO to ensure that the difference in input amount
@@ -911,7 +910,7 @@ impl GlobalState {
         debug!("primitive witness for transaction: {}", primitive_witness);
 
         info!(
-            "Start: generate proof collection for {}-in {}-out transaction",
+            "Start: generate proof for {}-in {}-out transaction",
             primitive_witness.input_utxos.utxos.len(),
             primitive_witness.output_utxos.utxos.len()
         );
@@ -921,14 +920,9 @@ impl GlobalState {
                 TransactionProof::ProofCollection(ProofCollection::produce(&primitive_witness))
             }
             TxProvingCapability::SingleProof => {
-                let proof_collection = ProofCollection::produce(&primitive_witness);
-                let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-                let claim = single_proof_witness.claim();
-                let nondeterminism = single_proof_witness.nondeterminism();
-                TransactionProof::SingleProof(SingleProof.prove(&claim, nondeterminism))
+                TransactionProof::SingleProof(SingleProof::produce(&primitive_witness))
             }
         };
-        info!("Done generating proof collection");
 
         Transaction { kernel, proof }
     }
@@ -1543,6 +1537,10 @@ mod global_state_tests {
         prover_capability: TxProvingCapability,
     ) -> Result<Transaction> {
         // UTXO data: inputs, outputs, and supporting witness data
+        debug!(
+            "creating tx with timestamp and prover capability {:?}",
+            prover_capability
+        );
         let (
             inputs,
             spendable_utxos_and_mps,
@@ -1555,6 +1553,7 @@ mod global_state_tests {
             .await
             .generate_utxo_data_for_transaction(&mut receiver_data, fee, timestamp)
             .await?;
+        debug!("Generated UTXO data for tx");
 
         // other data
         let public_announcements = receiver_data

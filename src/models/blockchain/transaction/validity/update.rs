@@ -741,12 +741,7 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let proof_collection = ProofCollection::produce(&primitive_witness);
-        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-        let proof = SingleProof.prove(
-            &single_proof_witness.claim(),
-            single_proof_witness.nondeterminism(),
-        );
+        let proof = SingleProof::produce(&primitive_witness);
 
         let mut new_kernel = primitive_witness.kernel.clone();
         let mut new_msa = primitive_witness.mutator_set_accumulator.clone();

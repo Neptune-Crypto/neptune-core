@@ -11,7 +11,9 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
+use tracing::info;
 
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_type_scripts_claim::GenerateCollectTypeScriptsClaim;
@@ -20,6 +22,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_loc
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
@@ -269,6 +272,23 @@ impl SingleProof {
             input: kernel_mast_hash.reversed().values().to_vec(),
             output: vec![],
         }
+    }
+
+    /// Generate a [SingleProof] for the transaction, given its primitive
+    /// witness.
+    ///
+    /// This involves generating a [ProofCollection] as an intermediate step.
+    pub(crate) fn produce(primitive_witness: &PrimitiveWitness) -> Proof {
+        let proof_collection = ProofCollection::produce(primitive_witness);
+        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+        let claim = single_proof_witness.claim();
+        let nondeterminism = single_proof_witness.nondeterminism();
+
+        info!("Start: generate single proof");
+        let single_proof = SingleProof.prove(&claim, nondeterminism);
+        info!("Done");
+
+        single_proof
     }
 }
 

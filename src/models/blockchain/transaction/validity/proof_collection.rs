@@ -10,6 +10,7 @@ use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
 use tracing::debug;
+use tracing::info;
 
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
@@ -190,7 +191,7 @@ impl ProofCollection {
                 tsaw.prove(txk_mast_hash, salted_inputs_hash, salted_outputs_hash)
             })
             .collect_vec();
-        debug!("done proving");
+        info!("done proving proof collection");
 
         // collect hashes
         let lock_script_hashes = primitive_witness
@@ -221,9 +222,9 @@ impl ProofCollection {
     }
 
     pub fn verify(&self, txk_mast_hash: Digest) -> bool {
-        println!("verifying, txk hash: {}", txk_mast_hash);
-        println!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
-        println!(
+        debug!("verifying, txk hash: {}", txk_mast_hash);
+        debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
+        debug!(
             "verifying, salted outputs hash: {}",
             self.salted_outputs_hash
         );
@@ -238,7 +239,7 @@ impl ProofCollection {
             input: self.kernel_mast_hash.reversed().values().to_vec(),
             output: self.salted_inputs_hash.values().to_vec(),
         };
-        println!(
+        debug!(
             "removal records integrity claim: {:?}",
             removal_records_integrity_claim
         );
@@ -295,46 +296,46 @@ impl ProofCollection {
             .collect_vec();
 
         // verify
-        println!("verifying removal records integrity ...");
+        debug!("verifying removal records integrity ...");
         let rri = triton_vm::verify(
             Stark::default(),
             &removal_records_integrity_claim,
             &self.removal_records_integrity,
         );
-        println!("{rri}");
-        println!("verifying kernel to outputs ...");
+        debug!("{rri}");
+        debug!("verifying kernel to outputs ...");
         let k2o = triton_vm::verify(
             Stark::default(),
             &kernel_to_outputs_claim,
             &self.kernel_to_outputs,
         );
-        println!("{k2o}");
-        println!("verifying collect lock scripts ...");
+        debug!("{k2o}");
+        debug!("verifying collect lock scripts ...");
         let cls = triton_vm::verify(
             Stark::default(),
             &collect_lock_scripts_claim,
             &self.collect_lock_scripts,
         );
-        println!("{cls}");
-        println!("verifying collect type scripts ...");
+        debug!("{cls}");
+        debug!("verifying collect type scripts ...");
         let cts = triton_vm::verify(
             Stark::default(),
             &collect_type_scripts_claim,
             &self.collect_type_scripts,
         );
-        println!("{cts}");
-        println!("verifying that all lock scripts halt ...");
+        debug!("{cts}");
+        debug!("verifying that all lock scripts halt ...");
         let lsh = lock_script_claims
             .iter()
             .zip(self.lock_scripts_halt.iter())
             .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
-        println!("{lsh}");
-        println!("verifying that all type scripts halt ...");
+        debug!("{lsh}");
+        debug!("verifying that all type scripts halt ...");
         let tsh = type_script_claims
             .iter()
             .zip(self.type_scripts_halt.iter())
             .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
-        println!("{tsh}");
+        debug!("{tsh}");
 
         // and all bits together and return
         rri && k2o && cls && cts && lsh && tsh

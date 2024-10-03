@@ -994,25 +994,14 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let proof_collection_1 = ProofCollection::produce(&primitive_witness_1);
-        let single_proof_witness_1 = SingleProofWitness::from_collection(proof_collection_1);
-        let proof_1 = SingleProof.prove(
-            &single_proof_witness_1.claim(),
-            single_proof_witness_1.nondeterminism(),
-        );
-
-        let proof_collection_2 = ProofCollection::produce(&primitive_witness_2);
-        let single_proof_witness_2 = SingleProofWitness::from_collection(proof_collection_2);
-        let proof_2 = SingleProof.prove(
-            &single_proof_witness_2.claim(),
-            single_proof_witness_2.nondeterminism(),
-        );
+        let single_proof_1 = SingleProof::produce(&primitive_witness_1);
+        let single_proof_2 = SingleProof::produce(&primitive_witness_2);
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,
-            proof_1,
+            single_proof_1,
             primitive_witness_2.kernel,
-            proof_2,
+            single_proof_2,
             shuffle_seed,
         )
     }
