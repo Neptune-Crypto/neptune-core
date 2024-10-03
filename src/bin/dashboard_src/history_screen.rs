@@ -168,7 +168,7 @@ impl HistoryScreen {
                                 None => NeptuneCoins::zero(),
                             };
                         }
-                        else { balance = balance + *amount; }
+                        else { balance += *amount; }
                         history_builder.push((*block_height, *timestamp, *amount, balance));
                     }
                     *balance_updates.lock().unwrap() = history_builder;

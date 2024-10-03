@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::iter::Sum;
 use std::ops::Add;
+use std::ops::AddAssign;
 use std::ops::Mul;
 use std::ops::Neg;
 use std::ops::Sub;
@@ -192,7 +193,17 @@ impl Add for NeptuneCoins {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
+        self.safe_add(rhs)
+            .expect("adding two neptune coins should not overflow.")
+    }
+}
+
+impl AddAssign for NeptuneCoins {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 = self
+            .safe_add(rhs)
+            .expect("adding two neptune coins should not overflow.")
+            .0;
     }
 }
 

@@ -37,7 +37,18 @@ pub struct WalletStatus {
     pub unsynced_unspent: Vec<WalletStatusElement>,
     pub synced_spent: Vec<WalletStatusElement>,
     pub unsynced_spent: Vec<WalletStatusElement>,
+    pub mempool_spent: Vec<Utxo>,
+    pub mempool_unspent: Vec<(Utxo, MsMembershipProof)>,
 }
+
+// action         synced_unspent   synced_spent         mempool_unspent      mempool_spent
+
+// coinbase       100
+// send 5         100                                   95                   100
+// send 10        100                                   85                   100,95
+// coinbase       100,85           100,95
+
+// synced_unspent - intersection(synced_unspent, mempool_spent) + mempool_unspent
 
 impl WalletStatus {
     pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
@@ -72,6 +83,28 @@ impl WalletStatus {
         self.unsynced_spent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>()
+    }
+
+    pub fn unconfirmed_unspent_utxos_iter(
+        &self,
+    ) -> impl Iterator<Item = (&Utxo, &MsMembershipProof)> {
+        self.synced_unspent
+            .iter()
+            .map(|(wse, msmp)| (&wse.utxo, msmp))
+            .chain(self.mempool_unspent.iter().map(|(a, b)| (a, b)))
+            .filter(|(utxo, _)| !self.mempool_spent.contains(utxo))
+    }
+    pub fn unconfirmed_unspent_available_utxos_iter(
+        &self,
+        timestamp: Timestamp,
+    ) -> impl Iterator<Item = (&Utxo, &MsMembershipProof)> {
+        self.unconfirmed_unspent_utxos_iter()
+            .filter(move |(utxo, _)| utxo.can_spend_at(timestamp))
+    }
+    pub fn unconfirmed_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+        self.unconfirmed_unspent_available_utxos_iter(timestamp)
+            .map(|(utxo, _)| utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
 }

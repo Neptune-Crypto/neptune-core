@@ -36,6 +36,7 @@ use super::screen::Screen;
 #[derive(Debug, Clone)]
 pub struct OverviewData {
     available_balance: Option<NeptuneCoins>,
+    available_unconfirmed_balance: Option<NeptuneCoins>,
     timelocked_balance: Option<NeptuneCoins>,
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
@@ -73,6 +74,7 @@ impl OverviewData {
     pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
         Self {
             available_balance: Default::default(),
+            available_unconfirmed_balance: Default::default(),
             timelocked_balance: Default::default(),
             confirmations: Default::default(),
             synchronization_percentage: Default::default(),
@@ -102,6 +104,7 @@ impl OverviewData {
     pub async fn test() -> Self {
         OverviewData {
             available_balance: Some(NeptuneCoins::zero()),
+            available_unconfirmed_balance: Some(NeptuneCoins::zero()),
             timelocked_balance: Some(NeptuneCoins::zero()),
             confirmations: Some(17.into()),
             synchronization_percentage: Some(99.5),
@@ -218,6 +221,7 @@ impl OverviewScreen {
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.available_balance = Some(resp.available_balance);
+                                own_overview_data.available_unconfirmed_balance = Some(resp.available_unconfirmed_balance);
                                 own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
                                 own_overview_data.is_mining = resp.is_mining;
                                 own_overview_data.confirmations = resp.confirmations;
@@ -381,6 +385,10 @@ impl Widget for OverviewScreen {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
+        ));
+        lines.push(format!(
+            "unconfirmed balance: {}",
+            dashifnotset!(data.available_unconfirmed_balance),
         ));
         lines.push(format!(
             "time-locked balance: {}",
