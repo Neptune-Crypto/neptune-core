@@ -1399,26 +1399,27 @@ mod archival_state_tests {
         let (cbtx, _cb_expected) =
             global_state.make_coinbase_transaction(NeptuneCoins::zero(), in_seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
-        let receiver_data = UtxoReceiverData {
-            public_announcement: PublicAnnouncement::default(),
-            receiver_privacy_digest: rng.gen(),
-            sender_randomness: rng.gen(),
-            utxo: Utxo {
-                coins: one_money.to_native_coins(),
-                lock_script_hash: LockScript::anyone_can_spend().hash(),
-            },
-        };
+        let anyone_can_spend_utxo =
+            Utxo::new_native_coin(LockScript::anyone_can_spend(), one_money);
+        let receiver_data = UtxoReceiverData::new(anyone_can_spend_utxo, rng.gen(), rng.gen());
         let sender_tx = global_state
-            .create_transaction(vec![receiver_data], one_money, in_seven_months)
+            .create_transaction_with_prover_capability(
+                vec![receiver_data],
+                one_money,
+                in_seven_months,
+                TxProvingCapability::SingleProof,
+            )
             .await
             .unwrap();
         let block_tx = sender_tx.merge_with(cbtx, Default::default());
-        let block_1_a =
+        let block_1 =
             Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
 
-        // Verify that block_1 is valid
-        assert!(block_1_a.has_proof_of_work(&genesis_block));
-        assert!(block_1_a.is_valid(&genesis_block, in_seven_months));
+        // Verify that block_1 is valid. We don't care about PoW for this test.
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+
+        // 3 outputs: 1 coinbase, 1 for recipient of tx, 1 for change.
+        assert_eq!(3, block_1.body().transaction_kernel.outputs.len());
 
         Ok(())
     }
