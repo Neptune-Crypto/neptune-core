@@ -399,7 +399,7 @@ mod mine_loop_tests {
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
-        let network = Network::RegTest;
+        let network = Network::Main;
         let premine_receiver_global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
