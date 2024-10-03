@@ -582,7 +582,7 @@ mod mine_loop_tests {
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
 
-        let now = tip_block_orig.header().timestamp;
+        let now = tip_block_orig.header().timestamp + Timestamp::minutes(10);
 
         // pretend/simulate that it takes at least 10 seconds to mine the block.
         let ten_seconds_ago = now - Timestamp::seconds(10);
