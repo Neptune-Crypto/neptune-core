@@ -158,8 +158,11 @@ pub mod test {
     use std::time::SystemTime;
 
     use itertools::Itertools;
+    use rand::seq::SliceRandom;
+    use rand::thread_rng;
     use tasm_lib::triton_vm;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+    use tokio::runtime::Runtime;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
@@ -211,6 +214,34 @@ pub mod test {
         .to_hex()
     }
 
+    /// Load a proof for the claim if it exists; otherwise, run the prover and
+    /// save it before returning it.
+    pub fn load_proof_or_produce_and_save(
+        claim: Claim,
+        program: Program,
+        nondeterminism: NonDeterminism,
+    ) -> Proof {
+        let name = proof_filename(claim.clone());
+        match load_proof_if_available(claim.clone()) {
+            Some(proof) => {
+                println!(" - Loaded proof from disk: {name}.");
+                proof
+            }
+            None => {
+                print!(" - Proving ... ");
+                stdout().flush().expect("could not flush terminal");
+                let tick = SystemTime::now();
+                let proof = produce_and_save_proof(claim, program, nondeterminism);
+                let duration = SystemTime::now().duration_since(tick).unwrap();
+                println!(
+                    "success! Proof time: {:?}. Proof stored to disk: {name}",
+                    duration
+                );
+                proof
+            }
+        }
+    }
+
     /// Tries to load a proof for the claim from the test_data directory
     fn load_proof_if_available(claim: Claim) -> Option<Proof> {
         let name = proof_filename(claim);
@@ -242,6 +273,103 @@ pub mod test {
         Some(proof)
     }
 
+    /// Load a list of proof-servers from test_data/
+    fn load_servers() -> Vec<String> {
+        let mut path = PathBuf::new();
+        path.push("test_data");
+        path.push(Path::new("proof_servers").with_extension("txt"));
+        let Ok(mut input_file) = File::open(path.clone()) else {
+            println!(
+                "cannot proof-server list '{}' -- file might not exist",
+                path.to_string_lossy()
+            );
+            return vec![];
+        };
+        let mut file_contents = vec![];
+        if input_file.read_to_end(&mut file_contents).is_err() {
+            println!("cannot read file '{}'", path.to_string_lossy());
+            return vec![];
+        }
+        let Ok(file_as_string) = String::from_utf8(file_contents) else {
+            println!(
+                "cannot parse file '{}' -- is it valid utf8?",
+                path.to_string_lossy()
+            );
+            return vec![];
+        };
+        file_as_string
+            .lines()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn test_load_servers() {
+        let servers = load_servers();
+        for server in servers {
+            println!("read server: {}", server);
+        }
+    }
+
+    /// Queries known servers for proofs.
+    ///
+    /// The proof-servers file is located at `test_data/proof_servers.txt`. It
+    /// should contain one line per URL, ending in a slash.
+    fn query_server_for_proof(directory: String, filename: String) -> Option<Proof> {
+        let mut servers = load_servers();
+        servers.shuffle(&mut thread_rng());
+        let rt = Runtime::new().unwrap();
+        for server in servers {
+            if let Some(proof) = rt.block_on(async {
+                let Ok(response) = reqwest::get(server.clone() + &filename).await else {
+                    println!(
+                        "server '{}' failed for file '{}'; trying next ...",
+                        server.clone(),
+                        filename
+                    );
+                    return None;
+                };
+                let Ok(file_contents) = response.bytes().await else {
+                    println!(
+                        "error reading file '{}' from server '{}'; trying next ...",
+                        filename, server
+                    );
+                    return None;
+                };
+                let mut proof_data = vec![];
+                for ch in file_contents.chunks(8) {
+                    if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
+                        proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
+                    } else {
+                        println!("cannot cast chunk to eight bytes");
+                        return None;
+                    }
+                }
+                let proof = Proof(proof_data);
+                println!("got proof.");
+                Some(proof)
+            }) {
+                let mut path = PathBuf::new();
+                path.push(directory);
+                path.push(filename);
+                save_proof(&path, &proof);
+                return Some(proof);
+            }
+        }
+        println!(
+            "No known servers serve file `{}`; trying to prove instead ...",
+            filename
+        );
+        None
+    }
+
+    #[test]
+    fn test_query_proof() {
+        let directory = "test_data".to_string();
+        let filename = "155848c090374716f0612597f818fb7d4879aa8b45e1a781f03aea7731079534f3ef3a05b888d72d.proof".to_string();
+        assert!(query_server_for_proof(directory, filename).is_some());
+    }
+
     /// Call Triton VM prover to produce a proof and save it to disk.
     fn produce_and_save_proof(
         claim: Claim,
@@ -257,6 +385,12 @@ pub mod test {
         let proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism)
             .expect("cannot produce proof");
 
+        save_proof(&path, &proof);
+        proof
+    }
+
+    /// Store a proof to the given file
+    fn save_proof(path: &PathBuf, proof: &Proof) {
         let proof_data = proof
             .0
             .iter()
@@ -267,35 +401,5 @@ pub mod test {
         output_file
             .write_all(&proof_data)
             .expect("cannot write to file");
-
-        proof
-    }
-
-    /// Load a proof for the claim if it exists; otherwise, run the prover and
-    /// save it before returning it.
-    pub fn load_proof_or_produce_and_save(
-        claim: Claim,
-        program: Program,
-        nondeterminism: NonDeterminism,
-    ) -> Proof {
-        let name = proof_filename(claim.clone());
-        match load_proof_if_available(claim.clone()) {
-            Some(proof) => {
-                println!(" - Loaded proof from disk: {name}.");
-                proof
-            }
-            None => {
-                print!(" - Proving ... ");
-                stdout().flush().expect("could not flush terminal");
-                let tick = SystemTime::now();
-                let proof = produce_and_save_proof(claim, program, nondeterminism);
-                let duration = SystemTime::now().duration_since(tick).unwrap();
-                println!(
-                    "success! Proof time: {:?}. Proof stored to disk: {name}",
-                    duration
-                );
-                proof
-            }
-        }
     }
 }
