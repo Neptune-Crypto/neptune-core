@@ -62,7 +62,7 @@ use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 
-type SpentUtxo = (Utxo, AbsoluteIndexSet, MsMembershipProof, Option<u64>);
+type SpentUtxo = (Utxo, AbsoluteIndexSet, Option<u64>);
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -278,7 +278,7 @@ impl WalletState {
                     Hash::hash(&tx).to_hex()
                 );
 
-                let spent_utxos = self.scan_for_spent_utxos(&tx, true).await;
+                let spent_utxos = self.scan_for_spent_utxos(&tx).await;
 
                 let announced_utxos = self
                     .scan_for_announced_utxos(&tx)
@@ -416,11 +416,7 @@ impl WalletState {
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
-    async fn scan_for_spent_utxos(
-        &self,
-        transaction: &Transaction,
-        include_mempool: bool,
-    ) -> Vec<SpentUtxo> {
+    async fn scan_for_spent_utxos(&self, transaction: &Transaction) -> Vec<SpentUtxo> {
         let confirmed_absolute_index_sets = transaction
             .kernel
             .inputs
@@ -435,30 +431,25 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some((i, monitored_utxo)) = stream.next().await {
-            let (proof, abs_i) = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some((_, proof)) => (
-                    proof.clone(),
-                    proof.compute_indices(Hash::hash(&monitored_utxo.utxo)),
-                ),
+            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
+                Some((_, proof)) => proof.compute_indices(Hash::hash(&monitored_utxo.utxo)),
                 None => continue,
             };
 
             if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((monitored_utxo.utxo, abs_i, proof, Some(i)));
+                spent_own_utxos.push((monitored_utxo.utxo, abs_i, Some(i)));
             }
         }
 
-        if include_mempool {
-            for (au, ms_proof) in self.mempool_unspent_utxos.values().flatten() {
-                let abs_i = ms_proof.compute_indices(Hash::hash(&au.utxo));
-                if transaction
-                    .kernel
-                    .inputs
-                    .iter()
-                    .any(|rr| rr.absolute_indices == abs_i)
-                {
-                    spent_own_utxos.push((au.utxo.clone(), abs_i, ms_proof.clone(), None));
-                }
+        for (au, ms_proof) in self.mempool_unspent_utxos.values().flatten() {
+            let abs_i = ms_proof.compute_indices(Hash::hash(&au.utxo));
+            if transaction
+                .kernel
+                .inputs
+                .iter()
+                .any(|rr| rr.absolute_indices == abs_i)
+            {
+                spent_own_utxos.push((au.utxo.clone(), abs_i, None));
             }
         }
         spent_own_utxos
@@ -676,8 +667,7 @@ impl WalletState {
     ) -> Result<()> {
         let transaction: Transaction = new_block.kernel.body.transaction.clone();
 
-        let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, MsMembershipProof, Option<u64>)> =
-            self.scan_for_spent_utxos(&transaction, true).await;
+        let spent_inputs = self.scan_for_spent_utxos(&transaction).await;
 
         let onchain_received_outputs = self.scan_for_announced_utxos(&transaction);
 
@@ -891,6 +881,8 @@ impl WalletState {
             );
         }
 
+        let mutxos = monitored_utxos.get_all().await;
+
         // apply all removal records
         debug!("Block has {} removal records", removal_records.len());
         debug!(
@@ -923,7 +915,7 @@ impl WalletState {
                 .find(|(_, abs_i, ..)| *abs_i == removal_record.absolute_indices)
             {
                 None => (),
-                Some((spent_utxo, _abs_i, proof, maybe_mutxo_list_index)) => {
+                Some((spent_utxo, _abs_i, maybe_mutxo_list_index)) => {
                     debug!(
                         "Discovered own input at input {} worth {}, marking UTXO as spent.",
                         block_tx_input_count,
@@ -938,12 +930,17 @@ impl WalletState {
                             new_block.kernel.header.height,
                         ));
                         monitored_utxos.set(*mutxo_index, found_spent_mutxo).await;
-                    } else if let Some((i, mut mutxo)) = monitored_utxos
-                        .get_all()
-                        .await
-                        .into_iter()
+                    }
+                    // handle case where utxo is added and removed in the
+                    // same block via mempool unconfirmed tx chaining.
+                    //
+                    // todo: can we avoid this expensive find() and
+                    // the get_all() call outside the loop?
+                    else if let Some((i, mut mutxo)) = mutxos
+                        .iter()
                         .enumerate()
                         .find(|(_, m)| m.utxo == *spent_utxo)
+                        .map(|(i, m)| (i, m.to_owned()))
                     {
                         mutxo.spent_in_block = Some((
                             new_block.hash(),
@@ -952,15 +949,7 @@ impl WalletState {
                         ));
                         monitored_utxos.set(i as Index, mutxo).await;
                     } else {
-                        let mut mutxo =
-                            MonitoredUtxo::new(spent_utxo.clone(), self.number_of_mps_per_utxo);
-                        mutxo.add_membership_proof_for_tip(new_block.hash(), proof.clone());
-                        mutxo.spent_in_block = Some((
-                            new_block.hash(),
-                            new_block.kernel.header.timestamp,
-                            new_block.kernel.header.height,
-                        ));
-                        monitored_utxos.push(mutxo).await;
+                        unreachable!()
                     }
                 }
             }
