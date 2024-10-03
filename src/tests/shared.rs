@@ -55,6 +55,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
@@ -88,6 +89,8 @@ use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
@@ -751,6 +754,18 @@ pub fn make_mock_transaction(
             mutator_set_hash: random(),
         },
         proof: TransactionProof::Invalid,
+    }
+}
+
+pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
+    ExpectedUtxo {
+        utxo: Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::zero()),
+        addition_record: AdditionRecord::new(Default::default()),
+        sender_randomness: Default::default(),
+        receiver_preimage: Default::default(),
+        received_from: UtxoNotifier::Myself,
+        notification_received: SystemTime::now(),
+        mined_in_block: None,
     }
 }
 

@@ -390,6 +390,8 @@ mod mine_loop_tests {
     use crate::config_models::network::Network;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::UtxoReceiverData;
+    use crate::tests::shared::dummy_expected_utxo;
+    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::WalletSecret;
 
@@ -625,7 +627,17 @@ mod mine_loop_tests {
         Ok(())
     }
 
-    /// This tests the difficulty adjustment algorithm.
+    /// Test the difficulty adjustment algorithm.
+    ///
+    /// Specifically, verify that the observed concrete block interval when mining
+    /// tracks the target block interval, assuming:
+    ///  - No time is spent proving
+    ///  - Constant mining power
+    ///  - Mining power exceeds lower bound (hashing once every target interval).
+    ///
+    /// Note that the second assumption is broken when running the entire test suite.
+    /// So if this test fails when all others pass, it is not necessarily a cause
+    /// for worry.
     ///
     /// We mine ten blocks with a target block interval of 1 second, so all
     /// blocks should be mined in approx 10 seconds.
@@ -635,7 +647,7 @@ mod mine_loop_tests {
     ///
     /// We also assert upper and lower bounds for variance from the expected 10
     /// seconds.  The variance limit is 1.3, so the upper bound is 13 seconds
-    /// and the lower bound is 7692.
+    /// and the lower bound is 7692ms.
     ///
     /// We ignore the first 2 blocks after genesis because they are typically
     /// mined very fast.
@@ -686,10 +698,8 @@ mod mine_loop_tests {
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
-            let (transaction, coinbase_utxo_info) = {
-                let global_state = global_state_lock.lock_guard().await;
-                global_state.make_coinbase_transaction(NeptuneCoins::zero(), start_time)
-            };
+            let (transaction, coinbase_utxo_info) =
+                { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
 
             let (block_header, block_body, block_proof) = Block::make_block_template(
                 &prev_block,
