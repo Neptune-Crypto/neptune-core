@@ -347,12 +347,7 @@ impl RemovalRecord {
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
         self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
             let leaf_digest = Hash::hash(chunk);
-
-            // TODO: This in-bounds check can be removed after upstream
-            // dependency twenty-first has been updated with
-            // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
-            let in_bounds = swbfi_leaf_count > *chunk_index;
-            in_bounds && mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
+            mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
         })
     }
 
