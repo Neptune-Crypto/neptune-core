@@ -105,11 +105,7 @@ fn mine_block_worker(
     let mut block = Block::new(block_header, block_body, block_proof);
 
     // Mining takes place here
-    while block.hash() >= threshold {
-        if !unrestricted_mining {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-
+    loop {
         // If the sender is cancelled, the parent to this thread most
         // likely received a new block, and this thread hasn't been stopped
         // yet by the operating system, although the call to abort this
@@ -135,6 +131,15 @@ fn mine_block_worker(
             Block::difficulty_control(&previous_block, now, target_block_interval);
         threshold = Block::difficulty_to_digest_threshold(new_difficulty);
         block.set_header_timestamp_and_difficulty(now, new_difficulty);
+
+        // This must match the rules in `[Block::has_proof_of_work]`.
+        if block.hash() <= threshold {
+            break;
+        }
+
+        if !unrestricted_mining {
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     let nonce = block.kernel.header.nonce;
@@ -554,7 +559,7 @@ mod mine_loop_tests {
         Ok(())
     }
 
-    /// This test mines a single block at height 1 on the regtest network
+    /// This test mines a single block at height 1 on the main network
     /// and then validates that the header timestamp has changed and
     /// that it is within the last second (from now).
     ///
@@ -566,7 +571,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Main;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -575,8 +580,10 @@ mod mine_loop_tests {
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
 
+        let now = tip_block_orig.header().timestamp;
+
         // pretend/simulate that it takes at least 10 seconds to mine the block.
-        let ten_seconds_ago = Timestamp::now() - Timestamp::seconds(10);
+        let ten_seconds_ago = now - Timestamp::seconds(10);
 
         let (transaction, coinbase_utxo_info) =
             global_state.make_coinbase_transaction(NeptuneCoins::zero(), ten_seconds_ago);
@@ -607,6 +614,8 @@ mod mine_loop_tests {
 
         let block_timestamp = mined_block_info.block.kernel.header.timestamp;
 
+        // Mining updates the timestamp. So block timestamp will be >= to what
+        // was set in the block template, and <= current time.
         assert!(block_timestamp >= initial_header_timestamp);
         assert!(block_timestamp <= Timestamp::now());
 

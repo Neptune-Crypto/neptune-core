@@ -692,7 +692,16 @@ impl Block {
     /// compare the hash of the current block against the difficulty determined by
     /// the previous.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
-        self.hash() <= Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty)
+        let hash = self.hash();
+        let threshold =
+            Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty);
+        let satisfied = hash <= threshold;
+
+        if !satisfied {
+            warn!("Invalid proof of work for block. Got: {hash}\nThreshold: {threshold}");
+        }
+
+        satisfied
     }
 
     /// Converts `difficulty` to type `Digest` so that the hash of a block can be
