@@ -1595,17 +1595,19 @@ mod global_state_tests {
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
+        let tx_proving_capability = global_state_lock
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .tx_proving_capability;
+
         create_transaction_with_timestamp_and_prover_capability(
             global_state_lock,
             receiver_data,
             fee,
             timestamp,
-            global_state_lock
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .tx_proving_capability,
+            tx_proving_capability,
         )
         .await
     }
