@@ -1785,7 +1785,7 @@ mod global_state_tests {
             // Verify that the restored MUTXO has a valid MSMP
             let own_premine_mutxo = monitored_utxos.get(0).await;
             let ms_item = Hash::hash(&own_premine_mutxo.utxo);
-            global_state
+            assert!(global_state
                 .chain
                 .light_state()
                 .body()
@@ -1796,7 +1796,7 @@ mod global_state_tests {
                         .get_latest_membership_proof_entry()
                         .unwrap()
                         .1,
-                );
+                ));
             assert_eq!(
                 mock_block_1.hash(),
                 own_premine_mutxo
@@ -1813,67 +1813,50 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
+        let alic_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut global_state = global_state_lock.lock_guard_mut().await;
+        let mut alice = alic_state_lock.lock_guard_mut().await;
 
-        let other_receiver_wallet_secret = WalletSecret::new_random();
-        let other_receiver_address = other_receiver_wallet_secret
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_address = bob_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
 
-        // 1. Create new block 1 and store it to the DB
+        // 1. Create new block 1 and store it
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mock_block_1a, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+        let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, bob_address, rng.gen());
         {
-            global_state
+            alice
                 .chain
                 .archival_state_mut()
                 .write_block_as_tip(&mock_block_1a)
                 .await?;
         }
 
-        // Verify that wallet has a monitored UTXO (from genesis)
-        let wallet_status = global_state.get_wallet_status_for_tip().await;
-        assert!(!wallet_status
+        // Verify that Alice has a monitored UTXO (from genesis)
+        assert!(!alice
+            .get_wallet_status_for_tip()
+            .await
             .synced_unspent_available_amount(launch + seven_months)
             .is_zero());
 
         // Verify that this is unsynced with mock_block_1a
-        assert!(
-            global_state
-                .wallet_state
-                .is_synced_to(genesis_block.hash())
-                .await
-        );
-        assert!(
-            !global_state
-                .wallet_state
-                .is_synced_to(mock_block_1a.hash())
-                .await
-        );
+        assert!(alice.wallet_state.is_synced_to(genesis_block.hash()).await);
+        assert!(!alice.wallet_state.is_synced_to(mock_block_1a.hash()).await);
 
         // Call resync
-        global_state
+        alice
             .resync_membership_proofs_from_stored_blocks(mock_block_1a.hash())
             .await
             .unwrap();
 
         // Verify that it is synced
-        assert!(
-            global_state
-                .wallet_state
-                .is_synced_to(mock_block_1a.hash())
-                .await
-        );
+        assert!(alice.wallet_state.is_synced_to(mock_block_1a.hash()).await);
 
         // Verify that MPs are valid
-        assert!(
-            wallet_state_has_all_valid_mps_for(&global_state.wallet_state, &mock_block_1a).await
-        );
+        assert!(wallet_state_has_all_valid_mps_for(&alice.wallet_state, &mock_block_1a).await);
 
         Ok(())
     }
@@ -1881,28 +1864,28 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
+        let network = Network::Main;
         let mut rng = thread_rng();
-        let network = Network::RegTest;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let own_spending_key = global_state
+
+        let alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut alice = alice.lock_guard_mut().await;
+        let alice_spending_key = alice
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let own_receiving_address = own_spending_key.to_address();
+        let alice_address = alice_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state.chain.archival_state().get_tip().await;
+        let genesis_block = alice.chain.archival_state().get_tip().await;
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
-        global_state
+            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+        alice
             .set_new_self_mined_tip(
                 mock_block_1a.clone(),
                 ExpectedUtxo::new(
                     coinbase_utxo,
                     coinbase_output_randomness,
-                    own_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 ),
             )
@@ -1910,54 +1893,57 @@ mod global_state_tests {
             .unwrap();
 
         // Verify that wallet has monitored UTXOs, from genesis and from block_1a
-        let wallet_status = global_state
-            .wallet_state
-            .get_wallet_status_from_lock(mock_block_1a.hash())
-            .await;
-        assert_eq!(2, wallet_status.synced_unspent.len());
+        assert_eq!(
+            2,
+            alice
+                .wallet_state
+                .get_wallet_status_from_lock(mock_block_1a.hash())
+                .await
+                .synced_unspent
+                .len()
+        );
 
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
-        let other_wallet_secret = WalletSecret::new_random();
-        let other_receiving_address = other_wallet_secret
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_address = bob_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _, _) =
-                make_mock_block(&parent_block, None, other_receiving_address, rng.gen());
-            global_state.set_new_tip(next_block.clone()).await.unwrap();
+            let (next_block, _, _) = make_mock_block(&parent_block, None, bob_address, rng.gen());
+            alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
 
         // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
-        global_state
+        alice
             .resync_membership_proofs_from_stored_blocks(parent_block.hash())
             .await
             .unwrap();
 
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
-        let wallet_status_after_forking = global_state
+        let alice_wallet_status_after_reorg = alice
             .wallet_state
             .get_wallet_status_from_lock(parent_block.hash())
             .await;
-        assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
-        assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
+        assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
+        assert_eq!(1, alice_wallet_status_after_reorg.unsynced_unspent.len());
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+        let monitored_utxos = alice.wallet_state.wallet_db.monitored_utxos();
         assert!(
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(parent_block.hash(), alice.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(parent_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(parent_block.hash(), alice.chain.archival_state())
                 .await
         );
 
@@ -1969,30 +1955,28 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let wallet_secret = global_state.wallet_state.wallet_secret.clone();
-        let own_spending_key = wallet_secret.nth_generation_spending_key(0);
-        let own_receiving_address = own_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new_random();
-        let other_receiving_address = other_wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address();
+        let alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut alice = alice.lock_guard_mut().await;
+        let alice_spending_key = alice
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let alice_address = alice_spending_key.to_address();
+        let bob_secret = WalletSecret::new_random();
+        let bob_address = bob_secret.nth_generation_spending_key(0).to_address();
 
-        // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state.chain.archival_state().get_tip().await;
-        assert!(genesis_block.kernel.header.height.is_genesis());
+        // 1. Create new block 1a where Alice receives a coinbase UTXO, store it
+        let genesis_block = alice.chain.archival_state().get_tip().await;
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
+            make_mock_block(&genesis_block, None, alice_address, rng.gen());
         {
-            global_state
+            alice
                 .set_new_self_mined_tip(
                     mock_block_1a.clone(),
                     ExpectedUtxo::new(
                         coinbase_utxo_1a,
                         cb_utxo_output_randomness_1a,
-                        own_spending_key.privacy_preimage,
+                        alice_spending_key.privacy_preimage,
                         UtxoNotifier::OwnMiner,
                     ),
                 )
@@ -2000,27 +1984,27 @@ mod global_state_tests {
                 .unwrap();
 
             // Verify that UTXO was recorded
-            let wallet_status_after_1a = global_state
-                .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash())
-                .await;
-            assert_eq!(2, wallet_status_after_1a.synced_unspent.len());
+            assert_eq!(
+                2,
+                alice
+                    .wallet_state
+                    .get_wallet_status_from_lock(mock_block_1a.hash())
+                    .await
+                    .synced_unspent
+                    .len()
+            );
         }
 
-        // Add 100 blocks on top of 1a, *not* mined by us
+        // Add 100 blocks on top of 1a, *not* mined by Alice
         let mut fork_a_block = mock_block_1a.clone();
         for _ in 0..100 {
-            let (next_a_block, _, _) =
-                make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen());
-            global_state
-                .set_new_tip(next_a_block.clone())
-                .await
-                .unwrap();
+            let (next_a_block, _, _) = make_mock_block(&fork_a_block, None, bob_address, rng.gen());
+            alice.set_new_tip(next_a_block.clone()).await.unwrap();
             fork_a_block = next_a_block;
         }
 
         // Verify that all both MUTXOs have synced MPs
-        let wallet_status_on_a_fork = global_state
+        let wallet_status_on_a_fork = alice
             .wallet_state
             .get_wallet_status_from_lock(fork_a_block.hash())
             .await;
@@ -2030,35 +2014,35 @@ mod global_state_tests {
         // Fork away from the "a" chain to the "b" chain, with block 1a as LUCA
         let mut fork_b_block = mock_block_1a.clone();
         for _ in 0..100 {
-            let (next_b_block, _, _) =
-                make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen());
-            global_state
-                .set_new_tip(next_b_block.clone())
-                .await
-                .unwrap();
+            let (next_b_block, _, _) = make_mock_block(&fork_b_block, None, bob_address, rng.gen());
+            alice.set_new_tip(next_b_block.clone()).await.unwrap();
             fork_b_block = next_b_block;
         }
 
         // Verify that there are zero MUTXOs with synced MPs
-        let wallet_status_on_b_fork_before_resync = global_state
+        let alice_wallet_status_on_b_fork_before_resync = alice
             .wallet_state
             .get_wallet_status_from_lock(fork_b_block.hash())
             .await;
         assert_eq!(
             0,
-            wallet_status_on_b_fork_before_resync.synced_unspent.len()
+            alice_wallet_status_on_b_fork_before_resync
+                .synced_unspent
+                .len()
         );
         assert_eq!(
             2,
-            wallet_status_on_b_fork_before_resync.unsynced_unspent.len()
+            alice_wallet_status_on_b_fork_before_resync
+                .unsynced_unspent
+                .len()
         );
 
         // Run the resync and verify that MPs are synced
-        global_state
+        alice
             .resync_membership_proofs_from_stored_blocks(fork_b_block.hash())
             .await
             .unwrap();
-        let wallet_status_on_b_fork_after_resync = global_state
+        let wallet_status_on_b_fork_after_resync = alice
             .wallet_state
             .get_wallet_status_from_lock(fork_b_block.hash())
             .await;
@@ -2073,59 +2057,56 @@ mod global_state_tests {
         // to this new chain
         let mut fork_c_block = genesis_block.clone();
         for _ in 0..100 {
-            let (next_c_block, _, _) =
-                make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen());
-            global_state
-                .set_new_tip(next_c_block.clone())
-                .await
-                .unwrap();
+            let (next_c_block, _, _) = make_mock_block(&fork_c_block, None, bob_address, rng.gen());
+            alice.set_new_tip(next_c_block.clone()).await.unwrap();
             fork_c_block = next_c_block;
         }
 
         // Verify that there are zero MUTXOs with synced MPs
-        let wallet_status_on_c_fork_before_resync = global_state
+        let alice_wallet_status_on_c_fork_before_resync = alice
             .wallet_state
             .get_wallet_status_from_lock(fork_c_block.hash())
             .await;
         assert_eq!(
             0,
-            wallet_status_on_c_fork_before_resync.synced_unspent.len()
+            alice_wallet_status_on_c_fork_before_resync
+                .synced_unspent
+                .len()
         );
         assert_eq!(
             2,
-            wallet_status_on_c_fork_before_resync.unsynced_unspent.len()
+            alice_wallet_status_on_c_fork_before_resync
+                .unsynced_unspent
+                .len()
         );
 
         // Run the resync and verify that UTXO from genesis is synced, but that
         // UTXO from 1a is not synced.
-        global_state
+        alice
             .resync_membership_proofs_from_stored_blocks(fork_c_block.hash())
             .await
             .unwrap();
-        let wallet_status_on_c_fork_after_resync = global_state
+        let alice_ws_c_after_resync = alice
             .wallet_state
             .get_wallet_status_from_lock(fork_c_block.hash())
             .await;
-        assert_eq!(1, wallet_status_on_c_fork_after_resync.synced_unspent.len());
-        assert_eq!(
-            1,
-            wallet_status_on_c_fork_after_resync.unsynced_unspent.len()
-        );
+        assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
+        assert_eq!(1, alice_ws_c_after_resync.unsynced_unspent.len());
 
         // Also check that UTXO from 1a is considered abandoned
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+        let alice_mutxos = alice.wallet_state.wallet_db.monitored_utxos();
         assert!(
-            !monitored_utxos
+            !alice_mutxos
                 .get(0)
                 .await
-                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
                 .await
         );
         assert!(
-            monitored_utxos
+            alice_mutxos
                 .get(1)
                 .await
-                .was_abandoned(fork_c_block.hash(), global_state.chain.archival_state())
+                .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
                 .await
         );
 
