@@ -521,7 +521,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mined_block_has_proof_of_work() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Main;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -529,16 +529,17 @@ mod mine_loop_tests {
 
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
-        let now = Timestamp::now();
+        let launch_date = tip_block_orig.header().timestamp;
 
         let (transaction, coinbase_utxo_info) =
-            global_state.make_coinbase_transaction(NeptuneCoins::zero(), now);
+            global_state.make_coinbase_transaction(NeptuneCoins::zero(), launch_date);
 
         let (block_header, block_body, block_proof) =
-            Block::make_block_template(tip_block_orig, transaction, now, None);
+            Block::make_block_template(tip_block_orig, transaction, launch_date, None);
 
-        let block_timestamp = tip_block_orig.kernel.header.timestamp + Timestamp::seconds(1);
-        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, block_timestamp, None);
+        let initial_block_timestamp = launch_date + Timestamp::seconds(1);
+        let difficulty: U32s<5> =
+            Block::difficulty_control(tip_block_orig, initial_block_timestamp, None);
         let unrestricted_mining = false;
 
         mine_block_worker(
@@ -555,7 +556,9 @@ mod mine_loop_tests {
 
         let mined_block_info = worker_thread_rx.await.unwrap();
 
-        assert!(mined_block_info.block.is_valid(tip_block_orig, now));
+        assert!(mined_block_info
+            .block
+            .is_valid(tip_block_orig, Timestamp::now()));
         assert!(mined_block_info.block.has_proof_of_work(tip_block_orig));
 
         Ok(())

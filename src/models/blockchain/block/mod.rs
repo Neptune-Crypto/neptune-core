@@ -591,7 +591,10 @@ impl Block {
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
         let future_limit = now + Timestamp::hours(2);
         if block_copy.kernel.header.timestamp >= future_limit {
-            warn!("block time is too far in the future");
+            warn!(
+                "block time is too far in the future.\n\nBlock timestamp: {}\nThreshold is: {}",
+                block_copy.kernel.header.timestamp, future_limit
+            );
             return false;
         }
 
