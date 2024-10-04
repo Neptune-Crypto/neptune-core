@@ -152,21 +152,22 @@ pub mod test {
     use std::io::Write;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::time::Duration;
     use std::time::SystemTime;
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::thread_rng;
+    use reqwest::StatusCode;
     use reqwest::Url;
     use tasm_lib::triton_vm;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-    use tokio::runtime::Runtime;
     use tracing::debug;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
     use crate::triton_vm::stark::Stark;
+
+    const TEST_DATA_DIR: &str = "test_data";
 
     pub(crate) fn consensus_program_negative_test<T: ConsensusProgram>(
         consensus_program: T,
@@ -219,6 +220,7 @@ pub mod test {
     fn proof_path(claim: &Claim) -> PathBuf {
         let name = proof_filename(claim);
         let mut path = PathBuf::new();
+        path.push(TEST_DATA_DIR);
         path.push(Path::new(&name));
 
         path
@@ -258,7 +260,7 @@ pub mod test {
         }
     }
 
-    /// Tries to load a proof for the claim from the test_data directory
+    /// Tries to load a proof for the claim from the test data directory
     fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
         let path = proof_path(claim);
         let Ok(mut input_file) = File::open(path.clone()) else {
@@ -286,10 +288,10 @@ pub mod test {
         Some(proof)
     }
 
-    /// Load a list of proof-servers from test_data/
+    /// Load a list of proof-servers from test data directory
     fn load_servers() -> Vec<Url> {
         let mut server_list_path = PathBuf::new();
-        server_list_path.push("test_data");
+        server_list_path.push(TEST_DATA_DIR);
         server_list_path.push(Path::new("proof_servers").with_extension("txt"));
         let Ok(mut input_file) = File::open(server_list_path.clone()) else {
             println!(
@@ -326,11 +328,11 @@ pub mod test {
 
     /// Queries known servers for proofs.
     ///
-    /// The proof-servers file is located at `test_data/proof_servers.txt`. It
-    /// should contain one line per URL, ending in a slash.
+    /// The proof-servers file is located in `proof_servers.txt` test data
+    /// directory. It should contain one line per URL, ending in a slash.
     fn try_fetch_and_verify_proof_from_server(claim: &Claim) -> Option<Proof> {
         let filename = proof_filename(claim);
-        let (proof, server) = try_fetch_from_server_inner(&filename)?;
+        let (proof, server) = try_fetch_from_server_inner(filename.clone())?;
 
         if !triton_vm::verify(Stark::default(), claim, &proof) {
             eprintln!("Invalid proof served by {server}. Proof {filename} does not verify.");
@@ -348,31 +350,46 @@ pub mod test {
     /// If a proof was found, returns it along with the URL of the server
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
-    fn try_fetch_from_server_inner(filename: &str) -> Option<(Proof, Url)> {
+    /// TODO: Make this function async!
+    fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, Url)> {
         let mut servers = load_servers();
         servers.shuffle(&mut thread_rng());
-        let rt = Runtime::new().unwrap();
 
-        let http_client = reqwest::Client::builder()
-            .build()
-            .expect("Must be able to generate HTTP client instance");
-
+        // TODO: Use regular (non-blocking) reqwest client when this function
+        // is made `async`.
         for server in servers {
-            let url = server.join(filename).unwrap_or_else(|_| {
-                panic!("Must be able to form URL. Got: '{server}' and '{filename}'.")
-            });
-            debug!("requesting: <{url}>");
-            let Ok(response) = rt.block_on(http_client.get(url).send()) else {
-                println!(
-                    "server '{}' failed for file '{}'; trying next ...",
-                    server.clone(),
-                    filename
-                );
+            let server_ = server.clone();
+            let filename_ = filename.clone();
+            let handle = std::thread::spawn(move || {
+                let http_client = reqwest::blocking::Client::new();
+                let url = server_.join(&filename_).unwrap_or_else(|_| {
+                    panic!("Must be able to form URL. Got: '{server_}' and '{filename_}'.")
+                });
+                debug!("requesting: <{url}>");
+                let Ok(response) = http_client.get(url).send() else {
+                    println!(
+                        "server '{}' failed for file '{}'; trying next ...",
+                        server_.clone(),
+                        filename_
+                    );
 
+                    return None;
+                };
+
+                Some((response.status(), response.bytes()))
+            });
+
+            let Some((status_code, body)) = handle.join().unwrap() else {
+                eprintln!("Could not connect to server {server}.");
                 continue;
             };
 
-            let Ok(file_contents) = rt.block_on(response.bytes()) else {
+            if !status_code.is_success() {
+                eprintln!("{server} responded with {status_code}");
+                continue;
+            }
+
+            let Ok(file_contents) = body else {
                 eprintln!(
                     "error reading file '{}' from server '{}'; trying next ...",
                     filename, server
@@ -405,7 +422,7 @@ pub mod test {
     #[test]
     fn test_query_proof() {
         let filename = "155848c090374716f0612597f818fb7d4879aa8b45e1a781f03aea7731079534f3ef3a05b888d72d.proof".to_string();
-        assert!(try_fetch_from_server_inner(&filename).is_some());
+        assert!(try_fetch_from_server_inner(filename).is_some());
     }
 
     /// Call Triton VM prover to produce a proof and save it to disk.
@@ -416,8 +433,9 @@ pub mod test {
     ) -> Proof {
         let name = proof_filename(claim);
         let mut path = PathBuf::new();
-        path.push("test_data");
-        create_dir_all(&path).expect("cannot create 'test_data' directory");
+        path.push(TEST_DATA_DIR);
+        create_dir_all(&path)
+            .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
         path.push(Path::new(&name));
 
         let proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism)
@@ -435,7 +453,7 @@ pub mod test {
             .copied()
             .flat_map(|b| b.value().to_be_bytes())
             .collect_vec();
-        let mut output_file = File::create(&path).expect("cannot open file for writing");
+        let mut output_file = File::create(path).expect("cannot open file for writing");
         output_file
             .write_all(&proof_data)
             .expect("cannot write to file");
