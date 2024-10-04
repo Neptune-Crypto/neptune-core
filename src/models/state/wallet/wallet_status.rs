@@ -40,12 +40,18 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
-    pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+    pub fn synced_unspent_available_iter(
+        &self,
+        timestamp: Timestamp,
+    ) -> impl Iterator<Item = &(WalletStatusElement, MsMembershipProof)> {
         self.synced_unspent
             .iter()
-            .map(|(wse, _msmp)| &wse.utxo)
-            .filter(|utxo| utxo.can_spend_at(timestamp))
-            .map(|utxo| utxo.get_native_currency_amount())
+            .filter(move |(wse, _)| wse.utxo.can_spend_at(timestamp))
+    }
+
+    pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+        self.synced_unspent_available_iter(timestamp)
+            .map(|(wse, _)| wse.utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
     pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NeptuneCoins {

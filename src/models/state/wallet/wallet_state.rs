@@ -1009,14 +1009,24 @@ impl WalletState {
         // membership proofs.
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
+        // filter out any utxos that are already spent in the mempool.
+        let unspent_utxos = wallet_status
+            .synced_unspent_available_iter(timestamp)
+            .filter(|(wse, _)| !self.mempool_spent_utxos_iter().any(|u| *u == wse.utxo))
+            .collect_vec();
+        let unspent_available_amount = unspent_utxos
+            .iter()
+            .map(|(wse, _)| wse.utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>();
+
         // First check that we have enough. Otherwise return an error.
-        if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {
+        if unspent_available_amount < requested_amount {
             bail!(
                 "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
                 requested_amount,
                 wallet_status.synced_unspent.len(),
                 wallet_status.synced_unspent.iter().map(|(wse, _msmp)| wse.utxo.get_native_currency_amount()).sum::<NeptuneCoins>(),
-                wallet_status.synced_unspent_available_amount(timestamp),
+                unspent_available_amount,
                 wallet_status.synced_unspent_timelocked_amount(timestamp),
                 wallet_status.unsynced_unspent.len(),
                 wallet_status.unsynced_unspent_amount(),
@@ -1027,8 +1037,7 @@ impl WalletState {
         let mut allocated_amount = NeptuneCoins::zero();
 
         while allocated_amount < requested_amount {
-            let (wallet_status_element, membership_proof) =
-                wallet_status.synced_unspent[ret.len()].clone();
+            let (wallet_status_element, membership_proof) = unspent_utxos[ret.len()].clone();
 
             // find spending key for this utxo.
             let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
@@ -1392,7 +1401,7 @@ mod tests {
         }
     }
 
-    mod wallet_balance {
+    mod unconfirmed_tx {
         use generation_address::GenerationReceivingAddress;
 
         use super::*;
@@ -1505,6 +1514,79 @@ mod tests {
                     .await,
                 coinbase_amt
             );
+
+            Ok(())
+        }
+
+        // this test attempts to spend the same input twice in the same block.
+        // this results in an "insufficient funds" error in this case because
+        // the input selection code ignores the spent utxo on the 2nd attempt
+        // and no other input utxos are available to fund the tx.
+        #[traced_test]
+        #[tokio::test]
+        async fn attempt_spend_input_in_mempool() -> Result<()> {
+            let mut rng = thread_rng();
+            let network = Network::RegTest;
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 0, WalletSecret::new_random()).await;
+            let change_key = global_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation);
+
+            let send_amt = NeptuneCoins::new(5);
+
+            // mine a block to our wallet.  we should have 100 coins after.
+            mine_block_to_wallet(&mut global_state_lock).await?.hash();
+
+            // generate an output that our wallet cannot claim.
+            let outputs = vec![(
+                ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                send_amt,
+            )];
+
+            let tx = {
+                let gs = global_state_lock.lock_guard().await;
+
+                // create tx, with 5 coins going to 3rd party and 95 coins change back to self.
+                let mut tx_outputs =
+                    gs.generate_tx_outputs(outputs.clone(), UtxoNotifyMethod::OnChain)?;
+                gs.create_transaction(
+                    &mut tx_outputs,
+                    change_key,
+                    UtxoNotifyMethod::OnChain,
+                    NeptuneCoins::zero(),
+                    Timestamp::now(),
+                )
+                .await?
+            };
+
+            // add the tx to the mempool.
+            // note that the wallet should be notified of these changes.
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_insert(tx)
+                .await?;
+
+            let gs = global_state_lock.lock_guard().await;
+            let mut tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotifyMethod::OnChain)?;
+            let result = gs
+                .create_transaction(
+                    &mut tx_outputs,
+                    change_key,
+                    UtxoNotifyMethod::OnChain,
+                    NeptuneCoins::zero(),
+                    Timestamp::now(),
+                )
+                .await;
+
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Insufficient synced amount to create transaction"));
 
             Ok(())
         }
