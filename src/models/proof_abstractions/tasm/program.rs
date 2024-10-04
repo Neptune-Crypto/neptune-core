@@ -152,14 +152,17 @@ pub mod test {
     use std::io::Write;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::time::Duration;
     use std::time::SystemTime;
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::thread_rng;
+    use reqwest::Url;
     use tasm_lib::triton_vm;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use tokio::runtime::Runtime;
+    use tracing::debug;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
@@ -236,7 +239,7 @@ pub mod test {
             }
             None => {
                 println!("Proof not found on disk.");
-                match try_fetch_proof_from_server(claim) {
+                match try_fetch_and_verify_proof_from_server(claim) {
                     Some(proof) => proof,
                     None => {
                         println!("Proof not found on proof servers - Proving locally ... ");
@@ -284,33 +287,33 @@ pub mod test {
     }
 
     /// Load a list of proof-servers from test_data/
-    fn load_servers() -> Vec<String> {
-        let mut path = PathBuf::new();
-        path.push("test_data");
-        path.push(Path::new("proof_servers").with_extension("txt"));
-        let Ok(mut input_file) = File::open(path.clone()) else {
+    fn load_servers() -> Vec<Url> {
+        let mut server_list_path = PathBuf::new();
+        server_list_path.push("test_data");
+        server_list_path.push(Path::new("proof_servers").with_extension("txt"));
+        let Ok(mut input_file) = File::open(server_list_path.clone()) else {
             println!(
                 "cannot proof-server list '{}' -- file might not exist",
-                path.to_string_lossy()
+                server_list_path.to_string_lossy()
             );
             return vec![];
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
-            println!("cannot read file '{}'", path.to_string_lossy());
+            println!("cannot read file '{}'", server_list_path.to_string_lossy());
             return vec![];
         }
         let Ok(file_as_string) = String::from_utf8(file_contents) else {
             println!(
                 "cannot parse file '{}' -- is it valid utf8?",
-                path.to_string_lossy()
+                server_list_path.to_string_lossy()
             );
             return vec![];
         };
         file_as_string
             .lines()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
+            .map(|s| Url::parse(s).expect("Must be able to parse string '{s}' as URL"))
+            .collect()
     }
 
     #[test]
@@ -325,8 +328,8 @@ pub mod test {
     ///
     /// The proof-servers file is located at `test_data/proof_servers.txt`. It
     /// should contain one line per URL, ending in a slash.
-    fn try_fetch_proof_from_server(claim: &Claim) -> Option<Proof> {
-        let filename = proof_filename(&claim);
+    fn try_fetch_and_verify_proof_from_server(claim: &Claim) -> Option<Proof> {
+        let filename = proof_filename(claim);
         let (proof, server) = try_fetch_from_server_inner(&filename)?;
 
         if !triton_vm::verify(Stark::default(), claim, &proof) {
@@ -345,12 +348,21 @@ pub mod test {
     /// If a proof was found, returns it along with the URL of the server
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
-    fn try_fetch_from_server_inner(filename: &str) -> Option<(Proof, String)> {
+    fn try_fetch_from_server_inner(filename: &str) -> Option<(Proof, Url)> {
         let mut servers = load_servers();
         servers.shuffle(&mut thread_rng());
         let rt = Runtime::new().unwrap();
+
+        let http_client = reqwest::Client::builder()
+            .build()
+            .expect("Must be able to generate HTTP client instance");
+
         for server in servers {
-            let Ok(response) = rt.block_on(reqwest::get(server.clone() + &filename)) else {
+            let url = server.join(filename).unwrap_or_else(|_| {
+                panic!("Must be able to form URL. Got: '{server}' and '{filename}'.")
+            });
+            debug!("requesting: <{url}>");
+            let Ok(response) = rt.block_on(http_client.get(url).send()) else {
                 println!(
                     "server '{}' failed for file '{}'; trying next ...",
                     server.clone(),
