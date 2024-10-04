@@ -152,22 +152,26 @@ pub mod test {
     use std::io::Write;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::time::Duration;
     use std::time::SystemTime;
 
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::thread_rng;
-    use reqwest::StatusCode;
+    use reqwest::header::HeaderMap;
+    use reqwest::header::HeaderValue;
     use reqwest::Url;
     use tasm_lib::triton_vm;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use tracing::debug;
+    use tracing::Span;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
     use crate::triton_vm::stark::Stark;
 
     const TEST_DATA_DIR: &str = "test_data";
+    const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     pub(crate) fn consensus_program_negative_test<T: ConsensusProgram>(
         consensus_program: T,
@@ -352,16 +356,50 @@ pub mod test {
     /// not store the proof to disk.
     /// TODO: Consider making this async.
     fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, Url)> {
+        fn get_test_name_from_tracing() -> String {
+            match Span::current().metadata().map(|x| x.name()) {
+                Some(test_name) => test_name.to_owned(),
+                None => "unknown".to_owned(),
+            }
+        }
+
+        fn attempt_to_get_test_name() -> String {
+            let thread = std::thread::current();
+            match thread.name() {
+                Some(test_name) => {
+                    if test_name.eq("tokio-runtime-worker") {
+                        get_test_name_from_tracing()
+                    } else {
+                        test_name.to_owned()
+                    }
+                }
+                None => get_test_name_from_tracing(),
+            }
+        }
+
         let mut servers = load_servers();
         servers.shuffle(&mut thread_rng());
+
+        // Add test name to request allow server to see which test requires a proof
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            TEST_NAME_HTTP_HEADER_KEY,
+            HeaderValue::from_str(&attempt_to_get_test_name())
+                .unwrap_or_else(|_| panic!("Must be to add test name to HTTP header")),
+        );
 
         // TODO: Use regular (non-blocking) reqwest client if this function
         // is made `async`.
         for server in servers {
             let server_ = server.clone();
             let filename_ = filename.clone();
+            let headers_ = headers.clone();
             let handle = std::thread::spawn(move || {
-                let http_client = reqwest::blocking::Client::new();
+                let http_client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .default_headers(headers_)
+                    .build()
+                    .expect("Must be able to build HTTP client instance");
                 let url = server_.join(&filename_).unwrap_or_else(|_| {
                     panic!("Must be able to form URL. Got: '{server_}' and '{filename_}'.")
                 });
