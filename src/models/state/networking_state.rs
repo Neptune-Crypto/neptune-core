@@ -166,3 +166,13 @@ impl NetworkingState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimate_proving_power_doesnt_crash() {
+        NetworkingState::estimate_proving_power();
+    }
+}
