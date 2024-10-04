@@ -124,11 +124,8 @@ pub fn prove_consensus_program(
     maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
 
     #[cfg(test)]
-    let proof = test::load_proof_or_produce_and_save(
-        claim.clone(),
-        program.clone(),
-        nondeterminism.clone(),
-    );
+    let proof =
+        test::load_proof_or_produce_and_save(&claim, program.clone(), nondeterminism.clone());
     #[cfg(not(test))]
     let proof = tasm_lib::triton_vm::prove(
         tasm_lib::triton_vm::stark::Stark::default(),
@@ -199,9 +196,9 @@ pub mod test {
         );
     }
 
-    /// Derive a file name from the claim
-    fn proof_filename(claim: Claim) -> String {
-        Hash::hash(
+    /// Derive a file name from the claim, includes the extension
+    fn proof_filename(claim: &Claim) -> String {
+        let base_name = Hash::hash(
             &[
                 Hash::hash(&claim.input),
                 claim.program_digest,
@@ -211,43 +208,56 @@ pub mod test {
             .flat_map(|d| d.values())
             .collect_vec(),
         )
-        .to_hex()
+        .to_hex();
+
+        format!("{base_name}.proof")
+    }
+
+    fn proof_path(claim: &Claim) -> PathBuf {
+        let name = proof_filename(claim);
+        let mut path = PathBuf::new();
+        path.push(Path::new(&name));
+
+        path
     }
 
     /// Load a proof for the claim if it exists; otherwise, run the prover and
     /// save it before returning it.
-    pub fn load_proof_or_produce_and_save(
-        claim: Claim,
+    pub(crate) fn load_proof_or_produce_and_save(
+        claim: &Claim,
         program: Program,
         nondeterminism: NonDeterminism,
     ) -> Proof {
-        let name = proof_filename(claim.clone());
-        match load_proof_if_available(claim.clone()) {
+        let name = proof_filename(claim);
+        match try_load_proof_from_disk(claim) {
             Some(proof) => {
                 println!(" - Loaded proof from disk: {name}.");
                 proof
             }
             None => {
-                print!(" - Proving ... ");
-                stdout().flush().expect("could not flush terminal");
-                let tick = SystemTime::now();
-                let proof = produce_and_save_proof(claim, program, nondeterminism);
-                let duration = SystemTime::now().duration_since(tick).unwrap();
-                println!(
-                    "success! Proof time: {:?}. Proof stored to disk: {name}",
-                    duration
-                );
-                proof
+                println!("Proof not found on disk.");
+                match try_fetch_proof_from_server(claim) {
+                    Some(proof) => proof,
+                    None => {
+                        println!("Proof not found on proof servers - Proving locally ... ");
+                        stdout().flush().expect("could not flush terminal");
+                        let tick = SystemTime::now();
+                        let proof = produce_and_save_proof(claim, program, nondeterminism);
+                        let duration = SystemTime::now().duration_since(tick).unwrap();
+                        println!(
+                            "success! Proof time: {:?}. Proof stored to disk: {name}",
+                            duration
+                        );
+                        proof
+                    }
+                }
             }
         }
     }
 
     /// Tries to load a proof for the claim from the test_data directory
-    fn load_proof_if_available(claim: Claim) -> Option<Proof> {
-        let name = proof_filename(claim);
-        let mut path = PathBuf::new();
-        path.push("test_data");
-        path.push(Path::new(&name).with_extension("proof"));
+    fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
+        let path = proof_path(claim);
         let Ok(mut input_file) = File::open(path.clone()) else {
             println!(
                 "cannot open file '{}' -- might not exist",
@@ -315,72 +325,88 @@ pub mod test {
     ///
     /// The proof-servers file is located at `test_data/proof_servers.txt`. It
     /// should contain one line per URL, ending in a slash.
-    fn query_server_for_proof(directory: String, filename: String) -> Option<Proof> {
+    fn try_fetch_proof_from_server(claim: &Claim) -> Option<Proof> {
+        let filename = proof_filename(&claim);
+        let (proof, server) = try_fetch_from_server_inner(&filename)?;
+
+        if !triton_vm::verify(Stark::default(), claim, &proof) {
+            eprintln!("Invalid proof served by {server}. Proof {filename} does not verify.");
+            return None;
+        }
+
+        let path = proof_path(claim);
+        save_proof(&path, &proof);
+
+        Some(proof)
+    }
+
+    /// Tries to fetch a proof from a server, does not validate the proof
+    ///
+    /// If a proof was found, returns it along with the URL of the server
+    /// serving the proof. The caller should validate the proof. Does
+    /// not store the proof to disk.
+    fn try_fetch_from_server_inner(filename: &str) -> Option<(Proof, String)> {
         let mut servers = load_servers();
         servers.shuffle(&mut thread_rng());
         let rt = Runtime::new().unwrap();
         for server in servers {
-            if let Some(proof) = rt.block_on(async {
-                let Ok(response) = reqwest::get(server.clone() + &filename).await else {
-                    println!(
-                        "server '{}' failed for file '{}'; trying next ...",
-                        server.clone(),
-                        filename
-                    );
-                    return None;
-                };
-                let Ok(file_contents) = response.bytes().await else {
-                    println!(
-                        "error reading file '{}' from server '{}'; trying next ...",
-                        filename, server
-                    );
-                    return None;
-                };
-                let mut proof_data = vec![];
-                for ch in file_contents.chunks(8) {
-                    if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
-                        proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
-                    } else {
-                        println!("cannot cast chunk to eight bytes");
-                        return None;
-                    }
+            let Ok(response) = rt.block_on(reqwest::get(server.clone() + &filename)) else {
+                println!(
+                    "server '{}' failed for file '{}'; trying next ...",
+                    server.clone(),
+                    filename
+                );
+
+                continue;
+            };
+
+            let Ok(file_contents) = rt.block_on(response.bytes()) else {
+                eprintln!(
+                    "error reading file '{}' from server '{}'; trying next ...",
+                    filename, server
+                );
+
+                continue;
+            };
+
+            let mut proof_data = vec![];
+            for ch in file_contents.chunks(8) {
+                if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
+                    proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
+                } else {
+                    eprintln!("cannot cast chunk to eight bytes. Server was: {server}");
+                    continue;
                 }
-                let proof = Proof(proof_data);
-                println!("got proof.");
-                Some(proof)
-            }) {
-                let mut path = PathBuf::new();
-                path.push(directory);
-                path.push(filename);
-                save_proof(&path, &proof);
-                return Some(proof);
             }
+
+            let proof = Proof(proof_data);
+            println!("got proof.");
+
+            return Some((proof, server));
         }
-        println!(
-            "No known servers serve file `{}`; trying to prove instead ...",
-            filename
-        );
+
+        println!("No known servers serve file `{}`", filename);
+
         None
     }
 
     #[test]
     fn test_query_proof() {
-        let directory = "test_data".to_string();
         let filename = "155848c090374716f0612597f818fb7d4879aa8b45e1a781f03aea7731079534f3ef3a05b888d72d.proof".to_string();
-        assert!(query_server_for_proof(directory, filename).is_some());
+        assert!(try_fetch_from_server_inner(&filename).is_some());
     }
 
     /// Call Triton VM prover to produce a proof and save it to disk.
     fn produce_and_save_proof(
-        claim: Claim,
+        claim: &Claim,
         program: Program,
         nondeterminism: NonDeterminism,
     ) -> Proof {
-        let name = proof_filename(claim.clone());
+        let name = proof_filename(claim);
         let mut path = PathBuf::new();
         path.push("test_data");
         create_dir_all(&path).expect("cannot create 'test_data' directory");
-        path.push(Path::new(&name).with_extension("proof"));
+        path.push(Path::new(&name));
 
         let proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism)
             .expect("cannot produce proof");
