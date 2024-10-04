@@ -457,9 +457,7 @@ mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::Zero;
-    use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing::debug;
@@ -479,11 +477,9 @@ mod tests {
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_transaction_with_wallet;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::mock_genesis_wallet_state;
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
@@ -933,10 +929,11 @@ mod tests {
             public_announcement: PublicAnnouncement::default(),
         };
         let tx_by_preminer_low_fee = preminer_state
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::ProofCollection,
             )
             .await?;
 
@@ -955,10 +952,11 @@ mod tests {
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
         let tx_by_preminer_high_fee = preminer_state
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 vec![receiver_data.clone()],
                 NeptuneCoins::new(10),
                 in_seven_months,
+                TxProvingCapability::ProofCollection,
             )
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
@@ -974,7 +972,12 @@ mod tests {
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
         let tx_by_preminer_medium_fee = preminer_state
-            .create_transaction(vec![receiver_data], NeptuneCoins::new(4), in_seven_months)
+            .create_transaction_with_prover_capability(
+                vec![receiver_data],
+                NeptuneCoins::new(4),
+                in_seven_months,
+                TxProvingCapability::ProofCollection,
+            )
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());
