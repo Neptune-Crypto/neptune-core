@@ -32,12 +32,22 @@ server {
     listen [::]:42580;  # IPv6 listener
     server_name <ip_or_url>;
 
+    # Block access to the root URL
+    location = / {
+        return 404;  # Return 404 for the root URL
+    }
+
     # Serve .proof files from the directory
     location ~* ^/[a-z0-9]+\.proof$ {
         alias /var/www/neptune-core-proofs/;
         autoindex off;
         autoindex_exact_size off;
         autoindex_localtime off;
+
+        # Limit allowed HTTP methods to GET
+        limit_except GET {
+            deny all;  # Block all other methods
+        }
 
         # Ensure no trailing slash is appended to the URL
         try_files $uri =404;
@@ -53,6 +63,11 @@ server {
     location = /robots.txt {
         return 200 "User-agent: *\nDisallow: /\n";
         add_header Content-Type text/plain;
+
+        # Limit allowed HTTP methods to GET
+        limit_except GET {
+            deny all;  # Block all other methods
+        }
 
         # Per-client rate limit
         limit_req zone=file_rate_limit burst=1 nodelay;
