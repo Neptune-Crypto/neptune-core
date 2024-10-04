@@ -1615,32 +1615,30 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
-        let network = Network::RegTest;
-        let other_wallet = WalletSecret::new_random();
-        let global_state_lock =
+        let network = Network::Main;
+
+        // seed determined by fair dice roll; guaranteed to be random
+        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
+        let other_wallet = WalletSecret::new_pseudorandom(rng.gen());
+        let premine_receiver =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let genesis_block = Block::genesis_block(network);
-        let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
-        let twenty_coins = twenty_neptune.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
         let main_lock_script = recipient_address.lock_script();
-        let output_utxo = Utxo {
-            coins: twenty_coins,
-            lock_script_hash: main_lock_script.hash(),
-        };
+
+        let nine_money = Utxo::new_native_coin(main_lock_script, NeptuneCoins::new(9));
         let sender_randomness = Digest::default();
         let receiver_privacy_digest = recipient_address.privacy_digest;
         let public_announcement = recipient_address
-            .generate_public_announcement(&output_utxo, sender_randomness)
+            .generate_public_announcement(&nine_money, sender_randomness)
             .unwrap();
-        let receiver_data = vec![UtxoReceiverData {
-            utxo: output_utxo.clone(),
-            sender_randomness,
-            receiver_privacy_digest,
-            public_announcement,
-        }];
+        let receiver_data =
+            vec![
+                UtxoReceiverData::new(nine_money, sender_randomness, receiver_privacy_digest)
+                    .with_public_announcement(public_announcement),
+            ];
 
-        let monitored_utxos = global_state_lock
+        let monitored_utxos = premine_receiver
             .lock_guard()
             .await
             .wallet_state
@@ -1654,32 +1652,27 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp;
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
-        assert!(create_transaction_with_timestamp(
-            &global_state_lock,
+        assert!(create_transaction_with_timestamp_and_prover_capability(
+            &premine_receiver,
             receiver_data.clone(),
             NeptuneCoins::new(1),
             launch + six_months - one_month,
+            TxProvingCapability::ProofCollection,
         )
         .await
         .is_err());
 
         // one month after though, we should be
-        let mut tx = create_transaction_with_timestamp(
-            &global_state_lock,
+        let tx = create_transaction_with_timestamp_and_prover_capability(
+            &premine_receiver,
             receiver_data,
             NeptuneCoins::new(1),
             launch + six_months + one_month,
+            TxProvingCapability::ProofCollection,
         )
         .await
         .unwrap();
         assert!(tx.is_valid().await);
-
-        // but if we backdate the timestamp two months, not anymore!
-        tx.kernel.timestamp = tx.kernel.timestamp - Timestamp::months(2);
-        // we can't test this yet; we don't have tasm code for time locks yet!
-        // todo: uncomment the next line when we do.
-        // assert!(!tx.is_valid());
-        tx.kernel.timestamp = tx.kernel.timestamp + Timestamp::months(2);
 
         assert_eq!(
             2,
@@ -1710,19 +1703,18 @@ mod global_state_tests {
                 .generate_public_announcement(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
-            other_receiver_data.push(UtxoReceiverData {
-                utxo,
-                sender_randomness: other_sender_randomness,
-                receiver_privacy_digest: other_receiver_digest,
-                public_announcement: other_public_announcement,
-            });
+            other_receiver_data.push(
+                UtxoReceiverData::new(utxo, other_sender_randomness, other_receiver_digest)
+                    .with_public_announcement(other_public_announcement),
+            );
         }
 
-        let new_tx: Transaction = create_transaction_with_timestamp(
-            &global_state_lock,
+        let new_tx: Transaction = create_transaction_with_timestamp_and_prover_capability(
+            &premine_receiver,
             other_receiver_data,
             NeptuneCoins::new(1),
             launch + six_months + one_month,
+            TxProvingCapability::ProofCollection,
         )
         .await
         .unwrap();

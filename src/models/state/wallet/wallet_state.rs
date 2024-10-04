@@ -219,7 +219,7 @@ impl WalletState {
                         .expected_utxos
                         .add_expected_utxo(
                             utxo,
-                            Digest::default(),
+                            Block::premine_sender_randomness(cli_args.network),
                             own_spending_key.privacy_preimage,
                             UtxoNotifier::Premine,
                         )

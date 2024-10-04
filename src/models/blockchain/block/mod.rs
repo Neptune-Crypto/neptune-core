@@ -8,6 +8,7 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tracing::debug;
@@ -340,7 +341,8 @@ impl Block {
             let utxo_digest = Hash::hash(&utxo);
             // generate randomness for mutator set commitment
             // Sender randomness cannot be random because there is no sender.
-            let bad_randomness = Digest::default();
+            let bad_randomness = Self::premine_sender_randomness(network);
+
             let receiver_digest = receiving_address.privacy_digest;
 
             // Add pre-mine UTXO to MutatorSet
@@ -375,12 +377,9 @@ impl Block {
             height: BFieldElement::zero().into(),
             prev_block_digest: Default::default(),
             timestamp: network.launch_date(),
-            // to be set to something difficult to predict ahead of time
-            nonce: [
-                BFieldElement::zero(),
-                BFieldElement::zero(),
-                BFieldElement::zero(),
-            ],
+
+            // TODO: to be set to something difficult to predict ahead of time
+            nonce: [bfe!(0), bfe!(0), bfe!(0)],
             max_block_size: 10_000,
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
@@ -388,6 +387,14 @@ impl Block {
         };
 
         Self::new(header, body, BlockProof::Genesis)
+    }
+
+    /// sender randomness is tailored to the network. This change
+    /// percolates into the mutator set hash and eventually into all transaction
+    /// kernels. The net result is that broadcasting transaction on other
+    /// networks invalidates the lock script proofs.
+    pub(crate) fn premine_sender_randomness(network: Network) -> Digest {
+        Digest::new([bfe!(network as u64), bfe!(0), bfe!(0), bfe!(0), bfe!(0)])
     }
 
     fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
@@ -759,8 +766,11 @@ impl Block {
 #[cfg(test)]
 mod block_tests {
 
+    use std::collections::HashSet;
+
     use rand::thread_rng;
     use rand::Rng;
+    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use super::*;
@@ -787,6 +797,20 @@ mod block_tests {
                 target_block_interval,
             );
             Self::new(header, body, proof)
+        }
+    }
+
+    #[test]
+    fn all_genesis_blocks_have_unique_mutator_set_hashes() {
+        let mut genesis_block_msa_digests: HashSet<Digest> = HashSet::default();
+
+        for network in Network::iter() {
+            assert!(genesis_block_msa_digests.insert(
+                Block::genesis_block(network)
+                    .body()
+                    .mutator_set_accumulator
+                    .hash(),
+            ), "All genesis blocks must have unique MSA digests, otherwise replay attacks are possible");
         }
     }
 

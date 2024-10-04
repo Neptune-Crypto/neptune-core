@@ -12,6 +12,9 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
+    /// Main net. Feature-complete. Fixed launch date. Not ready yet.
+    Main,
+
     /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
     #[default]
     Alpha,
@@ -19,9 +22,6 @@ pub enum Network {
     /// Upcoming iteration of testnet. Not feature-complete either but moreso than
     /// Alpha. Soon to be set as default.
     Beta,
-
-    /// Main net. Feature-complete. Fixed launch date. Not ready yet.
-    Main,
 
     /// Feature-complete (or as feature-complete as possible) test network separate
     /// from whichever network is currently running. For integration tests involving
@@ -80,5 +80,17 @@ impl FromStr for Network {
             "main" => Ok(Network::Main),
             _ => Err(format!("Failed to parse {} as network", input)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use num_traits::Zero;
+
+    use super::*;
+
+    #[test]
+    fn main_variant_is_zero() {
+        assert!((Network::Main as u32).is_zero());
     }
 }
