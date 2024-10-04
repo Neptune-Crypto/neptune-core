@@ -350,12 +350,12 @@ pub mod test {
     /// If a proof was found, returns it along with the URL of the server
     /// serving the proof. The caller should validate the proof. Does
     /// not store the proof to disk.
-    /// TODO: Make this function async!
+    /// TODO: Consider making this async.
     fn try_fetch_from_server_inner(filename: String) -> Option<(Proof, Url)> {
         let mut servers = load_servers();
         servers.shuffle(&mut thread_rng());
 
-        // TODO: Use regular (non-blocking) reqwest client when this function
+        // TODO: Use regular (non-blocking) reqwest client if this function
         // is made `async`.
         for server in servers {
             let server_ = server.clone();
