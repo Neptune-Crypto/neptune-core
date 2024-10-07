@@ -947,9 +947,7 @@ pub(crate) mod test {
     use super::MergeWitness;
     use crate::models::blockchain::transaction::validity::merge::Merge;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::PrimitiveWitness;
-    use crate::models::blockchain::transaction::ProofCollection;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;

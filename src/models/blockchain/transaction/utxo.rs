@@ -138,23 +138,6 @@ impl Utxo {
             .sum()
     }
 
-    /// Set the number of NeptuneCoins, overriding the pre-existing number attached
-    /// to the type script `NativeCurrency`, or adding a new coin with that amount
-    /// and type script hash to the coins list.
-    #[allow(dead_code, reason = "under development")]
-    pub(crate) fn set_native_currency_amount(&mut self, amount: NeptuneCoins) {
-        let new_coin = amount.to_native_coins().first().unwrap().clone();
-        if let Some(coin) = self
-            .coins
-            .iter_mut()
-            .find(|coin| coin.type_script_hash == NativeCurrency.hash())
-        {
-            *coin = new_coin;
-        } else {
-            self.coins.push(new_coin);
-        }
-    }
-
     /// If the UTXO has a timelock, find out what the release date is.
     pub fn release_date(&self) -> Option<Timestamp> {
         self.coins

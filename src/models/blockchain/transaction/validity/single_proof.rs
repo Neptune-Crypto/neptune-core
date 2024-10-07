@@ -22,7 +22,6 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_loc
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
-use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
@@ -79,12 +78,10 @@ pub(crate) enum SingleProofWitness {
 }
 
 impl SingleProofWitness {
-    #[allow(dead_code, reason = "under development")]
     pub fn from_collection(proof_collection: ProofCollection) -> Self {
         Self::Collection(Box::new(proof_collection))
     }
 
-    #[expect(dead_code, reason = "under development")]
     pub fn from_update(update_proof: Proof, new_kernel: &TransactionKernel) -> Self {
         Self::Update(WitnessOfUpdate {
             proof: update_proof,

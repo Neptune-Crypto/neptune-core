@@ -3,17 +3,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
-use block_height::BlockHeight;
 use futures::channel::oneshot;
-use itertools::Itertools;
 use num_traits::identities::Zero;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -449,7 +444,6 @@ mod mine_loop_tests {
         let four_neptune_coins = NeptuneCoins::new(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
-        let public_announcement = PublicAnnouncement::default();
         let tx_output = Utxo {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
@@ -457,12 +451,7 @@ mod mine_loop_tests {
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(
                 vec![
-                    (UtxoReceiverData {
-                        utxo: tx_output,
-                        sender_randomness,
-                        receiver_privacy_digest,
-                        public_announcement,
-                    }),
+                    (UtxoReceiverData::new(tx_output, sender_randomness, receiver_privacy_digest)),
                 ],
                 NeptuneCoins::new(1),
                 future_timestamp,

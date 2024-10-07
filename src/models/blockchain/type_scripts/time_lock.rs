@@ -19,7 +19,6 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::Digest;
-use twenty_first::error::BFieldCodecError;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;

@@ -687,7 +687,9 @@ impl WalletState {
         }
     }
 
-    pub(crate) async fn allocate_sufficient_input_funds_from_lock(
+    /// Allocate sufficient UTXOs to generate a transaction. `requested_amount`
+    /// must include fees that are paid in the transaction.
+    pub(crate) async fn allocate_sufficient_input_funds(
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
@@ -728,18 +730,6 @@ impl WalletState {
         }
 
         Ok(ret)
-    }
-
-    // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
-    // paid in the transaction.
-    pub(crate) async fn allocate_sufficient_input_funds(
-        &self,
-        requested_amount: NeptuneCoins,
-        tip_digest: Digest,
-    ) -> Result<Vec<UnlockedUtxo>> {
-        let now = Timestamp::now();
-        self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
-            .await
     }
 
     pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {

@@ -709,10 +709,8 @@ pub(crate) mod test {
 
     use super::*;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
-    use crate::models::blockchain::transaction::ProofCollection;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;

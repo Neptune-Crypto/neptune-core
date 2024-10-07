@@ -10,7 +10,6 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
-use std::cmp::max;
 use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
@@ -28,7 +27,6 @@ use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
-use tracing::error;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -338,51 +336,6 @@ impl Transaction {
         self.proof.verify(kernel_hash).await
     }
 
-    #[expect(dead_code, reason = "under development")]
-    fn merge_primitive_witnesses(
-        self_witness: PrimitiveWitness,
-        other_witness: PrimitiveWitness,
-        merged_kernel: &TransactionKernel,
-    ) -> PrimitiveWitness {
-        PrimitiveWitness {
-            input_utxos: self_witness
-                .input_utxos
-                .cat(other_witness.input_utxos.clone()),
-            lock_scripts_and_witnesses: [
-                self_witness.lock_scripts_and_witnesses.clone(),
-                other_witness.lock_scripts_and_witnesses.clone(),
-            ]
-            .concat(),
-            type_scripts_and_witnesses: self_witness
-                .type_scripts_and_witnesses
-                .iter()
-                .cloned()
-                .chain(other_witness.type_scripts_and_witnesses.iter().cloned())
-                .unique()
-                .collect_vec(),
-            input_membership_proofs: [
-                self_witness.input_membership_proofs.clone(),
-                other_witness.input_membership_proofs.clone(),
-            ]
-            .concat(),
-            output_utxos: self_witness
-                .output_utxos
-                .cat(other_witness.output_utxos.clone()),
-            output_sender_randomnesses: [
-                self_witness.output_sender_randomnesses.clone(),
-                other_witness.output_sender_randomnesses.clone(),
-            ]
-            .concat(),
-            output_receiver_digests: [
-                self_witness.output_receiver_digests.clone(),
-                other_witness.output_receiver_digests.clone(),
-            ]
-            .concat(),
-            mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
-            kernel: merged_kernel.clone(),
-        }
-    }
-
     /// Merge two transactions. Both input transactions must have a valid
     /// Proof witness for this operation to work.
     ///
@@ -392,9 +345,6 @@ impl Transaction {
     /// set hashes are not the same, if both transactions have coinbase a
     /// coinbase UTXO, or if either of the transactions are *not* a single
     /// proof.
-    #[expect(clippy::diverging_sub_expression, reason = "under development")]
-    #[expect(unreachable_code, reason = "under development")]
-    #[expect(unused_variables, reason = "under development")]
     pub fn merge_with(self, other: Transaction, shuffle_seed: [u8; 32]) -> Transaction {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -412,9 +362,9 @@ impl Transaction {
             } else {
                 let bad_type = match tx_proof {
                     TransactionProof::Invalid => "invalid",
-                    TransactionProof::Witness(primitive_witness) => "primitive_witness",
-                    TransactionProof::SingleProof(proof) => unreachable!(),
-                    TransactionProof::ProofCollection(proof_collection) => "proof_collection",
+                    TransactionProof::Witness(_primitive_witness) => "primitive_witness",
+                    TransactionProof::SingleProof(_proof) => unreachable!(),
+                    TransactionProof::ProofCollection(_proof_collection) => "proof_collection",
                 };
                 panic!("Transaction proof must be a single proof. {indicator} was: {bad_type}",);
             }

@@ -579,13 +579,12 @@ impl RPC for NeptuneRPCServer {
                     return None;
                 }
             };
-        let receiver_data = [(UtxoReceiverData {
-            utxo,
-            sender_randomness,
-            receiver_privacy_digest,
-            public_announcement,
-        })]
-        .to_vec();
+        let receiver_data =
+            [
+                UtxoReceiverData::new(utxo, sender_randomness, receiver_privacy_digest)
+                    .with_public_announcement(public_announcement),
+            ]
+            .to_vec();
 
         // Pause miner if we are mining
         let was_mining = self.state.mining().await;

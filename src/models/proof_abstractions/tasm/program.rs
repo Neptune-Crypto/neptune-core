@@ -476,7 +476,7 @@ pub mod test {
             .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
         path.push(Path::new(&name));
 
-        let proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism)
+        let proof = triton_vm::prove(Stark::default(), claim, &program, nondeterminism)
             .expect("cannot produce proof");
 
         save_proof(&path, &proof);

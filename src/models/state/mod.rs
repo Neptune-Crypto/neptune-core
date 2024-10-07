@@ -38,7 +38,6 @@ use super::blockchain::transaction::Transaction;
 use super::blockchain::transaction::TransactionProof;
 use super::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::proof_abstractions::tasm::program::ConsensusProgram;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -46,9 +45,7 @@ use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::peer::HandshakeData;
-use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -439,7 +436,7 @@ impl GlobalState {
         // collect spendable inputs
         let spendable_utxos_and_mps = self
             .wallet_state
-            .allocate_sufficient_input_funds_from_lock(total_spend, block_tip.hash(), timestamp)
+            .allocate_sufficient_input_funds(total_spend, block_tip.hash(), timestamp)
             .await?;
 
         Ok(spendable_utxos_and_mps)
@@ -581,12 +578,11 @@ impl GlobalState {
             )
             .expect("Adding change UTXO to UTXO notification pool must succeed");
 
-        UtxoReceiverData {
-            utxo: change_utxo,
-            sender_randomness: change_sender_randomness,
-            receiver_privacy_digest: receiver_preimage.hash(),
-            public_announcement: PublicAnnouncement::default(),
-        }
+        UtxoReceiverData::new(
+            change_utxo,
+            change_sender_randomness,
+            receiver_preimage.hash(),
+        )
     }
 
     /// Generate a primitive witness for a transaction from various disparate witness data.
@@ -1527,8 +1523,8 @@ mod global_state_tests {
         true
     }
 
-    /// Similar to [GlobalState::create_transaction_with_timestamp] but allows
-    /// caller to specify proving capability.
+    /// Similar to [GlobalState::create_transaction] but allows caller to
+    /// specify both proving capability and timestamp.
     pub(super) async fn create_transaction_with_timestamp_and_prover_capability(
         global_state_lock: &GlobalStateLock,
         mut receiver_data: Vec<UtxoReceiverData>,
@@ -1583,31 +1579,6 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             prover_capability,
-        )
-        .await
-    }
-
-    /// Similar to [GlobalState::create_transaction] but with a given timestamp,
-    /// as opposed to now.
-    pub(super) async fn create_transaction_with_timestamp(
-        global_state_lock: &GlobalStateLock,
-        receiver_data: Vec<UtxoReceiverData>,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-    ) -> Result<Transaction> {
-        let tx_proving_capability = global_state_lock
-            .global_state_lock
-            .lock_guard()
-            .await
-            .net
-            .tx_proving_capability;
-
-        create_transaction_with_timestamp_and_prover_capability(
-            global_state_lock,
-            receiver_data,
-            fee,
-            timestamp,
-            tx_proving_capability,
         )
         .await
     }

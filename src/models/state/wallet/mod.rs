@@ -648,13 +648,14 @@ mod wallet_tests {
             .await?;
 
         // Verify that the allocater returns a sane amount
+        let now = Timestamp::now();
         assert_eq!(
             1,
             own_global_state
                 .lock_guard()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash(), now)
                 .await
                 .unwrap()
                 .len()
@@ -667,7 +668,8 @@ mod wallet_tests {
                 .wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.checked_sub(&NeptuneCoins::one()).unwrap(),
-                    block_1.hash()
+                    block_1.hash(),
+                    now
                 )
                 .await
                 .unwrap()
@@ -679,7 +681,7 @@ mod wallet_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(mining_reward, block_1.hash())
+                .allocate_sufficient_input_funds(mining_reward, block_1.hash(), now)
                 .await
                 .unwrap()
                 .len()
@@ -690,7 +692,11 @@ mod wallet_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .allocate_sufficient_input_funds(mining_reward + NeptuneCoins::one(), block_1.hash())
+            .allocate_sufficient_input_funds(
+                mining_reward + NeptuneCoins::one(),
+                block_1.hash(),
+                now
+            )
             .await
             .is_err());
 
@@ -734,7 +740,11 @@ mod wallet_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), next_block.hash())
+                .allocate_sufficient_input_funds(
+                    mining_reward.scalar_mul(5),
+                    next_block.hash(),
+                    now
+                )
                 .await
                 .unwrap()
                 .len()
@@ -747,7 +757,8 @@ mod wallet_tests {
                 .wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.scalar_mul(5) + NeptuneCoins::one(),
-                    next_block.hash()
+                    next_block.hash(),
+                    now
                 )
                 .await
                 .unwrap()
@@ -761,7 +772,7 @@ mod wallet_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(expected_balance, next_block.hash())
+                .allocate_sufficient_input_funds(expected_balance, next_block.hash(), now)
                 .await
                 .unwrap()
                 .len()
@@ -774,7 +785,8 @@ mod wallet_tests {
             .wallet_state
             .allocate_sufficient_input_funds(
                 expected_balance + NeptuneCoins::one(),
-                next_block.hash()
+                next_block.hash(),
+                now
             )
             .await
             .is_err());
@@ -785,7 +797,7 @@ mod wallet_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash())
+            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash(), now)
             .await
             .unwrap();
         assert_eq!(
@@ -841,7 +853,7 @@ mod wallet_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::new(2000), next_block.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::new(2000), next_block.hash(), now)
                 .await
                 .unwrap()
                 .len()
@@ -852,7 +864,7 @@ mod wallet_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .allocate_sufficient_input_funds(NeptuneCoins::new(2001), next_block.hash())
+            .allocate_sufficient_input_funds(NeptuneCoins::new(2001), next_block.hash(), now)
             .await
             .is_err());
 

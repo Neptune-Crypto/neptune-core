@@ -12,7 +12,6 @@ use proptest_arbitrary_interop::arb;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -681,6 +680,34 @@ mod test {
 
     use super::*;
     use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
+    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+
+    impl Utxo {
+        /// Set the number of NeptuneCoins, overriding the pre-existing number attached
+        /// to the type script `NativeCurrency`, or adding a new coin with that amount
+        /// and type script hash to the coins list.
+        pub(crate) fn set_native_currency_amount(&mut self, amount: NeptuneCoins) {
+            assert!(
+                self.coins
+                    .iter()
+                    .filter(|x| x.type_script_hash == NativeCurrency.hash())
+                    .count()
+                    <= 1,
+                "Cannot have repeated native currency coins"
+            );
+            let new_coin = amount.to_native_coins().first().unwrap().clone();
+            if let Some(coin) = self
+                .coins
+                .iter_mut()
+                .find(|coin| coin.type_script_hash == NativeCurrency.hash())
+            {
+                *coin = new_coin;
+            } else {
+                self.coins.push(new_coin);
+            }
+        }
+    }
 
     impl PrimitiveWitness {
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
