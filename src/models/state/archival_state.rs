@@ -840,7 +840,6 @@ impl ArchivalState {
 #[cfg(test)]
 mod archival_state_tests {
 
-    use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
@@ -853,7 +852,6 @@ mod archival_state_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
@@ -982,78 +980,52 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_db_write_test() -> Result<()> {
-        let mut rng = thread_rng();
+        let mut rng = StdRng::seed_from_u64(107221549301u64);
         // Verify that `update_mutator_set` writes the active window back to disk.
 
         let network = Network::Alpha;
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = wallet.nth_generation_spending_key(0).to_address();
-        let genesis_receiver_global_state_lock =
-            mock_genesis_global_state(network, 0, wallet).await;
-        let mut genesis_receiver_global_state =
-            genesis_receiver_global_state_lock.lock_guard_mut().await;
+        let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let alice_wallet = alice_wallet.wallet_secret;
+        let allice_address = alice_wallet.nth_generation_spending_key(0).to_address();
+        let alice = mock_genesis_global_state(network, 0, alice_wallet).await;
+        let mut alice = alice.lock_guard_mut().await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &genesis_receiver_global_state
-                .chain
-                .archival_state_mut()
-                .genesis_block,
+            &alice.chain.archival_state_mut().genesis_block,
             None,
-            own_receiving_address,
+            allice_address,
             rng.gen(),
         );
 
         {
-            genesis_receiver_global_state
-                .set_new_tip(mock_block_1.clone())
-                .await
-                .unwrap();
-            let ams_ref = &genesis_receiver_global_state
-                .chain
-                .archival_state()
-                .archival_mutator_set;
+            alice.set_new_tip(mock_block_1.clone()).await.unwrap();
+            let ams_ref = &alice.chain.archival_state().archival_mutator_set;
             assert_ne!(0, ams_ref.ams().aocl.num_leafs().await);
         }
 
-        let now = mock_block_1.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = mock_block_1.kernel.header.timestamp + Timestamp::months(7);
 
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
-        {
-            let sender_tx = genesis_receiver_global_state
-                .create_transaction(
-                    vec![UtxoReceiverData {
-                        public_announcement: PublicAnnouncement::default(),
-                        receiver_privacy_digest: random(),
-                        sender_randomness: random(),
-                        utxo: Utxo {
-                            coins: NeptuneCoins::new(4).to_native_coins(),
-                            lock_script_hash: LockScript::anyone_can_spend().hash(),
-                        },
-                    }],
-                    NeptuneCoins::new(2),
-                    now + seven_months,
-                )
-                .await
-                .unwrap();
+        let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
+        let sender_tx = alice
+            .create_transaction_with_prover_capability(
+                vec![UtxoReceiverData::new(utxo, rng.gen(), rng.gen())],
+                NeptuneCoins::new(2),
+                in_seven_months,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
 
-            let mock_block_2 =
-                Block::new_block_from_template(&mock_block_1, sender_tx, Timestamp::now(), None);
+        let mock_block_2 =
+            Block::new_block_from_template(&mock_block_1, sender_tx, in_seven_months, None);
 
-            // Remove an element from the mutator set, verify that the active window DB is updated.
-            genesis_receiver_global_state
-                .set_new_tip(mock_block_2.clone())
-                .await?;
+        // Remove an element from the mutator set, verify that the active window DB is updated.
+        alice.set_new_tip(mock_block_2.clone()).await?;
 
-            let ams_ref = &genesis_receiver_global_state
-                .chain
-                .archival_state()
-                .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
-        }
+        let ams_ref = &alice.chain.archival_state().archival_mutator_set;
+        assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
 
         Ok(())
     }
