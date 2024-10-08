@@ -29,13 +29,13 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::UtxoNotifyMethod;
+use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
-use crate::models::consensus::timestamp::Timestamp;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
@@ -294,7 +294,7 @@ impl RPC for NeptuneRPCServer {
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
-        match leaf_index > 0 && leaf_index < aocl.count_leaves().await {
+        match leaf_index > 0 && leaf_index < aocl.num_leafs().await {
             true => Some(aocl.get_leaf_async(leaf_index).await),
             false => None,
         }
@@ -658,6 +658,15 @@ impl RPC for NeptuneRPCServer {
             }
         };
 
+        // Pause miner if we are mining
+        let was_mining = self.state.mining().await;
+        if was_mining {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
+        }
+
         // Create the transaction
         //
         // Note that create_transaction() does not modify any state and only
@@ -708,6 +717,16 @@ impl RPC for NeptuneRPCServer {
             .rpc_server_to_main_tx
             .send(RPCServerToMain::Send(Box::new(transaction.clone())))
             .await;
+
+        // Restart mining if it was paused
+        if was_mining {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
+        }
+
+        self.state.flush_databases().await.expect("flushed DBs");
 
         match response {
             Ok(_) => Some(Hash::hash(&transaction)),
@@ -813,6 +832,7 @@ mod rpc_server_tests {
     use tracing_test::traced_test;
     use ReceivingAddress;
 
+    use super::*;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::PeerSanctionReason;
@@ -825,8 +845,6 @@ mod rpc_server_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
-
-    use super::*;
 
     async fn test_rpc_server(
         network: Network,
@@ -1221,7 +1239,7 @@ mod rpc_server_tests {
             .archival_mutator_set
             .ams()
             .aocl
-            .count_leaves()
+            .num_leafs()
             .await;
 
         debug_assert!(aocl_leaves > 0);

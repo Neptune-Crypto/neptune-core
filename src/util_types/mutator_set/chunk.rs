@@ -3,13 +3,13 @@ use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::prelude::TasmObject;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::shared::CHUNK_SIZE;
 use crate::prelude::twenty_first;
 
-use super::shared::CHUNK_SIZE;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 pub struct Chunk {
     pub relative_indices: Vec<u32>,
 }

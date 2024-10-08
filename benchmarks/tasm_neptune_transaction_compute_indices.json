@@ -2,22 +2,22 @@
   {
     "name": "tasm_neptune_transaction_compute_indices",
     "benchmark_result": {
-      "clock_cycle_count": 4722,
+      "clock_cycle_count": 4507,
       "hash_table_height": 595,
-      "u32_table_height": 4346,
-      "op_stack_table_height": 3533,
-      "ram_table_height": 488
+      "u32_table_height": 4470,
+      "op_stack_table_height": 3255,
+      "ram_table_height": 487
     },
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_compute_indices",
     "benchmark_result": {
-      "clock_cycle_count": 4722,
+      "clock_cycle_count": 4507,
       "hash_table_height": 595,
-      "u32_table_height": 4482,
-      "op_stack_table_height": 3533,
-      "ram_table_height": 488
+      "u32_table_height": 4606,
+      "op_stack_table_height": 3255,
+      "ram_table_height": 487
     },
     "case": "WorstCase"
   }

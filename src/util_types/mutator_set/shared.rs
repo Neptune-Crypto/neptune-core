@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use tasm_lib::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-
 use super::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 
 pub const WINDOW_SIZE: u32 = 1 << 20;
 pub const CHUNK_SIZE: u32 = 1 << 12;
@@ -57,9 +57,9 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 pub fn get_batch_mutation_argument_for_removal_record(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =
         HashMap::new();
     // `mutated_chunk_dictionaries` records the indices into the
     // input `chunk_dictionaries` slice that shows which elements
@@ -67,7 +67,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
     let mut mutated_chunk_dictionaries: HashSet<usize> = HashSet::new();
     for (chunk_index, indices) in removal_record.get_chunkidx_to_indices_dict().iter() {
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
-            match chunk_dictionary.dictionary.get_mut(chunk_index) {
+            match chunk_dictionary.get_mut(chunk_index) {
                 // Leaf and its MMR-membership proof exists in own MS-membership proof (in `chunk_dictionaries`)
                 Some((mmr_mp, chunk)) => {
                     for index in indices.iter() {
@@ -91,7 +91,7 @@ pub fn get_batch_mutation_argument_for_removal_record(
 
                 // Leaf does not exists in own membership proof, so we get it from the removal record
                 None => {
-                    match removal_record.target_chunks.dictionary.get(chunk_index) {
+                    match removal_record.target_chunks.get(chunk_index) {
                         None => {
                             // This should mean that the index is in the active part of the
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
@@ -124,7 +124,10 @@ pub fn get_batch_mutation_argument_for_removal_record(
 
     (
         mutated_chunk_dictionaries,
-        batch_modification_hash_map.into_values().collect(),
+        batch_modification_hash_map
+            .into_iter()
+            .map(|(i, (p, l))| (i, p, l))
+            .collect(),
     )
 }
 
@@ -156,9 +159,9 @@ pub fn get_batch_mutation_argument_for_removal_record(
 pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
     removal_record: &RemovalRecord,
     chunk_dictionaries: &mut [&mut ChunkDictionary],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
+) -> (HashSet<usize>, Vec<(u64, MmrMembershipProof, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof, Digest)> =
         HashMap::new();
 
     // `mutated_chunk_dictionaries` records the indices in `chunk_dictionaries`
@@ -167,7 +170,7 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
 
     for (chunk_index, indices) in removal_record.get_chunkidx_to_indices_dict().iter() {
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
-            match chunk_dictionary.dictionary.get_mut(chunk_index) {
+            match chunk_dictionary.get_mut(chunk_index) {
                 // Leaf and its MMR-membership proof exists in own MS-membership proof (via `chunk_dictionaries`)
                 Some((mmr_mp, chunk)) => {
                     for index in indices.iter() {
@@ -189,7 +192,7 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
                 // want the leaf values to revert to, we should *not*
                 // add the indices supplied by the removal record.
                 None => {
-                    match removal_record.target_chunks.dictionary.get(chunk_index) {
+                    match removal_record.target_chunks.get(chunk_index) {
                         None => {
                             // This should mean that the index is in the active part of the
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
@@ -223,6 +226,9 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
 
     (
         mutated_chunk_dictionaries,
-        batch_modification_hash_map.into_values().collect(),
+        batch_modification_hash_map
+            .iter()
+            .map(|(i, (p, l))| (*i, p.clone(), *l))
+            .collect_vec(),
     )
 }

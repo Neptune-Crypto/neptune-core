@@ -1,16 +1,16 @@
-use serde::Deserialize;
-use serde::Serialize;
 use std::fmt;
 use std::net::IpAddr;
-use twenty_first::math::digest::Digest;
 
-use crate::database::NeptuneLevelDb;
-use crate::prelude::twenty_first;
+use serde::Deserialize;
+use serde::Serialize;
+use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
-use super::consensus::timestamp::Timestamp;
 use super::peer::PeerStanding;
+use super::proof_abstractions::timestamp::Timestamp;
+use crate::database::NeptuneLevelDb;
+use crate::prelude::twenty_first;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 

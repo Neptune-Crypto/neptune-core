@@ -1,8 +1,8 @@
-mod compute_canonical_commitment;
-mod compute_indices;
-mod hash_index_list;
-mod hash_removal_record_indices;
+pub(crate) mod authenticate_txk_field;
+pub mod claims;
+pub(crate) mod coinbase_amount;
+pub mod hash_removal_record_index_sets;
 mod hash_utxo;
-pub mod removal_records_integrity;
+pub mod leaf_authentication;
+pub mod merge;
 pub mod transaction_kernel_mast_hash;
-mod verify_aocl_membership;

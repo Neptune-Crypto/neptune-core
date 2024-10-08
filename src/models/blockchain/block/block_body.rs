@@ -7,10 +7,9 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::Transaction;
-use crate::models::consensus::mast_hash::HasDiscriminant;
-use crate::models::consensus::mast_hash::MastHash;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -33,7 +32,7 @@ impl HasDiscriminant for BlockBodyField {
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
-    pub transaction: Transaction,
+    pub transaction_kernel: TransactionKernel,
 
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
     /// accumulator (=> compact representation and membership proofs) and an anonymity
@@ -41,12 +40,12 @@ pub struct BlockBody {
     pub mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.
-    pub lock_free_mmr_accumulator: MmrAccumulator<Hash>,
+    pub lock_free_mmr_accumulator: MmrAccumulator,
 
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
-    pub block_mmr_accumulator: MmrAccumulator<Hash>,
+    pub block_mmr_accumulator: MmrAccumulator,
 
     /// All blocks that lost the block race to an ancestor of this block and have not been
     /// listed as uncle before. The miner will need to prove that between his block and
@@ -59,7 +58,7 @@ impl MastHash for BlockBody {
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         vec![
-            self.transaction.kernel.encode(),
+            self.transaction_kernel.encode(),
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),

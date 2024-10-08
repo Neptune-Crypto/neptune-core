@@ -7,8 +7,6 @@ use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::locks::tokio::AtomicRw;
-
 use super::super::storage_vec::Index;
 use super::traits::StorageReader;
 use super::PendingWrites;
@@ -16,6 +14,7 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
+use crate::locks::tokio::AtomicRw;
 
 pub(super) struct DbtVecPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,

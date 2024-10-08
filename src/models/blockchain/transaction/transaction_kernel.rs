@@ -8,24 +8,24 @@ use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use strum::VariantArray;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
+use super::primitive_witness::PrimitiveWitness;
+use super::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::consensus::mast_hash::HasDiscriminant;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-use super::primitive_witness::PrimitiveWitness;
-use super::PublicAnnouncement;
 
 pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -38,16 +38,17 @@ pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord>,
 
-    // `outputs` contains the commitments (addition records) that go into the AOCL
+    /// `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
 
     pub public_announcements: Vec<PublicAnnouncement>,
     pub fee: NeptuneCoins,
     pub coinbase: Option<NeptuneCoins>,
 
-    // number of milliseconds since unix epoch
+    /// number of milliseconds since unix epoch
     pub timestamp: Timestamp,
 
+    /// mutator set hash *prior* to updating mutator set with this transaction.
     pub mutator_set_hash: Digest,
 }
 
@@ -57,10 +58,11 @@ impl From<PrimitiveWitness> for TransactionKernel {
     }
 }
 
-#[derive(Debug, Clone, EnumCount)]
+#[derive(VariantArray, Debug, Clone, EnumCount, Copy, strum_macros::Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum TransactionKernelField {
-    InputUtxos,
-    OutputUtxos,
+    Inputs,
+    Outputs,
     PublicAnnouncements,
     Fee,
     Coinbase,
@@ -70,7 +72,7 @@ pub enum TransactionKernelField {
 
 impl HasDiscriminant for TransactionKernelField {
     fn discriminant(&self) -> usize {
-        self.clone() as usize
+        *self as usize
     }
 }
 
@@ -186,12 +188,11 @@ pub mod transaction_kernel_tests {
     use rand::Rng;
     use rand::RngCore;
 
+    use super::*;
     use crate::tests::shared::random_public_announcement;
     use crate::tests::shared::random_transaction_kernel;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
-
-    use super::*;
 
     #[test]
     pub fn decode_public_announcement() {

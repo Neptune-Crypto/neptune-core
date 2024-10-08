@@ -6,7 +6,7 @@ A block kernel consists of a header and a body. The block header has constant si
  - `prev_block_digest` the hash of the block's predecessor
  - `timestamp` when the block was found
  - `nonce` randomness for proof-of-work
- - `max_block_size` maximum block size in bytes
+ - `max_block_size` maximum block size in `BFieldElement`s
  - `proof_of_work_line` approximate number of hashes computed in the block's direct lineage
  - `proof_of_work_family` approximate number of hashes computed in the block's family, including uncles
  - `difficulty` approximate number of hashes required to find a block.

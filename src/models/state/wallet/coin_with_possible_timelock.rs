@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
@@ -113,10 +113,9 @@ mod test {
     use rand::Rng;
     use rand::RngCore;
 
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::consensus::timestamp::Timestamp;
-
     use super::CoinWithPossibleTimeLock;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
     fn sample_report() {

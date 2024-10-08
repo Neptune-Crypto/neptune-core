@@ -1,5 +1,12 @@
 //! provides an interface to transaction outputs and associated types
 
+use std::ops::Deref;
+use std::ops::DerefMut;
+
+use anyhow::Result;
+use serde::Deserialize;
+use serde::Serialize;
+
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -7,17 +14,11 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
 use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-use anyhow::Result;
-use serde::Deserialize;
-use serde::Serialize;
-use std::ops::Deref;
-use std::ops::DerefMut;
 
 /// enumerates how utxos should be transferred.
 ///
@@ -78,7 +79,7 @@ impl From<ExpectedUtxo> for TxOutput {
         Self {
             utxo: expected_utxo.utxo.clone(),
             sender_randomness: expected_utxo.sender_randomness,
-            receiver_privacy_digest: expected_utxo.receiver_preimage.hash::<Hash>(),
+            receiver_privacy_digest: expected_utxo.receiver_preimage.hash(),
             utxo_notification: UtxoNotification::OffChain(Box::new(expected_utxo)),
         }
     }
@@ -198,15 +199,20 @@ impl TxOutput {
     pub fn offchain(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_privacy_preimage: Digest,
+        receiver_privacy_digest: Digest,
     ) -> Self {
-        ExpectedUtxo::new(
+        Self {
             utxo,
             sender_randomness,
-            receiver_privacy_preimage,
-            UtxoNotifier::Myself,
-        )
-        .into()
+            receiver_privacy_digest,
+            utxo_notification: UtxoNotification::OffChain(Box::new(
+                // Remark: UtxoNotification cannot contain an ExpectedUtxo because
+                // the second structure contains secret information known only to
+                // the receiver. UtxoNotification is created by the sender, who
+                // oblivious to these secrets.
+                todo!(),
+            )),
+        }
     }
 
     // only for legacy tests
@@ -352,6 +358,8 @@ impl TxOutputList {
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
     use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -359,7 +367,6 @@ mod tests {
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
-    use rand::Rng;
 
     #[tokio::test]
     async fn test_utxoreceiver_auto_not_owned_output() -> Result<()> {

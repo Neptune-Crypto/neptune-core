@@ -6,14 +6,13 @@ use serde::Serialize;
 use twenty_first::math::digest::Digest;
 use twenty_first::prelude::U32s;
 
+use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
+use super::block_header::TARGET_DIFFICULTY_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
-
-use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
-use super::block_header::TARGET_DIFFICULTY_U32_SIZE;
 
 /// Provides summary information about a Block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,10 +73,10 @@ impl BlockInfo {
             difficulty: header.difficulty,
             proof_of_work_line: header.proof_of_work_line,
             proof_of_work_family: header.proof_of_work_family,
-            num_inputs: body.transaction.kernel.inputs.len(),
-            num_outputs: body.transaction.kernel.outputs.len(),
+            num_inputs: body.transaction_kernel.inputs.len(),
+            num_outputs: body.transaction_kernel.outputs.len(),
             num_uncle_blocks: body.uncle_blocks.len(),
-            fee: body.transaction.kernel.fee,
+            fee: body.transaction_kernel.fee,
             mining_reward: crate::Block::get_mining_reward(header.height),
             is_genesis: digest == genesis_digest,
             is_tip: digest == tip_digest,

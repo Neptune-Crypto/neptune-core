@@ -1,10 +1,9 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use futures::Stream;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-
-use crate::locks::tokio::AtomicRw;
 
 use super::super::storage_vec::traits::*;
 use super::super::storage_vec::Index;
@@ -12,8 +11,7 @@ use super::dbtvec_private::DbtVecPrivate;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
-
-use futures::Stream;
+use crate::locks::tokio::AtomicRw;
 
 /// A LevelDb-backed Vec for use with DbSchema
 ///

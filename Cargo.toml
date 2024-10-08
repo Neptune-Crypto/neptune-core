@@ -39,7 +39,8 @@ semver = "^1.0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0"
-strum = { version = "0.25", features = ["derive"] }
+strum = { version = "0.26.3", features = ["derive"] }
+strum_macros = "0.26.4"
 tarpc = { version = "^0.34", features = [
     "tokio1",
     "serde-transport",
@@ -64,10 +65,12 @@ sha3 = "0.10.8"
 readonly = "0.2.12"
 thiserror = "1.0.59"
 systemstat = "0.2.3"
+sysinfo = "0.31.4"
 
 [dev-dependencies]
 test-strategy = "0.3"
 pin-project-lite = "0.2.13"
+reqwest = { version = "0.12.8", features = ["blocking"] }
 tokio-test = "0.4"
 blake3 = "1.5.1"
 divan = "0.1.14"
@@ -77,28 +80,50 @@ version = "1"
 default-features = false
 features = ["user-hooks"]
 
-# needed because it otherwise takes too long to sign transaction with STARK proofs
+# `opt-level = 3` is needed because it otherwise takes too long to sign
+# transaction with STARK proofs. The other flags are there to make compilation
+# of Triton VM faster.
 [profile.dev.package.triton-vm]
-opt-level = 0
+opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.release.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.bench.package.triton-vm]
 opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
 [profile.test.package.triton-vm]
-opt-level = 0
+opt-level = 3
+debug = false
+incremental = false
+debug-assertions = false
+overflow-checks = false
 
-# [profile.test]
-# opt-level = 0 # change to 3 for shorter test running times but much longer test compilation time
-# debug = true
-# debug-assertions = true
-# overflow-checks = true
-# lto = false
-# incremental = true
-# codegen-units = 256
-# rpath = false
+# Set to make compilation of Triton VM faster. Since it uses build scripts
+# that should run with `opt-level=3` set.
+[profile.test]
+build-override.opt-level = 3
+
+[profile.release]
+build-override.opt-level = 3
+
+[profile.bench]
+build-override.opt-level = 3
+
+[profile.dev]
+build-override.opt-level = 3
 
 ## We use harness = false on these so that the divan reports are output on stdout.
 
@@ -118,9 +143,10 @@ harness = false
 name = "archival_mmr"
 harness = false
 
-[patch.crates-io]
-# 694f27daf78aade0ed0dc07e3babaab036cd5572 is tip of branch: master as of 2024-04-30
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "694f27daf78aade0ed0dc07e3babaab036cd5572" }
+[[bench]]
+name = "consensus"
+harness = false
 
-# 0d2cb98c0495d30e53d28e82a35de44dc655c3ea = tip of branch: master,  on 2024-04-24
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "0d2cb98c0495d30e53d28e82a35de44dc655c3ea" }
+[patch.crates-io]
+# branch master, 2024-10-02
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "b4735945" }

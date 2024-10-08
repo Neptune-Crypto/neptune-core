@@ -32,12 +32,12 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
-use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::*;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -56,7 +56,7 @@ fn make_block_template(
     transaction: Transaction,
     mut block_timestamp: Timestamp,
     target_block_interval: Option<u64>,
-) -> (BlockHeader, BlockBody) {
+) -> (BlockHeader, BlockBody, BlockProof) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
     let mut next_mutator_set_accumulator: MutatorSetAccumulator =
@@ -73,9 +73,9 @@ fn make_block_template(
     let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmra.append(previous_block.hash());
     let block_body: BlockBody = BlockBody {
-        transaction,
+        transaction_kernel: transaction.kernel,
         mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
         block_mmr_accumulator: block_mmra,
         uncle_blocks: vec![],
     };
@@ -103,7 +103,9 @@ fn make_block_template(
         difficulty,
     };
 
-    (block_header, block_body)
+    let block_proof = BlockProof::DummyProof; // TODO: produce SingleProof
+
+    (block_header, block_body, block_proof)
 }
 
 /// Attempt to mine a valid block for the network
@@ -111,6 +113,7 @@ fn make_block_template(
 async fn mine_block(
     block_header: BlockHeader,
     block_body: BlockBody,
+    block_proof: BlockProof,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
@@ -134,6 +137,7 @@ async fn mine_block(
         mine_block_worker(
             block_header,
             block_body,
+            block_proof,
             previous_block,
             sender,
             coinbase_utxo_info,
@@ -150,6 +154,7 @@ async fn mine_block(
 fn mine_block_worker(
     block_header: BlockHeader,
     block_body: BlockBody,
+    block_proof: BlockProof,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
@@ -160,7 +165,7 @@ fn mine_block_worker(
     let mut threshold = Block::difficulty_to_digest_threshold(difficulty);
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
-        block_body.transaction.kernel.outputs.len(),
+        block_body.transaction_kernel.outputs.len(),
         block_header.height,
         threshold
     );
@@ -170,19 +175,14 @@ fn mine_block_worker(
     // seeded with that seed. The `thread_rng()` object is dropped immediately.
     let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
 
-    let block_type = Block::mk_std_block_type(None);
-    let mut block = Block::new(block_header, block_body, block_type);
+    let mut block = Block::new(block_header, block_body, block_proof);
 
     // Mining takes place here
-    while block.hash() >= threshold {
-        if !unrestricted_mining {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-
-        // If the sender is cancelled, the parent of this task most
-        // likely received a new block, and this task hasn't been stopped
-        // yet by the executor, although the call to abort this
-        // task *has* been made.
+    loop {
+        // If the sender is cancelled, the parent to this thread most
+        // likely received a new block, and this thread hasn't been stopped
+        // yet by the operating system, although the call to abort this
+        // thread *has* been made.
         if sender.is_canceled() {
             info!(
                 "Abandoning mining of current block with height {}",
@@ -204,6 +204,15 @@ fn mine_block_worker(
             Block::difficulty_control(&previous_block, now, target_block_interval);
         threshold = Block::difficulty_to_digest_threshold(new_difficulty);
         block.set_header_timestamp_and_difficulty(now, new_difficulty);
+
+        // This must match the rules in `[Block::has_proof_of_work]`.
+        if block.hash() <= threshold {
+            break;
+        }
+
+        if !unrestricted_mining {
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     let nonce = block.kernel.header.nonce;
@@ -238,30 +247,31 @@ Difficulty threshold: {threshold}
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
-/// Return the coinbase UTXO for the receiving address and the "sender" randomness
-/// used for the canonical AOCL commitment.
-fn make_coinbase_transaction(
-    coinbase_utxo: &Utxo,
-    receiver_digest: Digest,
-    wallet_secret: &WalletSecret,
-    block_height: BlockHeight,
-    mutator_set_accumulator: MutatorSetAccumulator,
+pub(crate) fn make_coinbase_transaction(
+    global_state: &GlobalState,
+    transaction_fees: NeptuneCoins,
     timestamp: Timestamp,
-) -> (Transaction, Digest) {
-    let sender_randomness: Digest =
-        wallet_secret.generate_sender_randomness(block_height, receiver_digest);
+) -> (Transaction, ExpectedUtxo) {
+    let coinbase_recipient_spending_key = global_state
+        .wallet_state
+        .wallet_secret
+        .nth_generation_spending_key(0);
+    let receiving_address = coinbase_recipient_spending_key.to_address();
+    let receiver_digest = receiving_address.privacy_digest;
+    let latest_block = global_state.chain.light_state();
+    let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
+    let next_block_height: BlockHeight = latest_block.header().height.next();
 
-    let coinbase_amount = coinbase_utxo
-        .coins
-        .iter()
-        .filter(|coin| coin.type_script_hash == TypeScript::native_currency().hash())
-        .map(|coin| {
-            *NeptuneCoins::decode(&coin.state)
-                .expect("Make coinbase transaction: failed to parse coin state as amount.")
-        })
-        .sum::<NeptuneCoins>();
+    let lock_script = receiving_address.lock_script();
+    let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
+    let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
+    let sender_randomness: Digest = global_state
+        .wallet_state
+        .wallet_secret
+        .generate_sender_randomness(next_block_height, receiver_digest);
+
     let coinbase_addition_record = commit(
-        Hash::hash(coinbase_utxo),
+        Hash::hash(&coinbase_utxo),
         sender_randomness,
         receiver_digest,
     );
@@ -276,23 +286,34 @@ fn make_coinbase_transaction(
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
-    let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
-        input_utxos: SaltedUtxos::empty(),
-        type_scripts: vec![TypeScript::native_currency()],
-        input_lock_scripts: vec![],
-        lock_script_witnesses: vec![],
-        input_membership_proofs: vec![],
-        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
+    let primitive_witness = GlobalState::generate_primitive_witness(
+        vec![],
+        vec![coinbase_utxo.clone()],
+        vec![sender_randomness],
+        vec![receiver_digest],
+        &kernel,
         mutator_set_accumulator,
-        kernel: kernel.clone(),
-    };
-    let transaction_validation_logic = TransactionValidationLogic::from(primitive_witness);
+    );
+
+    let utxo_info_for_coinbase = ExpectedUtxo::new(
+        coinbase_utxo,
+        sender_randomness,
+        coinbase_recipient_spending_key.privacy_preimage,
+        UtxoNotifier::OwnMiner,
+    );
+
+    // A coinbase transaction implies mining. So you *must*
+    // be able to create a SingleProof.
+    info!("Start: generate single proof for coinbase transaction");
+    let proof = SingleProof::produce(&primitive_witness);
+    info!("Done: generating single proof for coinbase transaction");
+
     (
         Transaction {
             kernel,
-            witness: transaction_validation_logic,
+            proof: TransactionProof::SingleProof(proof),
         },
-        sender_randomness,
+        utxo_info_for_coinbase,
     )
 }
 
@@ -304,6 +325,15 @@ fn create_block_transaction(
     global_state: &GlobalState,
     timestamp: Timestamp,
 ) -> (Transaction, ExpectedUtxo) {
+    /// Return the seed that is used when shuffling inputs and outputs in the
+    /// transaction merger.
+    fn shuffle_seed(wallet_secret: &WalletSecret, block_height: BlockHeight) -> [u8; 32] {
+        let secure_seed_from_wallet = wallet_secret.deterministic_derived_seed(block_height);
+        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
+
+        seed[0..32].try_into().unwrap()
+    }
+
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
@@ -334,14 +364,8 @@ fn create_block_transaction(
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
     let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
 
-    let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
-        &coinbase_utxo,
-        receiving_address.privacy_digest(),
-        &global_state.wallet_state.wallet_secret,
-        next_block_height,
-        latest_block.kernel.body.mutator_set_accumulator.clone(),
-        timestamp,
-    );
+    let (coinbase_transaction, coinbase_as_expected_utxo) =
+        make_coinbase_transaction(global_state, transaction_fees, timestamp);
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -349,20 +373,14 @@ fn create_block_transaction(
     );
 
     // Merge incoming transactions with the coinbase transaction
+    let shuffle_seed = shuffle_seed(&global_state.wallet_state.wallet_secret, next_block_height);
     let merged_transaction = transactions_to_include
         .into_iter()
         .fold(coinbase_transaction, |acc, transaction| {
-            Transaction::merge_with(acc, transaction)
+            Transaction::merge_with(acc, transaction, shuffle_seed)
         });
 
-    let utxo_info_for_coinbase = ExpectedUtxo::new(
-        coinbase_utxo,
-        coinbase_sender_randomness,
-        coinbase_recipient_spending_key.privacy_preimage,
-        UtxoNotifier::OwnMiner,
-    );
-
-    (merged_transaction, utxo_info_for_coinbase)
+    (merged_transaction, coinbase_as_expected_utxo)
 }
 
 /// Locking:
@@ -399,11 +417,12 @@ pub async fn mine(
                 global_state_lock.lock_guard().await.deref(),
                 now,
             );
-            let (block_header, block_body) =
+            let (block_header, block_body, block_proof) =
                 make_block_template(&latest_block, transaction, now, None);
             let miner_task = mine_block(
                 block_header,
                 block_body,
+                block_proof,
                 latest_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,
@@ -528,13 +547,17 @@ pub async fn mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
+    use lock_script::LockScript;
+    use tasm_lib::Digest;
     use tracing_test::traced_test;
 
-    use crate::config_models::network::Network;
-    use crate::models::consensus::timestamp::Timestamp;
-    use crate::tests::shared::mock_genesis_global_state;
-
     use super::*;
+    use crate::config_models::network::Network;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::dummy_expected_utxo;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_genesis_global_state;
+    use crate::WalletSecret;
 
     #[traced_test]
     #[tokio::test]
@@ -550,11 +573,21 @@ mod mine_loop_tests {
             "Mempool must be empty at startup"
         );
 
-        // Verify constructed coinbase transaction and block template when mempool is empty
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp;
+        let future_timestamp = now + Timestamp::months(7);
+        assert!(
+            !premine_receiver_global_state
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_available_amount(future_timestamp)
+                .is_zero(),
+            "Assumed to be premine-recipient"
+        );
+
+        // Verify constructed coinbase transaction and block template when mempool is empty
         let (transaction_empty_mempool, _coinbase_sender_randomness) =
-            create_block_transaction(&genesis_block, &premine_receiver_global_state, now);
+            premine_receiver_global_state.make_coinbase_transaction(NeptuneCoins::zero(), now);
         assert_eq!(
             1,
             transaction_empty_mempool.kernel.outputs.len(),
@@ -564,12 +597,12 @@ mod mine_loop_tests {
             transaction_empty_mempool.kernel.inputs.is_empty(),
             "Coinbase transaction with empty mempool must have zero inputs"
         );
-        let (block_header_template_empty_mempool, block_body_empty_mempool) =
-            make_block_template(&genesis_block, transaction_empty_mempool, now, None);
+        let (block_header_template_empty_mempool, block_body_empty_mempool, block_proof) =
+            Block::make_block_template(&genesis_block, transaction_empty_mempool, now, None);
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
-            Block::mk_std_block_type(None),
+            block_proof,
         );
         assert!(
             block_template_empty_mempool.is_valid(&genesis_block, now),
@@ -584,15 +617,13 @@ mod mine_loop_tests {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let (tx_by_preminer, expected_utxos) = premine_receiver_global_state
-            .create_transaction_test_wrapper(
-                vec![TxOutput::fake_address(
-                    tx_output,
-                    sender_randomness,
-                    receiver_privacy_digest,
-                )],
+        let tx_by_preminer = premine_receiver_global_state
+            .create_transaction(
+                vec![
+                    (UtxoReceiverData::new(tx_output, sender_randomness, receiver_privacy_digest)),
+                ],
                 NeptuneCoins::new(1),
-                now + Timestamp::months(7),
+                future_timestamp,
             )
             .await
             .unwrap();
@@ -607,13 +638,9 @@ mod mine_loop_tests {
             .insert(&tx_by_preminer);
         assert_eq!(1, premine_receiver_global_state.mempool.len());
 
-        // Build transaction
+        // Build transaction for block
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
-            create_block_transaction(
-                &genesis_block,
-                &premine_receiver_global_state,
-                now + Timestamp::months(7),
-            );
+            create_block_transaction(&premine_receiver_global_state, future_timestamp);
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -622,22 +649,17 @@ mod mine_loop_tests {
         assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
         // Build and verify block template
-        let (block_header_template, block_body) = make_block_template(
+        let (block_header_template, block_body, new_block_proof) = Block::make_block_template(
             &genesis_block,
             transaction_non_empty_mempool,
-            now + Timestamp::months(7),
+            future_timestamp,
             None,
         );
-        let block_template_non_empty_mempool = Block::new(
-            block_header_template,
-            block_body,
-            Block::mk_std_block_type(None),
-        );
+        let block_template_non_empty_mempool =
+            Block::new(block_header_template, block_body, new_block_proof);
         assert!(
-            block_template_non_empty_mempool.is_valid(
-                &genesis_block,
-                now + Timestamp::months(7) + Timestamp::seconds(2)
-            ),
+            block_template_non_empty_mempool
+                .is_valid(&genesis_block, future_timestamp + Timestamp::seconds(2)),
             "Block template created by miner with non-empty mempool must be valid"
         );
 
@@ -663,7 +685,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mined_block_has_proof_of_work() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Main;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -671,21 +693,23 @@ mod mine_loop_tests {
 
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
-        let now = Timestamp::now();
+        let launch_date = tip_block_orig.header().timestamp;
 
         let (transaction, coinbase_utxo_info) =
-            create_block_transaction(tip_block_orig, &global_state, now);
+            global_state.make_coinbase_transaction(NeptuneCoins::zero(), launch_date);
 
-        let (block_header, block_body) =
-            make_block_template(tip_block_orig, transaction, now, None);
+        let (block_header, block_body, block_proof) =
+            Block::make_block_template(tip_block_orig, transaction, launch_date, None);
 
-        let block_timestamp = tip_block_orig.kernel.header.timestamp + Timestamp::seconds(1);
-        let difficulty: U32s<5> = Block::difficulty_control(tip_block_orig, block_timestamp, None);
+        let initial_block_timestamp = launch_date + Timestamp::seconds(1);
+        let difficulty: U32s<5> =
+            Block::difficulty_control(tip_block_orig, initial_block_timestamp, None);
         let unrestricted_mining = false;
 
         mine_block_worker(
             block_header,
             block_body,
+            block_proof,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
@@ -696,13 +720,15 @@ mod mine_loop_tests {
 
         let mined_block_info = worker_task_rx.await.unwrap();
 
-        assert!(mined_block_info.block.is_valid(tip_block_orig, now));
+        assert!(mined_block_info
+            .block
+            .is_valid(tip_block_orig, Timestamp::now()));
         assert!(mined_block_info.block.has_proof_of_work(tip_block_orig));
 
         Ok(())
     }
 
-    /// This test mines a single block at height 1 on the regtest network
+    /// This test mines a single block at height 1 on the main network
     /// and then validates that the header timestamp has changed and
     /// that it is within the last second (from now).
     ///
@@ -714,7 +740,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Main;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -723,14 +749,16 @@ mod mine_loop_tests {
         let global_state = global_state_lock.lock_guard().await;
         let tip_block_orig = global_state.chain.light_state();
 
+        let now = tip_block_orig.header().timestamp + Timestamp::minutes(10);
+
         // pretend/simulate that it takes at least 10 seconds to mine the block.
-        let ten_seconds_ago = Timestamp::now() - Timestamp::seconds(10);
+        let ten_seconds_ago = now - Timestamp::seconds(10);
 
         let (transaction, coinbase_utxo_info) =
-            create_block_transaction(tip_block_orig, &global_state, ten_seconds_ago);
+            global_state.make_coinbase_transaction(NeptuneCoins::zero(), ten_seconds_ago);
 
-        let (block_header, block_body) =
-            make_block_template(tip_block_orig, transaction, ten_seconds_ago, None);
+        let (block_header, block_body, block_proof) =
+            Block::make_block_template(tip_block_orig, transaction, ten_seconds_ago, None);
 
         // sanity check that our initial state is correct.
         assert_eq!(block_header.timestamp, ten_seconds_ago);
@@ -742,6 +770,7 @@ mod mine_loop_tests {
         mine_block_worker(
             block_header,
             block_body,
+            block_proof,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
@@ -754,6 +783,8 @@ mod mine_loop_tests {
 
         let block_timestamp = mined_block_info.block.kernel.header.timestamp;
 
+        // Mining updates the timestamp. So block timestamp will be >= to what
+        // was set in the block template, and <= current time.
         assert!(block_timestamp >= initial_header_timestamp);
         assert!(block_timestamp <= Timestamp::now());
 
@@ -763,7 +794,17 @@ mod mine_loop_tests {
         Ok(())
     }
 
-    /// This tests the difficulty adjustment algorithm.
+    /// Test the difficulty adjustment algorithm.
+    ///
+    /// Specifically, verify that the observed concrete block interval when mining
+    /// tracks the target block interval, assuming:
+    ///  - No time is spent proving
+    ///  - Constant mining power
+    ///  - Mining power exceeds lower bound (hashing once every target interval).
+    ///
+    /// Note that the second assumption is broken when running the entire test suite.
+    /// So if this test fails when all others pass, it is not necessarily a cause
+    /// for worry.
     ///
     /// We mine ten blocks with a target block interval of 1 second, so all
     /// blocks should be mined in approx 10 seconds.
@@ -773,7 +814,7 @@ mod mine_loop_tests {
     ///
     /// We also assert upper and lower bounds for variance from the expected 10
     /// seconds.  The variance limit is 1.3, so the upper bound is 13 seconds
-    /// and the lower bound is 7692.
+    /// and the lower bound is 7692ms.
     ///
     /// We ignore the first 2 blocks after genesis because they are typically
     /// mined very fast.
@@ -824,12 +865,10 @@ mod mine_loop_tests {
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
-            let (transaction, coinbase_utxo_info) = {
-                let global_state = global_state_lock.lock_guard().await;
-                create_block_transaction(&prev_block, &global_state, start_time)
-            };
+            let (transaction, coinbase_utxo_info) =
+                { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
 
-            let (block_header, block_body) = make_block_template(
+            let (block_header, block_body, block_proof) = Block::make_block_template(
                 &prev_block,
                 transaction,
                 start_time,
@@ -848,6 +887,7 @@ mod mine_loop_tests {
             mine_block_worker(
                 block_header,
                 block_body,
+                block_proof,
                 prev_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,

@@ -1,0 +1,13 @@
+[
+  {
+    "name": "CollectTypeScripts",
+    "benchmark_result": {
+      "clock_cycle_count": 1557,
+      "hash_table_height": 482,
+      "u32_table_height": 12,
+      "op_stack_table_height": 1413,
+      "ram_table_height": 391
+    },
+    "case": "CommonCase"
+  }
+]

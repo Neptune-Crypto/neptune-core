@@ -10,6 +10,7 @@ use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
+use tasm_lib::triton_vm::prelude::Digest;
 use tokio::select;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -17,7 +18,6 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use twenty_first::math::digest::Digest;
 
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -26,17 +26,16 @@ use crate::models::blockchain::block::Block;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
-use crate::models::consensus::timestamp::Timestamp;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanctionReason;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalStateLock;
-use crate::prelude::twenty_first;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -790,7 +789,7 @@ impl PeerLoopHandler {
                 );
 
                 // If transaction is invalid, punish
-                if !transaction.is_valid() {
+                if !transaction.is_valid().await {
                     warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1198,8 +1197,11 @@ mod peer_loop_tests {
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::TransactionNotification;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
@@ -1209,8 +1211,6 @@ mod peer_loop_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
-
-    use super::*;
 
     #[traced_test]
     #[tokio::test]
@@ -2402,6 +2402,7 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
+    #[ignore = "mempool cannot hold unproven transactions, so cannot test mempool yet"]
     async fn empty_mempool_request_tx_test() -> Result<()> {
         // In this scenerio the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.
@@ -2453,15 +2454,10 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn populated_mempool_request_tx_test() -> Result<()> {
+        let network = Network::Main;
         // In this scenario the peer is informed of a transaction that it already knows
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state_lock,
-            _hsd,
-        ) = get_test_genesis_setup(Network::Alpha, 1).await?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
+            get_test_genesis_setup(network, 1).await?;
 
         let transaction_1 = make_mock_transaction(vec![], vec![]);
 
@@ -2472,7 +2468,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
         let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
@@ -2482,6 +2478,20 @@ mod peer_loop_tests {
             1,
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
+        let transaction_1 = state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![],
+                NeptuneCoins::new(0),
+                now,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
 
         assert!(
             state_lock.lock_guard().await.mempool.is_empty(),
@@ -2497,6 +2507,12 @@ mod peer_loop_tests {
             "Mempool must be non-empty after insertion"
         );
 
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Read(PeerMessage::Bye),
+        ]);
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
             .await?;

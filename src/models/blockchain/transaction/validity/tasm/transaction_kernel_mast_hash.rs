@@ -17,11 +17,9 @@ use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::Function;
 use tasm_lib::traits::function::FunctionInitialState;
 use tasm_lib::InitVmState;
-use triton_vm::prelude::BFieldElement;
-use triton_vm::triton_asm;
+use triton_vm::prelude::*;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-use twenty_first::math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::shared::Hash;
@@ -69,7 +67,7 @@ impl BasicSnippet for TransactionKernelMastHash {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
 
-    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(New {
             element_type: DataType::Digest,
@@ -388,11 +386,11 @@ impl Function for TransactionKernelMastHash {
         rust_shadowing_helper_functions::list::list_new(list_address, memory);
         rust_shadowing_helper_functions::list::list_set_length(list_address, 16, memory);
         for (i, node) in nodes.into_iter().enumerate().skip(1) {
-            for j in 0..DIGEST_LENGTH {
+            for j in 0..Digest::LEN {
                 memory.insert(
                     list_address
                         + BFieldElement::one()
-                        + BFieldElement::new((i * DIGEST_LENGTH + j) as u64),
+                        + BFieldElement::new((i * Digest::LEN + j) as u64),
                     node.values()[j],
                 );
             }
@@ -437,9 +435,8 @@ mod tests {
     use twenty_first::math::bfield_codec::BFieldCodec;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
-    use crate::models::consensus::mast_hash::MastHash;
-
     use super::*;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
 
     #[test]
     fn verify_agreement_with_tx_kernel_mast_hash() {
@@ -482,9 +479,10 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use super::*;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+
+    use super::*;
 
     #[test]
     fn bench() {

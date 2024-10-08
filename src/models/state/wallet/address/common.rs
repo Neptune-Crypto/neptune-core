@@ -1,19 +1,19 @@
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
-use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
 use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
-use triton_vm::triton_asm;
-use triton_vm::triton_instr;
+use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::prelude::twenty_first;
 
 /// Derive a receiver id from a seed.
 pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
@@ -145,14 +145,23 @@ pub fn lock_script(spending_lock: Digest) -> LockScript {
     instructions.into()
 }
 
+/// Generate a lock script and a witness for a simple standard
+/// proof-of-preimage-knowledge lock script.
+pub(crate) fn lock_script_and_witness(unlock_key: Digest) -> LockScriptAndWitness {
+    let lock_script = lock_script(unlock_key.hash());
+    LockScriptAndWitness::new_with_nondeterminism(
+        lock_script.program,
+        NonDeterminism::new(unlock_key.reversed().values()),
+    )
+}
+
 #[cfg(test)]
 pub(super) mod test {
-    use super::*;
-
     use rand::thread_rng;
     use rand::Rng;
     use rand::RngCore;
-    use tasm_lib::DIGEST_LENGTH;
+
+    use super::*;
 
     #[test]
     fn test_conversion_fixed_length() {
@@ -205,25 +214,5 @@ pub(super) mod test {
 
             assert_eq!(test_case, bytes_again);
         }
-    }
-
-    /// Verify the UTXO owner's assent to the transaction.
-    /// This is the rust reference implementation, but the version of
-    /// this logic that is proven is `lock_script`.
-    ///
-    /// This function mocks proof verification.
-    pub fn std_lockscript_reference_verify_unlock(
-        spending_lock: Digest,
-        _bind_to: Digest,
-        witness_data: [BFieldElement; DIGEST_LENGTH],
-    ) -> bool {
-        spending_lock == Digest::new(witness_data).hash::<Hash>()
-    }
-
-    /// Unlock the UTXO binding it to some transaction by its kernel hash.
-    /// This function mocks proof generation.
-    pub fn binding_unlock(unlock_key: Digest, _bind_to: Digest) -> [BFieldElement; DIGEST_LENGTH] {
-        let witness_data = unlock_key;
-        witness_data.values()
     }
 }

@@ -10,7 +10,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use neptune_core::models::consensus::timestamp::Timestamp;
+use neptune_core::models::proof_abstractions::timestamp::Timestamp;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::CheckedSub;
 use num_traits::Zero;

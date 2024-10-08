@@ -1,5 +1,9 @@
 use twenty_first::math::tip5::Digest;
 
+use super::active_window::ActiveWindow;
+use super::archival_mmr::ArchivalMmr;
+use super::archival_mutator_set::ArchivalMutatorSet;
+use super::chunk::Chunk;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_schema::DbtSingleton;
 use crate::database::storage::storage_schema::DbtVec;
@@ -8,12 +12,6 @@ use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
-use crate::Hash;
-
-use super::active_window::ActiveWindow;
-use super::archival_mmr::ArchivalMmr;
-use super::archival_mutator_set::ArchivalMutatorSet;
-use super::chunk::Chunk;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
@@ -43,8 +41,8 @@ impl RustyArchivalMutatorSet {
 
         let ams = ArchivalMutatorSet::<AmsMmrStorage, AmsChunkStorage> {
             chunks,
-            aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl).await,
-            swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi).await,
+            aocl: ArchivalMmr::<AmsMmrStorage>::new(aocl).await,
+            swbf_inactive: ArchivalMmr::<AmsMmrStorage>::new(swbfi).await,
             swbf_active: ActiveWindow::new(),
         };
 
@@ -103,19 +101,15 @@ mod tests {
     use rand::random;
     use rand::thread_rng;
     use rand::RngCore;
-    use twenty_first::math::tip5::Tip5;
 
+    use super::*;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::test_shared::mutator_set::*;
 
-    use super::*;
-
     #[tokio::test]
     async fn persist_test() {
-        type H = Tip5;
-
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
         let num_removals = 50usize;
         let mut rng = thread_rng();
@@ -135,12 +129,12 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         for _ in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let mp = rusty_mutator_set
                 .ams()
                 .prove(item, sender_randomness, receiver_preimage)
@@ -161,7 +155,7 @@ mod tests {
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         // Verify membership
@@ -200,7 +194,7 @@ mod tests {
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set.ams().aocl.count_leaves().await
+            rusty_mutator_set.ams().aocl.num_leafs().await
         );
 
         // persist and drop
@@ -221,7 +215,7 @@ mod tests {
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set.ams().aocl.count_leaves().await
+            new_rusty_mutator_set.ams().aocl.num_leafs().await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(

@@ -1,18 +1,16 @@
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::triton_vm::program::NonDeterminism;
-use tasm_lib::triton_vm::program::PublicInput;
+use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::models::consensus::SecretWitness;
-use crate::Hash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMmrUpdateWitness {
-    pub previous_mmr_accumulator: MmrAccumulator<Hash>,
+    pub previous_mmr_accumulator: MmrAccumulator,
 }
 
 impl SecretWitness for CorrectMmrUpdateWitness {
@@ -24,7 +22,7 @@ impl SecretWitness for CorrectMmrUpdateWitness {
         todo!()
     }
 
-    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
+    fn program(&self) -> Program {
         todo!()
     }
 }

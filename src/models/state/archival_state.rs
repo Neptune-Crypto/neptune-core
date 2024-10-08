@@ -11,6 +11,7 @@ use tracing::debug;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 
+use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::create_db_if_missing;
@@ -30,8 +31,6 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-
-use super::shared::new_block_file_is_needed;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -204,7 +203,7 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         if archival_mutator_set.ams().aocl.is_empty().await {
-            for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
+            for addition_record in genesis_block.kernel.body.transaction_kernel.outputs.iter() {
                 archival_mutator_set.ams_mut().add(addition_record).await;
             }
             let genesis_hash = genesis_block.hash();
@@ -725,8 +724,7 @@ impl ArchivalState {
             for addition_record in roll_back_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .iter()
                 .rev()
@@ -745,7 +743,7 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            for removal_record in roll_back_block.kernel.body.transaction.kernel.inputs.iter() {
+            for removal_record in roll_back_block.kernel.body.transaction_kernel.inputs.iter() {
                 self.archival_mutator_set
                     .ams_mut()
                     .revert_remove(removal_record)
@@ -776,16 +774,14 @@ impl ArchivalState {
             let mut addition_records: Vec<AdditionRecord> = apply_forward_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .clone();
             addition_records.reverse();
             let mut removal_records = apply_forward_block
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .inputs
                 .clone();
             removal_records.reverse();
@@ -843,7 +839,6 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
-    use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
@@ -851,27 +846,31 @@ mod archival_state_tests {
     use rand::SeedableRng;
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::utxo::LockScript;
+    use crate::mine_loop::make_coinbase_transaction;
+    use crate::models::blockchain::transaction::lock_script::LockScript;
+    use crate::models::blockchain::transaction::transaction_output::TxOutput;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::transaction::TxOutput;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::consensus::timestamp::Timestamp;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
-
-    use super::*;
+    use crate::util_types::test_shared::mutator_set::mock_item_mp_rr_for_init_msa;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
@@ -923,15 +922,14 @@ mod archival_state_tests {
             Block::genesis_block(network)
                 .kernel
                 .body
-                .transaction
-                .kernel
+                .transaction_kernel
                 .outputs
                 .len() as u64,
             archival_state
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves()
+                .num_leafs()
                 .await,
             "Archival mutator set must be populated with premine outputs"
         );
@@ -986,89 +984,60 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_db_write_test() -> Result<()> {
-        let mut rng = thread_rng();
+        let mut rng = StdRng::seed_from_u64(107221549301u64);
         // Verify that `update_mutator_set` writes the active window back to disk.
 
         let network = Network::Alpha;
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = wallet.nth_generation_spending_key_for_tests(0).to_address();
-        let mut genesis_receiver_global_state_lock =
-            mock_genesis_global_state(network, 0, wallet).await;
-        let mut genesis_receiver_global_state =
-            genesis_receiver_global_state_lock.lock_guard_mut().await;
+        let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let alice_wallet = alice_wallet.wallet_secret;
+        let allice_address = alice_wallet
+            .nth_generation_spending_key_for_tests(0)
+            .to_address();
+        let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
+        let mut alice = alice.lock_guard_mut().await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &genesis_receiver_global_state
-                .chain
-                .archival_state_mut()
-                .genesis_block,
+            &alice.chain.archival_state_mut().genesis_block,
             None,
-            own_receiving_address,
+            allice_address,
             rng.gen(),
         );
 
         {
-            genesis_receiver_global_state
-                .set_new_tip(mock_block_1.clone())
-                .await
-                .unwrap();
-            let ams_ref = &genesis_receiver_global_state
-                .chain
-                .archival_state()
-                .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().aocl.count_leaves().await);
+            alice.set_new_tip(mock_block_1.clone()).await.unwrap();
+            let ams_ref = &alice.chain.archival_state().archival_mutator_set;
+            assert_ne!(0, ams_ref.ams().aocl.num_leafs().await);
         }
 
-        let now = mock_block_1.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = mock_block_1.kernel.header.timestamp + Timestamp::months(7);
 
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
-        {
-            let (mut mock_block_2, _, _) = make_mock_block_with_valid_pow(
-                &mock_block_1,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
-            let (sender_tx, expected_utxos) = genesis_receiver_global_state
-                .create_transaction_test_wrapper(
-                    vec![TxOutput::random(Utxo {
-                        coins: NeptuneCoins::new(4).to_native_coins(),
-                        lock_script_hash: LockScript::anyone_can_spend().hash(),
-                    })],
-                    NeptuneCoins::new(2),
-                    now + seven_months,
-                )
-                .await
-                .unwrap();
+        let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
+        let change_key = alice
+            .wallet_state
+            .wallet_secret
+            .nth_symmetric_key_for_tests(0);
+        let sender_tx = alice
+            .create_transaction_with_prover_capability(
+                &mut vec![TxOutput::offchain(utxo, rng.gen(), rng.gen())].into(),
+                change_key.into(),
+                UtxoNotifyMethod::OnChain,
+                NeptuneCoins::new(2),
+                in_seven_months,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
 
-            // inform wallet of any expected utxos from this tx.
-            genesis_receiver_global_state
-                .add_expected_utxos_to_wallet(expected_utxos)
-                .await
-                .unwrap();
+        let mock_block_2 =
+            Block::new_block_from_template(&mock_block_1, sender_tx, in_seven_months, None);
 
-            mock_block_2
-                .accumulate_transaction(
-                    sender_tx,
-                    &mock_block_1.kernel.body.mutator_set_accumulator,
-                )
-                .await;
+        // Remove an element from the mutator set, verify that the active window DB is updated.
+        alice.set_new_tip(mock_block_2.clone()).await?;
 
-            // Remove an element from the mutator set, verify that the active window DB is updated.
-            genesis_receiver_global_state
-                .set_new_tip(mock_block_2.clone())
-                .await?;
-
-            let ams_ref = &genesis_receiver_global_state
-                .chain
-                .archival_state()
-                .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
-        }
+        let ams_ref = &alice.chain.archival_state().archival_mutator_set;
+        assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
 
         Ok(())
     }
@@ -1126,103 +1095,58 @@ mod archival_state_tests {
         // Make a rollback of one block that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
-
-        let mut rng = thread_rng();
         let network = Network::RegTest;
-        let (mut archival_state, _peer_db_lock, _data_dir) =
-            mock_genesis_archival_state(network).await;
+        let mut rng = thread_rng();
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = genesis_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
-        let mut num_utxos = Block::premine_utxos(network).len();
+        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
 
-        // 1. Create new block 1 with one input and four outputs and store it to disk
-        let (mut block_1a, _, _) = make_mock_block_with_valid_pow(
-            &archival_state.genesis_block,
-            None,
-            own_receiving_address,
-            rng.gen(),
-        );
-        let genesis_block = archival_state.genesis_block.clone();
-        let now = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let mut global_state = global_state_lock.lock_guard_mut().await;
+        let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
+        let num_premine_utxos = Block::premine_utxos(network).len();
 
-        let one_money = NeptuneCoins::new(42).to_native_coins();
-        let tx_outputs = vec![
-            TxOutput::random(Utxo {
-                lock_script_hash: LockScript::anyone_can_spend().hash(),
-                coins: one_money.clone(),
-            }),
-            TxOutput::random(Utxo {
-                lock_script_hash: LockScript::anyone_can_spend().hash(),
-                coins: one_money,
-            }),
-        ];
-        let (sender_tx, expected_utxos) = global_state_lock
-            .lock_guard()
-            .await
-            .create_transaction_test_wrapper(tx_outputs, NeptuneCoins::new(4), now + seven_months)
-            .await
-            .unwrap();
+        let in_seven_months = Timestamp::now() + Timestamp::months(7);
 
-        // inform wallet of any expected utxos from this tx.
-        global_state_lock
-            .lock_guard_mut()
-            .await
-            .add_expected_utxos_to_wallet(expected_utxos)
-            .await
-            .unwrap();
+        let rrs = |num: usize| {
+            let mut ret = vec![];
+            for _ in 0..num {
+                let (_, _, rr) = mock_item_mp_rr_for_init_msa();
+                ret.push(rr);
+            }
 
-        block_1a
-            .accumulate_transaction(
-                sender_tx,
-                &archival_state
-                    .genesis_block
-                    .kernel
-                    .body
-                    .mutator_set_accumulator,
-            )
-            .await;
+            ret
+        };
+        let mut ars = |num: usize| {
+            let mut ret = vec![];
+            for _ in 0..num {
+                let ar = AdditionRecord::new(rng.gen());
+                ret.push(ar);
+            }
 
-        assert!(block_1a.is_valid(&genesis_block, now + seven_months));
+            ret
+        };
+        let removal_records_1a = rrs(2);
+        let addition_records_1a = ars(5);
+        let removal_records_1b = rrs(0);
+        let addition_records_1b = ars(5);
 
-        {
-            archival_state.write_block_as_tip(&block_1a).await.unwrap();
+        let tx_1a = make_mock_transaction(removal_records_1a, addition_records_1a);
+        let block_1a = Block::new_block_from_template(&genesis_block, tx_1a, in_seven_months, None);
+        let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
+        let block_1b = Block::new_block_from_template(&genesis_block, tx_1b, in_seven_months, None);
 
-            // 2. Update mutator set with this
-            archival_state.update_mutator_set(&block_1a).await.unwrap();
+        global_state.set_new_tip(block_1a.clone()).await.unwrap();
+        global_state.set_new_tip(block_1b.clone()).await.unwrap();
 
-            // 3. Create competing block 1 and store it to DB
-            let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
-                &archival_state.genesis_block,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
-            archival_state
-                .write_block_as_tip(&mock_block_1b)
-                .await
-                .unwrap();
-            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
-
-            // 4. Update mutator set with that and verify rollback
-            archival_state
-                .update_mutator_set(&mock_block_1b)
-                .await
-                .unwrap();
-        }
-
-        // 5. Verify correct rollback
+        // Verify correct rollback
 
         // Verify that the new state of the archival mutator set contains
         // two UTXOs and that none have been removed
         assert!(
-            archival_state
+            global_state
+                .chain
+                .archival_state()
                 .archival_mutator_set
                 .ams()
                 .swbf_active
@@ -1232,12 +1156,14 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            num_utxos,
-            archival_state
+            num_premine_utxos + 5,
+            global_state
+                .chain
+                .archival_state()
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves()
+                .num_leafs()
                 .await as usize,
             "AOCL leaf count must agree with blockchain after rollback"
         );
@@ -1246,117 +1172,44 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() -> Result<()> {
-        let mut rng = thread_rng();
         // Make a rollback of multiple blocks that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
+
         let network = Network::RegTest;
+        let mut rng = thread_rng();
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
+        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
 
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
-        // this variable might come in handy for reporting purposes
-        let mut _aocl_index_of_consumed_input = 0;
+        let in_seven_months = Timestamp::now() + Timestamp::months(7);
 
-        let some_money = NeptuneCoins::new(54).to_native_coins();
-
-        for i in 0..10 {
+        for _ in 0..10 {
             // Create next block with inputs and outputs
-            let (mut next_block, _, _) = make_mock_block_with_valid_pow(
-                &previous_block,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
-            let now = next_block.kernel.header.timestamp;
-            let seven_months = Timestamp::months(7);
-            let tx_outputs = vec![
-                TxOutput::random(Utxo {
-                    lock_script_hash: LockScript::anyone_can_spend().hash(),
-                    coins: some_money.clone(),
-                }),
-                TxOutput::random(Utxo {
-                    lock_script_hash: LockScript::anyone_can_spend().hash(),
-                    coins: some_money.clone(),
-                }),
-            ];
-            let (sender_tx, expected_utxos) = global_state
-                .create_transaction_test_wrapper(
-                    tx_outputs,
-                    NeptuneCoins::new(4),
-                    now + seven_months,
-                )
-                .await
-                .unwrap();
 
-            // inform wallet of any expected utxos from this tx.
-            global_state
-                .add_expected_utxos_to_wallet(expected_utxos)
-                .await
-                .unwrap();
+            let removal_records = {
+                let (_, _, rr0) = mock_item_mp_rr_for_init_msa();
+                let (_, _, rr1) = mock_item_mp_rr_for_init_msa();
+                vec![rr0, rr1]
+            };
+            let addition_records = vec![];
 
-            next_block
-                .accumulate_transaction(
-                    sender_tx,
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                )
-                .await;
+            let tx = make_mock_transaction(removal_records, addition_records);
+            let next_block =
+                Block::new_block_from_template(&previous_block, tx, in_seven_months, None);
 
-            assert!(
-                next_block.is_valid(&previous_block, now + seven_months),
-                "next block ({i}) not valid for devnet"
-            );
-
-            // Store the produced block as tip
-            {
-                global_state
-                    .chain
-                    .archival_state_mut()
-                    .write_block_as_tip(&next_block)
-                    .await?;
-                global_state
-                    .chain
-                    .light_state_mut()
-                    .set_block(next_block.clone());
-
-                // 2. Update archival-mutator set with produced block
-                global_state
-                    .chain
-                    .archival_state_mut()
-                    .update_mutator_set(&next_block)
-                    .await
-                    .unwrap();
-
-                // 3. Update wallet state so we can continue making transactions
-                global_state
-                    .wallet_state
-                    .update_wallet_state_with_new_block(
-                        &previous_block.kernel.body.mutator_set_accumulator,
-                        &next_block,
-                    )
-                    .await
-                    .unwrap();
-            }
-
-            // Genesis block may have a different number of outputs than the blocks produced above
-            if i == 0 {
-                _aocl_index_of_consumed_input +=
-                    genesis_block.kernel.body.transaction.kernel.outputs.len() as u64;
-            } else {
-                _aocl_index_of_consumed_input +=
-                    next_block.kernel.body.transaction.kernel.outputs.len() as u64;
-            }
+            // 2. Update archival-mutator set with produced block
+            global_state.set_new_tip(next_block.clone()).await.unwrap();
 
             previous_block = next_block;
         }
@@ -1369,12 +1222,7 @@ mod archival_state_tests {
                 own_receiving_address,
                 rng.gen(),
             );
-            global_state
-                .chain
-                .archival_state_mut()
-                .write_block_as_tip(&mock_block_1b)
-                .await?;
-            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
+            num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
             global_state
@@ -1409,7 +1257,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .ams()
                 .aocl
-                .count_leaves().await as usize,
+                .num_leafs().await as usize,
             "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
         );
 
@@ -1419,55 +1267,44 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Main;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = genesis_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
         let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
-        let (mut block_1_a, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address, rng.gen());
-        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let global_state = global_state_lock.lock_guard().await;
 
-        // Verify that block_1 that only contains the coinbase output is valid
-        assert!(block_1_a.has_proof_of_work(&genesis_block));
-        assert!(block_1_a.is_valid(&genesis_block, now));
+        let mut rng = StdRng::seed_from_u64(87255549301u64);
 
-        // Add a valid input to the block transaction
+        let (cbtx, _cb_expected) =
+            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), in_seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
-        let tx_outputs = TxOutput::random(Utxo {
-            coins: one_money.to_native_coins(),
-            lock_script_hash: LockScript::anyone_can_spend().hash(),
-        });
-        let (sender_tx, expected_utxos) = global_state_lock
-            .lock_guard()
-            .await
-            .create_transaction_test_wrapper(vec![tx_outputs], one_money, now + seven_months)
-            .await
-            .unwrap();
-
-        // inform wallet of any expected utxos from this tx.
-        global_state_lock
-            .lock_guard_mut()
-            .await
-            .add_expected_utxos_to_wallet(expected_utxos)
-            .await
-            .unwrap();
-
-        block_1_a
-            .accumulate_transaction(
-                sender_tx,
-                &genesis_block.kernel.body.mutator_set_accumulator,
+        let anyone_can_spend_utxo =
+            Utxo::new_native_coin(LockScript::anyone_can_spend(), one_money);
+        let receiver_data = TxOutput::offchain(anyone_can_spend_utxo, rng.gen(), rng.gen());
+        let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
+        let sender_tx = global_state
+            .create_transaction_with_prover_capability(
+                &mut vec![receiver_data].into(),
+                change_key.into(),
+                UtxoNotifyMethod::OnChain,
+                one_money,
+                in_seven_months,
+                TxProvingCapability::SingleProof,
             )
-            .await;
+            .await
+            .unwrap();
+        let block_tx = sender_tx.merge_with(cbtx, Default::default());
+        let block_1 =
+            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
 
-        // Block with signed transaction must validate
-        assert!(block_1_a.is_valid(&genesis_block, now + seven_months));
+        // Verify that block_1 is valid. We don't care about PoW for this test.
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+
+        // 3 outputs: 1 coinbase, 1 for recipient of tx, 1 for change.
+        assert_eq!(3, block_1.body().transaction_kernel.outputs.len());
 
         Ok(())
     }
@@ -1476,129 +1313,122 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
-
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Main;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
-        let mut genesis_state_lock =
+            .nth_generation_spending_key(0);
+        let mut genesis =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
+        let mut rng = StdRng::seed_from_u64(41251549301u64);
 
-        let wallet_secret_alice = WalletSecret::new_random();
-        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
+        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
         let mut alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
-        let wallet_secret_bob = WalletSecret::new_random();
-        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
+        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
+        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let mut bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
-        let launch = genesis_block.kernel.header.timestamp;
-        let seven_months = Timestamp::months(7);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
-        let (mut block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
-            &genesis_block,
-            None,
-            genesis_spending_key.to_address(),
-            rng.gen(),
-        );
+        println!("Generated initial states and genesis block");
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = NeptuneCoins::one();
-        let sender_randomness: Digest = random();
-        let tx_outputs_for_alice = vec![
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(41).to_native_coins(),
-                },
+        let sender_randomness: Digest = rng.gen();
+        let alice_address = alice_spending_key.to_address();
+        let receiver_data_for_alice = vec![
+            TxOutput::offchain(
+                Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(1)),
                 sender_randomness,
-                alice_spending_key.to_address().privacy_digest,
+                alice_address.privacy_digest,
             ),
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(59).to_native_coins(),
-                },
+            TxOutput::offchain(
+                Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(9)),
                 sender_randomness,
-                alice_spending_key.to_address().privacy_digest,
+                alice_address.privacy_digest,
             ),
         ];
         // Two outputs for Bob
-        let tx_outputs_for_bob = vec![
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(141).to_native_coins(),
-                },
+        let bob_address = bob_spending_key.to_address();
+
+        let receiver_data_for_bob = vec![
+            TxOutput::offchain(
+                Utxo::new_native_coin(bob_address.lock_script(), NeptuneCoins::new(2)),
                 sender_randomness,
-                bob_spending_key.to_address().privacy_digest,
+                bob_address.privacy_digest,
             ),
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(59).to_native_coins(),
-                },
+            TxOutput::offchain(
+                Utxo::new_native_coin(bob_address.lock_script(), NeptuneCoins::new(3)),
                 sender_randomness,
-                bob_spending_key.to_address().privacy_digest,
+                bob_address.privacy_digest,
             ),
         ];
-        {
-            let (tx_to_alice_and_bob, expected_utxos_ab) = genesis_state_lock
-                .lock_guard()
-                .await
-                .create_transaction_test_wrapper(
-                    [tx_outputs_for_alice.clone(), tx_outputs_for_bob.clone()].concat(),
-                    fee,
-                    launch + seven_months,
-                )
-                .await
-                .unwrap();
 
-            // inform wallet of any expected utxos from this tx.
-            genesis_state_lock
-                .lock_guard_mut()
-                .await
-                .add_expected_utxos_to_wallet(expected_utxos_ab)
-                .await
-                .unwrap();
+        println!("Before tx creation");
+        let fee = NeptuneCoins::new(1);
+        let change_key = genesis
+            .global_state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_symmetric_key_for_tests(0);
+        let tx_to_alice_and_bob = genesis
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                &mut [
+                    receiver_data_for_alice.clone(),
+                    receiver_data_for_bob.clone(),
+                ]
+                .concat()
+                .into(),
+                change_key.into(),
+                UtxoNotifyMethod::OffChain,
+                fee,
+                in_seven_months,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
+        println!("Generated transaction for Alice and Bob.");
 
-            // Absorb and verify validity
-            block_1
-                .accumulate_transaction(
-                    tx_to_alice_and_bob,
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                )
-                .await;
-            assert!(block_1.is_valid(&genesis_block, launch + seven_months));
-        }
+        let (cbtx, cb_expected) = {
+            let genesis_state = genesis.lock_guard().await;
+            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+        };
+
+        let block_tx = cbtx.merge_with(tx_to_alice_and_bob, Default::default());
+        println!("Generated block transaction");
+
+        let block_1 =
+            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
+        println!("Generated block");
+
+        // Verify validity
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
         println!("Accumulated transaction into block_1.");
         println!(
             "Transaction has {} inputs (removal records) and {} outputs (addition records)",
-            block_1.kernel.body.transaction.kernel.inputs.len(),
-            block_1.kernel.body.transaction.kernel.outputs.len()
+            block_1.kernel.body.transaction_kernel.inputs.len(),
+            block_1.kernel.body.transaction_kernel.outputs.len()
         );
 
         // Expect incoming transactions
         {
-            let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
+            let mut genesis_state = genesis.lock_guard_mut().await;
             genesis_state
                 .wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    cb_utxo,
-                    cb_output_randomness,
-                    genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
-                ))
+                .add_expected_utxo(cb_expected)
                 .await;
         }
         {
             let mut alice_state = alice_state_lock.lock_guard_mut().await;
-            for rec_data in tx_outputs_for_alice {
+            for rec_data in receiver_data_for_alice {
                 alice_state
                     .wallet_state
                     .add_expected_utxo(ExpectedUtxo::new(
@@ -1613,7 +1443,7 @@ mod archival_state_tests {
 
         {
             let mut bob_state = bob_state_lock.lock_guard_mut().await;
-            for rec_data in tx_outputs_for_bob {
+            for rec_data in receiver_data_for_bob {
                 bob_state
                     .wallet_state
                     .add_expected_utxo(ExpectedUtxo::new(
@@ -1627,20 +1457,15 @@ mod archival_state_tests {
         }
 
         // Update chain states
-        for state_lock in [
-            &mut genesis_state_lock,
-            &mut alice_state_lock,
-            &mut bob_state_lock,
-        ] {
+        for state_lock in [&mut genesis, &mut alice_state_lock, &mut bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         {
-            let genesis_state = genesis_state_lock.lock_guard().await;
             assert_eq!(
                 3,
-                genesis_state
+                genesis.lock_guard().await
                     .wallet_state
                     .wallet_db
                     .monitored_utxos()
@@ -1648,140 +1473,128 @@ mod archival_state_tests {
             );
         }
 
-        // Alice should have a balance of 100 and Bob a balance of 200
-
+        // Check balances
         assert_eq!(
-            NeptuneCoins::new(100),
+            NeptuneCoins::new(10),
             alice_state_lock
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         assert_eq!(
-            NeptuneCoins::new(200),
+            NeptuneCoins::new(5),
             bob_state_lock
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
 
-        // Make two transactions: Alice sends two UTXOs to Genesis (50 + 49 coins and 1 in fee)
-        // and Bob sends three UTXOs to genesis (50 + 50 + 98 and 2 in fee)
-        let tx_outputs_from_alice = vec![
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
-                },
-                random(),
-                genesis_spending_key.to_address().privacy_digest,
+        println!("Transactions were received in good order.");
+
+        // Make two transactions: Alice sends two UTXOs to Genesis (1 + 8 coins and 1 in fee)
+        // and Bob sends three UTXOs to genesis (1 + 1 + 1 and 1 in fee)
+        let genesis_address = genesis_spending_key.to_address();
+        let receiver_data_from_alice = vec![
+            TxOutput::offchain(
+                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                rng.gen(),
+                genesis_address.privacy_digest,
             ),
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(49).to_native_coins(),
-                },
-                random(),
-                genesis_spending_key.to_address().privacy_digest,
+            TxOutput::offchain(
+                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(8)),
+                rng.gen(),
+                genesis_address.privacy_digest,
             ),
         ];
-        let (tx_from_alice, expected_utxos_alice) = alice_state_lock
+        let alice_change_key = alice_state_lock
             .lock_guard()
             .await
-            .create_transaction_test_wrapper(
-                tx_outputs_from_alice.clone(),
+            .wallet_state
+            .wallet_secret
+            .nth_symmetric_key_for_tests(0)
+            .into();
+        let tx_from_alice = alice_state_lock
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                &mut receiver_data_from_alice.clone().into(),
+                alice_change_key,
+                UtxoNotifyMethod::OffChain,
                 NeptuneCoins::new(1),
-                launch + seven_months,
+                in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
-
-        // inform wallet of any expected utxos from this tx.
-        alice_state_lock
-            .lock_guard_mut()
-            .await
-            .add_expected_utxos_to_wallet(expected_utxos_alice)
-            .await
-            .unwrap();
-
-        let tx_outputs_from_bob = vec![
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
-                },
-                random(),
-                genesis_spending_key.to_address().privacy_digest,
+        let receiver_data_from_bob = vec![
+            TxOutput::offchain(
+                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                rng.gen(),
+                genesis_address.privacy_digest,
             ),
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(50).to_native_coins(),
-                },
-                random(),
-                genesis_spending_key.to_address().privacy_digest,
+            TxOutput::offchain(
+                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                rng.gen(),
+                genesis_address.privacy_digest,
             ),
-            TxOutput::fake_address(
-                Utxo {
-                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: NeptuneCoins::new(98).to_native_coins(),
-                },
-                random(),
-                genesis_spending_key.to_address().privacy_digest,
+            TxOutput::offchain(
+                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(2)),
+                rng.gen(),
+                genesis_address.privacy_digest,
             ),
         ];
-        let (tx_from_bob, expected_utxos_bob) = bob_state_lock
+        let bob_change_key = bob_state_lock
             .lock_guard()
             .await
-            .create_transaction_test_wrapper(
-                tx_outputs_from_bob.clone(),
-                NeptuneCoins::new(2),
-                launch + seven_months,
+            .wallet_state
+            .wallet_secret
+            .nth_symmetric_key_for_tests(0)
+            .into();
+        let tx_from_bob = bob_state_lock
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                &mut receiver_data_from_bob.clone().into(),
+                bob_change_key,
+                UtxoNotifyMethod::OffChain,
+                NeptuneCoins::new(1),
+                in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
 
-        // inform wallet of any expected utxos from this tx.
-        bob_state_lock
-            .lock_guard_mut()
-            .await
-            .add_expected_utxos_to_wallet(expected_utxos_bob)
-            .await
-            .unwrap();
+        println!("Generated new transaction to Alice and Bob");
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
-            make_mock_block_with_valid_pow(
-                &block_1,
-                None,
-                genesis_spending_key.to_address(),
-                rng.gen(),
-            );
-        block_2
-            .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
-        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
-        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+        let (cbtx2, cb_expected2) = {
+            let genesis_state = genesis.lock_guard().await;
+            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+        };
+        let block_tx2 = cbtx2
+            .merge_with(tx_from_alice, Default::default())
+            .merge_with(tx_from_bob, Default::default());
+        let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);
 
-        block_2
-            .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)
-            .await;
+        println!("Generated new block");
 
         // Sanity checks
-        assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());
-        assert_eq!(6, block_2.kernel.body.transaction.kernel.outputs.len());
-        let now = block_1.kernel.header.timestamp;
-        assert!(block_2.is_valid(&block_1, now));
+        assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
+        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
+        assert!(block_2.is_valid(&block_1, in_seven_months));
 
         // Expect incoming UTXOs
-        for rec_data in tx_outputs_from_alice {
-            genesis_state_lock
+        for rec_data in receiver_data_from_alice
+            .into_iter()
+            .chain(receiver_data_from_bob)
+        {
+            genesis
                 .lock_guard_mut()
                 .await
                 .wallet_state
@@ -1794,38 +1607,21 @@ mod archival_state_tests {
                 .await;
         }
 
-        for rec_data in tx_outputs_from_bob {
-            genesis_state_lock
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    rec_data.utxo.clone(),
-                    rec_data.sender_randomness,
-                    genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::Cli,
-                ))
-                .await;
-        }
-
-        genesis_state_lock
+        let expected_utxo = ExpectedUtxo::new(
+            cb_expected2.utxo,
+            cb_expected2.sender_randomness,
+            genesis_spending_key.privacy_preimage,
+            UtxoNotifier::OwnMiner,
+        );
+        genesis
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(ExpectedUtxo::new(
-                cb_utxo_block_2,
-                cb_sender_randomness_block_2,
-                genesis_spending_key.privacy_preimage,
-                UtxoNotifier::Cli,
-            ))
+            .add_expected_utxo(expected_utxo)
             .await;
 
         // Update chain states
-        for state_lock in [
-            &mut genesis_state_lock,
-            &mut alice_state_lock,
-            &mut bob_state_lock,
-        ] {
+        for state_lock in [&mut genesis, &mut alice_state_lock, &mut bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_2.clone()).await.unwrap();
         }
@@ -1835,20 +1631,20 @@ mod archival_state_tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months)
+            .synced_unspent_available_amount(in_seven_months)
             .is_zero());
         assert!(bob_state_lock
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months)
+            .synced_unspent_available_amount(in_seven_months)
             .is_zero());
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO
         assert_eq!(
             9,
-            genesis_state_lock.lock_guard().await
+            genesis.lock_guard().await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
@@ -1856,7 +1652,7 @@ mod archival_state_tests {
         );
 
         // Verify that mutator sets are updated correctly and that last block is block 2
-        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+        for state_lock in [&genesis, &alice_state_lock, &bob_state_lock] {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(

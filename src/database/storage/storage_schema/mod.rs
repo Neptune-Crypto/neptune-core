@@ -55,13 +55,12 @@ mod tests {
     use serde::Deserialize;
     use serde::Serialize;
 
-    use crate::database::NeptuneLevelDb;
-    use crate::twenty_first::math::other::random_elements;
-
     use super::super::storage_vec::traits::*;
     use super::super::storage_vec::Index;
     use super::traits::*;
     use super::*;
+    use crate::database::NeptuneLevelDb;
+    use crate::twenty_first::math::other::random_elements;
 
     #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     struct S(Vec<u8>);

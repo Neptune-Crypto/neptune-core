@@ -3,17 +3,17 @@ use std::fmt::Display;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::EnumCount;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
-use crate::models::consensus::mast_hash::HasDiscriminant;
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::prelude::twenty_first;
-
 use super::block_height::BlockHeight;
+use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
+use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::prelude::twenty_first;
 
 pub const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
 pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
@@ -63,7 +63,7 @@ impl Display for BlockHeader {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumCount)]
 pub enum BlockHeaderField {
     Version,
     Height,

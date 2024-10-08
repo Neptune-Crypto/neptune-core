@@ -1,0 +1,13 @@
+[
+  {
+    "name": "KernelToOutputs-4in-4out",
+    "benchmark_result": {
+      "clock_cycle_count": 1973,
+      "hash_table_height": 786,
+      "u32_table_height": 327,
+      "op_stack_table_height": 1542,
+      "ram_table_height": 295
+    },
+    "case": "CommonCase"
+  }
+]

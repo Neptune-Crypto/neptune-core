@@ -480,8 +480,9 @@ impl<T> Atomic<T> for AtomicRw<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use futures::future::FutureExt;
+
+    use super::*;
 
     #[tokio::test]
     // Verify (compile-time) that AtomicRw::lock() and ::lock_mut() accept mutable values.  (FnMut)

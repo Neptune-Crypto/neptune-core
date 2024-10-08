@@ -5,13 +5,25 @@ use rand::Rng;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::TasmObject;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
 use crate::prelude::twenty_first;
 
 #[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec, Arbitrary,
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    GetSize,
+    BFieldCodec,
+    Arbitrary,
+    TasmObject,
 )]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
@@ -38,10 +50,9 @@ mod addition_record_tests {
     use rand::random;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+    use super::*;
     use crate::models::blockchain::shared::Hash;
     use crate::util_types::mutator_set::commit;
-
-    use super::*;
 
     #[test]
     fn get_size_test() {

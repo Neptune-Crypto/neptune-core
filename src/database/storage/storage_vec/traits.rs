@@ -3,14 +3,13 @@
 //! It is recommended to wildcard import these with
 //! `use crate::database::storage::storage_vec::traits::*`
 
-use super::Index;
-
 // for Stream (async Iterator equiv)
 use async_stream::stream;
 use futures::stream::Stream;
-
 // re-export to make life easier for users of our API.
 pub use futures::{pin_mut, StreamExt};
+
+use super::Index;
 
 // #[allow(async_fn_in_trait)]
 #[async_trait::async_trait]

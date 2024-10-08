@@ -1,15 +1,11 @@
 //! provides a symmetric key interface based on aes-256-gcm for sending and claiming [Utxo]
 
-use super::common;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::prelude::twenty_first;
 use aead::Aead;
 use aead::Key;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
+use anyhow::Result;
 use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
@@ -17,6 +13,14 @@ use serde::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use super::common;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::prelude::twenty_first;
 
 /// represents a symmetric key decryption error
 #[derive(Debug, thiserror::Error)]
@@ -96,7 +100,7 @@ impl SymmetricKey {
 
     /// returns the privacy digest which is a hash of the privacy_preimage
     pub fn privacy_digest(&self) -> Digest {
-        self.privacy_preimage().hash::<Hash>()
+        self.privacy_preimage().hash()
     }
 
     /// returns the receiver_identifier, a public fingerprint
@@ -174,7 +178,7 @@ impl SymmetricKey {
 
     /// returns the spending lock which is a hash of unlock_key()
     pub fn spending_lock(&self) -> Digest {
-        self.unlock_key().hash::<Hash>()
+        self.unlock_key().hash()
     }
 
     /// generates a lock script from the spending lock.
@@ -183,5 +187,23 @@ impl SymmetricKey {
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
         common::lock_script(self.spending_lock())
+    }
+
+    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+        common::lock_script_and_witness(self.unlock_key())
+    }
+
+    pub(crate) fn generate_public_announcement(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: Digest,
+    ) -> Result<PublicAnnouncement> {
+        let ciphertext = [
+            &[SYMMETRIC_KEY_FLAG_U8.into(), self.receiver_identifier()],
+            self.encrypt(utxo, sender_randomness)?.as_slice(),
+        ]
+        .concat();
+
+        Ok(PublicAnnouncement::new(ciphertext))
     }
 }

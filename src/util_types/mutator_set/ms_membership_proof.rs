@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
-use std::marker::PhantomData;
 use std::ops::IndexMut;
 
 use arbitrary::Arbitrary;
@@ -14,6 +13,7 @@ use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -21,9 +21,6 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -37,7 +34,8 @@ use super::shared::get_batch_mutation_argument_for_removal_record;
 use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
-
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -59,17 +57,14 @@ pub enum MembershipProofError {
 pub struct MsMembershipProof {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
-    pub auth_path_aocl: MmrMembershipProof<Hash>,
+    pub auth_path_aocl: MmrMembershipProof,
+    pub aocl_leaf_index: u64,
     pub target_chunks: ChunkDictionary,
 }
 
 impl MsMembershipProof {
     pub fn addition_record(&self, item: Digest) -> AdditionRecord {
-        commit(
-            item,
-            self.sender_randomness,
-            self.receiver_preimage.hash::<Hash>(),
-        )
+        commit(item, self.sender_randomness, self.receiver_preimage.hash())
     }
 
     /// Compute the indices that will be added to the SWBF if this item is removed.
@@ -78,7 +73,7 @@ impl MsMembershipProof {
             item,
             self.sender_randomness,
             self.receiver_preimage,
-            self.auth_path_aocl.leaf_index,
+            self.aocl_leaf_index,
         ))
     }
 
@@ -93,10 +88,10 @@ impl MsMembershipProof {
         assert!(
             membership_proofs
                 .iter()
-                .all(|mp| mp.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves()),
+                .all(|mp| mp.aocl_leaf_index < mutator_set.aocl.num_leafs()),
             "No AOCL data index can point outside of provided mutator set. aocl leaf count: {}; mp leaf indices: {}",
-            mutator_set.aocl.count_leaves(),
-            membership_proofs.iter().map(|x| x.auth_path_aocl.leaf_index.to_string()).join(",")
+            mutator_set.aocl.num_leafs(),
+            membership_proofs.iter().map(|x| x.aocl_leaf_index.to_string()).join(",")
         );
         assert_eq!(
             membership_proofs.len(),
@@ -104,26 +99,45 @@ impl MsMembershipProof {
             "Function must be called with same number of membership proofs and items. Got {} items and {} membership proofs", own_items.len(), membership_proofs.len()
         );
 
-        let new_item_index = mutator_set.aocl.count_leaves();
+        assert!(membership_proofs
+            .iter()
+            .all(|msmp| msmp
+                .target_chunks
+                .iter()
+                .all(|(chunk_index, (mmr_mp, chunk))| mmr_mp.verify(
+                    *chunk_index,
+                    Hash::hash(chunk),
+                    &mutator_set.swbf_inactive.peaks(),
+                    mutator_set.swbf_inactive.num_leafs()
+                ))));
+
+        let new_item_index = mutator_set.aocl.num_leafs();
 
         // Update AOCL MMR membership proofs
-        let indices_for_updated_mps = MmrMembershipProof::batch_update_from_append(
+        let leaf_indices = membership_proofs
+            .iter()
+            .map(|msmp| msmp.aocl_leaf_index)
+            .collect_vec();
+        let indices_for_mps_updated_from_append = MmrMembershipProof::batch_update_from_append(
             &mut membership_proofs
                 .iter_mut()
-                .map(|x| &mut x.auth_path_aocl)
+                .map(|msmp| &mut msmp.auth_path_aocl)
                 .collect::<Vec<_>>(),
+            &leaf_indices,
             new_item_index,
             addition_record.canonical_commitment,
-            &mutator_set.aocl.get_peaks(),
+            &mutator_set.aocl.peaks(),
         );
 
         // if window does not slide, we are done
         if !MutatorSetAccumulator::window_slides(new_item_index) {
-            return Ok(indices_for_updated_mps);
+            return Ok(indices_for_mps_updated_from_append);
         }
 
+        let new_item_index2 = mutator_set.aocl.num_leafs();
+
         // window does slide
-        let batch_index = new_item_index / BATCH_SIZE as u64;
+        let batch_index = new_item_index2 / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
@@ -134,8 +148,8 @@ impl MsMembershipProof {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: MmrMembershipProof<Hash> = mmra.append(new_chunk_digest);
+        let mut updated_mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
+        let new_chunk_auth_path: MmrMembershipProof = updated_mmra.append(new_chunk_digest);
 
         // Collect all indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the indices are
@@ -146,25 +160,28 @@ impl MsMembershipProof {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, &item))| {
-                let indices = AbsoluteIndexSet::new(&get_swbf_indices(
+                let absolute_indices = AbsoluteIndexSet::new(&get_swbf_indices(
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,
-                    mp.auth_path_aocl.leaf_index,
+                    mp.aocl_leaf_index,
                 ));
-                let chunks_set: HashSet<u64> = indices
+                for chunk_index in absolute_indices
                     .to_array()
                     .iter()
-                    .map(|x| (x / CHUNK_SIZE as u128) as u64)
-                    .collect();
-                chunks_set.iter().for_each(|chnkidx| {
-                    chunk_index_to_mp_index.entry(*chnkidx).or_default().push(i)
-                });
+                    .map(|x| (*x / CHUNK_SIZE as u128) as u64)
+                    .unique()
+                {
+                    chunk_index_to_mp_index
+                        .entry(chunk_index)
+                        .or_default()
+                        .push(i)
+                }
             });
 
-        // Find the membership proofs that need a new dictionary entry for the chunk that's being
-        // added to the inactive part by this addition.
-        let mps_for_new_chunk_dictionary_entry: Vec<usize> =
+        // Find the indices of the mutator set membership proofs whose
+        // `target_chunks` field needs a new dictionary entry for the slid chunk.
+        let indices_for_mps_with_new_chunk_dictionary_entry: Vec<usize> =
             match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
@@ -185,15 +202,11 @@ impl MsMembershipProof {
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in mps_for_new_chunk_dictionary_entry.iter() {
-            membership_proofs
-                .index_mut(*i)
-                .target_chunks
-                .dictionary
-                .insert(
-                    old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk.clone()),
-                );
+        for i in indices_for_mps_with_new_chunk_dictionary_entry.iter() {
+            membership_proofs.index_mut(*i).target_chunks.insert(
+                old_window_start_batch_index,
+                (new_chunk_auth_path.clone(), new_chunk.clone()),
+            );
         }
 
         // Collect those MMR membership proofs for chunks whose authentication
@@ -207,41 +220,48 @@ impl MsMembershipProof {
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
+            &mut mmr::mmr_membership_proof::MmrMembershipProof,
         > = vec![];
 
-        // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
-        // which parts of the MMR membership proofs that map to MS membership proofs. This is
+        // The `mmr_mp_index_to_ms_mp_index` variable remembers
+        // which MMR membership proofs that map to MS membership proofs. This is
         // required to return the indices of the MS membership proofs that have been updated
         // by this function call.
-        let mut mmr_membership_proof_index_to_membership_proof_index: Vec<usize> = vec![];
+        let mut mmr_mp_index_to_ms_mp_index = vec![];
+        let mut mmr_membership_indices = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in mp.target_chunks.dictionary.iter_mut() {
-                    mmr_membership_proofs_for_append.push(mmr_mp);
-                    mmr_membership_proof_index_to_membership_proof_index.push(i);
+                for (chunk_index, (mmr_mp, _chunk)) in mp.target_chunks.iter_mut() {
+                    if *chunk_index != old_window_start_batch_index {
+                        mmr_membership_proofs_for_append.push(mmr_mp);
+                        mmr_membership_indices.push(*chunk_index);
+                        mmr_mp_index_to_ms_mp_index.push(i as u64);
+                    }
                 }
             }
         }
 
-        let indices_for_mutated_values =
-            mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
+        let indices_for_modified_paths =
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
-                mutator_set.swbf_inactive.count_leaves(),
+                &mmr_membership_indices,
+                mutator_set.swbf_inactive.num_leafs(),
                 new_chunk_digest,
-                &mutator_set.swbf_inactive.get_peaks(),
+                &mutator_set.swbf_inactive.peaks(),
             );
-        let mut swbf_mutated_indices: Vec<usize> = vec![];
-        for j in indices_for_mutated_values {
-            swbf_mutated_indices.push(mmr_membership_proof_index_to_membership_proof_index[j]);
+
+        let mut indices_for_mps_with_updated_swbf_auth_paths = vec![];
+        for j in indices_for_modified_paths {
+            indices_for_mps_with_updated_swbf_auth_paths
+                .push(mmr_mp_index_to_ms_mp_index[j] as usize);
         }
 
         // Gather the indices the are returned. These indices indicate which membership
         // proofs that have been mutated.
-        let mut all_mutated_mp_indices: Vec<usize> = [
-            swbf_mutated_indices,
-            indices_for_updated_mps,
-            mps_for_new_chunk_dictionary_entry,
+        let mut all_mutated_mp_indices = [
+            indices_for_mps_updated_from_append,
+            indices_for_mps_with_updated_swbf_auth_paths,
+            indices_for_mps_with_new_chunk_dictionary_entry,
         ]
         .concat();
         all_mutated_mp_indices.sort_unstable();
@@ -250,24 +270,23 @@ impl MsMembershipProof {
         Ok(all_mutated_mp_indices)
     }
 
-    /**
-     * update_from_addition
-     * Updates a membership proof in anticipation of an addition to the set.
-     */
+    /// Update a membership proof in anticipation of an addition to the set and
+    /// return, wrapped in a `Result`, whether something was updated.
     pub fn update_from_addition(
         &mut self,
         own_item: Digest,
         mutator_set: &MutatorSetAccumulator,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
-        assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
-        let new_item_index = mutator_set.aocl.count_leaves();
+        assert!(self.aocl_leaf_index < mutator_set.aocl.num_leafs());
+        let new_item_index = mutator_set.aocl.num_leafs();
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
-            mutator_set.aocl.count_leaves(),
+            self.aocl_leaf_index,
+            mutator_set.aocl.num_leafs(),
             addition_record.canonical_commitment,
-            &mutator_set.aocl.get_peaks(),
+            &mutator_set.aocl.peaks(),
         );
 
         // if window does not slide, we are done
@@ -279,38 +298,37 @@ impl MsMembershipProof {
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
-        // Get indices by recalculating them. (We do not cache indices any more.)
+        // Get Bloom filter indices by recalculating them.
         let all_indices = get_swbf_indices(
             own_item,
             self.sender_randomness,
             self.receiver_preimage,
-            self.auth_path_aocl.leaf_index,
+            self.aocl_leaf_index,
         );
         let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
             .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
             .collect::<HashSet<u64>>();
 
-        // Get an accumulator-version of the MMR and insert the new SWBF leaf to get its
-        // authentication path.
-        // It's important to convert the MMR
-        // to an MMR Accumulator here, since we don't want to drag around or clone
-        // a whole archival MMR for this operation, as the archival MMR can be in the
-        // size of gigabytes, whereas the MMR accumulator should be in the size of
-        // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
+        // the new leaf's authentication path.
+        let mut mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
+        let new_leaf_index = mmra.num_leafs();
+        let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
             mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
         let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
-        let new_window_start_batch_index = batch_index;
+        assert_eq!(
+            new_leaf_index, old_window_start_batch_index,
+            "new SWBFI leaf index does not match with `old_window_start_batch_index`"
+        );
         'outer: for chunk_index in chunk_indices_set.into_iter() {
             // Update for indices that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.
             if chunk_index < old_window_start_batch_index {
-                let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
+                let mp = match self.target_chunks.get_mut(&chunk_index) {
                     // If this record is not found, the MembershipProof is in a broken
                     // state.
                     None => {
@@ -321,9 +339,10 @@ impl MsMembershipProof {
                     Some((m, _chnk)) => m,
                 };
                 let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
-                    mutator_set.swbf_inactive.count_leaves(),
+                    chunk_index,
+                    mutator_set.swbf_inactive.num_leafs(),
                     new_chunk_digest,
-                    &mutator_set.swbf_inactive.get_peaks(),
+                    &mutator_set.swbf_inactive.peaks(),
                 );
                 swbf_chunk_dictionary_updated =
                     swbf_chunk_dictionary_updated || swbf_chunk_dict_updated_local;
@@ -332,10 +351,8 @@ impl MsMembershipProof {
             }
 
             // if index is in the part that is becoming inactive, add a dictionary entry
-            if old_window_start_batch_index <= chunk_index
-                && chunk_index < new_window_start_batch_index
-            {
-                if self.target_chunks.dictionary.contains_key(&chunk_index) {
+            if chunk_index == new_leaf_index {
+                if self.target_chunks.contains_key(&chunk_index) {
                     return Err(Box::new(MembershipProofError::AlreadyExistingChunk(
                         chunk_index,
                     )));
@@ -343,7 +360,6 @@ impl MsMembershipProof {
 
                 // add dictionary entry
                 self.target_chunks
-                    .dictionary
                     .insert(chunk_index, (new_auth_path.clone(), new_chunk.clone()));
                 swbf_chunk_dictionary_updated = true;
 
@@ -364,12 +380,12 @@ impl MsMembershipProof {
         previous_mutator_set: &MutatorSetAccumulator,
     ) {
         // calculate AOCL MMR MP length
-        let previous_leaf_count = previous_mutator_set.aocl.count_leaves();
+        let previous_leaf_count = previous_mutator_set.aocl.num_leafs();
         assert!(
-            previous_leaf_count > self.auth_path_aocl.leaf_index,
+            previous_leaf_count > self.aocl_leaf_index,
             "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
-        let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
+        let aocl_discrepancies = self.aocl_leaf_index ^ previous_leaf_count;
         let aocl_mt_height = (aocl_discrepancies as u128).ilog2();
 
         // trim to length
@@ -378,15 +394,13 @@ impl MsMembershipProof {
         }
 
         // remove chunks from unslid windows
-        let swbfi_leaf_count = previous_mutator_set.swbf_inactive.count_leaves();
-        self.target_chunks
-            .dictionary
-            .retain(|k, _v| *k < swbfi_leaf_count);
+        let swbfi_leaf_count = previous_mutator_set.swbf_inactive.num_leafs();
+        self.target_chunks.retain(|(k, _v)| *k < swbfi_leaf_count);
 
         // iterate over all retained chunk authentication paths
-        for (k, (mp, _chnk)) in self.target_chunks.dictionary.iter_mut() {
+        for (k, (mp, _chnk)) in self.target_chunks.iter_mut() {
             // calculate length
-            let chunk_discrepancies = swbfi_leaf_count ^ k;
+            let chunk_discrepancies = swbfi_leaf_count ^ *k;
             let chunk_mt_height = (chunk_discrepancies as u128).ilog2();
 
             // trim to length
@@ -417,11 +431,13 @@ impl MsMembershipProof {
         // mutated.
         // The chunk values contained in the MS membership proof's chunk dictionary has already
         // been updated by the `get_batch_mutation_argument_for_removal_record` function.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
+        let mut leaf_indices = vec![];
         let mut mmr_mp_index_to_input_index: Vec<usize> = vec![];
         for (i, chunk_dict) in chunk_dictionaries.iter_mut().enumerate() {
-            for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
                 mmr_mp_index_to_input_index.push(i);
             }
         }
@@ -430,7 +446,11 @@ impl MsMembershipProof {
         let mutated_mmr_mps =
             mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut own_mmr_mps,
-                mutation_argument,
+                &leaf_indices,
+                mutation_argument
+                    .iter()
+                    .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                    .collect_vec(),
             );
 
         // Keep track of which MS membership proofs that were mutated. This is all those membership
@@ -467,9 +487,13 @@ impl MsMembershipProof {
         // It would be sufficient to only update the membership proofs that live in the Merkle
         // trees that have been updated, but it probably will not give a measureable speedup
         // since this change would not reduce the amount of hashing needed
-        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
+        let chunk_mmr_lis = self
             .target_chunks
-            .dictionary
+            .iter()
+            .map(|(chunk_index, (_, _))| *chunk_index)
+            .collect_vec();
+        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = self
+            .target_chunks
             .iter_mut()
             .map(|(_, (mmr_mp, _))| mmr_mp)
             .collect();
@@ -477,7 +501,11 @@ impl MsMembershipProof {
         let mutated_mmr_mp_indices: Vec<usize> =
             mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut chunk_mmr_mps,
-                mutation_argument,
+                &chunk_mmr_lis,
+                mutation_argument
+                    .iter()
+                    .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                    .collect_vec(),
             );
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
@@ -506,9 +534,13 @@ impl MsMembershipProof {
         // Note that *all* MMR membership proofs must be updated. It's not sufficient to update
         // those whose leaf has changed, since an authentication path changes if *any* leaf
         // in the same Merkle tree (under the same MMR peak) changes.
-        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
+        let chunk_mmr_lis = self
             .target_chunks
-            .dictionary
+            .iter()
+            .map(|(leaf_index, (_, _))| *leaf_index)
+            .collect_vec();
+        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = self
+            .target_chunks
             .iter_mut()
             .map(|(_, (mmr_mp, _))| mmr_mp)
             .collect();
@@ -516,7 +548,11 @@ impl MsMembershipProof {
         let mutated_mmr_mp_indices: Vec<usize> =
             mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut chunk_mmr_mps,
-                batch_membership,
+                &chunk_mmr_lis,
+                batch_membership
+                    .iter()
+                    .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                    .collect_vec(),
             );
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
@@ -529,11 +565,12 @@ pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembership
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let sender_randomness: Digest = rng.gen();
     let receiver_preimage: Digest = rng.gen();
-    let auth_path_aocl: MmrMembershipProof<Hash> = pseudorandom_mmr_membership_proof(rng.gen());
+    let (auth_path_aocl, aocl_leaf_index) = pseudorandom_mmr_membership_proof_with_index(rng.gen());
     let target_chunks: ChunkDictionary = pseudorandom_chunk_dictionary(rng.gen());
     MsMembershipProof {
         sender_randomness,
         receiver_preimage,
+        aocl_leaf_index,
         auth_path_aocl,
         target_chunks,
     }
@@ -541,18 +578,17 @@ pub fn pseudorandom_mutator_set_membership_proof(seed: [u8; 32]) -> MsMembership
 
 /// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
 /// for testing purposes.
-pub fn pseudorandom_mmr_membership_proof<H: AlgebraicHasher>(
-    seed: [u8; 32],
-) -> MmrMembershipProof<H> {
+pub fn pseudorandom_mmr_membership_proof_with_index(seed: [u8; 32]) -> (MmrMembershipProof, u64) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_index: u64 = rng.gen();
     let authentication_path: Vec<Digest> =
         (0..rng.gen_range(0..15)).map(|_| rng.gen()).collect_vec();
-    MmrMembershipProof {
+    (
+        MmrMembershipProof {
+            authentication_path,
+        },
         leaf_index,
-        authentication_path,
-        _hasher: PhantomData,
-    }
+    )
 }
 
 #[cfg(test)]
@@ -568,45 +604,48 @@ mod ms_proof_tests {
     use twenty_first::math::other::random_elements;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+    use super::*;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
+    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_membership_proof;
-
-    use super::*;
 
     #[test]
     fn mp_equality_test() {
         let mut rng = thread_rng();
 
-        let (_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (_item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
         let base_mp = MsMembershipProof {
             sender_randomness,
             receiver_preimage,
-            auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            auth_path_aocl: MmrMembershipProof::new(vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 
         let mp_with_different_leaf_index = MsMembershipProof {
             sender_randomness,
             receiver_preimage,
-            auth_path_aocl: MmrMembershipProof::<Hash>::new(100073, vec![]),
+            auth_path_aocl: MmrMembershipProof::new(vec![]),
+            aocl_leaf_index: 100073,
             target_chunks: ChunkDictionary::default(),
         };
 
         let mp_with_different_sender_randomness = MsMembershipProof {
             sender_randomness: rng.gen(),
             receiver_preimage,
-            auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            auth_path_aocl: MmrMembershipProof::new(vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 
         let mp_with_different_receiver_preimage = MsMembershipProof {
             receiver_preimage: rng.gen(),
             sender_randomness,
-            auth_path_aocl: MmrMembershipProof::<Hash>::new(0, vec![]),
+            auth_path_aocl: MmrMembershipProof::new(vec![]),
+            aocl_leaf_index: 0,
             target_chunks: ChunkDictionary::default(),
         };
 
@@ -624,7 +663,7 @@ mod ms_proof_tests {
 
         // Construct an MMR with 7 leafs
         let mmr_digests = random_elements::<Digest>(7);
-        let mut mmra: MmrAccumulator<Hash> = MmrAccumulator::new(mmr_digests);
+        let mut mmra: MmrAccumulator = MmrAccumulator::new_from_leafs(mmr_digests);
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk::empty_chunk();
@@ -636,10 +675,7 @@ mod ms_proof_tests {
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
         let mut mp_mutated: MsMembershipProof = base_mp.clone();
-        mp_mutated
-            .target_chunks
-            .dictionary
-            .insert(0, (mmr_mp, zero_chunk));
+        mp_mutated.target_chunks.insert(0, (mmr_mp, zero_chunk));
         assert_ne!(mp_mutated, base_mp);
     }
 
@@ -649,7 +685,7 @@ mod ms_proof_tests {
         // in this code base as a macro. So this is basically a test of that macro.
         let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
@@ -680,7 +716,7 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
             for (oi, mp) in membership_proofs.iter_mut() {
                 mp.update_from_addition(
@@ -812,7 +848,7 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
@@ -893,8 +929,7 @@ mod ms_proof_tests {
                 let item: Digest = random();
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect_vec(),
                     &items,
@@ -943,8 +978,7 @@ mod ms_proof_tests {
                 let item: Digest = random();
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 msa.add(&addition_record);
             }
 
@@ -955,7 +989,7 @@ mod ms_proof_tests {
             let own_addition_record = commit(
                 own_item,
                 own_sender_randomness,
-                own_receiver_preimage.hash::<Hash>(),
+                own_receiver_preimage.hash(),
             );
             let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage);
             msa.add(&own_addition_record);
@@ -966,8 +1000,7 @@ mod ms_proof_tests {
                 let item: Digest = random();
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 own_mp
                     .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
@@ -985,8 +1018,7 @@ mod ms_proof_tests {
                 let item: Digest = random();
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 own_mp
                     .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
@@ -1028,7 +1060,7 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             addition_records.push(addition_record);
 
             let membership_proof = archival_mutator_set
@@ -1153,8 +1185,7 @@ mod ms_proof_tests {
                 let receiver_preimage: Digest = rng.gen();
 
                 // generate addition record
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
 
                 // record membership proof
                 let membership_proof = archival_mutator_set

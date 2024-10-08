@@ -1,0 +1,13 @@
+[
+  {
+    "name": "CollectTypeScripts-2in-2out",
+    "benchmark_result": {
+      "clock_cycle_count": 2393,
+      "hash_table_height": 740,
+      "u32_table_height": 294,
+      "op_stack_table_height": 1943,
+      "ram_table_height": 433
+    },
+    "case": "CommonCase"
+  }
+]

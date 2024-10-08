@@ -6,7 +6,13 @@ debug ?=
 
 $(info debug is $(debug))
 # Treat all warnings as errors
-# export RUSTFLAGS = -Dwarnings
+export RUSTFLAGS = -Dwarnings
+
+# Set another target dir than default to avoid builds from `make`
+# to invalidate cache from barebones use of `cargo` commands.
+# The cache is cleared when a new `RUSTFLAGS` value is encountered,
+# so to prevent the two builds from interfering, we use two dirs.
+export CARGO_TARGET_DIR=./makefile-target
 
 ifdef debug
   release :=
@@ -17,6 +23,10 @@ else
   target :=release
   extension :=
 endif
+
+# Tests that require proofs that are expensive to create
+expensive-proofs:
+	CARGO_TARGET_DIR=./makefile-target-opt-level3 RUSTFLAGS="-C opt-level=3 -C debug-assertions=no -Z threads=180 --cfg=tokio_unstable" cargo t can_verify_transaction_ -- --nocapture --test-threads=1
 
 build:
 	$(info RUSTFLAGS is $(RUSTFLAGS))

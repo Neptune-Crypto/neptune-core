@@ -10,17 +10,25 @@ A transaction kernel consists of the following fields:
  - `timestamp: Timestamp` When the transaction took or takes place.
  - `mutator_set_hash: Digest` A commitment to the mutator set that is to be updated by the transaction.
 
+Note that while addition records and removal records are both commitments to UTXOs, they are different types of commitments. The removal record is an index set into the SWBF (with supporting chunk dictionary) whereas the addition record is a hash digest.
+
 ## Validity
+
+Transaction validity is designed to check four conditions:
+1. The lock scripts of all input UTXOs halt gracefully
+2. All involved typescripts halt gracefully
+3. All input UTXOs are present in the mutator set's append-only commitment list
+4. All input UTXOs are *not* present in the mutator set's sliding-window Bloom filter.
 
 A transaction is *valid* if (any of):
 
  - ***a)*** it has a valid witness (including spending keys and mutator set membership proofs)
  - ***b)*** it has valid proofs for each subprogram (subprograms establish things like the owners consent to this transaction, there is no inflation, etc.)
- - ***d)*** it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
- - ***e)*** it has a single valid proof that the transaction originates from merging two valid transactions
- - ***f)*** it has a single valid proof that the transaction belongs to an integral mempool, *i.e.*, one to which only valid transactions were added
- - ***g)*** it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator
- - ***h)*** it has a single valid proof that another single valid proof exists (but possibly with an older version of the proof system or different parameters).
+ - ***c)*** it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
+ - ***d)*** it has a single valid proof that the transaction originates from merging two valid transactions
+ - ***e)*** it has a single valid proof that the transaction belongs to an integral mempool, *i.e.*, one to which only valid transactions were added
+ - ***f)*** it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator
+ - ***g)*** it has a single valid proof that another single valid proof exists (but possibly with an older version of the proof system or different parameters).
 
 For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
 
@@ -33,17 +41,18 @@ A transaction witness is defined to be valid if, after deriving from it a set of
 A transaction witness consists of the following fields:
 
  - `input_utxos: SaltedUtxos` A wrapper object wrapping together a list of input `Utxo`s and a salt, which is 3 `BFieldElement`s.
- - `input_lock_scripts: Vec<LockScript>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
- - `type_scripts: Vec<TypeScript>` The scripts that authenticate the correct evolution of all token types involved.
- - `lock_script_witnesses: Vec<Vec<BFieldElement>>` Witness data to the lock scripts.
+ - `lock_scripts_and_witnesses: Vec<LockScriptAndWitness>` The lock scripts determine the spending policies of the input UTXOs; in the simplest case, whether their owners approve of the transaction.
+ - `type_scripts_and_witnesses: Vec<TypeScriptAndWitness>` The scripts that authenticate the correct evolution of all token types involved.
  - `input_membership_proofs: Vec<MsMembershipProof>` Membership proofs in the mutator set for the input UTXOs.
  - `output_utxos: SaltedUtxos` A wrapper object wrapping together a list of output `Utxo`s and a salt, which is 3 `BFieldElement`s.
+ - `output_sender_randomnesses: Vec<Digest>` Senders' contributions to output commitment randomnesses.
+ - `output_receiver_digests: Vec<Digest>` Receivers' contributions to output commitment randomnesses.
  - `mutator_set_accumulator: MutatorSetAccumulator` The mutator set accumulator, which is the anonymous accumulator.
  - `kernel: TransactionKernel` The transaction kernel that this witness attests to.
 
 Note that a (transaction, valid witness) pair cannot be broadcasted because that would undermine both soundness and privacy.
 
-### B: Decomposition into Subclaims
+### B: Standard Decomposition into Subclaims
 
 The motivation for splitting transaction validity into subclaims is that the induced subprograms can be proved individually, which might be cheaper than proving the whole thing in one go. Also, it is conceivable that components of a transaction are updated and do not invalidate all subproofs but only a subset of them. The subprograms are as follows.
 
@@ -51,16 +60,17 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - divine the input UTXOs
    - divine the salt
    - divine the mutator set accumulator and authenticate it against the given transaction kernel MAST hash
-   - keep a set of all announced indices and initialize it to the empty set
    - for each input UTXO:
+     - divine the receiver preimage
+     - divine the sender randomness
+     - compute the canonical commitment
+     - verify the membership of the canonical commitment to the AOCL
      - compute the removal record index set
-     - read the removal record chunks dictionary from memory
-     - for each entry in this dictionary, verify that the chunk belongs to the SWBF MMR from the mutator set accumulator (authentication paths are either read from memory or divined in -- to be decided)
-     - for all indices in the index set, verify that if it is in the inactive part of the SWBF, then it lives in some dictionary entry (chunk)
-     - add the indices to the set of all announced indices and filter out duplicates
-     - verify that the set of all announced indices has grown
-   - hash the list of removal records and authenticate it against the given transaction kernel MAST hash
-   - output the hash of the salted UTXOs.
+     - verify that the calculated removal record index set matches the claimed index set
+   - hash the list of removal record sets and authenticate it against the given transaction kernel MAST hash
+   - output the hash of the salted input UTXOs.
+
+   Checks ensuring that each AOCL index is unique and that the published authentication paths are valid, are delegated to the miner and do, for performance reasons, not belong here. Checks that the removal record has not already been applied (i.e. no double-spend) is also delegated to the miner.
  - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)` Collects the output UTXOs into a more digestible format. Specifically:
    - divine the output UTXOs
    - divine the salt
@@ -89,13 +99,13 @@ The motivation for splitting transaction validity into subclaims is that the ind
      - collect the type script hash
    - filter out duplicates
    - output the unique type script hashes
- - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
+ - `TypeScript :: (transaction_kernel_mast_hash : Digest) × (salted_input_utxos_hash : Digest) × (salted_output_utxos_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
 
 Diagram 1 shows how the explicit inputs and outputs of all the subprograms relate to each other. Single arrows denote inputs or outputs. Double lines indicate that the program(s) on the one end hash to the digest(s) on the other.
 
 | ![Transaction Validity Diagram](./transaction-validity-diagram.svg) |
 |:-------------------------------------------------------------------:|
-|             **Diagram 1:** Transaction validity.                    |
+|                **Diagram 1:** Transaction validity.                 |
 
 All subprograms can be proven individually given access to the transaction's witness. The next table shows which fields of the `TransactionPrimitiveWitness` are (potentially) used in which subprogram.
 
@@ -166,19 +176,22 @@ The claim for certifying the validity of transaction based on its inclusion in a
 ### F: Transaction Data Update
 
 A transaction is valid if another transaction that is identical except for fixing an older mutator set hash or timestamp, was valid. Specifically, the program `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` verifies the update of transaction data as follows:
- - divine `tx : TransactionKernel`
- - verify `tx` with some divined proof
- - create a new `TransactionKernel` object `kernel`
- - set all fields of `kernel` to the matching field of `tx` except:
-   - set `kernel.timestamp` such that `kernel.timestamp >= tx.timestamp`
-   - set `kernel.mutator_set_hash =/= tx.mutator_set_hash` only if the following instructions execute gracefully without crashing
-     - divine the mutator set AOCL MMR accumulator `kernel_aocl`
-     - authenticate `kernel_aocl` against the mutator set MAST hash `kernel.mutator_set_hash` using a divined authentication path
-     - divine the mutator set AOCL MMR accumultar `tx_aocl`
-     - authenticate the `tx_aocl` against the mutator set MAST hash `tx.mutator_set_hash` using a divined authentication path
-     - verify that there is a set of AOCL leafs whose addition sends `tx_aocl` to `kernel_aocl`
-
-Note that it is not necessary to verify that the removal records' authentication paths were updated correctly as this is implied by `tx` being valid.
+ - divine `old_kernel : TransactionKernel`
+ - verify `old_kernel` with some divined proof
+ - create a new `TransactionKernel` object `new_kernel`
+ - set all fields of `new_kernel` to the matching field of `old_kernel` except:
+   - set `new_kernel.timestamp` such that `new_kernel.timestamp >= old_kernel.timestamp`
+   - set `new_kernel.mutator_set_hash =/= tx.mutator_set_hash` only if the following instructions execute gracefully without crashing
+     - divine the mutator set AOCL MMR accumulator `new_kernel_aocl`
+     - authenticate `new_kernel_aocl` against the mutator set MAST hash `new_kernel.mutator_set_hash` using a divined authentication path
+     - divine the mutator set AOCL MMR accumultar `old_kernel_aocl`
+     - authenticate the `old_kernel_aocl` against the mutator set MAST hash `old_kernel.mutator_set_hash` using a divined authentication path
+     - verify that there is a set of AOCL leafs whose addition sends `old_kernel_aocl` to `new_kernel_aocl`
+   - set `new_kernel.inputs` to the following list:
+     - each index set is identical to the matching index set from `old_kernel`
+     - read the chunks dictionary
+     - for every index in the inactive part of the SWBF, verify that it lives in some chunk
+     - for every chunk in the chunk dictionary, verify its authentication path (either from `divine_sibling` or memory -- to be decided)
 
 ### G: Transaction Proof Update
 

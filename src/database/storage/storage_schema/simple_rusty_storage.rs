@@ -1,6 +1,3 @@
-use crate::database::neptune_leveldb::WriteBatchAsync;
-use crate::locks::tokio::LockCallbackFn;
-
 use super::super::super::neptune_leveldb::NeptuneLevelDb;
 use super::traits::StorageWriter;
 use super::DbtSchema;
@@ -8,6 +5,8 @@ use super::RustyKey;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
+use crate::database::neptune_leveldb::WriteBatchAsync;
+use crate::locks::tokio::LockCallbackFn;
 
 /// Database schema and tables logic for RustyLevelDB. You probably
 /// want to implement your own storage class after this example so

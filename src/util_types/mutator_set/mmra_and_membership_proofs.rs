@@ -8,14 +8,13 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::Digest;
 
-use crate::models::blockchain::shared::Hash;
-
 use super::root_and_paths::RootAndPaths;
 
 #[derive(Debug, Clone)]
 pub struct MmraAndMembershipProofs {
-    pub mmra: MmrAccumulator<Hash>,
-    pub membership_proofs: Vec<MmrMembershipProof<Hash>>,
+    pub mmra: MmrAccumulator,
+    pub membership_proofs: Vec<MmrMembershipProof>,
+    pub leaf_indices: Vec<u64>,
 }
 
 impl Arbitrary for MmraAndMembershipProofs {
@@ -100,12 +99,11 @@ impl Arbitrary for MmraAndMembershipProofs {
                 // prepare to extract membership proofs
                 let mut membership_proofs = vec![
                     MmrMembershipProof {
-                        leaf_index: 0,
                         authentication_path: vec![],
-                        _hasher: std::marker::PhantomData::<Hash>
                     };
                     num_paths as usize
                 ];
+                let mut leaf_indices = vec![0; num_paths as usize];
 
                 // loop over all leaf indices and look up membership proof
                 for (root_and_paths, indices_and_leafs_) in roots_and_pathses
@@ -117,20 +115,25 @@ impl Arbitrary for MmraAndMembershipProofs {
                         paths.into_iter().zip(indices_and_leafs_.iter())
                     {
                         membership_proofs[enumeration_index].authentication_path = path;
-                        membership_proofs[enumeration_index].leaf_index = mmr_index;
+                        leaf_indices[enumeration_index] = mmr_index;
                     }
                 }
 
                 // sanity check
-                for (mmr_mp, leaf) in membership_proofs.iter().zip(leafs.iter()) {
+                for ((mmr_mp, leaf), leaf_index) in membership_proofs
+                    .iter()
+                    .zip(leafs.iter())
+                    .zip(leaf_indices.iter())
+                {
                     let (_mti, _pi) =
-                        leaf_index_to_mt_index_and_peak_index(mmr_mp.leaf_index, total_leaf_count);
-                    assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count));
+                        leaf_index_to_mt_index_and_peak_index(*leaf_index, total_leaf_count);
+                    assert!(mmr_mp.verify(*leaf_index, *leaf, &peaks, total_leaf_count));
                 }
 
                 MmraAndMembershipProofs {
                     mmra: MmrAccumulator::init(peaks, total_leaf_count),
                     membership_proofs,
+                    leaf_indices,
                 }
             })
             .boxed()
@@ -141,13 +144,14 @@ impl Arbitrary for MmraAndMembershipProofs {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::twenty_first::math::tip5::Digest;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test_strategy::proptest;
+
+    use super::*;
+    use crate::twenty_first::math::tip5::Digest;
 
     fn indices_and_leafs_strategy(max: u64, num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
         vec((0u64..max, arb::<Digest>()), num)
@@ -168,14 +172,15 @@ mod test {
         )]
         mmra_and_membership_proofs: MmraAndMembershipProofs,
     ) {
-        for ((_index, leaf), mp) in indices_and_leafs
+        for ((index, leaf), mp) in indices_and_leafs
             .into_iter()
             .zip(mmra_and_membership_proofs.membership_proofs)
         {
             prop_assert!(mp.verify(
-                &mmra_and_membership_proofs.mmra.get_peaks(),
+                index,
                 leaf,
-                mmra_and_membership_proofs.mmra.count_leaves(),
+                &mmra_and_membership_proofs.mmra.peaks(),
+                mmra_and_membership_proofs.mmra.num_leafs(),
             ));
         }
     }

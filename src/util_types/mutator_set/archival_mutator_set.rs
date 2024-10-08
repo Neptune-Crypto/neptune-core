@@ -8,12 +8,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use crate::database::storage::storage_vec::traits::*;
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::get_swbf_indices;
-use crate::util_types::mutator_set::MutatorSetError;
-
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
 use super::archival_mmr::ArchivalMmr;
@@ -24,14 +18,19 @@ use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::RemovalRecord;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
+use crate::database::storage::storage_vec::traits::*;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::get_swbf_indices;
+use crate::util_types::mutator_set::MutatorSetError;
 
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
     MmrStorage: StorageVec<Digest> + Send + Sync,
     ChunkStorage: StorageVec<Chunk> + Send + Sync,
 {
-    pub aocl: ArchivalMmr<Hash, MmrStorage>,
-    pub swbf_inactive: ArchivalMmr<Hash, MmrStorage>,
+    pub aocl: ArchivalMmr<MmrStorage>,
+    pub swbf_inactive: ArchivalMmr<MmrStorage>,
     pub swbf_active: ActiveWindow,
     pub chunks: ChunkStorage,
 }
@@ -48,9 +47,9 @@ where
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         MutatorSetAccumulator::new(
-            &self.aocl.get_peaks().await,
-            self.aocl.count_leaves().await,
-            &self.swbf_inactive.get_peaks().await,
+            &self.aocl.peaks().await,
+            self.aocl.num_leafs().await,
+            &self.swbf_inactive.peaks().await,
             &self.swbf_active.clone(),
         )
         .prove(item, sender_randomness, receiver_preimage)
@@ -91,8 +90,8 @@ where
         self.accumulator().await.hash()
     }
 
-    /// Apply a list of removal records while keeping a list of mutator set membership proofs
-    /// up-to-date
+    /// Apply a list of removal records while keeping a list of mutator set
+    /// membership proofs up-to-date.
     pub async fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord>,
@@ -115,24 +114,13 @@ where
             .collect_vec();
         indices_and_new_leafs.sort_by_key(|(i, _d)| *i);
 
-        // compile list of MMR membership proofs to be preserved
-        let mut preserved_mmr_membership_proofs = preserved_membership_proofs
-            .iter_mut()
-            .flat_map(|msmp| {
-                msmp.target_chunks
-                    .dictionary
-                    .iter_mut()
-                    .map(|(_index, (mmrmp, _chunk))| mmrmp)
-            })
-            .collect_vec();
-
-        // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        // This updates both the inactive part of the SWBF and the MMR membership proofs
+        // Apply the batch-update to the inactive part of the sliding window
+        // Bloom filter. The next line updates the inactive part of the SWBF
+        // only. We do *not* want to update the MMR membership proofs again;
+        // they were already updated in the call to
+        // `MutatorSetAccumulator::batch_remove`.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(
-                &mut preserved_mmr_membership_proofs,
-                indices_and_new_leafs,
-            )
+            .batch_mutate_leaf_and_update_mps(&mut [], indices_and_new_leafs)
             .await;
 
         self.chunks.set_many(chunk_index_to_chunk_new_state).await
@@ -152,8 +140,8 @@ where
         assert_eq!(0, aocl.len().await);
         assert_eq!(0, swbf_inactive.len().await);
         assert_eq!(0, chunks.len().await);
-        let aocl: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(aocl).await;
-        let swbf_inactive: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(swbf_inactive).await;
+        let aocl: ArchivalMmr<MmrStorage> = ArchivalMmr::new(aocl).await;
+        let swbf_inactive: ArchivalMmr<MmrStorage> = ArchivalMmr::new(swbf_inactive).await;
         Self {
             aocl,
             swbf_inactive,
@@ -166,10 +154,10 @@ where
     pub async fn get_aocl_authentication_path(
         &self,
         index: u64,
-    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
-        if self.aocl.count_leaves().await <= index {
+    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof, Box<dyn Error>> {
+        if self.aocl.num_leafs().await <= index {
             return Err(Box::new(MutatorSetError::RequestedAoclAuthPathOutOfBounds(
-                (index, self.aocl.count_leaves().await),
+                (index, self.aocl.num_leafs().await),
             )));
         }
 
@@ -180,14 +168,14 @@ where
     pub async fn get_chunk_and_auth_path(
         &self,
         chunk_index: u64,
-    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk), Box<dyn Error>> {
-        if self.swbf_inactive.count_leaves().await <= chunk_index {
+    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof, Chunk), Box<dyn Error>> {
+        if self.swbf_inactive.num_leafs().await <= chunk_index {
             return Err(Box::new(MutatorSetError::RequestedSwbfAuthPathOutOfBounds(
-                (chunk_index, self.swbf_inactive.count_leaves().await),
+                (chunk_index, self.swbf_inactive.num_leafs().await),
             )));
         }
 
-        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
             self.swbf_inactive.prove_membership_async(chunk_index).await;
 
         // This check should never fail. It would mean that chunks are missing but that the
@@ -210,14 +198,15 @@ where
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
-        aocl_index: u64,
+        aocl_leaf_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
         if self.aocl.is_empty().await {
             return Err(Box::new(MutatorSetError::MutatorSetIsEmpty));
         }
 
-        let auth_path_aocl = self.get_aocl_authentication_path(aocl_index).await?;
-        let swbf_indices = get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_index);
+        let auth_path_aocl = self.get_aocl_authentication_path(aocl_leaf_index).await?;
+        let swbf_indices =
+            get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
 
         let batch_index = self.get_batch_index_async().await;
         let window_start = batch_index * CHUNK_SIZE as u128;
@@ -237,11 +226,9 @@ where
                 self.chunks.len().await > chunk_index,
                 "Chunks must be known if its authentication path is known."
             );
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof =
                 self.swbf_inactive.prove_membership_async(chunk_index).await;
-            target_chunks
-                .dictionary
-                .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
+            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
         }
 
         Ok(MsMembershipProof {
@@ -249,6 +236,7 @@ where
             sender_randomness: sender_randomness.to_owned(),
             receiver_preimage: receiver_preimage.to_owned(),
             target_chunks,
+            aocl_leaf_index,
         })
     }
 
@@ -297,7 +285,7 @@ where
     /// Determine whether the given `AdditionRecord` can be reversed.
     /// Equivalently, determine if it was added last.
     pub async fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
-        let leaf_index = self.aocl.count_leaves().await - 1;
+        let leaf_index = self.aocl.num_leafs().await - 1;
         let digest = self.aocl.get_leaf_async(leaf_index).await;
         addition_record.canonical_commitment == digest
     }
@@ -309,7 +297,7 @@ where
     ///   from the inactive window, and slide window back by putting the
     ///   last inactive chunk in the active window.
     pub async fn revert_add(&mut self, addition_record: &AdditionRecord) {
-        let removed_add_index = self.aocl.count_leaves().await - 1;
+        let removed_add_index = self.aocl.num_leafs().await - 1;
 
         // 1. Remove last leaf from AOCL
         let digest = self.aocl.remove_last_leaf_async().await.unwrap();
@@ -349,17 +337,17 @@ where
 
     pub async fn accumulator(&self) -> MutatorSetAccumulator {
         MutatorSetAccumulator {
-            aocl: MmrAccumulator::init(self.aocl.get_peaks().await, self.aocl.count_leaves().await),
+            aocl: MmrAccumulator::init(self.aocl.peaks().await, self.aocl.num_leafs().await),
             swbf_inactive: MmrAccumulator::init(
-                self.swbf_inactive.get_peaks().await,
-                self.swbf_inactive.count_leaves().await,
+                self.swbf_inactive.peaks().await,
+                self.swbf_inactive.num_leafs().await,
             ),
             swbf_active: self.swbf_active.clone(),
         }
     }
 
     pub async fn get_batch_index_async(&self) -> u128 {
-        match self.aocl.count_leaves().await {
+        match self.aocl.num_leafs().await {
             0 => 0,
             n => (n - 1) as u128 / BATCH_SIZE as u128,
         }
@@ -376,7 +364,7 @@ where
         // track of the mutator set.
 
         // add to list
-        let item_index = self.aocl.count_leaves().await;
+        let item_index = self.aocl.num_leafs().await;
         self.aocl
             .append(addition_record.canonical_commitment.to_owned())
             .await; // ignore auth path
@@ -389,7 +377,7 @@ where
         // First update the inactive part of the SWBF, the SWBF MMR
         let new_chunk: Chunk = self.swbf_active.slid_chunk();
         let chunk_digest: Digest = Hash::hash(&new_chunk);
-        let new_chunk_index = self.swbf_inactive.count_leaves().await;
+        let new_chunk_index = self.swbf_inactive.num_leafs().await;
         self.swbf_inactive.append(chunk_digest).await; // ignore auth path
 
         // Then move window to the right, equivalent to moving values
@@ -437,14 +425,13 @@ where
 
             // If chunk index is not in the active part, insert the index into the relevant chunk
             let new_target_chunks_clone = new_target_chunks.clone();
-            let count_leaves = self.aocl.count_leaves().await;
+            let count_leaves = self.aocl.num_leafs().await;
             let relevant_chunk = new_target_chunks
-                .dictionary
                 .get_mut(&chunk_index)
                 .unwrap_or_else(|| {
                     panic!(
                         "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
-                        new_target_chunks_clone.dictionary,
+                        new_target_chunks_clone,
                         count_leaves,
                         batch_index,
                         removal_record
@@ -458,24 +445,13 @@ where
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
-        let target_chunk_indices = new_target_chunks.dictionary.keys().cloned().collect_vec();
-        let all_leafs = new_target_chunks
-            .dictionary
-            .values()
-            .map(|(_p, chunk)| Hash::hash(chunk));
-        let mutation_data = target_chunk_indices.into_iter().zip(all_leafs).collect();
-
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data)
+            .batch_mutate_leaf_and_update_mps(&mut [], new_target_chunks.indices_and_leafs())
             .await;
 
-        new_target_chunks
-            .dictionary
-            .into_iter()
-            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
-            .collect()
+        new_target_chunks.indices_and_chunks().into_iter().collect()
     }
 }
 
@@ -486,14 +462,13 @@ mod archival_mutator_set_tests {
     use rand::Rng;
     use rand::SeedableRng;
 
+    use super::*;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
-    use crate::util_types::test_shared::mutator_set::make_item_and_randomnesses;
-
-    use super::*;
+    use crate::util_types::test_shared::mutator_set::mock_item_and_randomnesses;
 
     #[tokio::test]
     async fn archival_set_commitment_test() {
@@ -505,9 +480,9 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for i in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = archival_mutator_set
                 .prove(item, sender_randomness, receiver_preimage)
                 .await;
@@ -903,7 +878,7 @@ mod archival_mutator_set_tests {
                     item,
                     expired_membership_proof.sender_randomness,
                     expired_membership_proof.receiver_preimage,
-                    expired_membership_proof.auth_path_aocl.leaf_index,
+                    expired_membership_proof.aocl_leaf_index,
                 )
                 .await
                 .unwrap();
@@ -946,9 +921,9 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for _ in 0..num_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
-            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
             let membership_proof = archival_mutator_set
                 .prove(item, sender_randomness, receiver_preimage)
                 .await;
@@ -994,10 +969,9 @@ mod archival_mutator_set_tests {
             let mut membership_proofs: Vec<MsMembershipProof> = vec![];
             let mut items: Vec<Digest> = vec![];
             for _ in 0..num_additions {
-                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
-                let addition_record =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
                 let membership_proof = archival_mutator_set
                     .prove(item, sender_randomness, receiver_preimage)
                     .await;
@@ -1045,7 +1019,11 @@ mod archival_mutator_set_tests {
                 .zip_eq(skipped_removes.into_iter())
             {
                 // If this removal record was not applied, then the membership proof must verify
-                assert_eq!(skipped, archival_mutator_set.verify(item, mp).await);
+                assert_eq!(
+                    skipped,
+                    archival_mutator_set.verify(item, mp).await,
+                    "item was not removed but membership proof is invalid"
+                );
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
@@ -1068,7 +1046,7 @@ mod archival_mutator_set_tests {
         let item: Digest = rng.gen();
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
-        let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+        let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         let membership_proof = archival_mutator_set
             .prove(item, sender_randomness, receiver_preimage)
             .await;
@@ -1082,8 +1060,8 @@ mod archival_mutator_set_tests {
     >(
         archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+        let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
         let membership_proof = archival_mutator_set
             .prove(item, sender_randomness, receiver_preimage)
             .await;

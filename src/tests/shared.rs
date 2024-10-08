@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -18,6 +19,11 @@ use futures::task::Poll;
 use itertools::Itertools;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
+use proptest::collection::vec;
+use proptest::prelude::Strategy;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
+use proptest_arbitrary_interop::arb;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use rand::random;
@@ -34,7 +40,6 @@ use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -48,27 +53,25 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
-use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TxInputList;
-use crate::models::blockchain::transaction::TxOutputList;
+use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::TypeScript;
-use crate::models::channel::MainToPeerTask;
-use crate::models::channel::PeerTaskToMain;
-use crate::models::consensus::timestamp::Timestamp;
-use crate::models::consensus::ValidityTree;
+use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
+use crate::models::channel::MainToPeerThread;
+use crate::models::channel::PeerThreadToMain;
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
@@ -76,6 +79,8 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
@@ -83,21 +88,19 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
+use crate::models::state::UtxoReceiverData;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
-use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
-use crate::util_types::test_shared::mutator_set::pseudorandom_mmra_with_mps;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
@@ -194,7 +197,7 @@ pub async fn mock_genesis_global_state(
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db, syncing, None);
     let genesis_block = archival_state.get_tip().await;
 
     // Sanity check
@@ -398,97 +401,6 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     Utxo {
         lock_script_hash: rng.gen(),
         coins: NeptuneCoins::new(rng.gen_range(0..42000000)).to_native_coins(),
-    }
-}
-
-pub fn pseudorandom_removal_record_integrity_witness(
-    seed: [u8; 32],
-) -> RemovalRecordsIntegrityWitness {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let num_inputs = 2;
-    let num_outputs = 2;
-    let num_public_announcements = 1;
-
-    let input_utxos = (0..num_inputs)
-        .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let mut membership_proofs = (0..num_inputs)
-        .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let addition_records = input_utxos
-        .iter()
-        .zip(membership_proofs.iter())
-        .map(|(utxo, msmp)| {
-            commit(
-                Hash::hash(utxo),
-                msmp.sender_randomness,
-                msmp.receiver_preimage.hash::<Hash>(),
-            )
-        })
-        .collect_vec();
-    let canonical_commitments = addition_records
-        .iter()
-        .map(|ar| ar.canonical_commitment)
-        .collect_vec();
-    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
-    assert_eq!(num_inputs, mmr_mps.len());
-    assert_eq!(num_inputs, canonical_commitments.len());
-
-    for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
-        assert!(
-            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()),
-            "Returned MPs must be valid for returned AOCL"
-        );
-    }
-
-    for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
-        ms_mp.auth_path_aocl = mmr_mp.clone();
-    }
-    let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
-    let swbfa_hash: Digest = rng.gen();
-    let mut kernel = pseudorandom_transaction_kernel(
-        rng.gen(),
-        num_inputs,
-        num_outputs,
-        num_public_announcements,
-    );
-    kernel.mutator_set_hash = Hash::hash_pair(
-        Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-        Hash::hash_pair(swbfa_hash, Digest::default()),
-    );
-    kernel.inputs = input_utxos
-        .iter()
-        .zip(membership_proofs.iter())
-        .map(|(utxo, msmp)| {
-            (
-                Hash::hash(utxo),
-                msmp.sender_randomness,
-                msmp.receiver_preimage,
-                msmp.auth_path_aocl.leaf_index,
-            )
-        })
-        .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
-        .map(|ais| RemovalRecord {
-            absolute_indices: AbsoluteIndexSet::new(&ais),
-            target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
-        })
-        .rev()
-        .collect_vec();
-
-    let mut kernel_index_set_hashes = kernel
-        .inputs
-        .iter()
-        .map(|rr| Hash::hash(&rr.absolute_indices))
-        .collect_vec();
-    kernel_index_set_hashes.sort();
-
-    RemovalRecordsIntegrityWitness {
-        input_utxos,
-        membership_proofs,
-        aocl,
-        swbfi,
-        swbfa_hash,
-        kernel,
     }
 }
 
@@ -700,14 +612,86 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 //     transaction_1
 // }
 
+pub(crate) fn make_mock_txs_with_primitive_witness_with_timestamp(
+    count: usize,
+    timestamp: Timestamp,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let primitive_witnesses = vec(
+        arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, timestamp),
+        count,
+    )
+    .new_tree(&mut test_runner)
+    .unwrap()
+    .current();
+
+    primitive_witnesses
+        .into_iter()
+        .map(|pw| Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        })
+        .collect_vec()
+}
+
+pub(crate) fn make_plenty_mock_transaction_with_primitive_witness(
+    count: usize,
+) -> Vec<Transaction> {
+    let mut test_runner = TestRunner::deterministic();
+    let deterministic_now = arb::<Timestamp>()
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+    let primitive_witnesses = vec(
+        arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now),
+        count,
+    )
+    .new_tree(&mut test_runner)
+    .unwrap()
+    .current();
+
+    primitive_witnesses
+        .into_iter()
+        .map(|pw| Transaction {
+            kernel: pw.kernel.clone(),
+            proof: TransactionProof::Witness(pw),
+        })
+        .collect_vec()
+}
+
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
-pub async fn make_mock_transaction_with_generation_key(
-    tx_inputs: TxInputList,
+pub(crate) async fn make_mock_transaction_with_generation_key(
+    utxo_unlockers: Vec<UnlockedUtxo>,
     tx_outputs: TxOutputList,
     fee: NeptuneCoins,
     tip_msa: MutatorSetAccumulator,
 ) -> Transaction {
+    // Generate removal records
+    let mut inputs = vec![];
+    for unlocker in utxo_unlockers.iter() {
+        let removal_record = tip_msa.drop(unlocker.mutator_set_item(), unlocker.mutator_set_mp());
+        inputs.push(removal_record);
+    }
+
+    let mut outputs = vec![];
+    let mut output_sender_randomnesses = vec![];
+    let mut output_receiver_digests = vec![];
+    for rd in tx_outputs.iter() {
+        let addition_record = commit(
+            Hash::hash(&rd.utxo),
+            rd.sender_randomness,
+            rd.receiver_privacy_digest,
+        );
+        outputs.push(addition_record);
+        output_sender_randomnesses.push(rd.sender_randomness);
+        output_receiver_digests.push(rd.receiver_privacy_digest);
+    }
+
+    let public_announcements = tx_outputs
+        .iter()
+        .map(|x| x.public_announcement.clone())
+        .collect_vec();
     let timestamp = Timestamp::now();
 
     let kernel = TransactionKernel {
@@ -720,30 +704,35 @@ pub async fn make_mock_transaction_with_generation_key(
         mutator_set_hash: tip_msa.hash(),
     };
 
-    let type_scripts = vec![TypeScript::native_currency()];
-
-    let spending_key_unlock_keys = tx_inputs
-        .spending_keys_iter()
-        .into_iter()
-        .map(|k| k.unlock_key().encode())
+    let input_utxos = utxo_unlockers
+        .iter()
+        .map(|unlocker| unlocker.utxo.clone())
         .collect_vec();
-
+    let type_scripts_and_witnesses = vec![TypeScriptAndWitness::new(NativeCurrency.program())];
+    let input_membership_proofs = utxo_unlockers
+        .iter()
+        .map(|unlocker| unlocker.mutator_set_mp())
+        .cloned()
+        .collect_vec();
+    let input_lock_scripts_and_witnesses = utxo_unlockers
+        .iter()
+        .map(|unlocker| unlocker.lock_script_and_witness().to_owned())
+        .collect_vec();
+    let output_utxos = tx_outputs.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
-        input_utxos: SaltedUtxos::new(tx_inputs.utxos()),
-        type_scripts,
-        input_lock_scripts: tx_inputs.lock_scripts(),
-        lock_script_witnesses: spending_key_unlock_keys,
-        input_membership_proofs: tx_inputs.ms_membership_proofs(),
-        output_utxos: SaltedUtxos::new(tx_outputs.utxos()),
+        input_utxos: SaltedUtxos::new(input_utxos),
+        type_scripts_and_witnesses,
+        lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
+        input_membership_proofs,
+        output_utxos: SaltedUtxos::new(output_utxos),
+        output_sender_randomnesses,
+        output_receiver_digests,
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };
-    let validity_logic = TransactionValidationLogic::from(primitive_witness);
+    let proof = TransactionProof::Witness(primitive_witness);
 
-    Transaction {
-        kernel,
-        witness: validity_logic,
-    }
+    Transaction { kernel, proof }
 }
 
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
@@ -764,11 +753,28 @@ pub fn make_mock_transaction(
             coinbase: None,
             mutator_set_hash: random(),
         },
-        witness: TransactionValidationLogic {
-            vast: ValidityTree::axiom(),
-            maybe_primitive_witness: None,
-        },
+        proof: TransactionProof::Invalid,
     }
+}
+
+pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
+    ExpectedUtxo {
+        utxo: Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::zero()),
+        addition_record: AdditionRecord::new(Default::default()),
+        sender_randomness: Default::default(),
+        receiver_preimage: Default::default(),
+        received_from: UtxoNotifier::Myself,
+        notification_received: SystemTime::now(),
+        mined_in_block: None,
+    }
+}
+
+pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
+    let mut rng = rand::thread_rng();
+    let item: Digest = rng.gen();
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
+    (item, sender_randomness, receiver_preimage)
 }
 
 // TODO: Change this function into something more meaningful!
@@ -795,10 +801,7 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        witness: TransactionValidationLogic {
-            vast: ValidityTree::axiom(),
-            maybe_primitive_witness: None,
-        },
+        proof: TransactionProof::Invalid,
     }
 }
 
@@ -820,7 +823,7 @@ pub fn make_mock_block(
     let lock_script = coinbase_beneficiary.lock_script();
     let coinbase_amount = Block::get_mining_reward(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
-    let coinbase_output_randomness: Digest = rng.gen();
+    let coinbase_sender_randomness: Digest = rng.gen();
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
@@ -830,7 +833,7 @@ pub fn make_mock_block(
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
-        commit(coinbase_digest, coinbase_output_randomness, receiver_digest);
+        commit(coinbase_digest, coinbase_sender_randomness, receiver_digest);
     next_mutator_set.add(&coinbase_addition_record);
 
     let block_timestamp = match block_timestamp {
@@ -848,28 +851,10 @@ pub fn make_mock_block(
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let primitive_witness = PrimitiveWitness {
-        input_utxos: SaltedUtxos::empty(),
-        type_scripts: vec![TypeScript::native_currency()],
-        lock_script_witnesses: vec![],
-        input_membership_proofs: vec![],
-        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
-        mutator_set_accumulator: previous_mutator_set.clone(),
-        input_lock_scripts: vec![],
-        kernel: tx_kernel.clone(),
-    };
-    let mut validation_logic = TransactionValidationLogic::from(primitive_witness);
-    validation_logic.vast.prove();
-
-    let transaction = Transaction {
-        witness: validation_logic,
-        kernel: tx_kernel,
-    };
-
     let block_body: BlockBody = BlockBody {
-        transaction,
+        transaction_kernel: tx_kernel,
         mutator_set_accumulator: next_mutator_set.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
         block_mmr_accumulator: block_mmr,
         uncle_blocks: vec![],
     };
@@ -883,7 +868,7 @@ pub fn make_mock_block(
         version: zero,
         height: new_block_height,
         prev_block_digest: previous_block.hash(),
-        timestamp: block_body.transaction.kernel.timestamp,
+        timestamp: block_body.transaction_kernel.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         proof_of_work_line: pow_family,
@@ -892,9 +877,9 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body, Block::mk_std_block_type(None)),
+        Block::new(block_header, block_body, BlockProof::DummyProof),
         coinbase_utxo,
-        coinbase_output_randomness,
+        coinbase_sender_randomness,
     )
 }
 

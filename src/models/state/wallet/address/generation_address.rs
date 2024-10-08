@@ -12,12 +12,6 @@
 //! until they are transferred to the original owner's children or
 //! grand-children.
 
-use super::common;
-use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::prelude::twenty_first;
 use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
@@ -37,6 +31,15 @@ use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use super::common;
+use crate::config_models::network::Network;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::prelude::twenty_first;
+
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
@@ -45,7 +48,7 @@ pub struct GenerationSpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
     pub privacy_preimage: Digest,
-    pub unlock_key: Digest,
+    unlock_key: Digest,
     pub seed: Digest,
 }
 
@@ -61,13 +64,17 @@ impl GenerationSpendingKey {
     pub fn to_address(&self) -> GenerationReceivingAddress {
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = self.privacy_preimage.hash::<Hash>();
+        let privacy_digest = self.privacy_preimage.hash();
         GenerationReceivingAddress {
             receiver_identifier: self.receiver_identifier,
             encryption_key: pk,
             privacy_digest,
             spending_lock: self.generate_spending_lock(),
         }
+    }
+
+    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+        common::lock_script_and_witness(self.unlock_key)
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -133,7 +140,7 @@ impl GenerationSpendingKey {
     }
 
     fn generate_spending_lock(&self) -> Digest {
-        self.unlock_key.hash::<Hash>()
+        self.unlock_key.hash()
     }
 }
 
@@ -143,7 +150,7 @@ impl GenerationReceivingAddress {
         let receiver_identifier = common::derive_receiver_id(seed);
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = spending_key.privacy_preimage.hash::<Hash>();
+        let privacy_digest = spending_key.privacy_preimage.hash();
         Self {
             receiver_identifier,
             encryption_key: pk,
@@ -161,7 +168,7 @@ impl GenerationReceivingAddress {
     /// address.
     pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
         match witness.try_into() {
-            Ok(witness_array) => Digest::new(witness_array).hash::<Hash>() == self.spending_lock,
+            Ok(witness_array) => Digest::new(witness_array).hash() == self.spending_lock,
             Err(_) => false,
         }
     }
@@ -251,5 +258,19 @@ impl GenerationReceivingAddress {
     /// returns the privacy digest
     pub fn privacy_digest(&self) -> Digest {
         self.privacy_digest
+    }
+
+    pub(crate) fn generate_public_announcement(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: Digest,
+    ) -> Result<PublicAnnouncement> {
+        let ciphertext = [
+            &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
+            self.encrypt(utxo, sender_randomness)?.as_slice(),
+        ]
+        .concat();
+
+        Ok(PublicAnnouncement::new(ciphertext))
     }
 }

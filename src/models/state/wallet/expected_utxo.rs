@@ -1,12 +1,15 @@
-use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
-use crate::{
-    models::consensus::timestamp::Timestamp,
-    prelude::twenty_first,
-    util_types::mutator_set::{addition_record::AdditionRecord, commit},
-};
 use get_size::GetSize;
-use serde::{Deserialize, Serialize};
-use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+use serde::Deserialize;
+use serde::Serialize;
+use twenty_first::math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 
 /// represents utxo and secrets necessary for recipient to claim it.
 ///
@@ -54,7 +57,7 @@ impl ExpectedUtxo {
             addition_record: commit(
                 Hash::hash(&utxo),
                 sender_randomness,
-                receiver_preimage.hash::<Hash>(),
+                receiver_preimage.hash(),
             ),
             utxo,
             sender_randomness,

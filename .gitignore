@@ -3,6 +3,13 @@
 debug/
 target/
 
+# build-targets use by Makefile recipes
+/makefile-target
+/makefile-target-opt-level3
+
+# git shouldn't see the proof files. Bc big.
+/test_data/*.proof
+
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html
 # Cargo.lock
@@ -111,3 +118,7 @@ fabric.properties
 .idea/codestream.xml
 
 # End of https://www.toptal.com/developers/gitignore/api/clion
+
+# Debuggable Tasm programs for triton-tui
+program.tasm
+vm_state.json

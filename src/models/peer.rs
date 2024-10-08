@@ -1,14 +1,12 @@
-use serde::Deserialize;
-use serde::Serialize;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+
+use serde::Deserialize;
+use serde::Serialize;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use crate::config_models::network::Network;
-use crate::prelude::twenty_first;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
@@ -17,6 +15,8 @@ use super::blockchain::block::transfer_block::TransferBlock;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
 use super::blockchain::transaction::Transaction;
+use crate::config_models::network::Network;
+use crate::prelude::twenty_first;
 
 const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;
 const INVALID_BLOCK_SEVERITY: u16 = 10;

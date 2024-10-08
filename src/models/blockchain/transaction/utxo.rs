@@ -1,8 +1,10 @@
+use std::fmt::Display;
 use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
+use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -10,33 +12,78 @@ use rand::RngCore;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
-use triton_vm::instruction::LabelledInstruction;
-use triton_vm::program::Program;
-use triton_vm::triton_asm;
+use tasm_lib::prelude::TasmObject;
+use triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use super::lock_script::LockScript;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-use crate::models::consensus::timestamp::Timestamp;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::triton_vm;
 use crate::prelude::twenty_first;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary,
+)]
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+impl Display for Coin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = if self.type_script_hash == NativeCurrency.hash() {
+            let amount = match NeptuneCoins::decode(&self.state) {
+                Ok(boxed_amount) => boxed_amount.to_string(),
+                Err(_) => "Error: Unable to decode amount".to_owned(),
+            };
+            format!("Native currency: {amount}")
+        } else if self.type_script_hash == TimeLock.hash() {
+            let release_date = self.release_date().unwrap();
+            format!("Timelock until: {release_date}")
+        } else {
+            "Unknown type script hash".to_owned()
+        };
+
+        write!(f, "{}", output)
+    }
+}
+
+impl Coin {
+    pub fn release_date(&self) -> Option<Timestamp> {
+        if self.type_script_hash == TimeLock.hash() {
+            Some(Timestamp(BFieldElement::new(self.state[0].value())))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
+}
+
+impl Display for Utxo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.coins
+                .iter()
+                .enumerate()
+                .map(|(i, coin)| format!("coin {i}: {coin}"))
+                .join("; ")
+        )
+    }
 }
 
 impl GetSize for Utxo {
@@ -107,14 +154,9 @@ impl Utxo {
     /// this UTXO.
     pub fn has_known_type_scripts(&self) -> bool {
         let known_type_script_hashes = [NativeCurrency.hash(), TimeLock.hash()];
-        if !self
-            .coins
+        self.coins
             .iter()
             .all(|c| known_type_script_hashes.contains(&c.type_script_hash))
-        {
-            return false;
-        }
-        true
     }
 
     /// Determine if the UTXO can be spent at a given date in the future,
@@ -201,6 +243,9 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
 }
 
 impl<'a> Arbitrary<'a> for Utxo {
+    /// Produce a strategy for "arbitrary" UTXOs where "arbitrary" means:
+    ///  - lock script corresponding to an arbitrary generation address
+    ///  - one coin of type NativeCurrency and arbitrary amount.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let lock_script_hash: Digest = Digest::arbitrary(u)?;
         let type_script_hash = NativeCurrency.hash();
@@ -215,54 +260,6 @@ impl<'a> Arbitrary<'a> for Utxo {
         })
     }
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct LockScript {
-    pub program: Program,
-}
-
-impl From<Vec<LabelledInstruction>> for LockScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
-    }
-}
-
-impl From<&[LabelledInstruction]> for LockScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
-    }
-}
-
-impl LockScript {
-    pub fn new(program: Program) -> Self {
-        Self { program }
-    }
-
-    pub fn anyone_can_spend() -> Self {
-        Self {
-            program: Program::new(&triton_asm!(
-                read_io 5
-                halt
-            )),
-        }
-    }
-
-    pub fn hash(&self) -> Digest {
-        self.program.hash::<Hash>()
-    }
-}
-
-impl<'a> Arbitrary<'a> for LockScript {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let program = Program::arbitrary(u)?;
-        Ok(LockScript { program })
-    }
-}
-
 #[cfg(test)]
 mod utxo_tests {
     use rand::thread_rng;
@@ -270,9 +267,9 @@ mod utxo_tests {
     use tracing_test::traced_test;
     use twenty_first::math::other::random_elements;
 
-    use crate::models::blockchain::type_scripts::TypeScript;
-
     use super::*;
+    use crate::models::blockchain::type_scripts::TypeScript;
+    use crate::triton_vm::prelude::*;
 
     fn make_random_utxo() -> Utxo {
         let mut rng = thread_rng();

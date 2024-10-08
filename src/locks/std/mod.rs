@@ -6,7 +6,12 @@ mod shared;
 pub mod traits;
 
 pub use atomic_mutex::AtomicMutex;
-pub use atomic_rw::{AtomicRw, AtomicRwReadGuard, AtomicRwWriteGuard};
-pub use shared::{LockAcquisition, LockCallbackFn, LockEvent, LockInfo, LockType};
-
+pub use atomic_rw::AtomicRw;
+pub use atomic_rw::AtomicRwReadGuard;
+pub use atomic_rw::AtomicRwWriteGuard;
+pub use shared::LockAcquisition;
+pub use shared::LockCallbackFn;
 use shared::LockCallbackInfo;
+pub use shared::LockEvent;
+pub use shared::LockInfo;
+pub use shared::LockType;

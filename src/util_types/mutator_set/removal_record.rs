@@ -16,15 +16,13 @@ use serde::ser::SerializeTuple;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-
-use crate::models::blockchain::shared::Hash;
-use crate::prelude::twenty_first;
 
 use super::chunk_dictionary::pseudorandom_chunk_dictionary;
 use super::chunk_dictionary::ChunkDictionary;
@@ -35,8 +33,10 @@ use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::shared::NUM_TRIALS;
 use super::MutatorSetError;
+use crate::models::blockchain::shared::Hash;
+use crate::prelude::twenty_first;
 
-#[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
@@ -179,7 +179,7 @@ impl RemovalRecord {
         removal_records: &mut [&mut Self],
         mutator_set: &MutatorSetAccumulator,
     ) {
-        let new_item_index = mutator_set.aocl.count_leaves();
+        let new_item_index = mutator_set.aocl.num_leafs();
 
         // if window does not slide, do nothing
         if !MutatorSetAccumulator::window_slides(new_item_index) {
@@ -196,8 +196,8 @@ impl RemovalRecord {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        let mut mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
+        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
             mmra.append(new_chunk_digest);
 
         // Collect all indices for all removal records that are being updated
@@ -242,14 +242,10 @@ impl RemovalRecord {
         // First insert the new entry into the chunk dictionary for the removal
         // record that need it.
         for i in rrs_for_new_chunk_dictionary_entry.iter() {
-            removal_records
-                .index_mut(*i)
-                .target_chunks
-                .dictionary
-                .insert(
-                    old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk.clone()),
-                );
+            removal_records.index_mut(*i).target_chunks.insert(
+                old_window_start_batch_index,
+                (new_swbf_auth_path.clone(), new_chunk.clone()),
+            );
         }
 
         // Collect those MMR membership proofs for chunks whose authentication
@@ -263,22 +259,27 @@ impl RemovalRecord {
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
+            &mut mmr::mmr_membership_proof::MmrMembershipProof,
         > = vec![];
+        let mut leaf_indices = vec![];
         for (i, rr) in removal_records.iter_mut().enumerate() {
             if rrs_for_batch_append.contains(&i) {
-                for (_, (mmr_mp, _chnk)) in rr.target_chunks.dictionary.iter_mut() {
-                    mmr_membership_proofs_for_append.push(mmr_mp);
+                for (chunk_index, (mmr_mp, _chnk)) in rr.target_chunks.iter_mut() {
+                    if *chunk_index != old_window_start_batch_index {
+                        mmr_membership_proofs_for_append.push(mmr_mp);
+                        leaf_indices.push(*chunk_index);
+                    }
                 }
             }
         }
 
         // Perform the update of all the MMR membership proofs contained in the removal records
-        mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
-            mutator_set.swbf_inactive.count_leaves(),
+            &leaf_indices,
+            mutator_set.swbf_inactive.num_leafs(),
             new_chunk_digest,
-            &mutator_set.swbf_inactive.get_peaks(),
+            &mutator_set.swbf_inactive.peaks(),
         );
     }
 
@@ -299,51 +300,55 @@ impl RemovalRecord {
             );
 
         // Collect all the MMR membership proofs from the chunk dictionaries.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
+        let mut leaf_indices = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
-            for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
                 own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
             }
         }
 
         // Perform the batch mutation of the MMR membership proofs
         mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_mmr_mps,
-            mutation_argument,
+            &leaf_indices,
+            mutation_argument
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                .collect_vec(),
         );
     }
 
-    /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
-        let Ok((inactive, _)) = self.absolute_indices.split_by_activity(mutator_set) else {
+    fn has_required_authenticated_chunks(
+        &self,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+    ) -> bool {
+        let Ok((inactive, _)) = self
+            .absolute_indices
+            .split_by_activity(mutator_set_accumulator)
+        else {
             return false;
         };
 
         let required_chunk_indices: HashSet<u64> = inactive.into_keys().collect();
         let proven_chunk_indices: HashSet<u64> =
-            self.target_chunks.dictionary.keys().copied().collect();
-        if required_chunk_indices != proven_chunk_indices {
+            self.target_chunks.all_chunk_indices().into_iter().collect();
+        required_chunk_indices == proven_chunk_indices
+    }
+
+    /// Validates that a removal record is synchronized against the inactive part of the SWBF
+    pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
+        if !self.has_required_authenticated_chunks(mutator_set) {
             return false;
         }
 
-        let swbfi_peaks = mutator_set.swbf_inactive.get_peaks();
-        let swbfi_leaf_count = mutator_set.swbf_inactive.count_leaves();
-        self.target_chunks
-            .dictionary
-            .iter()
-            .all(|(chunk_index, (mmr_proof, chunk))| {
-                let leaf_digest = Hash::hash(chunk);
-
-                if *chunk_index != mmr_proof.leaf_index {
-                    return false;
-                }
-
-                // TODO: This in-bounds check can be removed after upstream
-                // dependency twenty-first has been updated with
-                // 45dcedcb7167196caf42a4667b1361a29cd9bba9.
-                let in_bounds = swbfi_leaf_count > mmr_proof.leaf_index;
-                in_bounds && mmr_proof.verify(&swbfi_peaks, leaf_digest, swbfi_leaf_count)
-            })
+        let swbfi_peaks = mutator_set.swbf_inactive.peaks();
+        let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
+        self.target_chunks.all(|(chunk_index, (mmr_proof, chunk))| {
+            let leaf_digest = Hash::hash(chunk);
+            mmr_proof.verify(*chunk_index, leaf_digest, &swbfi_peaks, swbfi_leaf_count)
+        })
     }
 
     /// Returns a hashmap from chunk index to chunk.
@@ -379,6 +384,7 @@ mod removal_record_tests {
     use rand::RngCore;
     use test_strategy::proptest;
 
+    use super::*;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -387,19 +393,36 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use crate::util_types::test_shared::mutator_set::*;
 
-    use super::*;
+    impl AbsoluteIndexSet {
+        /// Test-function used for negative tests of removal records
+        pub(crate) fn increment_bloom_filter_index(&mut self, index: usize) {
+            self.0[index] = self.0[index].wrapping_add(1);
+        }
 
-    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
-        let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
-        let removal_record: RemovalRecord = accumulator.drop(item, &mp);
-        (item, mp, removal_record)
+        /// Test-function used for negative tests of removal records
+        pub(crate) fn decrement_bloom_filter_index(&mut self, index: usize) {
+            self.0[index] = self.0[index].wrapping_sub(1);
+        }
+    }
+
+    #[test]
+    fn increment_bloom_filter_index_behaves_as_expected() {
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
+        let original_index_set = removal_record.absolute_indices;
+        for i in 0..NUM_TRIALS as usize {
+            let mut mutated_index_set = original_index_set;
+            mutated_index_set.increment_bloom_filter_index(i);
+
+            assert_ne!(original_index_set, mutated_index_set);
+
+            mutated_index_set.decrement_bloom_filter_index(i);
+            assert_eq!(original_index_set, mutated_index_set);
+        }
     }
 
     #[test]
     fn get_size_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let serialization_result = bincode::serialize(&removal_record).unwrap();
         let reported_size = removal_record.get_size();
@@ -413,7 +436,7 @@ mod removal_record_tests {
     #[test]
     fn split_by_activity_one_element_test() {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
         accumulator.add(&mp.addition_record(item));
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
@@ -436,7 +459,7 @@ mod removal_record_tests {
 
     #[test]
     fn verify_that_removal_records_and_mp_indices_agree() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+        let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
@@ -451,7 +474,7 @@ mod removal_record_tests {
 
     #[test]
     fn hash_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
@@ -471,7 +494,7 @@ mod removal_record_tests {
 
     #[test]
     fn get_chunkidx_to_indices_test() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+        let (item, mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
@@ -497,7 +520,7 @@ mod removal_record_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
 
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = mock_item_mp_rr_for_init_msa();
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord>(&json).unwrap();
@@ -509,9 +532,9 @@ mod removal_record_tests {
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            commit(item, sender_randomness, receiver_preimage.hash());
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
         assert!(
@@ -538,9 +561,9 @@ mod removal_record_tests {
             accumulator.active_window_chunk_interval();
         let num_chunks_in_active_window = max_index_in_active_window - min_index_in_active_window;
 
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            commit(item, sender_randomness, receiver_preimage.hash());
 
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
         accumulator.add(&addition_record);
@@ -571,9 +594,9 @@ mod removal_record_tests {
         let mut mps = vec![];
         let mut items = vec![];
         for j in 0..initial_additions {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record: AdditionRecord =
-                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
@@ -608,7 +631,7 @@ mod removal_record_tests {
             .collect_vec()
             .choose(&mut thread_rng())
             .unwrap();
-        rr.target_chunks.dictionary.remove(&to_remove);
+        rr.target_chunks.remove(&to_remove);
         assert!(!rr.validate(&accumulator));
     }
 
@@ -623,10 +646,10 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+                let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                    commit(item, sender_randomness, receiver_preimage.hash());
                 let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
                 // Update all removal records from addition, then add the element
@@ -706,10 +729,10 @@ mod removal_record_tests {
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+                commit(item, sender_randomness, receiver_preimage.hash());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             // Update all removal records and membership proofs from addition,

@@ -473,6 +473,7 @@ mod connect_tests {
     use tracing_test::traced_test;
     use twenty_first::math::digest::Digest;
 
+    use super::*;
     use crate::config_models::network::Network;
     use crate::models::peer::ConnectionStatus;
     use crate::models::peer::PeerInfo;
@@ -487,8 +488,6 @@ mod connect_tests {
     use crate::tests::shared::to_bytes;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
-
-    use super::*;
 
     #[traced_test]
     #[tokio::test]

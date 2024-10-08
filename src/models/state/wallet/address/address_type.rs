@@ -8,20 +8,20 @@ use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::utxo::LockScript;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::AnnouncedUtxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::transaction::Transaction;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
-use crate::BFieldElement;
-
 use super::common;
 use super::generation_address;
 use super::symmetric_key;
+use crate::config_models::network::Network;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::AnnouncedUtxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
+use crate::BFieldElement;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
 // that we get a compiler verification that values do not conflict.  which is
@@ -158,13 +158,21 @@ impl ReceivingAddress {
         utxo: &Utxo,
         sender_randomness: Digest,
     ) -> Result<PublicAnnouncement> {
-        let ciphertext = [
-            &[KeyType::from(self).into(), self.receiver_identifier()],
-            self.encrypt(utxo, sender_randomness)?.as_slice(),
-        ]
-        .concat();
+        // let ciphertext = [
+        //     &[KeyType::from(self).into(), self.receiver_identifier()],
+        //     self.encrypt(utxo, sender_randomness)?.as_slice(),
+        // ]
+        // .concat();
 
-        Ok(PublicAnnouncement::new(ciphertext))
+        // Ok(PublicAnnouncement::new(ciphertext))
+        match self {
+            ReceivingAddress::Generation(generation_receiving_address) => {
+                generation_receiving_address.generate_public_announcement(utxo, sender_randomness)
+            }
+            ReceivingAddress::Symmetric(symmetric_key) => {
+                symmetric_key.generate_public_announcement(utxo, sender_randomness)
+            }
+        }
     }
 
     /// returns the `spending_lock`
@@ -271,6 +279,16 @@ impl SpendingKey {
         }
     }
 
+    /// Return the lock script and its witness
+    pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
+        match self {
+            SpendingKey::Generation(generation_spending_key) => {
+                generation_spending_key.lock_script_and_witness()
+            }
+            SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
+        }
+    }
+
     /// returns the privacy preimage.
     ///
     /// note: The hash of the preimage is available in the receiving address
@@ -287,14 +305,6 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => k.receiver_identifier,
             Self::Symmetric(k) => k.receiver_identifier(),
-        }
-    }
-
-    /// returns unlock_key needed for transaction witnesses
-    pub fn unlock_key(&self) -> Digest {
-        match self {
-            Self::Generation(k) => k.unlock_key,
-            Self::Symmetric(k) => k.unlock_key(),
         }
     }
 
@@ -316,16 +326,15 @@ impl SpendingKey {
     /// that cannot be decypted.
     pub fn scan_for_announced_utxos<'a>(
         &'a self,
-        transaction: &'a Transaction,
+        tx_kernel: &'a TransactionKernel,
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
         // pre-compute some fields.
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
-        let receiver_digest = receiver_preimage.hash::<Hash>();
+        let receiver_digest = receiver_preimage.hash();
 
         // for all public announcements
-        transaction
-            .kernel
+        tx_kernel
             .public_announcements
             .iter()
 
@@ -375,10 +384,6 @@ impl SpendingKey {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::tests::shared::make_mock_transaction;
     use generation_address::GenerationReceivingAddress;
     use generation_address::GenerationSpendingKey;
     use itertools::Itertools;
@@ -388,6 +393,10 @@ mod test {
     use rand::Rng;
     use symmetric_key::SymmetricKey;
     use test_strategy::proptest;
+
+    use super::*;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::tests::shared::make_mock_transaction;
 
     /// tests scanning for announced utxos with a symmetric key
     #[proptest]
@@ -416,7 +425,7 @@ mod test {
     /// tests keygen, sign, and verify with a symmetric key
     #[proptest]
     fn test_keygen_sign_verify_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_keygen_sign_verify(
+        worker::test_keypair_validity(
             SymmetricKey::from_seed(seed).into(),
             SymmetricKey::from_seed(seed).into(),
         );
@@ -425,7 +434,7 @@ mod test {
     /// tests keygen, sign, and verify with an asymmetric (generation) key
     #[proptest]
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_keygen_sign_verify(
+        worker::test_keypair_validity(
             GenerationSpendingKey::derive_from_seed(seed).into(),
             GenerationReceivingAddress::derive_from_seed(seed).into(),
         );
@@ -472,7 +481,7 @@ mod test {
 
             // 5. verify that no announced utxos exist for this key
             assert!(key
-                .scan_for_announced_utxos(&mock_tx)
+                .scan_for_announced_utxos(&mock_tx.kernel)
                 .collect_vec()
                 .is_empty());
 
@@ -492,7 +501,7 @@ mod test {
                 .push(public_announcement);
 
             // 9. scan tx public announcements for announced utxos
-            let announced_utxos = key.scan_for_announced_utxos(&mock_tx).collect_vec();
+            let announced_utxos = key.scan_for_announced_utxos(&mock_tx.kernel).collect_vec();
 
             // 10. verify there is exactly 1 announced_utxo and obtain it.
             assert_eq!(1, announced_utxos.len());
@@ -533,20 +542,16 @@ mod test {
         /// note: key generation is performed by the caller. Both the
         /// spending_key and receiving_address must be independently derived from
         /// the same seed.
-        pub fn test_keygen_sign_verify(
+        pub fn test_keypair_validity(
             spending_key: SpendingKey,
             receiving_address: ReceivingAddress,
         ) {
             // 1. prepare a (random) message and witness data.
             let msg: Digest = random();
-            let witness_data = common::test::binding_unlock(spending_key.unlock_key(), msg);
+            let l_and_s = spending_key.lock_script_and_witness();
 
-            // 2. perform mock proof verification
-            assert!(common::test::std_lockscript_reference_verify_unlock(
-                receiving_address.spending_lock(),
-                msg,
-                witness_data
-            ));
+            // 2. perform proof verification
+            assert!(l_and_s.halts_gracefully(msg.values().to_vec().into()));
 
             // 3. convert spending key to an address.
             let receiving_address_again = spending_key.to_address();

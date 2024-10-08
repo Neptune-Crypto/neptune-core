@@ -1,8 +1,11 @@
 # Summary
 
+- [Main](./main.md)
 - [Consensus](./consensus.md)
   - [Transaction](./consensus/transaction.md)
   - [Block](./consensus/block.md)
+  - [UTXO](./consensus/utxo.md)
+  - [Neptune Coins](./consensus/neptune-coins.md)
 - [Neptune-Core](./neptune-core.md)
   - [Overview](./neptune-core/overview.md)
   - [Events](./neptune-core/events.md)

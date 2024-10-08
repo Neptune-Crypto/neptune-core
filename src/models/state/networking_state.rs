@@ -3,7 +3,10 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 
 use anyhow::Result;
+use num_traits::Zero;
+use sysinfo::System;
 
+use super::tx_proving_capability::TxProvingCapability;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::NeptuneLevelDb;
@@ -35,15 +38,54 @@ pub struct NetworkingState {
 
     // Read-only value set during startup
     pub instance_id: u128,
+
+    /// The capabilities of this machine to produce STARK proofs
+    pub tx_proving_capability: TxProvingCapability,
 }
 
 impl NetworkingState {
-    pub fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
+    pub(crate) fn new(
+        peer_map: PeerMap,
+        peer_databases: PeerDatabases,
+        syncing: bool,
+        tx_proving_capability: Option<TxProvingCapability>,
+    ) -> Self {
+        println!("{tx_proving_capability:?}");
+        let tx_proving_capability =
+            tx_proving_capability.unwrap_or_else(Self::estimate_proving_power);
+        println!("{tx_proving_capability:?}");
         Self {
             peer_map,
             peer_databases,
             syncing,
             instance_id: rand::random(),
+            tx_proving_capability,
+        }
+    }
+
+    pub(crate) fn estimate_proving_power() -> TxProvingCapability {
+        const SINGLE_PROOF_CORE_REQ: usize = 19;
+        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 128;
+        const PROOF_COLLECTION_CORE_REQ: usize = 2;
+        const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
+
+        let s = System::new_all();
+        let total_memory = s.total_memory();
+        assert!(
+            !total_memory.is_zero(),
+            "Total memory reported illegal value of 0"
+        );
+
+        let physical_core_count = s.physical_core_count().unwrap_or(1);
+
+        if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
+            TxProvingCapability::SingleProof
+        } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
+            && physical_core_count > PROOF_COLLECTION_CORE_REQ
+        {
+            TxProvingCapability::ProofCollection
+        } else {
+            TxProvingCapability::LockScript
         }
     }
 
@@ -122,5 +164,15 @@ impl NetworkingState {
                 .put(ip, current_standing)
                 .await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimate_proving_power_doesnt_crash() {
+        NetworkingState::estimate_proving_power();
     }
 }

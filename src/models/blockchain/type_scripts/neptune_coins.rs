@@ -24,10 +24,9 @@ use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
-use crate::models::blockchain::transaction::utxo::Coin;
-use crate::models::consensus::tasm::program::ConsensusProgram;
-
 use super::native_currency::NativeCurrency;
+use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented
 /// by an atomic unit called Neptune atomic units (nau), which itself is represented as a 128
@@ -250,21 +249,35 @@ impl Zero for NeptuneCoins {
     }
 }
 
-impl From<u32> for NeptuneCoins {
-    fn from(n: u32) -> NeptuneCoins {
-        Self::new(n)
-    }
+#[derive(Debug)]
+pub enum FloatConversionError {
+    NaN,
+    Infinity,
+    Negative,
+    Overflow,
+    InvalidAmount,
 }
 
-impl From<u16> for NeptuneCoins {
-    fn from(n: u16) -> NeptuneCoins {
-        Self::new(n as u32)
-    }
-}
+impl TryFrom<f64> for NeptuneCoins {
+    type Error = FloatConversionError;
 
-impl From<u8> for NeptuneCoins {
-    fn from(n: u8) -> NeptuneCoins {
-        Self::new(n as u32)
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        let u = if value.is_nan() {
+            Err(FloatConversionError::NaN)
+        } else if value.is_infinite() {
+            Err(FloatConversionError::Infinity)
+        } else if value < 0.0 {
+            Err(FloatConversionError::Negative)
+        } else if value > u128::MAX as f64 {
+            Err(FloatConversionError::Overflow)
+        } else {
+            Ok(value as u128)
+        }?;
+        let bi = BigInt::from(u);
+        match Self::from_nau(bi) {
+            Some(nc) => Ok(nc),
+            None => Err(FloatConversionError::InvalidAmount),
+        }
     }
 }
 

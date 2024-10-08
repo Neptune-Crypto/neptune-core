@@ -20,11 +20,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
+use super::block_height::BlockHeight;
 use crate::models::state::GlobalState;
 use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
-
-use super::block_height::BlockHeight;
 
 /// Provides alternatives for looking up a block.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

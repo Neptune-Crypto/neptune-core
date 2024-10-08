@@ -4,12 +4,11 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::locks::tokio::AtomicRw;
-
 use super::PendingWrites;
 use super::RustyValue;
 use super::SimpleRustyReader;
 use super::WriteOperation;
+use crate::locks::tokio::AtomicRw;
 
 // note: no locking is required in `DbtSingletonPrivate` because locking
 // is performed in the `DbtSingleton` public wrapper.

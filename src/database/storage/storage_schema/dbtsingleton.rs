@@ -4,12 +4,11 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::locks::tokio::AtomicRw;
-
 use super::dbtsingleton_private::DbtSingletonPrivate;
 use super::traits::*;
 use super::PendingWrites;
 use super::SimpleRustyReader;
+use crate::locks::tokio::AtomicRw;
 
 /// Singleton type created by [`super::DbtSchema`]
 ///

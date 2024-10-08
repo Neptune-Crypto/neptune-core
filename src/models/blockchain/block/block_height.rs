@@ -104,8 +104,9 @@ impl Display for BlockHeight {
 
 #[cfg(test)]
 mod block_height_tests {
-    use super::*;
     use tracing_test::traced_test;
+
+    use super::*;
 
     #[traced_test]
     #[tokio::test]

@@ -2,10 +2,10 @@
   {
     "name": "tasm_neptune_transaction_hash_utxo",
     "benchmark_result": {
-      "clock_cycle_count": 168,
+      "clock_cycle_count": 165,
       "hash_table_height": 115,
       "u32_table_height": 11,
-      "op_stack_table_height": 140,
+      "op_stack_table_height": 122,
       "ram_table_height": 20
     },
     "case": "CommonCase"
@@ -13,10 +13,10 @@
   {
     "name": "tasm_neptune_transaction_hash_utxo",
     "benchmark_result": {
-      "clock_cycle_count": 168,
+      "clock_cycle_count": 165,
       "hash_table_height": 115,
       "u32_table_height": 11,
-      "op_stack_table_height": 140,
+      "op_stack_table_height": 122,
       "ram_table_height": 20
     },
     "case": "WorstCase"

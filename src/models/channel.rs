@@ -1,9 +1,7 @@
-use crate::prelude::twenty_first;
-
 use std::net::SocketAddr;
 
-use twenty_first::amount::u32s::U32s;
-use twenty_first::math::digest::Digest;
+use tasm_lib::triton_vm::prelude::Digest;
+use tasm_lib::twenty_first::prelude::U32s;
 
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::block_height::BlockHeight;
