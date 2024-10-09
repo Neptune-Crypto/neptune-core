@@ -37,6 +37,7 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::peer::TransactionNotification;
+use crate::models::state::wallet::expected_utxo;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
@@ -1011,7 +1012,7 @@ impl MainLoopHandler {
     /// after handling this message.
     async fn handle_rpc_server_message(&mut self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
-            RPCServerToMain::Send(transaction) => {
+            RPCServerToMain::BroadcastTx(transaction) => {
                 debug!(
                     "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.inputs.len(),

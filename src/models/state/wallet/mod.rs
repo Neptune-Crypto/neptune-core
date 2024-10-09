@@ -871,7 +871,7 @@ mod wallet_tests {
         );
 
         let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(15));
-        let tx_outputs = vec![TxOutput::fake_address(
+        let tx_outputs = vec![TxOutput::onchain(
             utxo,
             random(),
             other_wallet_recipient_address.privacy_digest,

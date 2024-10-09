@@ -36,6 +36,7 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::transaction_output::UtxoNotificationPayload;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::prelude::twenty_first;
@@ -141,6 +142,17 @@ impl GenerationSpendingKey {
 
     fn generate_spending_lock(&self) -> Digest {
         self.unlock_key.hash()
+    }
+
+    pub(crate) fn try_decrypt_to_utxo_notification(
+        &self,
+        public_announcement: PublicAnnouncement,
+    ) -> Result<UtxoNotificationPayload> {
+        let (utxo, sender_randomness) = self.decrypt(&public_announcement.message)?;
+        Ok(UtxoNotificationPayload {
+            utxo,
+            sender_randomness,
+        })
     }
 }
 
@@ -262,12 +274,15 @@ impl GenerationReceivingAddress {
 
     pub(crate) fn generate_public_announcement(
         &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
+        utxo_notification_payload: UtxoNotificationPayload,
     ) -> Result<PublicAnnouncement> {
         let ciphertext = [
             &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
-            self.encrypt(utxo, sender_randomness)?.as_slice(),
+            self.encrypt(
+                &utxo_notification_payload.utxo,
+                utxo_notification_payload.sender_randomness,
+            )?
+            .as_slice(),
         ]
         .concat();
 

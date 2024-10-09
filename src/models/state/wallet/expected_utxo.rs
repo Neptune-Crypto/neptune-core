@@ -13,8 +13,14 @@ use crate::util_types::mutator_set::commit;
 
 /// represents utxo and secrets necessary for recipient to claim it.
 ///
-/// [ExpectedUtxo] is intended for offchain temporary storage of utxos that a
-/// wallet sends to itself, eg change outputs.
+/// [ExpectedUtxo] is intended to inform the wallet of UTXOs that were confirmed
+/// or are about to be confirmed, that it can claim. For example:
+///  - change outputs,
+///  - coinbase UTXOs (produced by the miner)
+///  - incoming off-chain transaction notifications.
+///
+/// The on-chain notifications follow a completely different code path and never
+/// touch [ExpectedUtxo]s.
 ///
 /// The `ExpectedUtxo` will exist in the local
 /// [RustyWalletDatabase](super::rusty_wallet_database::RustyWalletDatabase)
@@ -28,6 +34,9 @@ use crate::util_types::mutator_set::commit;
 /// an alternative is to use onchain symmetric keys instead, which uses some
 /// blockchain space and may leak some privacy if a key is ever used more than
 /// once.
+///
+/// Objects of this type are not intended to be transmitted; they only ever live
+/// locally in the client's memory or disk. The main use of this thing
 ///
 /// ### about `receiver_preimage`
 ///
@@ -69,7 +78,9 @@ impl ExpectedUtxo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum_macros::Display,
+)]
 pub enum UtxoNotifier {
     OwnMiner,
     Cli,

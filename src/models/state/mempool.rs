@@ -457,9 +457,7 @@ mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::Zero;
-    use rand::random;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing::debug;

@@ -8,7 +8,7 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::rpc_server::RPCClient;

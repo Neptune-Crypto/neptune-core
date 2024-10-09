@@ -9,21 +9,19 @@ use serde::Serialize;
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
 use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 
-/// enumerates how utxos should be transferred.
+/// enumerates how utxos and spending information is communicated.
 ///
 /// see also: [UtxoNotification]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UtxoNotifyMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain,
@@ -32,33 +30,17 @@ pub enum UtxoNotifyMethod {
     OffChain,
 }
 
-/// enumerates utxo transfer methods with payloads
-///
-/// [PublicAnnouncement] is essentially opaque however one can determine the key
-/// type via [`KeyType::try_from::<PublicAnnouncement>()`](crate::models::state::wallet::address::KeyType::try_from::<PublicAnnouncement>())
-///
-/// see also: [UtxoNotifyMethod], [KeyType](crate::models::state::wallet::address::KeyType)
+/// The payload of a UTXO notification, containing all information necessary
+/// to claim it, provided access to the associated spending key.
 ///
 /// future work:
-///
-/// we should consider adding this variant that would facilitate passing
-/// utxo from sender to receiver off-chain for lower-fee transfers between
-/// trusted parties or eg wallets owned by the same person/org.
-///
-/// OffChainSerialized(PublicAnnouncement)
-///
-/// also, perhaps PublicAnnouncement should be used for `OffChain`
-/// and replace ExpectedUtxo.  to consolidate code/logic.
-///
-/// see comment for: [TxOutput::auto()]
-///
+/// we should consider adding functionality that would facilitate passing
+/// these payloads from sender to receiver off-chain for lower-fee transfers
+/// between trusted parties or eg wallets owned by the same person/org.
 #[derive(Debug, Clone)]
-pub enum UtxoNotification {
-    /// the utxo notification should be transferred to recipient on the blockchain as a [PublicAnnouncement]
-    OnChain(PublicAnnouncement),
-
-    /// the utxo notification should be transferred to recipient off the blockchain as an [ExpectedUtxo]
-    OffChain(Box<ExpectedUtxo>),
+pub struct UtxoNotificationPayload {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
 }
 
 /// represents a transaction output, as accepted by
@@ -68,30 +50,18 @@ pub enum UtxoNotification {
 /// and claim a given UTXO
 #[derive(Debug, Clone)]
 pub struct TxOutput {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
-    pub receiver_privacy_digest: Digest,
-    pub utxo_notification: UtxoNotification,
-}
-
-impl From<ExpectedUtxo> for TxOutput {
-    fn from(expected_utxo: ExpectedUtxo) -> Self {
-        Self {
-            utxo: expected_utxo.utxo.clone(),
-            sender_randomness: expected_utxo.sender_randomness,
-            receiver_privacy_digest: expected_utxo.receiver_preimage.hash(),
-            utxo_notification: UtxoNotification::OffChain(Box::new(expected_utxo)),
-        }
-    }
+    pub notification_payload: UtxoNotificationPayload,
+    pub notification_method: UtxoNotifyMethod,
+    pub receiving_address: ReceivingAddress,
 }
 
 impl From<&TxOutput> for AdditionRecord {
     /// retrieves public announcements from possible sub-set of the list
-    fn from(ur: &TxOutput) -> Self {
+    fn from(txo: &TxOutput) -> Self {
         commit(
-            Hash::hash(&ur.utxo),
-            ur.sender_randomness,
-            ur.receiver_privacy_digest,
+            Hash::hash(&txo.notification_payload.utxo),
+            txo.notification_payload.sender_randomness,
+            txo.receiving_address.privacy_digest(),
         )
     }
 }
@@ -103,7 +73,7 @@ impl TxOutput {
     /// will be used. A [PublicAnnouncement] will be created using whichever
     /// address type is provided.
     ///
-    /// If the [Utxo] can be claimed by our wallet, then
+    /// If the [Utxo] can be claimed by our wallet, then parameter
     /// `owned_utxo_notify_method` dictates the behavior:
     ///
     /// * `OffChain` results in local state transfer via whichever address type is provided.
@@ -146,31 +116,26 @@ impl TxOutput {
         sender_randomness: Digest,
         owned_utxo_notify_method: UtxoNotifyMethod,
     ) -> Result<Self> {
-        let onchain = || -> Result<TxOutput> {
+        let onchain = || -> TxOutput {
             let utxo = Utxo::new_native_coin(address.lock_script(), amount);
-            let pub_ann = address.generate_public_announcement(&utxo, sender_randomness)?;
-            Ok(Self::onchain(
-                utxo,
-                sender_randomness,
-                address.privacy_digest(),
-                pub_ann,
-            ))
+            Self::onchain(utxo, sender_randomness, address.to_owned())
         };
 
-        let offchain = |key: SpendingKey| {
+        let offchain = || {
             let utxo = Utxo::new_native_coin(address.lock_script(), amount);
-            Self::offchain(utxo, sender_randomness, key.privacy_preimage())
+            Self::offchain(utxo, sender_randomness, address.to_owned())
         };
 
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);
-        let utxo_wallet_key = wallet_state.find_spending_key_for_utxo(&utxo);
+        let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
-        let tx_output = match utxo_wallet_key {
-            None => onchain()?,
-            Some(key) => match owned_utxo_notify_method {
-                UtxoNotifyMethod::OnChain => onchain()?,
-                UtxoNotifyMethod::OffChain => offchain(key),
-            },
+        let tx_output = if has_matching_spending_key {
+            match owned_utxo_notify_method {
+                UtxoNotifyMethod::OnChain => onchain(),
+                UtxoNotifyMethod::OffChain => offchain(),
+            }
+        } else {
+            onchain()
         };
 
         Ok(tx_output)
@@ -182,14 +147,16 @@ impl TxOutput {
     pub fn onchain(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_privacy_digest: Digest,
-        public_announcement: PublicAnnouncement,
+        receiving_address: ReceivingAddress,
     ) -> Self {
-        Self {
+        let payload = UtxoNotificationPayload {
             utxo,
             sender_randomness,
-            receiver_privacy_digest,
-            utxo_notification: UtxoNotification::OnChain(public_announcement),
+        };
+        Self {
+            notification_payload: payload,
+            notification_method: UtxoNotifyMethod::OnChain,
+            receiving_address,
         }
     }
 
@@ -199,49 +166,33 @@ impl TxOutput {
     pub fn offchain(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiver_privacy_digest: Digest,
+        receiving_address: ReceivingAddress,
     ) -> Self {
-        Self {
+        let payload = UtxoNotificationPayload {
             utxo,
             sender_randomness,
-            receiver_privacy_digest,
-            utxo_notification: UtxoNotification::OffChain(Box::new(
-                // Remark: UtxoNotification cannot contain an ExpectedUtxo because
-                // the second structure contains secret information known only to
-                // the receiver. UtxoNotification is created by the sender, who
-                // oblivious to these secrets.
-                todo!(),
-            )),
+        };
+        Self {
+            notification_payload: payload,
+            notification_method: UtxoNotifyMethod::OffChain,
+            receiving_address,
         }
     }
 
-    // only for legacy tests
-    #[cfg(test)]
-    pub fn fake_address(
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_privacy_digest: Digest,
-    ) -> Self {
-        use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-
-        let address: ReceivingAddress =
-            GenerationReceivingAddress::derive_from_seed(rand::random()).into();
-        let announcement = address
-            .generate_public_announcement(&utxo, sender_randomness)
-            .unwrap();
-
-        Self {
-            utxo,
-            sender_randomness,
-            receiver_privacy_digest,
-            utxo_notification: UtxoNotification::OnChain(announcement),
-        }
+    pub(crate) fn is_offchain(&self) -> bool {
+        matches!(self.notification_method, UtxoNotifyMethod::OffChain)
     }
 
-    // only for legacy tests
-    #[cfg(test)]
-    pub fn random(utxo: Utxo) -> Self {
-        Self::fake_address(utxo, rand::random(), rand::random())
+    pub(crate) fn utxo(&self) -> Utxo {
+        self.notification_payload.utxo.clone()
+    }
+
+    pub(crate) fn sender_randomness(&self) -> Digest {
+        self.notification_payload.sender_randomness
+    }
+
+    pub(crate) fn receiver_digest(&self) -> Digest {
+        self.receiving_address.privacy_digest()
     }
 }
 
@@ -281,30 +232,32 @@ impl From<&TxOutputList> for Vec<Utxo> {
     }
 }
 
-impl From<&TxOutputList> for Vec<ExpectedUtxo> {
-    fn from(list: &TxOutputList) -> Self {
-        list.expected_utxos_iter().collect()
-    }
-}
+// Killed because: this mapping requires wallet info!
+// impl From<&TxOutputList> for Vec<ExpectedUtxo> {
+//     fn from(list: &TxOutputList) -> Self {
+//         list.expected_utxos_iter().collect()
+//     }
+// }
 
-impl From<&TxOutputList> for Vec<PublicAnnouncement> {
-    fn from(list: &TxOutputList) -> Self {
-        list.public_announcements_iter().into_iter().collect()
-    }
-}
+// Killed because: this mapping requires recipient info!
+// impl From<&TxOutputList> for Vec<PublicAnnouncement> {
+//     fn from(list: &TxOutputList) -> Self {
+//         list.public_announcements_iter().into_iter().collect()
+//     }
+// }
 
 impl TxOutputList {
     /// calculates total amount in native currency
     pub fn total_native_coins(&self) -> NeptuneCoins {
         self.0
             .iter()
-            .map(|u| u.utxo.get_native_currency_amount())
+            .map(|u| u.notification_payload.utxo.get_native_currency_amount())
             .sum()
     }
 
     /// retrieves utxos
     pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
-        self.0.iter().map(|u| u.utxo.clone())
+        self.0.iter().map(|u| u.notification_payload.utxo.clone())
     }
 
     /// retrieves utxos
@@ -323,36 +276,50 @@ impl TxOutputList {
     }
 
     /// retrieves public announcements from possible sub-set of the list
-    pub fn public_announcements_iter(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
-        self.0.iter().filter_map(|u| match &u.utxo_notification {
-            UtxoNotification::OnChain(pa) => Some(pa.clone()),
-            _ => None,
-        })
-    }
+    ///
+    /// Do we really want this function? We want to ensure that we can claim *our*
+    /// output UTXOs; but that is already achieved through `UtxoNotification`.
+    /// `PublicAnnouncement`s can be `UtxoNotification`s but not necessarily, and
+    /// when they are they announce UTXOs that are generally intended for others.
+    ///
+    // Killed because: going from `TxOutput` to `PublicAnnouncement` requires
+    //  either wallet info or recipient info; but neither are part of the signature.
+    // pub fn public_announcements_iter(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
+    //     self.0.iter().filter_map(|u| match &u.utxo_notification {
+    //         UtxoNotification::OnChain(pa) => Some(pa.clone()),
+    //         _ => None,
+    //     })
+    // }
 
     /// retrieves public announcements from possible sub-set of the list
-    pub fn public_announcements(&self) -> Vec<PublicAnnouncement> {
-        self.public_announcements_iter().into_iter().collect()
-    }
+    // Killed because: see `public_announcements_iter`.
+    // pub(crate) fn public_announcements(&self) -> Vec<PublicAnnouncement> {
+    //     self.public_announcements_iter().into_iter().collect()
+    // }
 
     /// retrieves expected_utxos from possible sub-set of the list
-    pub fn expected_utxos_iter(&self) -> impl Iterator<Item = ExpectedUtxo> + '_ {
-        self.0.iter().filter_map(|u| match &u.utxo_notification {
-            UtxoNotification::OffChain(eu) => Some(*eu.clone()),
-            _ => None,
-        })
-    }
+    // Killed because: going from `TxOutput` to `ExpectedUtxo` requires wallet
+    // info.
+    // pub fn expected_utxos_iter(&self) -> impl Iterator<Item = ExpectedUtxo> + '_ {
+    //     self.0.iter().filter_map(|u| match &u.utxo_notification {
+    //         UtxoNotification::OffChain(eu) => Some(*eu.clone()),
+    //         _ => None,
+    //     })
+    // }
 
-    /// indicates if any offchain notifications (ExpectedUtxo) exist
+    /// retrieves expected_utxos from possible sub-set of the list
+    // Killed because: see `expected_utxos_iter`
+    // pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
+    //     self.expected_utxos_iter().collect()
+    // }
+
+    /// indicates if any offchain notifications exist
     pub fn has_offchain(&self) -> bool {
-        self.0
-            .iter()
-            .any(|u| matches!(&u.utxo_notification, UtxoNotification::OffChain(_)))
+        self.0.iter().any(|u| u.is_offchain())
     }
 
-    /// retrieves expected_utxos from possible sub-set of the list
-    pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
-        self.expected_utxos_iter().collect()
+    pub fn push(&mut self, tx_output: TxOutput) {
+        self.0.push(tx_output);
     }
 }
 
@@ -390,7 +357,7 @@ mod tests {
             .generate_sender_randomness(block_height, address.privacy_digest);
 
         for utxo_notify_method in [UtxoNotifyMethod::OffChain, UtxoNotifyMethod::OnChain] {
-            let utxo_receiver = TxOutput::auto(
+            let tx_output = TxOutput::auto(
                 &state.wallet_state,
                 &address.into(),
                 amount,
@@ -400,16 +367,14 @@ mod tests {
 
             // we should have OnChain transfer regardless of owned_transfer_method setting
             // because it only applies to owned outputs.
-            assert!(matches!(
-                utxo_receiver.utxo_notification,
-                UtxoNotification::OnChain(_)
-            ));
-            assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
-            assert_eq!(
-                utxo_receiver.receiver_privacy_digest,
-                address.privacy_digest
-            );
-            assert_eq!(utxo_receiver.utxo, utxo);
+            // assert!(matches!(
+            //     tx_output.utxo_notification,
+            //     ::OnChain(_)
+            // ));
+            assert_eq!(utxo_notify_method, tx_output.notification_method);
+            assert_eq!(tx_output.sender_randomness(), sender_randomness);
+            assert_eq!(tx_output.receiver_digest(), address.privacy_digest);
+            assert_eq!(tx_output.utxo(), utxo);
         }
 
         Ok(())
@@ -451,34 +416,30 @@ mod tests {
                 .wallet_secret
                 .generate_sender_randomness(block_height, address.privacy_digest());
 
-            let utxo_receiver = TxOutput::auto(
+            let tx_output = TxOutput::auto(
                 &state.wallet_state,
                 &address,
                 amount,
                 sender_randomness,
-                transfer_method, // how to notify of owned utxos.
+                transfer_method, // how to notify of utxos sent to myself
             )?;
 
-            let transfer_is_correct = match utxo_receiver.utxo_notification {
-                UtxoNotification::OffChain(_) => {
-                    matches!(transfer_method, UtxoNotifyMethod::OffChain)
-                }
-                UtxoNotification::OnChain(ref pa) => match transfer_method {
-                    UtxoNotifyMethod::OnChain => address.matches_public_announcement_key_type(pa),
-                    _ => false,
-                },
-            };
+            assert_eq!(transfer_method, tx_output.notification_method);
+            assert_eq!(
+                sender_randomness,
+                tx_output.notification_payload.sender_randomness
+            );
+            assert_eq!(
+                address.lock_script().hash(),
+                tx_output.utxo().lock_script_hash
+            );
 
             println!("owned_transfer_method: {:#?}", transfer_method);
-            println!("utxo_transfer: {:#?}", utxo_receiver.utxo_notification);
+            println!("utxo_transfer: {:#?}", tx_output.notification_payload);
 
-            assert!(transfer_is_correct);
-            assert_eq!(utxo_receiver.sender_randomness, sender_randomness);
-            assert_eq!(
-                utxo_receiver.receiver_privacy_digest,
-                address.privacy_digest()
-            );
-            assert_eq!(utxo_receiver.utxo, utxo);
+            assert_eq!(tx_output.sender_randomness(), sender_randomness);
+            assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
+            assert_eq!(tx_output.utxo(), utxo);
         }
 
         Ok(())
