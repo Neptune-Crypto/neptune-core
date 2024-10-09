@@ -61,6 +61,7 @@ use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_opt
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_output::TxOutputList;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
@@ -735,8 +736,7 @@ pub(crate) async fn make_mock_transaction_with_generation_key(
     Transaction { kernel, proof }
 }
 
-// `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
-// already have created `DevNetInput`s.
+/// Make a transaction with `Invalid` transaction proof.
 pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
@@ -751,7 +751,7 @@ pub fn make_mock_transaction(
             fee: NeptuneCoins::new(1),
             timestamp,
             coinbase: None,
-            mutator_set_hash: random(),
+            mutator_set_hash: Digest::default(),
         },
         proof: TransactionProof::Invalid,
     }

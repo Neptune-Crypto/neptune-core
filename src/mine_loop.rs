@@ -291,7 +291,7 @@ pub(crate) fn make_coinbase_transaction(
         vec![coinbase_utxo.clone()],
         vec![sender_randomness],
         vec![receiver_digest],
-        &kernel,
+        kernel,
         mutator_set_accumulator,
     );
 
@@ -310,7 +310,7 @@ pub(crate) fn make_coinbase_transaction(
 
     (
         Transaction {
-            kernel,
+            kernel: primitive_witness.kernel,
             proof: TransactionProof::SingleProof(proof),
         },
         utxo_info_for_coinbase,

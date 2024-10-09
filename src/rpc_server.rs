@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -39,6 +40,8 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -650,7 +653,7 @@ impl RPC for NeptuneRPCServer {
         };
 
         let state = self.state.lock_guard().await;
-        let mut tx_outputs = match state.generate_tx_outputs(outputs, owned_utxo_notify_method) {
+        let tx_outputs = match state.generate_tx_outputs(outputs, owned_utxo_notify_method) {
             Ok(u) => u,
             Err(err) => {
                 tracing::error!("Could not generate tx outputs: {}", err);
@@ -675,9 +678,9 @@ impl RPC for NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let transaction = match state
+        let (transaction, maybe_change_output) = match state
             .create_transaction(
-                &mut tx_outputs,
+                tx_outputs.clone(),
                 change_key,
                 owned_utxo_notify_method,
                 fee,
@@ -693,17 +696,45 @@ impl RPC for NeptuneRPCServer {
         };
         drop(state);
 
+        let mut utxos_sent_to_self = {
+            let wallet = &self.state.lock_guard().await.wallet_state;
+            tx_outputs
+                .iter()
+                .filter(|txo| txo.is_offchain())
+                .filter_map(|txo| {
+                    wallet
+                        .find_spending_key_for_utxo(&txo.utxo)
+                        .map(|sk| (txo, sk))
+                })
+                .map(|(tx_output, spending_key)| {
+                    ExpectedUtxo::new(
+                        tx_output.utxo.clone(),
+                        tx_output.sender_randomness,
+                        spending_key.privacy_preimage(),
+                        UtxoNotifier::Myself,
+                    )
+                })
+                .collect_vec()
+        };
+
+        if let Some(change_output) = maybe_change_output {
+            let expected_change_utxo = ExpectedUtxo::new(
+                change_output.utxo,
+                change_output.sender_randomness,
+                change_key.privacy_preimage(),
+                UtxoNotifier::Myself,
+            );
+            utxos_sent_to_self.push(expected_change_utxo);
+        }
+
         // if the tx created offchain expected_utxos we must inform wallet.
-        if tx_outputs.has_offchain() {
+        if !utxos_sent_to_self.is_empty() {
             // acquire write-lock
             let mut gsm = self.state.lock_guard_mut().await;
 
             // Inform wallet of any expected incoming utxos.
             // note that this (briefly) mutates self.
-            if let Err(e) = gsm
-                .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
-                .await
-            {
+            if let Err(e) = gsm.add_expected_utxos_to_wallet(utxos_sent_to_self).await {
                 tracing::error!("Could not add expected utxos to wallet: {}", e);
                 return None;
             }
@@ -715,7 +746,7 @@ impl RPC for NeptuneRPCServer {
         // Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
             .rpc_server_to_main_tx
-            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
+            .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
             .await;
 
         // Restart mining if it was paused

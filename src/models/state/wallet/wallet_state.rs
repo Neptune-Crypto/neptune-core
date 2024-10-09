@@ -886,7 +886,7 @@ impl WalletState {
     /// must include fees that are paid in the transaction.
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
-        requested_amount: NeptuneCoins,
+        total_spend: NeptuneCoins,
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> Result<Vec<UnlockedUtxo>> {
@@ -896,10 +896,10 @@ impl WalletState {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
-        if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {
+        if wallet_status.synced_unspent_available_amount(timestamp) < total_spend {
             bail!(
                 "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
-                requested_amount,
+                total_spend,
                 wallet_status.synced_unspent.len(),
                 wallet_status.synced_unspent.iter().map(|(wse, _msmp)| wse.utxo.get_native_currency_amount()).sum::<NeptuneCoins>(),
                 wallet_status.synced_unspent_available_amount(timestamp),
@@ -911,7 +911,7 @@ impl WalletState {
 
         let mut ret = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
-        while allocated_amount < requested_amount {
+        while allocated_amount < total_spend {
             let (wallet_status_element, membership_proof) =
                 wallet_status.synced_unspent[ret.len()].clone();
 
@@ -926,7 +926,6 @@ impl WalletState {
                     continue;
                 }
             };
-            let lock_script = spending_key.to_address().lock_script();
 
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();

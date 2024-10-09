@@ -100,7 +100,7 @@ impl PeerTaskToMain {
 
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
-    Send(Box<Transaction>),
+    BroadcastTx(Box<Transaction>),
     Shutdown,
     PauseMiner,
     RestartMiner,
@@ -109,7 +109,7 @@ pub enum RPCServerToMain {
 impl RPCServerToMain {
     pub fn get_type(&self) -> String {
         match self {
-            RPCServerToMain::Send(_) => "initiate transaction".to_string(),
+            RPCServerToMain::BroadcastTx(_) => "broadcast transaction".to_string(),
             RPCServerToMain::Shutdown => "shutdown".to_string(),
             RPCServerToMain::PauseMiner => "pause miner".to_owned(),
             RPCServerToMain::RestartMiner => "restart miner".to_owned(),

@@ -44,7 +44,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// program related to block validity, it is important to use `safe_add` rather than `+` as
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
-#[derive(Clone, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
+#[derive(Clone, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject, Default)]
 pub struct NeptuneCoins(u128);
 
 impl NeptuneCoins {

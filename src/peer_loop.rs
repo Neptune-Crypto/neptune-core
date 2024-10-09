@@ -1199,9 +1199,11 @@ mod peer_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::TransactionNotification;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
@@ -2453,13 +2455,32 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn populated_mempool_request_tx_test() -> Result<()> {
+    async fn populated_mempool_request_tx_test() {
         let network = Network::Main;
         // In this scenario the peer is informed of a transaction that it already knows
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 1).await?;
+            get_test_genesis_setup(network, 1).await.unwrap();
+        let spending_key = state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Symmetric);
 
-        let transaction_1 = make_mock_transaction(vec![], vec![]);
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
+        let transaction_1 = state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                &mut Default::default(),
+                spending_key,
+                UtxoNotifyMethod::OffChain,
+                NeptuneCoins::new(0),
+                now,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = transaction_1.clone().into();
@@ -2479,20 +2500,6 @@ mod peer_loop_tests {
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-        let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
-        let transaction_1 = state_lock
-            .lock_guard_mut()
-            .await
-            .create_transaction_with_prover_capability(
-                vec![],
-                NeptuneCoins::new(0),
-                now,
-                TxProvingCapability::ProofCollection,
-            )
-            .await
-            .unwrap();
-
         assert!(
             state_lock.lock_guard().await.mempool.is_empty(),
             "Mempool must be empty at init"
@@ -2507,23 +2514,16 @@ mod peer_loop_tests {
             "Mempool must be non-empty after insertion"
         );
 
-        // Build the resulting transaction notification
-        let tx_notification: TransactionNotification = transaction_1.clone().into();
-        let mock = Mock::new(vec![
-            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-            Action::Read(PeerMessage::Bye),
-        ]);
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
-            .await?;
+            .await
+            .unwrap();
 
-        // nothing may be sent to `main_loop`
+        // nothing is allowed to be sent to `main_loop`
         match to_main_rx1.try_recv() {
             Err(TryRecvError::Empty) => (),
-            Err(TryRecvError::Disconnected) => bail!("to_main channel must still be open"),
-            Ok(_) => bail!("to_main channel must be empty"),
-        }
-
-        Ok(())
+            Err(TryRecvError::Disconnected) => panic!("to_main channel must still be open"),
+            Ok(_) => panic!("to_main channel must be empty"),
+        };
     }
 }

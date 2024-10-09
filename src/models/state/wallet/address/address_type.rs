@@ -10,12 +10,14 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
 use super::generation_address;
+use super::generation_address::GenerationSpendingKey;
 use super::symmetric_key;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_output::UtxoNotificationPayload;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -146,8 +148,8 @@ impl ReceivingAddress {
 
     /// generates a [PublicAnnouncement] for an output Utxo
     ///
-    /// The public announcement contains a Vec<BFieldElement] with fields:
-    ///   0    --> type flag.  (SYMMETRIC_KEY_FLAG)
+    /// The public announcement contains a Vec<BFieldElement> with fields:
+    ///   0    --> type flag.  (flag of key type)
     ///   1    --> receiver_identifier  (fingerprint derived from seed)
     ///   2..n --> ciphertext (encrypted utxo + sender_randomness)
     ///
@@ -155,8 +157,7 @@ impl ReceivingAddress {
     /// is intended for them and decryption should be attempted.
     pub fn generate_public_announcement(
         &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
+        utxo_notification_payload: UtxoNotificationPayload,
     ) -> Result<PublicAnnouncement> {
         // let ciphertext = [
         //     &[KeyType::from(self).into(), self.receiver_identifier()],
@@ -167,10 +168,10 @@ impl ReceivingAddress {
         // Ok(PublicAnnouncement::new(ciphertext))
         match self {
             ReceivingAddress::Generation(generation_receiving_address) => {
-                generation_receiving_address.generate_public_announcement(utxo, sender_randomness)
+                generation_receiving_address.generate_public_announcement(utxo_notification_payload)
             }
             ReceivingAddress::Symmetric(symmetric_key) => {
-                symmetric_key.generate_public_announcement(utxo, sender_randomness)
+                symmetric_key.generate_public_announcement(utxo_notification_payload)
             }
         }
     }
@@ -486,9 +487,13 @@ mod test {
                 .is_empty());
 
             // 6. generate a public announcement for this address
+            let utxo_notification_payload = UtxoNotificationPayload {
+                utxo: utxo.clone(),
+                sender_randomness,
+            };
             let public_announcement = key
                 .to_address()
-                .generate_public_announcement(&utxo, sender_randomness)
+                .generate_public_announcement(utxo_notification_payload)
                 .unwrap();
 
             // 7. verify that the public_announcement is marked as our key type.
