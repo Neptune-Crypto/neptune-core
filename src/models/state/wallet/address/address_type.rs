@@ -158,14 +158,7 @@ impl ReceivingAddress {
     pub fn generate_public_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
-    ) -> Result<PublicAnnouncement> {
-        // let ciphertext = [
-        //     &[KeyType::from(self).into(), self.receiver_identifier()],
-        //     self.encrypt(utxo, sender_randomness)?.as_slice(),
-        // ]
-        // .concat();
-
-        // Ok(PublicAnnouncement::new(ciphertext))
+    ) -> PublicAnnouncement {
         match self {
             ReceivingAddress::Generation(generation_receiving_address) => {
                 generation_receiving_address.generate_public_announcement(utxo_notification_payload)
@@ -194,10 +187,10 @@ impl ReceivingAddress {
     }
 
     /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
+    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
         match self {
             Self::Generation(a) => a.encrypt(utxo, sender_randomness),
-            Self::Symmetric(a) => Ok(a.encrypt(utxo, sender_randomness)?),
+            Self::Symmetric(a) => a.encrypt(utxo, sender_randomness),
         }
     }
 
@@ -493,8 +486,7 @@ mod test {
             };
             let public_announcement = key
                 .to_address()
-                .generate_public_announcement(utxo_notification_payload)
-                .unwrap();
+                .generate_public_announcement(utxo_notification_payload);
 
             // 7. verify that the public_announcement is marked as our key type.
             assert!(key.matches_public_announcement_key_type(&public_announcement));
@@ -531,7 +523,7 @@ mod test {
             let sender_randomness: Digest = random();
 
             // 3. encrypt secrets (utxo, sender_randomness)
-            let ciphertext = key.to_address().encrypt(&utxo, sender_randomness).unwrap();
+            let ciphertext = key.to_address().encrypt(&utxo, sender_randomness);
             println!("ciphertext.get_size() = {}", ciphertext.len() * 8);
 
             // 4. decrypt secrets

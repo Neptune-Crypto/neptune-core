@@ -143,11 +143,7 @@ impl SymmetricKey {
     /// encrypts utxo secrets (utxo, sender_randomness) into ciphertext
     ///
     /// The output of `encrypt()` should be used as the input to `decrypt()`.
-    pub fn encrypt(
-        &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
-    ) -> Result<Vec<BFieldElement>, EncryptError> {
+    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
         // 1. init randomness
         let mut randomness = [0u8; 32];
         let mut rng = thread_rng();
@@ -159,17 +155,17 @@ impl SymmetricKey {
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
 
         // 3. convert secrets to plaintext bytes
-        let plaintext = bincode::serialize(&(utxo, sender_randomness))?;
+        let plaintext = bincode::serialize(&(utxo, sender_randomness)).unwrap();
 
         // 4. encrypt plaintext to symmetric ciphertext bytes
         let cipher = Aes256Gcm::new(&self.secret_key());
-        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref())?;
+        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
 
         // 5. convert ciphertext bytes to [BFieldElement]
         let ciphertext_bfes = common::bytes_to_bfes(&ciphertext);
 
         // 6. concatenate nonce bfe + ciphertext bfes and return
-        Ok([&[nonce_bfe], ciphertext_bfes.as_slice()].concat())
+        [&[nonce_bfe], ciphertext_bfes.as_slice()].concat()
     }
 
     /// returns the unlock key
@@ -197,17 +193,17 @@ impl SymmetricKey {
     pub(crate) fn generate_public_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
-    ) -> Result<PublicAnnouncement> {
+    ) -> PublicAnnouncement {
         let ciphertext = [
             &[SYMMETRIC_KEY_FLAG_U8.into(), self.receiver_identifier()],
             self.encrypt(
                 &utxo_notification_payload.utxo,
                 utxo_notification_payload.sender_randomness,
-            )?
+            )
             .as_slice(),
         ]
         .concat();
 
-        Ok(PublicAnnouncement::new(ciphertext))
+        PublicAnnouncement::new(ciphertext)
     }
 }

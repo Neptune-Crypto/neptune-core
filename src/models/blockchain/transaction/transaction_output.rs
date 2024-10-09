@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::PublicAnnouncement;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -194,6 +195,16 @@ impl TxOutput {
     pub(crate) fn receiver_digest(&self) -> Digest {
         self.receiving_address.privacy_digest()
     }
+
+    pub(crate) fn public_announcement(&self) -> Option<PublicAnnouncement> {
+        match self.notification_method {
+            UtxoNotifyMethod::OffChain => None,
+            UtxoNotifyMethod::OnChain => Some(
+                self.receiving_address
+                    .generate_public_announcement(self.notification_payload.clone()),
+            ),
+        }
+    }
 }
 
 /// Represents a list of [TxOutput]
@@ -265,6 +276,14 @@ impl TxOutputList {
         self.utxos_iter().into_iter().collect()
     }
 
+    pub(crate) fn sender_randomnesses(&self) -> Vec<Digest> {
+        self.iter().map(|x| x.sender_randomness()).collect()
+    }
+
+    pub(crate) fn receiver_digests(&self) -> Vec<Digest> {
+        self.iter().map(|x| x.receiver_digest()).collect()
+    }
+
     /// retrieves addition_records
     pub fn addition_records_iter(&self) -> impl IntoIterator<Item = AdditionRecord> + '_ {
         self.0.iter().map(|u| u.into())
@@ -275,27 +294,17 @@ impl TxOutputList {
         self.addition_records_iter().into_iter().collect()
     }
 
-    /// retrieves public announcements from possible sub-set of the list
-    ///
-    /// Do we really want this function? We want to ensure that we can claim *our*
-    /// output UTXOs; but that is already achieved through `UtxoNotification`.
-    /// `PublicAnnouncement`s can be `UtxoNotification`s but not necessarily, and
-    /// when they are they announce UTXOs that are generally intended for others.
-    ///
-    // Killed because: going from `TxOutput` to `PublicAnnouncement` requires
-    //  either wallet info or recipient info; but neither are part of the signature.
-    // pub fn public_announcements_iter(&self) -> impl IntoIterator<Item = PublicAnnouncement> + '_ {
-    //     self.0.iter().filter_map(|u| match &u.utxo_notification {
-    //         UtxoNotification::OnChain(pa) => Some(pa.clone()),
-    //         _ => None,
-    //     })
-    // }
+    /// Returns all public announcement for this TxOutputList
+    pub(crate) fn public_announcements(&self) -> Vec<PublicAnnouncement> {
+        let mut public_announcements = vec![];
+        for tx_output in self.0.iter() {
+            if let Some(pa) = tx_output.public_announcement() {
+                public_announcements.push(pa);
+            }
+        }
 
-    /// retrieves public announcements from possible sub-set of the list
-    // Killed because: see `public_announcements_iter`.
-    // pub(crate) fn public_announcements(&self) -> Vec<PublicAnnouncement> {
-    //     self.public_announcements_iter().into_iter().collect()
-    // }
+        public_announcements
+    }
 
     /// retrieves expected_utxos from possible sub-set of the list
     // Killed because: going from `TxOutput` to `ExpectedUtxo` requires wallet
