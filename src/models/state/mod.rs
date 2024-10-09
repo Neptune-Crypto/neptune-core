@@ -421,21 +421,6 @@ impl GlobalState {
         inputs
     }
 
-    /// Given a list of UTXOs with receiver data, generate the corresponding
-    /// addition records.
-    pub(crate) fn generate_addition_records(receiver_data: &[TxOutput]) -> Vec<AdditionRecord> {
-        receiver_data
-            .iter()
-            .map(|rd| {
-                commit(
-                    Hash::hash(&rd.utxo),
-                    rd.sender_randomness,
-                    rd.receiver_privacy_digest,
-                )
-            })
-            .collect_vec()
-    }
-
     /// Generate a change UTXO to ensure that the difference in input amount
     /// and output amount goes back to us. Return the UTXO in a format compatible
     /// with claiming it later on, *i.e.*, as an [ExpectedUtxo].
@@ -464,12 +449,12 @@ impl GlobalState {
             UtxoNotifyMethod::OnChain => TxOutput::onchain(
                 change_utxo,
                 change_sender_randomness,
-                change_key.to_address().privacy_digest(),
+                change_key.to_address(),
             ),
             UtxoNotifyMethod::OffChain => TxOutput::offchain(
                 change_utxo,
                 change_sender_randomness,
-                change_key.to_address().privacy_digest(),
+                change_key.to_address(),
             ),
         };
 
@@ -840,16 +825,10 @@ impl GlobalState {
         };
 
         // populate witness
-        let output_utxos = tx_outputs.iter().map(|txo| txo.utxo.clone()).collect_vec();
+        let output_utxos = tx_outputs.utxos();
         let unlocked_utxos = tx_inputs;
-        let sender_randomnesses = tx_outputs
-            .iter()
-            .map(|txo| txo.sender_randomness)
-            .collect_vec();
-        let receiver_digests = tx_outputs
-            .iter()
-            .map(|txo| txo.receiver_privacy_digest)
-            .collect_vec();
+        let sender_randomnesses = tx_outputs.sender_randomnesses();
+        let receiver_digests = tx_outputs.receiver_digests();
         let primitive_witness = Self::generate_primitive_witness(
             unlocked_utxos,
             output_utxos,

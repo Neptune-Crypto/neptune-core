@@ -703,13 +703,13 @@ impl RPC for NeptuneRPCServer {
                 .filter(|txo| txo.is_offchain())
                 .filter_map(|txo| {
                     wallet
-                        .find_spending_key_for_utxo(&txo.utxo)
+                        .find_spending_key_for_utxo(&txo.utxo())
                         .map(|sk| (txo, sk))
                 })
                 .map(|(tx_output, spending_key)| {
                     ExpectedUtxo::new(
-                        tx_output.utxo.clone(),
-                        tx_output.sender_randomness,
+                        tx_output.utxo(),
+                        tx_output.notification_payload.sender_randomness,
                         spending_key.privacy_preimage(),
                         UtxoNotifier::Myself,
                     )
@@ -718,13 +718,15 @@ impl RPC for NeptuneRPCServer {
         };
 
         if let Some(change_output) = maybe_change_output {
-            let expected_change_utxo = ExpectedUtxo::new(
-                change_output.utxo,
-                change_output.sender_randomness,
-                change_key.privacy_preimage(),
-                UtxoNotifier::Myself,
-            );
-            utxos_sent_to_self.push(expected_change_utxo);
+            if change_output.is_offchain() {
+                let expected_change_utxo = ExpectedUtxo::new(
+                    change_output.utxo(),
+                    change_output.sender_randomness(),
+                    change_key.privacy_preimage(),
+                    UtxoNotifier::Myself,
+                );
+                utxos_sent_to_self.push(expected_change_utxo);
+            }
         }
 
         // if the tx created offchain expected_utxos we must inform wallet.

@@ -185,7 +185,7 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
+    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
         // derive shared key
         let mut randomness = [0u8; 32];
         let mut rng = thread_rng();
@@ -196,25 +196,22 @@ impl GenerationReceivingAddress {
         let nonce_bfe: BFieldElement = rng.gen();
 
         // convert payload to bytes
-        let plaintext = bincode::serialize(&(utxo, sender_randomness))?;
+        let plaintext = bincode::serialize(&(utxo, sender_randomness)).unwrap();
 
         // generate symmetric ciphertext
         let cipher = Aes256Gcm::new(&shared_key.into());
         let nonce_as_bytes = [nonce_bfe.value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
-        let ciphertext = match cipher.encrypt(nonce, plaintext.as_ref()) {
-            Ok(ctxt) => ctxt,
-            Err(_) => bail!("Could not encrypt payload."),
-        };
+        let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
         let ciphertext_bfes = common::bytes_to_bfes(&ciphertext);
 
         // concatenate and return
-        Ok([
+        [
             std::convert::Into::<[BFieldElement; CIPHERTEXT_SIZE_IN_BFES]>::into(kem_ctxt).to_vec(),
             vec![nonce_bfe],
             ciphertext_bfes,
         ]
-        .concat())
+        .concat()
     }
 
     /// returns human readable prefix (hrp) of an address.
@@ -275,17 +272,17 @@ impl GenerationReceivingAddress {
     pub(crate) fn generate_public_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
-    ) -> Result<PublicAnnouncement> {
+    ) -> PublicAnnouncement {
         let ciphertext = [
             &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
             self.encrypt(
                 &utxo_notification_payload.utxo,
                 utxo_notification_payload.sender_randomness,
-            )?
+            )
             .as_slice(),
         ]
         .concat();
 
-        Ok(PublicAnnouncement::new(ciphertext))
+        PublicAnnouncement::new(ciphertext)
     }
 }
