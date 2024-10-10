@@ -264,7 +264,7 @@ pub(crate) fn make_coinbase_transaction(
 
     let lock_script = receiving_address.lock_script();
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
+    let coinbase_utxo = Utxo::new_native_currency(lock_script, coinbase_amount);
     let sender_randomness: Digest = global_state
         .wallet_state
         .wallet_secret
@@ -362,7 +362,7 @@ fn create_block_transaction(
 
     let lock_script = receiving_address.lock_script();
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
+    let coinbase_utxo = Utxo::new_native_currency(lock_script, coinbase_amount);
 
     let (coinbase_transaction, coinbase_as_expected_utxo) =
         make_coinbase_transaction(global_state, transaction_fees, timestamp);

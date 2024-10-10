@@ -115,7 +115,7 @@ impl Utxo {
         }
     }
 
-    pub fn new_native_coin(lock_script: LockScript, amount: NeptuneCoins) -> Self {
+    pub fn new_native_currency(lock_script: LockScript, amount: NeptuneCoins) -> Self {
         Self::new(
             lock_script,
             vec![Coin {

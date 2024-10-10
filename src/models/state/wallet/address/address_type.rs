@@ -458,7 +458,7 @@ mod test {
         /// we verify that the data matches the original/expected values.
         pub fn scan_for_announced_utxos(key: SpendingKey) {
             // 1. generate a utxo with amount = 10
-            let utxo = Utxo::new_native_coin(key.to_address().lock_script(), NeptuneCoins::new(10));
+            let utxo = Utxo::new_native_currency(key.to_address().lock_script(), NeptuneCoins::new(10));
 
             // 2. generate sender randomness
             let sender_randomness: Digest = random();
@@ -517,7 +517,7 @@ mod test {
 
             // 1. create utxo with random amount
             let amount = NeptuneCoins::new(rng.gen_range(0..42000000));
-            let utxo = Utxo::new_native_coin(key.to_address().lock_script(), amount);
+            let utxo = Utxo::new_native_currency(key.to_address().lock_script(), amount);
 
             // 2. generate sender randomness
             let sender_randomness: Digest = random();

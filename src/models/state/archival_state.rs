@@ -1013,7 +1013,7 @@ mod archival_state_tests {
 
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
-        let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
+        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
         let change_key = alice
             .wallet_state
             .wallet_secret
@@ -1282,7 +1282,7 @@ mod archival_state_tests {
             make_coinbase_transaction(&global_state, NeptuneCoins::zero(), in_seven_months);
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let anyone_can_spend_utxo =
-            Utxo::new_native_coin(LockScript::anyone_can_spend(), one_money);
+            Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
         let receiver_data = TxOutput::offchain(anyone_can_spend_utxo, rng.gen(), rng.gen());
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
         let sender_tx = global_state
@@ -1341,12 +1341,12 @@ mod archival_state_tests {
         let alice_address = alice_spending_key.to_address();
         let receiver_data_for_alice = vec![
             TxOutput::offchain(
-                Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(1)),
+                Utxo::new_native_currency(alice_address.lock_script(), NeptuneCoins::new(1)),
                 sender_randomness,
                 alice_address.privacy_digest,
             ),
             TxOutput::offchain(
-                Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(9)),
+                Utxo::new_native_currency(alice_address.lock_script(), NeptuneCoins::new(9)),
                 sender_randomness,
                 alice_address.privacy_digest,
             ),
@@ -1356,12 +1356,12 @@ mod archival_state_tests {
 
         let receiver_data_for_bob = vec![
             TxOutput::offchain(
-                Utxo::new_native_coin(bob_address.lock_script(), NeptuneCoins::new(2)),
+                Utxo::new_native_currency(bob_address.lock_script(), NeptuneCoins::new(2)),
                 sender_randomness,
                 bob_address.privacy_digest,
             ),
             TxOutput::offchain(
-                Utxo::new_native_coin(bob_address.lock_script(), NeptuneCoins::new(3)),
+                Utxo::new_native_currency(bob_address.lock_script(), NeptuneCoins::new(3)),
                 sender_randomness,
                 bob_address.privacy_digest,
             ),
@@ -1500,12 +1500,12 @@ mod archival_state_tests {
         let genesis_address = genesis_spending_key.to_address();
         let receiver_data_from_alice = vec![
             TxOutput::offchain(
-                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                Utxo::new_native_currency(genesis_address.lock_script(), NeptuneCoins::new(1)),
                 rng.gen(),
                 genesis_address.privacy_digest,
             ),
             TxOutput::offchain(
-                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(8)),
+                Utxo::new_native_currency(genesis_address.lock_script(), NeptuneCoins::new(8)),
                 rng.gen(),
                 genesis_address.privacy_digest,
             ),
@@ -1532,17 +1532,17 @@ mod archival_state_tests {
             .unwrap();
         let receiver_data_from_bob = vec![
             TxOutput::offchain(
-                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                Utxo::new_native_currency(genesis_address.lock_script(), NeptuneCoins::new(1)),
                 rng.gen(),
                 genesis_address.privacy_digest,
             ),
             TxOutput::offchain(
-                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(1)),
+                Utxo::new_native_currency(genesis_address.lock_script(), NeptuneCoins::new(1)),
                 rng.gen(),
                 genesis_address.privacy_digest,
             ),
             TxOutput::offchain(
-                Utxo::new_native_coin(genesis_address.lock_script(), NeptuneCoins::new(2)),
+                Utxo::new_native_currency(genesis_address.lock_script(), NeptuneCoins::new(2)),
                 rng.gen(),
                 genesis_address.privacy_digest,
             ),

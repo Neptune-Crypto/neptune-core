@@ -1277,7 +1277,7 @@ mod tests {
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
 
             let mock_utxo =
-                Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(10));
+                Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(10));
 
             let sender_randomness: Digest = rand::random();
             let receiver_preimage: Digest = rand::random();
@@ -1327,7 +1327,7 @@ mod tests {
                 mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
 
             let mock_utxo =
-                Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
+                Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
 
             // Add a UTXO notification
             let mut addition_records = vec![];
@@ -1430,8 +1430,10 @@ mod tests {
                 )
                 .await;
 
-                let mock_utxo =
-                    Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
+                let mock_utxo = Utxo::new_native_currency(
+                    LockScript::anyone_can_spend(),
+                    NeptuneCoins::new(14),
+                );
 
                 assert!(wallet.wallet_db.expected_utxos().is_empty().await);
 

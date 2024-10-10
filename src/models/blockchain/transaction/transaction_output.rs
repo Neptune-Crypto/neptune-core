@@ -118,16 +118,16 @@ impl TxOutput {
         owned_utxo_notify_method: UtxoNotifyMethod,
     ) -> Result<Self> {
         let onchain = || -> TxOutput {
-            let utxo = Utxo::new_native_coin(address.lock_script(), amount);
+            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
             Self::onchain(utxo, sender_randomness, address.to_owned())
         };
 
         let offchain = || {
-            let utxo = Utxo::new_native_coin(address.lock_script(), amount);
+            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
             Self::offchain(utxo, sender_randomness, address.to_owned())
         };
 
-        let utxo = Utxo::new_native_coin(address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(address.lock_script(), amount);
         let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
         let tx_output = if has_matching_spending_key {
@@ -358,7 +358,7 @@ mod tests {
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
         let amount = NeptuneCoins::one();
-        let utxo = Utxo::new_native_coin(address.lock_script(), amount);
+        let utxo = Utxo::new_native_currency(address.lock_script(), amount);
 
         let sender_randomness = state
             .wallet_state
@@ -419,7 +419,7 @@ mod tests {
             (UtxoNotifyMethod::OffChain, address_gen.clone()),
             (UtxoNotifyMethod::OnChain, address_sym.clone()),
         ] {
-            let utxo = Utxo::new_native_coin(address.lock_script(), amount);
+            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
             let sender_randomness = state
                 .wallet_state
                 .wallet_secret
