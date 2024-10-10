@@ -230,8 +230,9 @@ pub mod test {
         path
     }
 
-    /// Load a proof for the claim if it exists; otherwise, run the prover and
-    /// save it before returning it.
+    /// First, attempt to load the proof from disk. If it does not exist,
+    /// attempt to fetech it online. If that also fails, run the prover and
+    /// save the proof before returning it.
     pub(crate) fn load_proof_or_produce_and_save(
         claim: &Claim,
         program: Program,
