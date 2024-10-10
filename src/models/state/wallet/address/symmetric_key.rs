@@ -197,8 +197,8 @@ impl SymmetricKey {
         let ciphertext = [
             &[SYMMETRIC_KEY_FLAG_U8.into(), self.receiver_identifier()],
             self.encrypt(
-                &utxo_notification_payload.utxo,
-                utxo_notification_payload.sender_randomness,
+                &utxo_notification_payload.utxo(),
+                utxo_notification_payload.sender_randomness(),
             )
             .as_slice(),
         ]

@@ -149,10 +149,7 @@ impl GenerationSpendingKey {
         public_announcement: PublicAnnouncement,
     ) -> Result<UtxoNotificationPayload> {
         let (utxo, sender_randomness) = self.decrypt(&public_announcement.message)?;
-        Ok(UtxoNotificationPayload {
-            utxo,
-            sender_randomness,
-        })
+        Ok(UtxoNotificationPayload::new(utxo, sender_randomness))
     }
 }
 
@@ -276,8 +273,8 @@ impl GenerationReceivingAddress {
         let ciphertext = [
             &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
             self.encrypt(
-                &utxo_notification_payload.utxo,
-                utxo_notification_payload.sender_randomness,
+                &utxo_notification_payload.utxo(),
+                utxo_notification_payload.sender_randomness(),
             )
             .as_slice(),
         ]
