@@ -3,7 +3,6 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -18,16 +17,30 @@ use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 
-/// enumerates how utxos and spending information is communicated.
-///
-/// see also: [UtxoNotification]
+/// Enumerates the medium of exchange for UTXO-notifications.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum UtxoNotifyMethod {
-    /// the utxo notification should be transferred to recipient encrypted on the blockchain
+pub enum UtxoNotificationMedium {
+    /// The UTXO notification should be sent on-chain
     OnChain,
 
-    /// the utxo notification should be transferred to recipient off the blockchain
+    /// The UTXO notification should be sent off-chain
     OffChain,
+}
+
+/// enumerates how utxos and spending information is communicated, including how
+/// to encrypt this information.
+///
+/// see also: [UtxoNotification]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+enum UtxoNotifyMethod {
+    /// the utxo notification should be transferred to recipient encrypted on the blockchain
+    OnChain(ReceivingAddress),
+
+    /// the utxo notification should be transferred to recipient off the blockchain
+    OffChain(ReceivingAddress),
+
+    /// No UTXO notification is intended
+    None,
 }
 
 /// The payload of a UTXO notification, containing all information necessary
@@ -38,9 +51,9 @@ pub enum UtxoNotifyMethod {
 /// these payloads from sender to receiver off-chain for lower-fee transfers
 /// between trusted parties or eg wallets owned by the same person/org.
 #[derive(Debug, Clone)]
-pub struct UtxoNotificationPayload {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
+struct UtxoNotificationPayload {
+    utxo: Utxo,
+    sender_randomness: Digest,
 }
 
 /// represents a transaction output, as accepted by
@@ -50,18 +63,19 @@ pub struct UtxoNotificationPayload {
 /// and claim a given UTXO
 #[derive(Debug, Clone)]
 pub struct TxOutput {
-    pub notification_payload: UtxoNotificationPayload,
-    pub notification_method: UtxoNotifyMethod,
-    pub receiving_address: ReceivingAddress,
+    utxo: Utxo,
+    sender_randomness: Digest,
+    receiver_digest: Digest,
+    notification_method: UtxoNotifyMethod,
 }
 
 impl From<&TxOutput> for AdditionRecord {
     /// retrieves public announcements from possible sub-set of the list
     fn from(txo: &TxOutput) -> Self {
         commit(
-            Hash::hash(&txo.notification_payload.utxo),
-            txo.notification_payload.sender_randomness,
-            txo.receiving_address.privacy_digest(),
+            Hash::hash(&txo.utxo),
+            txo.sender_randomness,
+            txo.receiver_digest,
         )
     }
 }
@@ -111,115 +125,109 @@ impl TxOutput {
     ///
     pub fn auto(
         wallet_state: &WalletState,
-        address: &ReceivingAddress,
+        address: ReceivingAddress,
         amount: NeptuneCoins,
         sender_randomness: Digest,
-        owned_utxo_notify_method: UtxoNotifyMethod,
-    ) -> Result<Self> {
-        let onchain = || -> TxOutput {
-            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
-            Self::onchain(utxo, sender_randomness, address.to_owned())
-        };
-
-        let offchain = || {
-            let utxo = Utxo::new_native_currency(address.lock_script(), amount);
-            Self::offchain(utxo, sender_randomness, address.to_owned())
-        };
-
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> Self {
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
+
         let has_matching_spending_key = wallet_state.can_unlock(&utxo);
 
-        let tx_output = if has_matching_spending_key {
-            match owned_utxo_notify_method {
-                UtxoNotifyMethod::OnChain => onchain(),
-                UtxoNotifyMethod::OffChain => offchain(),
+        let receiver_digest = address.privacy_digest();
+        let notification_method = if has_matching_spending_key {
+            match owned_utxo_notify_medium {
+                UtxoNotificationMedium::OnChain => UtxoNotifyMethod::OnChain(address),
+                UtxoNotificationMedium::OffChain => UtxoNotifyMethod::OffChain(address),
             }
         } else {
-            onchain()
+            UtxoNotifyMethod::OnChain(address)
         };
 
-        Ok(tx_output)
-    }
-
-    /// instantiates `TxOutput` using `OnChain` transfer method.
-    ///
-    /// For normal situations, auto() should be used instead.
-    pub fn onchain(
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiving_address: ReceivingAddress,
-    ) -> Self {
-        let payload = UtxoNotificationPayload {
+        Self {
             utxo,
             sender_randomness,
-        };
-        Self {
-            notification_payload: payload,
-            notification_method: UtxoNotifyMethod::OnChain,
-            receiving_address,
+            receiver_digest,
+            notification_method,
         }
     }
 
-    /// instantiates `TxOutput` using `OffChain` transfer method.
+    /// Instantiaties [TxOutput] without any associated notification-info.
     ///
-    /// For normal situations, auto() should be used instead.
-    pub fn offchain(
+    /// Warning: If care is not taken, this is an easy way to lose funds.
+    /// Don't use this constructor unless you have a good reason to.
+    pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
-        receiving_address: ReceivingAddress,
+        privacy_digest: Digest,
     ) -> Self {
-        let payload = UtxoNotificationPayload {
+        Self {
             utxo,
             sender_randomness,
-        };
-        Self {
-            notification_payload: payload,
-            notification_method: UtxoNotifyMethod::OffChain,
-            receiving_address,
+            receiver_digest: privacy_digest,
+            notification_method: UtxoNotifyMethod::None,
         }
     }
 
+    /// Instantiate a [TxOutput] for native currency intended fro on-chain UTXO
+    /// notification.
     pub(crate) fn onchain_native_currency(
         amount: NeptuneCoins,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
-        Self::onchain(utxo, sender_randomness, receiving_address)
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OnChain(receiving_address),
+        }
     }
 
+    /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
+    /// notification.
     pub(crate) fn offchain_native_currency(
         amount: NeptuneCoins,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
     ) -> Self {
         let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
-        Self::offchain(utxo, sender_randomness, receiving_address)
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+        }
     }
 
     pub(crate) fn is_offchain(&self) -> bool {
-        matches!(self.notification_method, UtxoNotifyMethod::OffChain)
+        matches!(self.notification_method, UtxoNotifyMethod::OffChain(_))
     }
 
     pub(crate) fn utxo(&self) -> Utxo {
-        self.notification_payload.utxo.clone()
+        self.utxo.clone()
     }
 
     pub(crate) fn sender_randomness(&self) -> Digest {
-        self.notification_payload.sender_randomness
+        self.sender_randomness
     }
 
     pub(crate) fn receiver_digest(&self) -> Digest {
-        self.receiving_address.privacy_digest()
+        self.receiver_digest
     }
 
     pub(crate) fn public_announcement(&self) -> Option<PublicAnnouncement> {
-        match self.notification_method {
-            UtxoNotifyMethod::OffChain => None,
-            UtxoNotifyMethod::OnChain => Some(
-                self.receiving_address
-                    .generate_public_announcement(self.notification_payload.clone()),
-            ),
+        match &self.notification_method {
+            UtxoNotifyMethod::None => None,
+            UtxoNotifyMethod::OffChain(_) => None,
+            UtxoNotifyMethod::OnChain(receiving_address) => {
+                let notification_payload = UtxoNotificationPayload {
+                    utxo: self.utxo(),
+                    sender_randomness: self.sender_randomness(),
+                };
+                Some(receiving_address.generate_public_announcement(notification_payload))
+            }
         }
     }
 }
@@ -279,13 +287,13 @@ impl TxOutputList {
     pub fn total_native_coins(&self) -> NeptuneCoins {
         self.0
             .iter()
-            .map(|u| u.notification_payload.utxo.get_native_currency_amount())
+            .map(|u| u.utxo.get_native_currency_amount())
             .sum()
     }
 
     /// retrieves utxos
     pub fn utxos_iter(&self) -> impl IntoIterator<Item = Utxo> + '_ {
-        self.0.iter().map(|u| u.notification_payload.utxo.clone())
+        self.0.iter().map(|u| u.utxo.clone())
     }
 
     /// retrieves utxos
@@ -370,7 +378,7 @@ mod tests {
     use crate::tests::shared::mock_genesis_global_state;
 
     #[tokio::test]
-    async fn test_utxoreceiver_auto_not_owned_output() -> Result<()> {
+    async fn test_utxoreceiver_auto_not_owned_output() {
         let global_state_lock =
             mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
 
@@ -390,32 +398,30 @@ mod tests {
             .wallet_secret
             .generate_sender_randomness(block_height, address.privacy_digest);
 
-        for utxo_notify_method in [UtxoNotifyMethod::OffChain, UtxoNotifyMethod::OnChain] {
+        for owned_utxo_notification_medium in [
+            UtxoNotificationMedium::OffChain,
+            UtxoNotificationMedium::OnChain,
+        ] {
             let tx_output = TxOutput::auto(
                 &state.wallet_state,
-                &address.into(),
+                address.into(),
                 amount,
                 sender_randomness,
-                utxo_notify_method, // how to notify of owned utxos.
-            )?;
+                owned_utxo_notification_medium, // how to notify utxos sent to myself.
+            );
 
-            // we should have OnChain transfer regardless of owned_transfer_method setting
-            // because it only applies to owned outputs.
-            // assert!(matches!(
-            //     tx_output.utxo_notification,
-            //     ::OnChain(_)
-            // ));
-            assert_eq!(utxo_notify_method, tx_output.notification_method);
+            assert!(
+                matches!(tx_output.notification_method, UtxoNotifyMethod::OnChain(_)),
+                "Not owned UTXOs are, currently, always transmitted on-chain"
+            );
             assert_eq!(tx_output.sender_randomness(), sender_randomness);
             assert_eq!(tx_output.receiver_digest(), address.privacy_digest);
             assert_eq!(tx_output.utxo(), utxo);
         }
-
-        Ok(())
     }
 
     #[tokio::test]
-    async fn test_utxoreceiver_auto_owned_output() -> Result<()> {
+    async fn test_utxoreceiver_auto_owned_output() {
         let mut global_state_lock =
             mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
 
@@ -440,9 +446,9 @@ mod tests {
 
         let amount = NeptuneCoins::one();
 
-        for (transfer_method, address) in [
-            (UtxoNotifyMethod::OffChain, address_gen.clone()),
-            (UtxoNotifyMethod::OnChain, address_sym.clone()),
+        for (owned_utxo_notification_medium, address) in [
+            (UtxoNotificationMedium::OffChain, address_gen.clone()),
+            (UtxoNotificationMedium::OnChain, address_sym.clone()),
         ] {
             let utxo = Utxo::new_native_currency(address.lock_script(), amount);
             let sender_randomness = state
@@ -452,30 +458,32 @@ mod tests {
 
             let tx_output = TxOutput::auto(
                 &state.wallet_state,
-                &address,
+                address.clone(),
                 amount,
                 sender_randomness,
-                transfer_method, // how to notify of utxos sent to myself
-            )?;
-
-            assert_eq!(transfer_method, tx_output.notification_method);
-            assert_eq!(
-                sender_randomness,
-                tx_output.notification_payload.sender_randomness
+                owned_utxo_notification_medium, // how to notify of utxos sent to myself
             );
+
+            match owned_utxo_notification_medium {
+                UtxoNotificationMedium::OnChain => assert!(matches!(
+                    tx_output.notification_method,
+                    UtxoNotifyMethod::OnChain(_)
+                )),
+                UtxoNotificationMedium::OffChain => assert!(matches!(
+                    tx_output.notification_method,
+                    UtxoNotifyMethod::OffChain(_)
+                )),
+            };
+
+            assert_eq!(sender_randomness, tx_output.sender_randomness());
             assert_eq!(
                 address.lock_script().hash(),
                 tx_output.utxo().lock_script_hash
             );
 
-            println!("owned_transfer_method: {:#?}", transfer_method);
-            println!("utxo_transfer: {:#?}", tx_output.notification_payload);
-
             assert_eq!(tx_output.sender_randomness(), sender_randomness);
             assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
             assert_eq!(tx_output.utxo(), utxo);
         }
-
-        Ok(())
     }
 }

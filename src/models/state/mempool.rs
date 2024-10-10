@@ -469,7 +469,7 @@ mod tests {
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
     use crate::models::blockchain::transaction::transaction_output::TxOutputList;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -640,12 +640,11 @@ mod tests {
         let mut utxos_from_bob = TxOutputList::from(vec![]);
         for i in 0..4 {
             let amount: NeptuneCoins = NeptuneCoins::new(i);
-            let new_utxo = Utxo {
-                coins: amount.to_native_coins(),
-                lock_script_hash: bob_address.lock_script().hash(),
-            };
-
-            utxos_from_bob.push(TxOutput::onchain(new_utxo, rng.gen(), bob_address.into()));
+            utxos_from_bob.push(TxOutput::onchain_native_currency(
+                amount,
+                rng.gen(),
+                bob_address.into(),
+            ));
         }
 
         let now = genesis_block.kernel.header.timestamp;
@@ -655,7 +654,7 @@ mod tests {
             .create_transaction(
                 utxos_from_bob.clone(),
                 bob_spending_key.into(),
-                UtxoNotifyMethod::OnChain,
+                UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
             )
@@ -680,11 +679,8 @@ mod tests {
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let utxos_from_alice = vec![TxOutput::onchain(
-            Utxo {
-                coins: NeptuneCoins::new(68).to_native_coins(),
-                lock_script_hash: alice_address.lock_script().hash(),
-            },
+        let utxos_from_alice = vec![TxOutput::onchain_native_currency(
+            NeptuneCoins::new(68),
             rng.gen(),
             alice_address.into(),
         )];
@@ -692,7 +688,7 @@ mod tests {
             .create_transaction(
                 utxos_from_alice.into(),
                 alice_spending_key.into(),
-                UtxoNotifyMethod::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
             )
@@ -821,11 +817,8 @@ mod tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
 
-        let utxo = Utxo::new(
-            alice_address.lock_script(),
-            NeptuneCoins::new(1).to_native_coins(),
-        );
-        let tx_receiver_data = TxOutput::onchain(utxo, rng.gen(), bob_address.into());
+        let tx_receiver_data =
+            TxOutput::onchain_native_currency(NeptuneCoins::new(1), rng.gen(), bob_address.into());
 
         let genesis_block = alice.chain.archival_state().genesis_block().to_owned();
         let now = genesis_block.kernel.header.timestamp;
@@ -834,7 +827,7 @@ mod tests {
             .create_transaction_with_prover_capability(
                 vec![tx_receiver_data].into(),
                 alice_key.into(),
-                UtxoNotifyMethod::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_years,
                 TxProvingCapability::SingleProof,
@@ -929,7 +922,7 @@ mod tests {
                     .create_transaction_with_prover_capability(
                         tx_outputs.clone(),
                         premine_spending_key.into(),
-                        UtxoNotifyMethod::OnChain,
+                        UtxoNotificationMedium::OnChain,
                         fee,
                         in_seven_months,
                         TxProvingCapability::ProofCollection,

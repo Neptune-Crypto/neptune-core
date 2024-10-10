@@ -1199,7 +1199,7 @@ mod peer_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::TransactionNotification;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -2480,7 +2480,7 @@ mod peer_loop_tests {
             .create_transaction_with_prover_capability(
                 Default::default(),
                 spending_key.into(),
-                UtxoNotifyMethod::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(0),
                 now,
                 TxProvingCapability::ProofCollection,

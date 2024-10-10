@@ -43,7 +43,7 @@ use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::transaction_output::TxOutput;
 use super::blockchain::transaction::transaction_output::TxOutputList;
-use super::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+use super::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -419,15 +419,9 @@ impl GlobalState {
         &self,
         change_amount: NeptuneCoins,
         change_key: SpendingKey,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        change_utxo_notify_method: UtxoNotificationMedium,
     ) -> Result<TxOutput> {
         let own_receiving_address = change_key.to_address();
-        let lock_script = own_receiving_address.lock_script();
-        let lock_script_hash = lock_script.hash();
-        let change_utxo = Utxo {
-            coins: change_amount.to_native_coins(),
-            lock_script_hash,
-        };
 
         let receiver_digest = own_receiving_address.privacy_digest();
         let change_sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
@@ -435,17 +429,16 @@ impl GlobalState {
             receiver_digest,
         );
 
-        // Add change UTXO to pool of expected incoming UTXOs
         let change_output = match change_utxo_notify_method {
-            UtxoNotifyMethod::OnChain => TxOutput::onchain(
-                change_utxo,
+            UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
+                change_amount,
                 change_sender_randomness,
-                change_key.to_address(),
+                own_receiving_address,
             ),
-            UtxoNotifyMethod::OffChain => TxOutput::offchain(
-                change_utxo,
+            UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
+                change_amount,
                 change_sender_randomness,
-                change_key.to_address(),
+                own_receiving_address,
             ),
         };
 
@@ -552,8 +545,8 @@ impl GlobalState {
     pub fn generate_tx_outputs(
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
-    ) -> Result<TxOutputList> {
+        owned_utxo_notify_medium: UtxoNotificationMedium,
+    ) -> TxOutputList {
         let block_height = self.chain.light_state().header().height;
 
         // Convert outputs.  [address:amount] --> TxOutputList
@@ -569,15 +562,15 @@ impl GlobalState {
                 // based on whether the address belongs to our wallet or not
                 TxOutput::auto(
                     &self.wallet_state,
-                    &address,
+                    address,
                     amount,
                     sender_randomness,
-                    owned_utxo_notify_method,
+                    owned_utxo_notify_medium,
                 )
             })
-            .collect::<Result<_>>()?;
+            .collect();
 
-        Ok(tx_outputs.into())
+        tx_outputs.into()
     }
 
     /// creates a Transaction.
@@ -629,20 +622,20 @@ impl GlobalState {
     ///     .next_unused_spending_key(KeyType::Symmetric);
     ///
     /// // on-chain notification for all utxos destined for our wallet.
-    /// let change_notify_method = UtxoNotifyMethod::OnChain;
+    /// let change_notify_medium = UtxoNotificationMedium::OnChain;
     ///
     /// // obtain read lock
     /// let state = self.state.lock_guard().await;
     ///
     /// // generate the tx_outputs
-    /// let mut tx_outputs = state.generate_tx_outputs(outputs, change_notify_method)?;
+    /// let mut tx_outputs = state.generate_tx_outputs(outputs, change_notify_medium)?;
     ///
     /// // Create the transaction
     /// let (transaction, maybe_change_utxo) = state
     ///     .create_transaction(
     ///         tx_outputs,                   // all outputs except `change`
     ///         change_key,                   // send `change` to this key
-    ///         change_notify_method,         // how to notify about `change` utxo
+    ///         change_notify_medium,         // how to notify about `change` utxo
     ///         NeptuneCoins::new(2),         // fee
     ///         Timestamp::now(),             // Timestamp of transaction
     ///     )
@@ -664,14 +657,14 @@ impl GlobalState {
         &self,
         tx_outputs: TxOutputList,
         change_key: SpendingKey,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         self.create_transaction_with_prover_capability(
             tx_outputs,
             change_key,
-            change_utxo_notify_method,
+            change_utxo_notify_medium,
             fee,
             timestamp,
             self.net.tx_proving_capability,
@@ -686,7 +679,7 @@ impl GlobalState {
         &self,
         mut tx_outputs: TxOutputList,
         change_key: SpendingKey,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
@@ -717,7 +710,7 @@ impl GlobalState {
             })?;
 
             let change_utxo =
-                self.create_change_output(amount, change_key, change_utxo_notify_method)?;
+                self.create_change_output(amount, change_key, change_utxo_notify_medium)?;
             tx_outputs.push(change_utxo.clone());
             maybe_change_output = Some(change_utxo);
         }
@@ -2347,8 +2340,8 @@ mod global_state_tests {
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
-        async fn onchain_symmetric_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OnChain, KeyType::Symmetric).await
+        async fn onchain_symmetric_change_exists() {
+            change_exists(UtxoNotificationMedium::OnChain, KeyType::Symmetric).await
         }
 
         /// test scenario: onchain/generation.
@@ -2358,8 +2351,8 @@ mod global_state_tests {
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
-        async fn onchain_generation_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OnChain, KeyType::Generation).await
+        async fn onchain_generation_change_exists() {
+            change_exists(UtxoNotificationMedium::OnChain, KeyType::Generation).await
         }
 
         /// test scenario: offchain/symmetric.
@@ -2369,8 +2362,8 @@ mod global_state_tests {
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
-        async fn offchain_symmetric_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OffChain, KeyType::Symmetric).await
+        async fn offchain_symmetric_change_exists() {
+            change_exists(UtxoNotificationMedium::OffChain, KeyType::Symmetric).await
         }
 
         /// test scenario: offchain/generation.
@@ -2380,28 +2373,28 @@ mod global_state_tests {
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
-        async fn offchain_generation_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OffChain, KeyType::Generation).await
+        async fn offchain_generation_change_exists() {
+            change_exists(UtxoNotificationMedium::OffChain, KeyType::Generation).await
         }
 
-        /// basic scenario:  alice receives 20,000 coins in the premine.  7 months
-        /// after launch she sends 20 coins to bob, plus 1 coin fee.  alice should
-        /// receive change of 19979.  Sometime after this block is mined alice's
+        /// basic scenario:  alice receives 20 coins in the premine.  7 months
+        /// after launch she sends 10 coins to bob, plus 1 coin fee.  alice should
+        /// receive change of 9.  Sometime after this block is mined alice's
         /// hard drive crashes and she loses her wallet.  She still has her wallet
         /// seed and uses it to create a new wallet and scan blockchain to recover
         /// funds.  At the end alice checks her wallet balance, which should be
-        /// 19979.
+        /// 9.
         ///
         /// note: the pre-mine and 7-months aspects are unimportant.  This test
         /// would have same results if alice were a coinbase recipient instead.
         ///
         /// variations:
-        ///   utxo_notify_method: alice can choose OnChain or OffChain utxo notification.
+        ///   change_notify_medium: alice can choose OnChain or OffChain utxo notification.
         ///   change_key_type:    alice's change key can be Symmetric or Generation
         ///
         /// outcomes:
-        ///   onchain/symmetric:    balance: 19979.  no funds loss.
-        ///   onchain/generation:   balance: 19979.  no funds loss.
+        ///   onchain/symmetric:    balance: 9.  no funds loss.
+        ///   onchain/generation:   balance: 9.  no funds loss.
         ///   offchain/symmetric:   balance: 0. all funds lost!
         ///   offchain/generation:  balance: 0. all funds lost!
         ///
@@ -2431,25 +2424,27 @@ mod global_state_tests {
         /// redundant-storage-in-a-box to users that want to use offchain
         /// notification but keep their wallets local.
         async fn change_exists(
-            utxo_notify_method: UtxoNotifyMethod,
+            change_notification_medium: UtxoNotificationMedium,
             change_key_type: KeyType,
-        ) -> Result<()> {
+        ) {
             // setup initial conditions
-            let network = Network::RegTest;
+            let network = Network::Main;
+            let mut rng = StdRng::seed_from_u64(10001);
+
             let genesis_block = Block::genesis_block(network);
             let launch = genesis_block.kernel.header.timestamp;
             let seven_months_post_launch = launch + Timestamp::months(7);
-            let miner_address = GenerationReceivingAddress::derive_from_seed(random());
 
             // amounts used in alice-to-bob transaction.
-            let alice_to_bob_amount = NeptuneCoins::new(20);
+            let alice_to_bob_amount = NeptuneCoins::new(10);
             let alice_to_bob_fee = NeptuneCoins::new(1);
 
             // init global state for alice bob
             let mut alice_state_lock =
                 mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
             let mut bob_state_lock =
-                mock_genesis_global_state(network, 3, WalletSecret::new_random()).await;
+                mock_genesis_global_state(network, 3, WalletSecret::new_pseudorandom(rng.gen()))
+                    .await;
 
             // in bob wallet: create receiving address for bob
             let bob_address = {
@@ -2470,7 +2465,7 @@ mod global_state_tests {
                     .get_wallet_status_for_tip()
                     .await
                     .synced_unspent_available_amount(seven_months_post_launch);
-                assert_eq!(alice_initial_balance, 20000u32.into());
+                assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
 
                 // create change key for alice. change_key_type is a test param.
                 let alice_change_key = alice_state_mut
@@ -2479,46 +2474,48 @@ mod global_state_tests {
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let mut tx_outputs =
-                    alice_state_mut.generate_tx_outputs(outputs, utxo_notify_method)?;
+                let tx_outputs =
+                    alice_state_mut.generate_tx_outputs(outputs, change_notification_medium);
 
                 // create tx.  utxo_notify_method is a test param.
-                let alice_to_bob_tx = alice_state_mut
+                let (alice_to_bob_tx, maybe_change_utxo) = alice_state_mut
                     .create_transaction(
-                        &mut tx_outputs,
+                        tx_outputs.clone(),
                         alice_change_key,
-                        utxo_notify_method,
+                        change_notification_medium,
                         alice_to_bob_fee,
                         seven_months_post_launch,
                     )
-                    .await?;
+                    .await
+                    .unwrap();
+                let Some(change_utxo) = maybe_change_utxo else {
+                    panic!("A change Tx-output was expected");
+                };
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when all utxo notifications are sent on-chain.
+                let expected_utxo = alice_state_mut.wallet_state.extract_expected_utxos(
+                    tx_outputs.concat_with(vec![change_utxo]),
+                    UtxoNotifier::Myself,
+                );
                 alice_state_mut
-                    .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
-                    .await?;
+                    .add_expected_utxos_to_wallet(expected_utxo)
+                    .await
+                    .unwrap();
 
                 // the block gets mined.
-                let (mut block_1, ..) =
-                    make_mock_block_with_valid_pow(&genesis_block, None, miner_address, random());
-
-                // add tx to block.  (weird this can happen)
-                block_1
-                    .accumulate_transaction(
+                let block_1 = {
+                    let (header, body, proof) = Block::make_block_template(
+                        &genesis_block,
                         alice_to_bob_tx,
-                        &alice_state_mut
-                            .chain
-                            .archival_state()
-                            .genesis_block()
-                            .kernel
-                            .body
-                            .mutator_set_accumulator,
-                    )
-                    .await;
+                        seven_months_post_launch,
+                        None,
+                    );
+                    Block::new(header, body, proof)
+                };
 
                 // alice's node learns of the new block.
-                alice_state_mut.set_new_tip(block_1.clone()).await?;
+                alice_state_mut.set_new_tip(block_1.clone()).await.unwrap();
 
                 // alice should have 2 monitored utxos.
                 assert_eq!(
@@ -2530,14 +2527,14 @@ mod global_state_tests {
                         .len().await, "Alice must have 2 UTXOs after block 1: change from transaction, and the spent premine UTXO"
                 );
 
-                // Now alice should have a balance of 19979.
-                // 20000 from premine - 21 (20 to Bob + 1 fee)
+                // Now alice should have a balance of 9.
+                // balance = premine - spent = premine - sent - fee = 20 - 10 - 1
                 let alice_calculated_balance = alice_initial_balance
                     .checked_sub(&alice_to_bob_amount)
                     .unwrap()
                     .checked_sub(&alice_to_bob_fee)
                     .unwrap();
-                assert_eq!(alice_calculated_balance, 19979u32.into());
+                assert_eq!(alice_calculated_balance, NeptuneCoins::new(9));
 
                 assert_eq!(
                     alice_calculated_balance,
@@ -2555,11 +2552,11 @@ mod global_state_tests {
                 let mut bob_state_mut = bob_state_lock.lock_guard_mut().await;
 
                 // bob's node adds block1 to the chain.
-                bob_state_mut.set_new_tip(block_1.clone()).await?;
+                bob_state_mut.set_new_tip(block_1.clone()).await.unwrap();
 
-                // Now Bob should have a balance of 20, from Alice
+                // Now Bob should have a balance of 10, from Alice
                 assert_eq!(
-                    alice_to_bob_amount, // 20
+                    alice_to_bob_amount, // 10
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
@@ -2586,27 +2583,27 @@ mod global_state_tests {
                     .await
                     .synced_unspent_available_amount(seven_months_post_launch);
 
-                // lucky alice's wallet begins with 20000 balance from premine.
-                assert_eq!(alice_initial_balance, 20000u32.into());
+                // lucky alice's wallet begins with 20 balance from premine.
+                assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
 
                 // now alice must replay old blocks.  (there's only one so far)
-                alice_state_mut.set_new_tip(block_1).await?;
+                alice_state_mut.set_new_tip(block_1).await.unwrap();
 
-                // Now alice should have a balance of 19979.
-                // 20000 from premine - 21 (20 to Bob + 1 fee)
+                // Now alice should have a balance of 9.
+                // 20 from premine - 11
                 let alice_calculated_balance = alice_initial_balance
                     .checked_sub(&alice_to_bob_amount)
                     .unwrap()
                     .checked_sub(&alice_to_bob_fee)
                     .unwrap();
 
-                assert_eq!(alice_calculated_balance, 19979u32.into());
+                assert_eq!(alice_calculated_balance, NeptuneCoins::new(9));
 
-                // For onchain notification the balance will be 19979.
-                // For offchain notification, it will be 0.  Funds are lost!!!
-                let alice_expected_balance_by_method = match utxo_notify_method {
-                    UtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
-                    UtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
+                // For onchain change-notification the balance will be 9.
+                // For offchain change-notification, it will be 0.  Funds are lost!!!
+                let alice_expected_balance_by_method = match change_notification_medium {
+                    UtxoNotificationMedium::OnChain => NeptuneCoins::new(9),
+                    UtxoNotificationMedium::OffChain => NeptuneCoins::new(0),
                 };
 
                 // verify that our on/offchain prediction is correct.
@@ -2618,8 +2615,6 @@ mod global_state_tests {
                         .synced_unspent_available_amount(seven_months_post_launch)
                 );
             }
-
-            Ok(())
         }
     }
 }
