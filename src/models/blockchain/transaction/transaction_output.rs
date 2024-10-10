@@ -51,9 +51,26 @@ enum UtxoNotifyMethod {
 /// these payloads from sender to receiver off-chain for lower-fee transfers
 /// between trusted parties or eg wallets owned by the same person/org.
 #[derive(Debug, Clone)]
-struct UtxoNotificationPayload {
+pub(crate) struct UtxoNotificationPayload {
     utxo: Utxo,
     sender_randomness: Digest,
+}
+
+impl UtxoNotificationPayload {
+    pub(crate) fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+        }
+    }
+
+    pub(crate) fn utxo(&self) -> Utxo {
+        self.utxo.clone()
+    }
+
+    pub(crate) fn sender_randomness(&self) -> Digest {
+        self.sender_randomness
+    }
 }
 
 /// represents a transaction output, as accepted by

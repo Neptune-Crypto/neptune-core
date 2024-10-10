@@ -10,7 +10,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
 use super::generation_address;
-use super::generation_address::GenerationSpendingKey;
 use super::symmetric_key;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
@@ -458,7 +457,8 @@ mod test {
         /// we verify that the data matches the original/expected values.
         pub fn scan_for_announced_utxos(key: SpendingKey) {
             // 1. generate a utxo with amount = 10
-            let utxo = Utxo::new_native_currency(key.to_address().lock_script(), NeptuneCoins::new(10));
+            let utxo =
+                Utxo::new_native_currency(key.to_address().lock_script(), NeptuneCoins::new(10));
 
             // 2. generate sender randomness
             let sender_randomness: Digest = random();
@@ -480,10 +480,8 @@ mod test {
                 .is_empty());
 
             // 6. generate a public announcement for this address
-            let utxo_notification_payload = UtxoNotificationPayload {
-                utxo: utxo.clone(),
-                sender_randomness,
-            };
+            let utxo_notification_payload =
+                UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
             let public_announcement = key
                 .to_address()
                 .generate_public_announcement(utxo_notification_payload);
