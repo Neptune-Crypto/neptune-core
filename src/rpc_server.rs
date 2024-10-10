@@ -29,7 +29,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
@@ -161,7 +161,7 @@ pub trait RPC {
     async fn send(
         amount: NeptuneCoins,
         address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -192,11 +192,11 @@ pub trait RPC {
     ///
     /// todo: shouldn't we return `Transaction` instead?
     ///
-    /// future work: add `unowned_utxo_notify_method` param.
+    /// future work: add `unowned_utxo_notify_medium` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -616,7 +616,7 @@ impl RPC for NeptuneRPCServer {
         ctx: context::Context,
         amount: NeptuneCoins,
         address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
@@ -633,7 +633,7 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
@@ -651,13 +651,7 @@ impl RPC for NeptuneRPCServer {
         };
 
         let state = self.state.lock_guard().await;
-        let tx_outputs = match state.generate_tx_outputs(outputs, owned_utxo_notify_method) {
-            Ok(u) => u,
-            Err(err) => {
-                tracing::error!("Could not generate tx outputs: {}", err);
-                return None;
-            }
-        };
+        let tx_outputs = state.generate_tx_outputs(outputs, owned_utxo_notification_medium);
 
         // Pause miner if we are mining
         let was_mining = self.state.mining().await;
@@ -680,7 +674,7 @@ impl RPC for NeptuneRPCServer {
             .create_transaction(
                 tx_outputs.clone(),
                 change_key,
-                owned_utxo_notify_method,
+                owned_utxo_notification_medium,
                 fee,
                 now,
             )
@@ -944,7 +938,7 @@ mod rpc_server_tests {
                 ctx,
                 NeptuneCoins::one(),
                 own_receiving_address.clone(),
-                UtxoNotifyMethod::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -953,7 +947,7 @@ mod rpc_server_tests {
             .send_to_many(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
-                UtxoNotifyMethod::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -1493,7 +1487,7 @@ mod rpc_server_tests {
         // --- Operation: perform send_to_many
         let result = rpc_server
             .clone()
-            .send_to_many(ctx, outputs, UtxoNotifyMethod::OffChain, fee)
+            .send_to_many(ctx, outputs, UtxoNotificationMedium::OffChain, fee)
             .await;
 
         // --- Test: verify op returns a value.

@@ -254,7 +254,7 @@ impl WalletState {
             .map(|(tx_output, spending_key)| {
                 ExpectedUtxo::new(
                     tx_output.utxo(),
-                    tx_output.notification_payload.sender_randomness,
+                    tx_output.sender_randomness(),
                     spending_key.privacy_preimage(),
                     notifier,
                 )
