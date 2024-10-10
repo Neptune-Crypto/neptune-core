@@ -12,7 +12,6 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
 use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -180,6 +179,24 @@ impl TxOutput {
         }
     }
 
+    pub(crate) fn onchain_native_currency(
+        amount: NeptuneCoins,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+    ) -> Self {
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        Self::onchain(utxo, sender_randomness, receiving_address)
+    }
+
+    pub(crate) fn offchain_native_currency(
+        amount: NeptuneCoins,
+        sender_randomness: Digest,
+        receiving_address: ReceivingAddress,
+    ) -> Self {
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        Self::offchain(utxo, sender_randomness, receiving_address)
+    }
+
     pub(crate) fn is_offchain(&self) -> bool {
         matches!(self.notification_method, UtxoNotifyMethod::OffChain)
     }
@@ -327,8 +344,16 @@ impl TxOutputList {
         self.0.iter().any(|u| u.is_offchain())
     }
 
-    pub fn push(&mut self, tx_output: TxOutput) {
+    pub(crate) fn push(&mut self, tx_output: TxOutput) {
         self.0.push(tx_output);
+    }
+
+    pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
+    where
+        T: IntoIterator<Item = TxOutput>,
+    {
+        self.0.extend(maybe_tx_output);
+        self
     }
 }
 

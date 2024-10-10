@@ -12,7 +12,6 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use get_size::GetSize;
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -40,7 +39,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
@@ -696,38 +694,15 @@ impl RPC for NeptuneRPCServer {
         };
         drop(state);
 
-        let mut utxos_sent_to_self = {
-            let wallet = &self.state.lock_guard().await.wallet_state;
-            tx_outputs
-                .iter()
-                .filter(|txo| txo.is_offchain())
-                .filter_map(|txo| {
-                    wallet
-                        .find_spending_key_for_utxo(&txo.utxo())
-                        .map(|sk| (txo, sk))
-                })
-                .map(|(tx_output, spending_key)| {
-                    ExpectedUtxo::new(
-                        tx_output.utxo(),
-                        tx_output.notification_payload.sender_randomness,
-                        spending_key.privacy_preimage(),
-                        UtxoNotifier::Myself,
-                    )
-                })
-                .collect_vec()
-        };
-
-        if let Some(change_output) = maybe_change_output {
-            if change_output.is_offchain() {
-                let expected_change_utxo = ExpectedUtxo::new(
-                    change_output.utxo(),
-                    change_output.sender_randomness(),
-                    change_key.privacy_preimage(),
-                    UtxoNotifier::Myself,
-                );
-                utxos_sent_to_self.push(expected_change_utxo);
-            }
-        }
+        let utxos_sent_to_self = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .extract_expected_utxos(
+                tx_outputs.concat_with(maybe_change_output),
+                UtxoNotifier::Myself,
+            );
 
         // if the tx created offchain expected_utxos we must inform wallet.
         if !utxos_sent_to_self.is_empty() {

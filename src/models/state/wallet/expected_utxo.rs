@@ -79,7 +79,7 @@ impl ExpectedUtxo {
 }
 
 #[derive(
-    Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum_macros::Display,
+    Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum_macros::Display,
 )]
 pub enum UtxoNotifier {
     OwnMiner,
