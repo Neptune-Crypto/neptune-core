@@ -1426,13 +1426,11 @@ impl GlobalState {
 mod global_state_tests {
     use num_traits::One;
     use num_traits::Zero;
-    use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::KeyType;
     use wallet::WalletSecret;
 
@@ -1444,37 +1442,6 @@ mod global_state_tests {
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
-
-    impl GlobalState {
-        pub(crate) async fn create_transaction_test_wrapper_kill_me(
-            &self,
-            tx_output_vec: Vec<TxOutput>,
-            fee: NeptuneCoins,
-            timestamp: Timestamp,
-        ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-            let mut tx_outputs = TxOutputList::from(tx_output_vec);
-
-            // note: should use next_unused_generation_spending_key()
-            // but that requires &mut self.
-            let change_key = self
-                .wallet_state
-                .wallet_secret
-                .nth_symmetric_key_for_tests(0);
-
-            let len = tx_outputs.len();
-            let transaction = self
-                .create_transaction(
-                    &mut tx_outputs,
-                    change_key.into(),
-                    UtxoNotifyMethod::OffChain,
-                    fee,
-                    timestamp,
-                )
-                .await?;
-            info!("receivers len before: {len}, after: {}", tx_outputs.len());
-            Ok((transaction, (&tx_outputs).into()))
-        }
-    }
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -1506,65 +1473,71 @@ mod global_state_tests {
     #[tokio::test]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
         let network = Network::Main;
-
-        // seed determined by fair dice roll; guaranteed to be random
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
-        let other_wallet = WalletSecret::new_pseudorandom(rng.gen());
-        let premine_receiver =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let genesis_block = Block::genesis_block(network);
-        let address = other_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let main_lock_script = address.lock_script();
 
-        let nine_money = Utxo::new_native_currency(main_lock_script, NeptuneCoins::new(9));
-        let sender_randomness = Digest::default();
-        let receiver_privacy_digest = address.privacy_digest();
-        let public_announcement = address
-            .generate_public_announcement(&nine_money, sender_randomness)
-            .unwrap();
-        let tx_outputs = vec![TxOutput::onchain(
-            output_utxo.clone(),
-            sender_randomness,
-            receiver_privacy_digest,
-            public_announcement,
-        )];
+        let alice = WalletSecret::new_pseudorandom(rng.gen());
+        let bob = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        assert!(
+            !bob.lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .get_all()
+                .await
+                .is_empty(),
+            "Bob must be premine recipient"
+        );
 
-        let monitored_utxos = premine_receiver
+        let bob_spending_key = bob
             .lock_guard()
             .await
             .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .await;
-        assert_ne!(monitored_utxos.len(), 0);
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
+        let bob_address = bob_spending_key.to_address();
+
+        let genesis_block = Block::genesis_block(network);
+        let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
+        let nine_money_output = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(9),
+            rng.gen(),
+            alice_address.into(),
+        );
+        let tx_outputs: TxOutputList = vec![nine_money_output].into();
 
         // one month before release date, we should not be able to create the transaction
         let launch = genesis_block.kernel.header.timestamp;
         let six_months = Timestamp::months(6);
         let one_month = Timestamp::months(1);
-        assert!(create_transaction_with_timestamp_and_prover_capability(
-            &premine_receiver,
-            receiver_data.clone(),
-            NeptuneCoins::new(1),
-            launch + six_months - one_month,
-            TxProvingCapability::ProofCollection,
-        )
-        .await
-        .is_err());
+        assert!(bob
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                tx_outputs.clone(),
+                bob_spending_key.into(),
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::new(1),
+                launch + six_months - one_month,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .is_err());
 
         // one month after though, we should be
-        let tx = create_transaction_with_timestamp_and_prover_capability(
-            &premine_receiver,
-            receiver_data,
-            NeptuneCoins::new(1),
-            launch + six_months + one_month,
-            TxProvingCapability::ProofCollection,
-        )
-        .await
-        .unwrap();
+        let (tx, change_output) = bob
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                tx_outputs,
+                bob_spending_key.into(),
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::new(1),
+                launch + six_months + one_month,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
         assert!(tx.is_valid().await);
 
         assert_eq!(
@@ -1579,41 +1552,30 @@ mod global_state_tests {
         );
 
         // Test with a transaction with three outputs and one (premine) input
-        let mut other_tx_outputs = vec![];
-        let mut output_utxos: Vec<Utxo> = vec![];
+        let mut output_utxos = vec![];
         for i in 2..5 {
-            let amount: NeptuneCoins = NeptuneCoins::new(i);
-            let that_many_coins = amount.to_native_coins();
-            let receiving_address: ReceivingAddress = other_wallet
-                .nth_generation_spending_key_for_tests(0)
-                .to_address()
-                .into();
-            let lock_script = receiving_address.lock_script();
-            let utxo = Utxo {
-                coins: that_many_coins,
-                lock_script_hash: lock_script.hash(),
-            };
-            let other_sender_randomness = Digest::default();
-            let other_receiver_digest = receiving_address.privacy_digest();
-            let other_public_announcement = receiving_address
-                .generate_public_announcement(&utxo, other_sender_randomness)
-                .unwrap();
-            output_utxos.push(utxo.clone());
-            other_receiver_data.push(
-                UtxoReceiverData::new(utxo, other_sender_randomness, other_receiver_digest)
-                    .with_public_announcement(other_public_announcement),
+            let that_much_money: NeptuneCoins = NeptuneCoins::new(i);
+            let output_utxo = TxOutput::offchain_native_currency(
+                that_much_money,
+                rng.gen(),
+                alice_address.into(),
             );
+            output_utxos.push(output_utxo);
         }
 
-        let new_tx: Transaction = create_transaction_with_timestamp_and_prover_capability(
-            &premine_receiver,
-            other_receiver_data,
-            NeptuneCoins::new(1),
-            launch + six_months + one_month,
-            TxProvingCapability::ProofCollection,
-        )
-        .await
-        .unwrap();
+        let (new_tx, _change) = bob
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                output_utxos.into(),
+                bob_spending_key.into(),
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::new(1),
+                launch + six_months + one_month,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
         assert!(new_tx.is_valid().await);
         assert_eq!(
             4,
@@ -1709,9 +1671,9 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let alic_state_lock =
+        let mut alice_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut alice = alic_state_lock.lock_guard_mut().await;
+        let mut alice = alice_state_lock.lock_guard_mut().await;
 
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_address = bob_wallet_secret
@@ -1763,7 +1725,7 @@ mod global_state_tests {
         let network = Network::Main;
         let mut rng = thread_rng();
 
-        let alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -1851,7 +1813,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -2262,16 +2224,17 @@ mod global_state_tests {
                 genesis_spending_key.to_address().privacy_digest,
             ),
         ];
-        let (tx_from_bob, expected_utxos_bob) = bob_state_lock
-            .lock_guard()
-            .await
-            .create_transaction_test_wrapper_kill_me(
-                tx_outputs_from_bob.clone(),
-                NeptuneCoins::new(2),
-                now,
-            )
-            .await
-            .unwrap();
+        // let _ = bob_state_lock.lock_guard().await.create_transaction_with_prover_capability(tx_outputs_for_bob, change_key, change_utxo_notify_medium, fee, timestamp, prover_capability)
+        // let (tx_from_bob, expected_utxos_bob) = bob_state_lock
+        //     .lock_guard()
+        //     .await
+        //     .create_transaction_test_wrapper_kill_me(
+        //         tx_outputs_from_bob.clone(),
+        //         NeptuneCoins::new(2),
+        //         now,
+        //     )
+        //     .await
+        //     .unwrap();
 
         // inform wallet of any expected utxos from this tx.
         bob_state_lock
