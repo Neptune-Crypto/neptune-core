@@ -248,6 +248,13 @@ pub(crate) fn make_coinbase_transaction(
     transaction_fees: NeptuneCoins,
     timestamp: Timestamp,
 ) -> (Transaction, ExpectedUtxo) {
+    // note: it is Ok to always use the same key here because:
+    //  1. if we find a block, the utxo will go to our wallet
+    //     and notification occurs offchain, so there is no privacy issue.
+    //  2. if we were to derive a new addr for each block then we would
+    //     have large gaps since an address only receives funds when
+    //     we actually win the mining lottery.
+    //  3. also this way we do not have to modify global/wallet state.
     let coinbase_recipient_spending_key = global_state
         .wallet_state
         .wallet_secret
@@ -317,7 +324,7 @@ pub(crate) fn make_coinbase_transaction(
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
 fn create_block_transaction(
-    latest_block: &Block,
+    predecessor_block: &Block,
     global_state: &GlobalState,
     timestamp: Timestamp,
 ) -> (Transaction, ExpectedUtxo) {
@@ -341,31 +348,14 @@ fn create_block_transaction(
     let transaction_fees = transactions_to_include
         .iter()
         .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
-
-    // note: it is Ok to always use the same key here because:
-    //  1. if we find a block, the utxo will go to our wallet
-    //     and notification occurs offchain, so there is no privacy issue.
-    //  2. if we were to derive a new addr for each block then we would
-    //     have large gaps since an address only receives funds when
-    //     we actually win the mining lottery.
-    //  3. also this way we do not have to modify global/wallet state.
-    let coinbase_recipient_spending_key = global_state
-        .wallet_state
-        .wallet_secret
-        .nth_generation_spending_key(0);
-    let receiving_address = coinbase_recipient_spending_key.to_address();
-    let next_block_height: BlockHeight = latest_block.kernel.header.height.next();
-
-    let lock_script = receiving_address.lock_script();
-    let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let coinbase_utxo = Utxo::new_native_currency(lock_script, coinbase_amount);
+    let next_block_height: BlockHeight = predecessor_block.kernel.header.height.next();
 
     let (coinbase_transaction, coinbase_as_expected_utxo) =
         make_coinbase_transaction(global_state, transaction_fees, timestamp);
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        latest_block.kernel.body.mutator_set_accumulator.hash()
+        predecessor_block.kernel.body.mutator_set_accumulator.hash()
     );
 
     // Merge incoming transactions with the coinbase transaction
@@ -543,10 +533,9 @@ pub async fn mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
-    use lock_script::LockScript;
-    use tasm_lib::Digest;
     use tracing_test::traced_test;
     use transaction_output::TxOutput;
+    use transaction_output::UtxoNotificationMedium;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -562,14 +551,19 @@ mod mine_loop_tests {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut alice = alice.lock_guard().await;
-        assert!(alice.mempool.is_empty(), "Mempool must be empty at startup");
+        assert!(
+            alice.lock_guard().await.mempool.is_empty(),
+            "Mempool must be empty at startup"
+        );
 
+        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_months = now + Timestamp::months(7);
         assert!(
             !alice
+                .lock_guard()
+                .await
                 .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_available_amount(in_seven_months)
@@ -578,8 +572,10 @@ mod mine_loop_tests {
         );
 
         // Verify constructed coinbase transaction and block template when mempool is empty
-        let (transaction_empty_mempool, coinbase_utxo_info) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), now);
+        let alice_mut = alice.lock_guard().await;
+        let (transaction_empty_mempool, _coinbase_utxo_info) =
+            make_coinbase_transaction(&alice_mut, NeptuneCoins::zero(), now);
+        drop(alice_mut);
 
         assert_eq!(
             1,
@@ -618,26 +614,41 @@ mod mine_loop_tests {
         // let tx_output = TxOutput::offchain_native_currency(NeptuneCoins::new(4), Digest::default(), receiving_address)
         // let utxo = Utxo::new(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
         // let tx_output = TxOutput::offchain(utxo, Digest::default(), )
-        let tx_by_preminer = alice
+        let alice_key = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
+        let (tx_by_preminer, _maybe_change_output) = alice
+            .lock_guard()
+            .await
             .create_transaction(
-                vec![
-                    (UtxoReceiverData::new(tx_output, sender_randomness, receiver_privacy_digest)),
-                ],
+                vec![TxOutput::offchain_native_currency(
+                    NeptuneCoins::new(4),
+                    rng.gen(),
+                    alice_key.to_address().into(),
+                )]
+                .into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
             )
             .await
             .unwrap();
 
-        // inform wallet of any expected utxos from this tx.
-        alice.add_expected_utxos_to_wallet(expected_utxos).await?;
+        // no need to inform wallet of expected utxos; block template validity
+        // is what is being tested
 
-        alice.mempool.insert(&tx_by_preminer);
-        assert_eq!(1, alice.mempool.len());
+        alice.lock_guard_mut().await.mempool.insert(&tx_by_preminer);
+        assert_eq!(1, alice.lock_guard().await.mempool.len());
 
         // Build transaction for block
+        let alice_mut = alice.lock_guard().await;
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
-            create_block_transaction(&alice, in_seven_months);
+            create_block_transaction(&genesis_block, &alice_mut, in_seven_months);
+        drop(alice_mut);
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
