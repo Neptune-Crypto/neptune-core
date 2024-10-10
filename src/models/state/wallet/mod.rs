@@ -438,11 +438,12 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::GlobalStateLock;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_generation_key;
     use crate::tests::shared::mock_genesis_global_state;
@@ -662,12 +663,15 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
-        let network = Network::RegTest;
-
+        // Scenario:
+        // Alice is not coinbase recipient. She mines many blocks, and her
+        // balance is verified through [WalletState::allocate_sufficient_input_funds].
         let mut rng = thread_rng();
-        let own_wallet_secret = WalletSecret::new_random();
-        let own_global_state = mock_genesis_global_state(network, 1, own_wallet_secret).await;
-        let own_spending_key = own_global_state
+        let network = Network::Main;
+
+        let alice_wallet_secret = WalletSecret::new_random();
+        let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
+        let alice_spending_key = alice
             .lock_guard()
             .await
             .wallet_state
@@ -677,168 +681,127 @@ mod wallet_tests {
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             None,
-            own_spending_key.to_address(),
+            alice_spending_key.to_address(),
             rng.gen(),
         );
         let mining_reward = cb_utxo.get_native_currency_amount();
+        let now = genesis_block.header().timestamp + Timestamp::months(10);
 
-        // Add block to wallet state
-        let own_wallet_state = own_global_state.lock_guard_mut().await.wallet_state;
-        own_wallet_state
-            .add_expected_utxo(ExpectedUtxo::new(
-                cb_utxo,
-                cb_output_randomness,
-                own_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
-            ))
-            .await;
-        own_wallet_state
-            .update_wallet_state_with_new_block(
-                &genesis_block.kernel.body.mutator_set_accumulator,
-                &block_1,
-            )
-            .await?;
+        let input_len = move |alice: GlobalStateLock, amount: NeptuneCoins| async {
+            let tip_digest = alice.lock_guard().await.chain.light_state().hash();
+            alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .allocate_sufficient_input_funds(amount, tip_digest, now)
+                .await
+                .map(|x| x.len())
+        };
+
+        assert!(
+            input_len(alice.clone(), NeptuneCoins::new(1),)
+                .await
+                .is_err(),
+            "Cannot allocate anything when wallet is empty"
+        );
+
+        // Add block 1 to wallet state
+        {
+            let mut alice_wallet_state = alice.lock_guard_mut().await.wallet_state;
+            alice_wallet_state
+                .add_expected_utxo(ExpectedUtxo::new(
+                    cb_utxo,
+                    cb_output_randomness,
+                    alice_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                ))
+                .await;
+            alice_wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await?;
+        }
 
         // Verify that the allocater returns a sane amount
-        let now = Timestamp::now();
+        let one_coin = NeptuneCoins::new(1);
+        assert_eq!(1, input_len(alice.clone(), one_coin).await.unwrap(),);
         assert_eq!(
             1,
-            own_global_state
-                .lock_guard()
+            input_len(alice.clone(), mining_reward.checked_sub(&one_coin).unwrap(),)
                 .await
-                .wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash(), now)
-                .await
-                .unwrap()
-                .len()
+                .unwrap(),
         );
-        assert_eq!(
-            1,
-            own_global_state
-                .lock_guard()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(
-                    mining_reward.checked_sub(&NeptuneCoins::one()).unwrap(),
-                    block_1.hash(),
-                    now
-                )
-                .await
-                .unwrap()
-                .len()
-        );
-        assert_eq!(
-            1,
-            own_global_state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(mining_reward, block_1.hash(), now)
-                .await
-                .unwrap()
-                .len()
-        );
+        assert_eq!(1, input_len(alice.clone(), mining_reward).await.unwrap());
 
         // Cannot allocate more than we have: `mining_reward`
-        assert!(own_global_state
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .allocate_sufficient_input_funds(
-                mining_reward + NeptuneCoins::one(),
-                block_1.hash(),
-                now
-            )
+        assert!(input_len(alice.clone(), mining_reward + one_coin)
             .await
             .is_err());
 
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
-        for _ in 0..21 {
-            let previous_block = next_block;
-            let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) = make_mock_block(
-                &previous_block,
-                None,
-                own_spending_key.to_address(),
-                rng.gen(),
-            );
-            own_wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    cb_utxo_prime,
-                    cb_output_randomness_prime,
-                    own_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
-                ))
-                .await;
-            own_wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_block.kernel.body.mutator_set_accumulator,
-                    &next_block_prime,
-                )
-                .await?;
-            next_block = next_block_prime;
+        {
+            let mut alice = alice.lock_guard_mut().await;
+            for _ in 0..21 {
+                let previous_block = next_block;
+                let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) = make_mock_block(
+                    &previous_block,
+                    None,
+                    alice_spending_key.to_address(),
+                    rng.gen(),
+                );
+                alice
+                    .wallet_state
+                    .add_expected_utxo(ExpectedUtxo::new(
+                        cb_utxo_prime,
+                        cb_output_randomness_prime,
+                        alice_spending_key.privacy_preimage,
+                        UtxoNotifier::OwnMiner,
+                    ))
+                    .await;
+                alice
+                    .wallet_state
+                    .update_wallet_state_with_new_block(
+                        &previous_block.kernel.body.mutator_set_accumulator,
+                        &next_block_prime,
+                    )
+                    .await?;
+                next_block = next_block_prime;
+            }
         }
 
         assert_eq!(
             5,
-            own_global_state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(
-                    mining_reward.scalar_mul(5),
-                    next_block.hash(),
-                    now
-                )
+            input_len(alice.clone(), mining_reward.scalar_mul(5))
                 .await
                 .unwrap()
-                .len()
         );
         assert_eq!(
             6,
-            own_global_state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(
-                    mining_reward.scalar_mul(5) + NeptuneCoins::one(),
-                    next_block.hash(),
-                    now
-                )
+            input_len(alice.clone(), mining_reward.scalar_mul(5) + one_coin)
                 .await
                 .unwrap()
-                .len()
         );
 
         let expected_balance = mining_reward.scalar_mul(22);
         assert_eq!(
             22,
-            own_global_state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(expected_balance, next_block.hash(), now)
-                .await
-                .unwrap()
-                .len()
+            input_len(alice.clone(), expected_balance).await.unwrap()
         );
 
         // Cannot allocate more than we have: 22 * mining reward
-        assert!(own_global_state
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .allocate_sufficient_input_funds(
-                expected_balance + NeptuneCoins::one(),
-                next_block.hash(),
-                now
-            )
+        assert!(input_len(alice.clone(), expected_balance + one_coin)
             .await
             .is_err());
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
-        let tx_inputs_two_utxos = own_wallet_state
+        let tx_inputs_two_utxos = alice
+            .lock_guard()
+            .await
+            .wallet_state
             .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash(), now)
             .await
             .unwrap();
@@ -848,35 +811,11 @@ mod wallet_tests {
             "Must use two UTXOs when sending 2 x mining reward"
         );
 
-        // This block spends two UTXOs and gives us none, so the new balance
-        // becomes 2000
-        let other_wallet = WalletSecret::new_random();
-        let other_wallet_recipient_address = other_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        assert_eq!(
-            Into::<BlockHeight>::into(22u64),
-            next_block.kernel.header.height
-        );
+        // This block throws away two UTXOs. So the new balance becomes 2000.
         let msa_tip_previous = next_block.kernel.body.mutator_set_accumulator.clone();
-        (next_block, _, _) = make_mock_block(
-            &next_block.clone(),
-            None,
-            own_spending_key.to_address(),
-            rng.gen(),
-        );
-        assert_eq!(
-            Into::<BlockHeight>::into(23u64),
-            next_block.kernel.header.height
-        );
-
-        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(15));
-        let tx_outputs = vec![TxOutput::onchain(
-            utxo,
-            random(),
-            other_wallet_recipient_address.privacy_digest,
-        )]
-        .into();
+        let output_utxo =
+            Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(200));
+        let tx_outputs = vec![TxOutput::no_notification(output_utxo, random(), random())].into();
 
         let tx = make_mock_transaction_with_generation_key(
             tx_inputs_two_utxos,
@@ -886,14 +825,13 @@ mod wallet_tests {
         )
         .await;
 
-        let next_block =
-            Block::new_block_from_template(&next_block.clone(), tx, Timestamp::now(), None);
+        let next_block = Block::new_block_from_template(&next_block.clone(), tx, now, None);
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
         );
 
-        own_global_state
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
@@ -902,22 +840,13 @@ mod wallet_tests {
 
         assert_eq!(
             20,
-            own_global_state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::new(2000), next_block.hash(), now)
+            input_len(alice.clone(), NeptuneCoins::new(2000))
                 .await
                 .unwrap()
-                .len()
         );
 
         // Cannot allocate more than we have: 2000
-        assert!(own_global_state
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .allocate_sufficient_input_funds(NeptuneCoins::new(2001), next_block.hash(), now)
+        assert!(input_len(alice.clone(), NeptuneCoins::new(2001))
             .await
             .is_err());
 
