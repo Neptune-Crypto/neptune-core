@@ -870,7 +870,7 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
 
-        let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(15));
+        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(15));
         let tx_outputs = vec![TxOutput::onchain(
             utxo,
             random(),
@@ -962,14 +962,14 @@ mod wallet_tests {
             alice_address.privacy_digest,
         );
         let utxo_12_to_alice =
-            Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(12));
+            Utxo::new_native_currency(alice_address.lock_script(), NeptuneCoins::new(12));
         let receiver_data_12_to_alice = TxOutput::offchain(
             utxo_12_to_alice,
             bob_sender_randomness,
             alice_address.privacy_digest,
         );
         let utxo_one_to_alice =
-            Utxo::new_native_coin(alice_address.lock_script(), NeptuneCoins::new(1));
+            Utxo::new_native_currency(alice_address.lock_script(), NeptuneCoins::new(1));
         let receiver_data_one_to_alice = TxOutput::offchain(
             utxo_one_to_alice.clone(),
             bob_sender_randomness,

@@ -1534,7 +1534,7 @@ mod global_state_tests {
             .to_address();
         let main_lock_script = address.lock_script();
 
-        let nine_money = Utxo::new_native_coin(main_lock_script, NeptuneCoins::new(9));
+        let nine_money = Utxo::new_native_currency(main_lock_script, NeptuneCoins::new(9));
         let sender_randomness = Digest::default();
         let receiver_privacy_digest = address.privacy_digest();
         let public_announcement = address

@@ -415,7 +415,7 @@ impl Block {
         let mut utxos = vec![];
         for (receiving_address, amount) in Self::premine_distribution() {
             // generate utxo
-            let mut utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
+            let mut utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
             let six_months = Timestamp::months(6);
             utxo.coins
                 .push(TimeLock::until(network.launch_date() + six_months));

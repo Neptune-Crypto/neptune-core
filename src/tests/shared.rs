@@ -759,7 +759,7 @@ pub fn make_mock_transaction(
 
 pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     ExpectedUtxo {
-        utxo: Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::zero()),
+        utxo: Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::zero()),
         addition_record: AdditionRecord::new(Default::default()),
         sender_randomness: Default::default(),
         receiver_preimage: Default::default(),
