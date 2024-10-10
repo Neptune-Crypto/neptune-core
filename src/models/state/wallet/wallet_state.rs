@@ -43,9 +43,9 @@ use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_output::TxOutputList;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
-use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -235,6 +235,31 @@ impl WalletState {
         }
 
         wallet_state
+    }
+
+    /// Extract `ExpectedUtxo`s from the `TxOutputList` that require off-chain
+    /// notifications and that are destined for this wallet.
+    pub(crate) fn extract_expected_utxos(
+        &self,
+        tx_outputs: TxOutputList,
+        notifier: UtxoNotifier,
+    ) -> Vec<ExpectedUtxo> {
+        tx_outputs
+            .iter()
+            .filter(|txo| txo.is_offchain())
+            .filter_map(|txo| {
+                self.find_spending_key_for_utxo(&txo.utxo())
+                    .map(|sk| (txo, sk))
+            })
+            .map(|(tx_output, spending_key)| {
+                ExpectedUtxo::new(
+                    tx_output.utxo(),
+                    tx_output.notification_payload.sender_randomness,
+                    spending_key.privacy_preimage(),
+                    notifier,
+                )
+            })
+            .collect_vec()
     }
 
     // note: does not verify we do not have any dups.

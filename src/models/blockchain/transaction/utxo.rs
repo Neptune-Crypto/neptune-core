@@ -13,7 +13,6 @@ use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
-use triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
@@ -26,7 +25,6 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::prelude::triton_vm;
 use crate::prelude::twenty_first;
 
 #[derive(
