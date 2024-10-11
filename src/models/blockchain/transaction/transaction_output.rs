@@ -373,6 +373,10 @@ impl TxOutputList {
         self.0.push(tx_output);
     }
 
+    pub(crate) fn to_vec(&self) -> Vec<TxOutput> {
+        self.0.clone()
+    }
+
     pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self
     where
         T: IntoIterator<Item = TxOutput>,
