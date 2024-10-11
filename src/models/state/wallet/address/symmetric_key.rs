@@ -6,8 +6,6 @@ use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::Result;
-use rand::thread_rng;
-use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -15,6 +13,7 @@ use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
+use super::common::deterministically_derive_seed_and_nonce;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -145,12 +144,10 @@ impl SymmetricKey {
     /// The output of `encrypt()` should be used as the input to `decrypt()`.
     pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
         // 1. init randomness
-        let mut randomness = [0u8; 32];
-        let mut rng = thread_rng();
-        rng.fill(&mut randomness);
+        let (_randomness, nonce_bfe) =
+            deterministically_derive_seed_and_nonce(utxo, sender_randomness);
 
         // 2. generate random nonce
-        let nonce_bfe: BFieldElement = rng.gen();
         let nonce_as_bytes = [&nonce_bfe.value().to_be_bytes(), [0u8; 4].as_slice()].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
 

@@ -12,12 +12,32 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::prelude::twenty_first;
 
 /// Derive a receiver id from a seed.
 pub fn derive_receiver_id(seed: Digest) -> BFieldElement {
     Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
+}
+
+/// Derive a seed and a nonce deterministically, in order to produce
+/// deterministic public announcements, since these are needed to be able to
+/// reuse proofs for tests. These values are used in the encryption
+/// step.
+pub fn deterministically_derive_seed_and_nonce(
+    utxo: &Utxo,
+    sender_randomness: Digest,
+) -> ([u8; 32], BFieldElement) {
+    let combined = Tip5::hash_pair(sender_randomness, utxo.lock_script_hash);
+    let [e0, e1, e2, e3, e4] = combined.values();
+    let e0: [u8; 8] = e0.into();
+    let e1: [u8; 8] = e1.into();
+    let e2: [u8; 8] = e2.into();
+    let e3: [u8; 8] = e3.into();
+    let seed: [u8; 32] = [e0, e1, e2, e3].concat().try_into().unwrap();
+
+    (seed, e4)
 }
 
 /// retrieves key-type field from a [PublicAnnouncement]

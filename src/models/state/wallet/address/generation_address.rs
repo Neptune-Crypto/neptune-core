@@ -21,8 +21,6 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
-use rand::thread_rng;
-use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -32,6 +30,7 @@ use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
+use super::common::deterministically_derive_seed_and_nonce;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -175,14 +174,9 @@ impl GenerationReceivingAddress {
     }
 
     pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
-        // derive shared key
-        let mut randomness = [0u8; 32];
-        let mut rng = thread_rng();
-        rng.fill(&mut randomness);
+        let (randomness, nonce_bfe) =
+            deterministically_derive_seed_and_nonce(utxo, sender_randomness);
         let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key, randomness);
-
-        // sample nonce
-        let nonce_bfe: BFieldElement = rng.gen();
 
         // convert payload to bytes
         let plaintext = bincode::serialize(&(utxo, sender_randomness)).unwrap();
