@@ -1403,7 +1403,6 @@ mod global_state_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::mock_genesis_wallet_state;
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -1942,13 +1941,14 @@ mod global_state_tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
         let network = Network::Main;
 
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let genesis_spending_key = genesis_wallet_state
+        let mut genesis_state_lock =
+            mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
+        let genesis_spending_key = genesis_state_lock
+            .lock_guard()
+            .await
+            .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let mut genesis_state_lock =
-            mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
 
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
@@ -1969,7 +1969,6 @@ mod global_state_tests {
         drop(genesis_state);
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = NeptuneCoins::one();
         let sender_randomness: Digest = rng.gen();
         let tx_outputs_for_alice = vec![
             TxOutput::onchain_native_currency(
@@ -1998,6 +1997,7 @@ mod global_state_tests {
             ),
         ];
 
+        let fee = NeptuneCoins::one();
         let genesis_key = genesis_state_lock
             .lock_guard_mut()
             .await
