@@ -3,6 +3,7 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -282,6 +283,12 @@ impl From<&TxOutputList> for Vec<AdditionRecord> {
 impl From<&TxOutputList> for Vec<Utxo> {
     fn from(list: &TxOutputList) -> Self {
         list.utxos_iter().into_iter().collect()
+    }
+}
+
+impl From<Option<TxOutput>> for TxOutputList {
+    fn from(value: Option<TxOutput>) -> Self {
+        value.into_iter().collect_vec().into()
     }
 }
 
