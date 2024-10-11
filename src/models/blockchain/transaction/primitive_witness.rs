@@ -126,15 +126,24 @@ impl Display for PrimitiveWitness {
             None => "No".to_owned(),
         };
         let utxo_digests = self.input_utxos.utxos.iter().map(Hash::hash);
+        let kernel_merkle_tree = self.kernel.merkle_tree();
+        let kernel_mt_leafs = kernel_merkle_tree.leafs();
         write!(
             f,
-            "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}\ntxk mast hash: {}\n\ninput canonical commitments:\n{}\n\n",
+            "inputs: [{}]\noutputs: [{}]\ncoinbase: {}\nfee: {}\n\
+            txk mast hash: {}\n\ninput canonical commitments:\n{}\n\
+            kernel mast hash leafs:\n{}\n\n\n",
             self.input_utxos,
             self.output_utxos,
             coinbase_str,
             self.kernel.fee,
             self.kernel.mast_hash(),
-            self.input_membership_proofs.iter().zip_eq(utxo_digests).map(|(msmp, utxo_digest)| msmp.addition_record(utxo_digest).canonical_commitment).join("\n")
+            self.input_membership_proofs
+                .iter()
+                .zip_eq(utxo_digests)
+                .map(|(msmp, utxo_digest)| msmp.addition_record(utxo_digest).canonical_commitment)
+                .join("\n"),
+            kernel_mt_leafs.iter().join("\n"),
         )
     }
 }
