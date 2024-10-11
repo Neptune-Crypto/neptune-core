@@ -2003,7 +2003,7 @@ mod global_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation);
-        let (tx_to_alice_and_bob, _maybe_change_output) = genesis_state_lock
+        let (tx_to_alice_and_bob, maybe_change_output) = genesis_state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2018,9 +2018,23 @@ mod global_state_tests {
             )
             .await
             .unwrap();
+        let Some(change_output) = maybe_change_output else {
+            panic!("Expected change output to genesis receiver");
+        };
 
-        // genesis receiver does not care about change
-        // this is not what we are testing here
+        // Expect change output
+        genesis_state_lock
+            .global_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .add_expected_utxo(ExpectedUtxo::new(
+                change_output.utxo(),
+                change_output.sender_randomness(),
+                genesis_key.privacy_preimage(),
+                UtxoNotifier::Myself,
+            ))
+            .await;
 
         let block_transaction =
             tx_to_alice_and_bob.merge_with(coinbase_transaction, Default::default());
