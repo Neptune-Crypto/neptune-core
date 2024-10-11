@@ -439,14 +439,17 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
+    use crate::models::blockchain::transaction::transaction_output::TxOutputList;
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_generation_key;
+    use crate::tests::shared::mock_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
 
@@ -587,7 +590,7 @@ mod wallet_tests {
             alice_expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
-        let alice_mutxos_block1 = get_monitored_utxos(&alice_wallet).await;
+        let mut alice_mutxos_block1 = get_monitored_utxos(&alice_wallet).await;
         assert_eq!(
             1,
             alice_mutxos_block1.len(),
@@ -692,7 +695,7 @@ mod wallet_tests {
         let mining_reward = cb_utxo.get_native_currency_amount();
         let now = genesis_block.header().timestamp + Timestamp::months(10);
 
-        let input_len = move |alice_: GlobalStateLock, amount: NeptuneCoins| async {
+        let input_len = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
             let tip_digest = alice_.lock_guard().await.chain.light_state().hash();
             alice_
                 .lock_guard()
@@ -712,8 +715,9 @@ mod wallet_tests {
 
         // Add block 1 to wallet state
         {
-            let mut alice_wallet_state = alice.lock_guard_mut().await.wallet_state;
-            alice_wallet_state
+            let mut alice = alice.lock_guard_mut().await;
+            alice
+                .wallet_state
                 .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
@@ -721,7 +725,8 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 ))
                 .await;
-            alice_wallet_state
+            alice
+                .wallet_state
                 .update_wallet_state_with_new_block(
                     &genesis_block.kernel.body.mutator_set_accumulator,
                     &block_1,
@@ -900,32 +905,28 @@ mod wallet_tests {
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(12),
             bob_sender_randomness,
-            alice_address,
+            alice_address.into(),
         );
         let receiver_data_1_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(1),
             bob_sender_randomness,
-            alice_address,
+            alice_address.into(),
         );
 
-        let receiver_data_to_alice =
+        let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
-        let valid_tx = bob
+        let (tx, _change_output) = bob
             .create_transaction(
-                receiver_data_to_alice,
+                receiver_data_to_alice.clone(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
-                UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(2),
                 in_seven_months,
             )
             .await
             .unwrap();
 
-        let block_1 =
-            Block::new_block_from_template(&genesis_block, valid_tx, in_seven_months, None);
-
-        // Verify the validity of the transaction and block
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+        let block_1 = mock_block_with_transaction(&genesis_block, tx);
 
         // Update wallet state with block_1
         assert!(
@@ -935,21 +936,8 @@ mod wallet_tests {
             "List of monitored UTXOs must be empty prior to updating wallet state"
         );
 
-        // Expect the UTXO outputs
-        for receive_data in receiver_data_to_alice.iter() {
-            alice
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    receive_data.utxo(),
-                    receive_data.sender_randomness(),
-                    alice_spending_key.privacy_preimage,
-                    UtxoNotifier::Cli,
-                ))
-                .await;
-        }
-
+        // Notification for Bob's change happens on-chain. No need to ask
+        // wallet to expect change UTXO.
         bob.set_new_tip(block_1.clone()).await.unwrap();
 
         assert_eq!(
@@ -1143,7 +1131,8 @@ mod wallet_tests {
                 &first_block_after_spree.kernel.body.mutator_set_accumulator,
                 &first_block_continuing_spree,
             )
-            .awaitunwrap();
+            .await
+            .unwrap();
         let alice_monitored_utxos_after_continued_spree: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
@@ -1184,7 +1173,7 @@ mod wallet_tests {
             alice_address.into(),
         );
 
-        let tx_from_bob = bob
+        let (tx_from_bob, _maybe_change_output) = bob
             .create_transaction(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
@@ -1328,6 +1317,49 @@ mod wallet_tests {
                 "All membership proofs of unspent UTXOs must be valid after block on longest chain"
             )
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn allow_consumption_of_genesis_output_test() {
+        let network = Network::Main;
+        let bob = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let bob_wallet = bob.wallet_secret;
+        let genesis_block = Block::genesis_block(network);
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let bob = mock_genesis_global_state(network, 42, bob_wallet).await;
+        let bob = bob.lock_guard().await;
+
+        let mut rng = StdRng::seed_from_u64(87255549301u64);
+
+        let (cbtx, _cb_expected) =
+            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_seven_months);
+        let one_money: NeptuneCoins = NeptuneCoins::new(1);
+        let anyone_can_spend_utxo =
+            Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
+        let tx_output = TxOutput::no_notification(anyone_can_spend_utxo, rng.gen(), rng.gen());
+        let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
+        let (sender_tx, _change_output) = bob
+            .create_transaction_with_prover_capability(
+                vec![tx_output].into(),
+                change_key.into(),
+                UtxoNotificationMedium::OffChain,
+                one_money,
+                in_seven_months,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
+        let tx_for_block = sender_tx.merge_with(cbtx, Default::default());
+        let block_1 =
+            Block::new_block_from_template(&genesis_block, tx_for_block, in_seven_months, None);
+
+        // The entire block must be valid, i.e., have a valid block proof, and
+        // be valid in other respects. We don't care about PoW, though.
+        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+
+        // 3 outputs: 1 coinbase, 1 for recipient of tx, 1 for change.
+        assert_eq!(3, block_1.body().transaction_kernel.outputs.len());
     }
 
     #[tokio::test]

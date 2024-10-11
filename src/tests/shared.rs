@@ -32,6 +32,7 @@ use rand::thread_rng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
+use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -53,6 +54,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction;
@@ -801,6 +803,47 @@ pub fn make_mock_transaction_with_wallet(
         kernel,
         proof: TransactionProof::Invalid,
     }
+}
+
+/// Create a block containing the supplied transaction.
+///
+/// The returned block has an invalid block proof.
+pub(crate) fn mock_block_with_transaction(
+    previous_block: &Block,
+    transaction: Transaction,
+) -> Block {
+    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
+    let block_header = BlockHeader {
+        version: bfe!(0),
+        height: new_block_height,
+        prev_block_digest: previous_block.hash(),
+        timestamp: transaction.kernel.timestamp,
+        nonce: [bfe!(0), bfe!(0), bfe!(0)],
+        max_block_size: 1_000_000,
+        proof_of_work_line: previous_block.header().proof_of_work_line,
+        proof_of_work_family: previous_block.header().proof_of_work_family,
+        difficulty: previous_block.header().difficulty,
+    };
+
+    let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
+    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
+    block_mmr.append(previous_block.hash());
+
+    let ms_update = MutatorSetUpdate::new(
+        transaction.kernel.inputs.clone(),
+        transaction.kernel.outputs.clone(),
+    );
+    ms_update.apply_to_accumulator(&mut next_mutator_set);
+
+    let body = BlockBody {
+        transaction_kernel: transaction.kernel,
+        mutator_set_accumulator: next_mutator_set,
+        lock_free_mmr_accumulator: previous_block.body().lock_free_mmr_accumulator.clone(),
+        block_mmr_accumulator: block_mmr,
+        uncle_blocks: Default::default(),
+    };
+
+    Block::new(block_header, body, BlockProof::Invalid)
 }
 
 /// Build a fake block with a random hash, containing *one* output UTXO in the form

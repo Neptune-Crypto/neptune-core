@@ -649,7 +649,7 @@ impl GlobalState {
     ///     state
     ///         .lock_guard_mut()
     ///         .await
-    ///         .add_expected_utxos_to_wallet(change_utxo.expected_utxo())
+    ///         .wallet_state.add_expected_utxos_to_wallet(change_utxo.expected_utxo())
     ///         .await?;
     /// }
     /// ```
@@ -840,28 +840,6 @@ impl GlobalState {
         };
 
         Transaction { kernel, proof }
-    }
-
-    // If any output UTXO(s) are going back to our wallet (eg change utxo)
-    // we add them to pool of expected incoming UTXOs so that we can
-    // synchronize them after the Tx is confirmed.
-    //
-    // Discussion: https://github.com/Neptune-Crypto/neptune-core/pull/136
-    pub async fn add_expected_utxos_to_wallet(
-        &mut self,
-        expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
-    ) -> Result<()> {
-        for expected_utxo in expected_utxos.into_iter() {
-            self.wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    expected_utxo.utxo,
-                    expected_utxo.sender_randomness,
-                    expected_utxo.receiver_preimage,
-                    expected_utxo.received_from,
-                ))
-                .await;
-        }
-        Ok(())
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
@@ -2194,7 +2172,8 @@ mod global_state_tests {
         alice_state_lock
             .lock_guard_mut()
             .await
-            .add_expected_utxos_to_wallet(expected_utxos_alice)
+            .wallet_state
+            .add_expected_utxos(expected_utxos_alice)
             .await
             .unwrap();
 
@@ -2462,7 +2441,8 @@ mod global_state_tests {
                     UtxoNotifier::Myself,
                 );
                 alice_state_mut
-                    .add_expected_utxos_to_wallet(expected_utxo)
+                    .wallet_state
+                    .add_expected_utxos(expected_utxo)
                     .await
                     .unwrap();
 

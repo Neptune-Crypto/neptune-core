@@ -14,7 +14,7 @@ use clap_complete::Shell;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
-use neptune_core::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::KeyType;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
@@ -461,7 +461,7 @@ async fn main() -> Result<()> {
                     ctx,
                     amount,
                     receiving_address,
-                    UtxoNotifyMethod::OnChain,
+                    UtxoNotificationMedium::OnChain,
                     fee,
                 )
                 .await?;
@@ -474,7 +474,7 @@ async fn main() -> Result<()> {
                 .collect::<Result<Vec<_>>>()?;
 
             client
-                .send_to_many(ctx, parsed_outputs, UtxoNotifyMethod::OnChain, fee)
+                .send_to_many(ctx, parsed_outputs, UtxoNotificationMedium::OnChain, fee)
                 .await?;
             println!("Send completed.");
         }

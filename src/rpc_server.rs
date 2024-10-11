@@ -705,7 +705,11 @@ impl RPC for NeptuneRPCServer {
 
             // Inform wallet of any expected incoming utxos.
             // note that this (briefly) mutates self.
-            if let Err(e) = gsm.add_expected_utxos_to_wallet(utxos_sent_to_self).await {
+            if let Err(e) = gsm
+                .wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await
+            {
                 tracing::error!("Could not add expected utxos to wallet: {}", e);
                 return None;
             }

@@ -270,6 +270,27 @@ impl WalletState {
             .await;
     }
 
+    // If any output UTXO(s) are going back to our wallet (eg change utxo)
+    // we add them to pool of expected incoming UTXOs so that we can
+    // synchronize them after the Tx is confirmed.
+    //
+    // Discussion: https://github.com/Neptune-Crypto/neptune-core/pull/136
+    pub(crate) async fn add_expected_utxos(
+        &mut self,
+        expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
+    ) -> Result<()> {
+        for expected_utxo in expected_utxos.into_iter() {
+            self.add_expected_utxo(ExpectedUtxo::new(
+                expected_utxo.utxo,
+                expected_utxo.sender_randomness,
+                expected_utxo.receiver_preimage,
+                expected_utxo.received_from,
+            ))
+            .await;
+        }
+        Ok(())
+    }
+
     /// Return a list of UTXOs spent by this wallet in the transaction
     async fn scan_for_spent_utxos(
         &self,

@@ -854,7 +854,7 @@ mod archival_state_tests {
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotifyMethod;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -1018,11 +1018,12 @@ mod archival_state_tests {
             .wallet_state
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
-        let sender_tx = alice
+        let tx_output_anyone_can_spend = TxOutput::no_notification(utxo, rng.gen(), rng.gen());
+        let (sender_tx, _change_output) = alice
             .create_transaction_with_prover_capability(
-                &mut vec![TxOutput::offchain(utxo, rng.gen(), rng.gen())].into(),
+                vec![tx_output_anyone_can_spend].into(),
                 change_key.into(),
-                UtxoNotifyMethod::OnChain,
+                UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
@@ -1260,51 +1261,6 @@ mod archival_state_tests {
                 .num_leafs().await as usize,
             "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
         );
-
-        Ok(())
-    }
-
-    #[traced_test]
-    #[tokio::test]
-    async fn allow_consumption_of_genesis_output_test() -> Result<()> {
-        let network = Network::Main;
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let genesis_block = Block::genesis_block(network);
-        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-        let global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
-        let global_state = global_state_lock.lock_guard().await;
-
-        let mut rng = StdRng::seed_from_u64(87255549301u64);
-
-        let (cbtx, _cb_expected) =
-            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), in_seven_months);
-        let one_money: NeptuneCoins = NeptuneCoins::new(1);
-        let anyone_can_spend_utxo =
-            Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
-        let receiver_data = TxOutput::offchain(anyone_can_spend_utxo, rng.gen(), rng.gen());
-        let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
-        let sender_tx = global_state
-            .create_transaction_with_prover_capability(
-                &mut vec![receiver_data].into(),
-                change_key.into(),
-                UtxoNotifyMethod::OnChain,
-                one_money,
-                in_seven_months,
-                TxProvingCapability::SingleProof,
-            )
-            .await
-            .unwrap();
-        let block_tx = sender_tx.merge_with(cbtx, Default::default());
-        let block_1 =
-            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
-
-        // Verify that block_1 is valid. We don't care about PoW for this test.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
-
-        // 3 outputs: 1 coinbase, 1 for recipient of tx, 1 for change.
-        assert_eq!(3, block_1.body().transaction_kernel.outputs.len());
 
         Ok(())
     }

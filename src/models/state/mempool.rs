@@ -666,7 +666,8 @@ mod tests {
             utxos_from_bob.concat_with(maybe_change_output),
             UtxoNotifier::Myself,
         );
-        bob.add_expected_utxos_to_wallet(expected_utxos)
+        bob.wallet_state
+            .add_expected_utxos(expected_utxos)
             .await
             .unwrap();
 
