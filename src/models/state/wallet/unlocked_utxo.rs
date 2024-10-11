@@ -6,6 +6,8 @@ use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::tasm_lib::Digest;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnlockedUtxo {
@@ -38,5 +40,11 @@ impl UnlockedUtxo {
 
     pub fn lock_script_and_witness(&self) -> &LockScriptAndWitness {
         &self.lock_script_and_witness
+    }
+
+    pub(crate) fn removal_record(&self, mutator_set: &MutatorSetAccumulator) -> RemovalRecord {
+        let item = self.mutator_set_item();
+        let msmp = &self.membership_proof;
+        mutator_set.drop(item, msmp)
     }
 }

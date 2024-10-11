@@ -448,7 +448,7 @@ mod wallet_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_transaction_with_generation_key;
+    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -533,7 +533,7 @@ mod wallet_tests {
     }
 
     #[tokio::test]
-    async fn wallet_state_registration_of_monitored_utxos_test() {
+    async fn wallet_state_correctly_updates_monitored_and_expected_utxos() {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let alice_wallet = WalletSecret::new_random();
@@ -590,7 +590,7 @@ mod wallet_tests {
             alice_expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
-        let mut alice_mutxos_block1 = get_monitored_utxos(&alice_wallet).await;
+        let alice_mutxos_block1 = get_monitored_utxos(&alice_wallet).await;
         assert_eq!(
             1,
             alice_mutxos_block1.len(),
@@ -598,40 +598,40 @@ mod wallet_tests {
         );
 
         // Ensure that the membership proof is valid
-        let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
-        let ms_membership_proof = alice_mutxos_block1[0]
+        let alice_block_1_cb_item = Hash::hash(&block_1_coinbase_utxo);
+        let ms_membership_proof_block1 = alice_mutxos_block1[0]
             .get_membership_proof_for_block(block_1.hash())
             .unwrap();
         assert!(block_1
             .kernel
             .body
             .mutator_set_accumulator
-            .verify(block_1_tx_output_digest, &ms_membership_proof));
+            .verify(alice_block_1_cb_item, &ms_membership_proof_block1));
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
         let (block_2, _, _) = make_mock_block(&block_1, None, bob_address, rng.gen());
         let (block_3, _, _) = make_mock_block(&block_2, None, bob_address, rng.gen());
-        let alice_mutxos = get_monitored_utxos(&alice_wallet).await;
-        {
-            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
-            let ms_membership_proof = alice_mutxos[0]
-                .get_membership_proof_for_block(block_1.hash())
-                .unwrap();
-            let _membership_proof_is_valid = block_3
-                .kernel
-                .body
-                .mutator_set_accumulator
-                .verify(block_1_tx_output_digest, &ms_membership_proof);
 
-            // Actually, new blocks / transactions / UTXOs do not necessarily
-            // invalidate existing mutator set membership proofs (although that is
-            // what usually happens). So there is no point asserting it.
-            // assert!(
-            //     !membership_proof_is_valid,
-            //     "membership proof must be invalid before updating wallet state"
-            // );
+        if ms_membership_proof_block1
+            .auth_path_aocl
+            .authentication_path
+            .is_empty()
+        {
+            // We *know* that Alice's membership proof is invalid now, since
+            // the extra blocks would have invalidated the AOCL-MMR proof --
+            // if the inserted UTXO was a peak (indicated by its authentication
+            // path having a length of zero).
+            assert!(
+                !block_3
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(alice_block_1_cb_item, &ms_membership_proof_block1),
+                "membership proof must be invalid before updating wallet state"
+            );
         }
+
         // Verify that the membership proof is valid *after* running the updater
         alice_wallet
             .update_wallet_state_with_new_block(
@@ -647,18 +647,19 @@ mod wallet_tests {
             )
             .await
             .unwrap();
-        alice_mutxos_block1 = get_monitored_utxos(&alice_wallet).await;
+
+        let alice_mutxos_block3 = get_monitored_utxos(&alice_wallet).await;
+        assert_eq!(1, alice_mutxos_block3.len(), "Still only one MUTXO");
 
         {
-            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
-            let ms_membership_proof = alice_mutxos_block1[0]
+            let ms_membership_proof_block3 = alice_mutxos_block3[0]
                 .get_membership_proof_for_block(block_3.hash())
                 .unwrap();
             let membership_proof_is_valid = block_3
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .verify(block_1_tx_output_digest, &ms_membership_proof);
+                .verify(alice_block_1_cb_item, &ms_membership_proof_block3);
             assert!(
                 membership_proof_is_valid,
                 "Membership proof must be valid after updating wallet state with generated blocks"
@@ -827,15 +828,15 @@ mod wallet_tests {
         let msa_tip_previous = next_block.kernel.body.mutator_set_accumulator.clone();
         let output_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(200));
-        let tx_outputs = vec![TxOutput::no_notification(output_utxo, random(), random())].into();
+        let tx_outputs: TxOutputList =
+            vec![TxOutput::no_notification(output_utxo, random(), random())].into();
 
-        let tx = make_mock_transaction_with_generation_key(
-            tx_inputs_two_utxos,
-            tx_outputs,
-            NeptuneCoins::zero(),
-            msa_tip_previous.clone(),
-        )
-        .await;
+        let removal_records = tx_inputs_two_utxos
+            .iter()
+            .map(|txi| txi.removal_record(&msa_tip_previous))
+            .collect_vec();
+        let addition_records = tx_outputs.addition_records();
+        let tx = make_mock_transaction(removal_records, addition_records);
 
         let next_block = Block::new_block_from_template(&next_block.clone(), tx, now, None);
         assert_eq!(
@@ -1186,7 +1187,9 @@ mod wallet_tests {
 
         let alice_state = alice.global_state_lock.lock_guard().await;
         let (coinbase_tx, cb_expected) =
-            make_coinbase_transaction(&alice_state, NeptuneCoins::zero(), in_seven_months);
+            make_coinbase_transaction(&alice_state, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap();
         let merged_tx = coinbase_tx.merge_with(tx_from_bob, Default::default());
         let block_3_b =
             Block::new_block_from_template(&block_2_b, merged_tx, in_seven_months, None);
@@ -1194,7 +1197,7 @@ mod wallet_tests {
             block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"
         );
-        let expected_utxo_for_alice = ExpectedUtxo::new(
+        let expected_utxo_for_alice_cb = ExpectedUtxo::new(
             cb_expected.utxo,
             cb_expected.sender_randomness,
             alice_spending_key.privacy_preimage,
@@ -1206,7 +1209,7 @@ mod wallet_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(expected_utxo_for_alice)
+            .add_expected_utxo(expected_utxo_for_alice_cb)
             .await;
         let expected_utxo_for_alice = ExpectedUtxo::new(
             receiver_data_1_to_alice_new.utxo(),
@@ -1323,17 +1326,17 @@ mod wallet_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() {
         let network = Network::Main;
-        let bob = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let bob_wallet = bob.wallet_secret;
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-        let bob = mock_genesis_global_state(network, 42, bob_wallet).await;
+        let bob = mock_genesis_global_state(network, 42, WalletSecret::devnet_wallet()).await;
         let bob = bob.lock_guard().await;
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
         let (cbtx, _cb_expected) =
-            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_seven_months);
+            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap();
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let anyone_can_spend_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);

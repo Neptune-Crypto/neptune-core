@@ -63,7 +63,6 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 use crate::VERSION;
 
@@ -395,21 +394,6 @@ impl GlobalState {
             }
         }
         history
-    }
-
-    /// Given a list of spendable UTXOs, generate the corresponding removal
-    /// recods relative to the current mutator set accumulator.
-    pub(crate) fn generate_removal_records(
-        utxo_unlockers: &[UnlockedUtxo],
-        mutator_set_accumulator: &MutatorSetAccumulator,
-    ) -> Vec<RemovalRecord> {
-        let mut inputs: Vec<RemovalRecord> = vec![];
-        for unlocker in utxo_unlockers.iter() {
-            let removal_record = mutator_set_accumulator
-                .drop(unlocker.mutator_set_item(), unlocker.mutator_set_mp());
-            inputs.push(removal_record);
-        }
-        inputs
     }
 
     /// Generate a change UTXO to ensure that the difference in input amount
@@ -795,8 +779,7 @@ impl GlobalState {
         // complete transaction kernel
         let removal_records = tx_inputs
             .iter()
-            .map(|txi| (txi.mutator_set_item(), txi.mutator_set_mp()))
-            .map(|(item, mp)| mutator_set_accumulator.drop(item, mp))
+            .map(|txi| txi.removal_record(&mutator_set_accumulator))
             .collect_vec();
         let kernel = TransactionKernel {
             inputs: removal_records,
@@ -1474,7 +1457,6 @@ mod global_state_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let bob_address = bob_spending_key.to_address();
 
         let genesis_block = Block::genesis_block(network);
         let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
@@ -1504,7 +1486,7 @@ mod global_state_tests {
             .is_err());
 
         // one month after though, we should be
-        let (tx, change_output) = bob
+        let (tx, _change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1981,7 +1963,9 @@ mod global_state_tests {
 
         let genesis_state = genesis_state_lock.lock_guard().await;
         let (coinbase_transaction, coinbase_expected_utxo) =
-            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months);
+            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap();
         drop(genesis_state);
 
         // Send two outputs each to Alice and Bob, from genesis receiver
@@ -2067,9 +2051,10 @@ mod global_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxos(expected_utxos_for_alice);
+            .add_expected_utxos(expected_utxos_for_alice)
+            .await;
 
-        let expected_utxos_for_bob = bob_state_lock
+        let expected_utxos_for_bob_1 = bob_state_lock
             .lock_guard()
             .await
             .wallet_state
@@ -2078,7 +2063,8 @@ mod global_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxos(expected_utxos_for_bob);
+            .add_expected_utxos(expected_utxos_for_bob_1)
+            .await;
 
         genesis_state_lock
             .lock_guard_mut()
@@ -2168,8 +2154,7 @@ mod global_state_tests {
             .await
             .wallet_state
             .add_expected_utxos(expected_utxos_alice)
-            .await
-            .unwrap();
+            .await;
 
         // make bob's transaction
         let tx_outputs_from_bob = vec![
@@ -2203,7 +2188,7 @@ mod global_state_tests {
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
-        let expected_utxos_for_bob = bob_state_lock
+        let expected_utxos_for_bob_2 = bob_state_lock
             .lock_guard()
             .await
             .wallet_state
@@ -2212,14 +2197,17 @@ mod global_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxos(expected_utxos_for_bob);
+            .add_expected_utxos(expected_utxos_for_bob_2)
+            .await;
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
         let genesis_state_mut = genesis_state_lock.lock_guard_mut().await;
         let (coinbase_transaction2, _expected_utxo) =
-            make_coinbase_transaction(&genesis_state_mut, NeptuneCoins::zero(), in_seven_months);
+            make_coinbase_transaction(&genesis_state_mut, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap();
         drop(genesis_state_mut);
 
         // don't care about change; testing correct constitution of blocks
@@ -2433,8 +2421,7 @@ mod global_state_tests {
                 alice_state_mut
                     .wallet_state
                     .add_expected_utxos(expected_utxo)
-                    .await
-                    .unwrap();
+                    .await;
 
                 // the block gets mined.
                 let block_1 = {

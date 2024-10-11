@@ -154,7 +154,7 @@ impl ReceivingAddress {
     ///
     /// Fields |0,1| enable the receiver to determine the ciphertext
     /// is intended for them and decryption should be attempted.
-    pub fn generate_public_announcement(
+    pub(crate) fn generate_public_announcement(
         &self,
         utxo_notification_payload: UtxoNotificationPayload,
     ) -> PublicAnnouncement {

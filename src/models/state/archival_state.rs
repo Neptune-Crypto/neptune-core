@@ -861,7 +861,6 @@ mod archival_state_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
@@ -1278,8 +1277,20 @@ mod archival_state_tests {
             .nth_generation_spending_key(0);
         let mut genesis =
             mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
-        let mut rng = StdRng::seed_from_u64(41251549301u64);
+        assert_eq!(
+            1,
+            genesis
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .len()
+                .await,
+            "Genesis receiver must have non-empty list of monitored UTXOs"
+        );
 
+        let mut rng = StdRng::seed_from_u64(41251549301u64);
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
         let mut alice = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
@@ -1357,6 +1368,8 @@ mod archival_state_tests {
         let (cbtx, cb_expected) = {
             let genesis_state = genesis.lock_guard().await;
             make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap()
         };
 
         let block_tx = cbtx.merge_with(tx_to_alice_and_bob, Default::default());
@@ -1384,8 +1397,12 @@ mod archival_state_tests {
                 .extract_expected_utxos(vec![change_utxo.unwrap()].into(), UtxoNotifier::Cli);
             genesis_state
                 .wallet_state
-                .add_expected_utxos(expected_utxos);
-            genesis_state.wallet_state.add_expected_utxo(cb_expected);
+                .add_expected_utxos(expected_utxos)
+                .await;
+            genesis_state
+                .wallet_state
+                .add_expected_utxo(cb_expected)
+                .await;
         }
 
         // UTXOs for this transaction are communicated offline. So must be
@@ -1395,7 +1412,10 @@ mod archival_state_tests {
             let expected_utxos = alice_state
                 .wallet_state
                 .extract_expected_utxos(receiver_data_for_alice.into(), UtxoNotifier::Cli);
-            alice_state.wallet_state.add_expected_utxos(expected_utxos);
+            alice_state
+                .wallet_state
+                .add_expected_utxos(expected_utxos)
+                .await;
         }
 
         {
@@ -1403,7 +1423,10 @@ mod archival_state_tests {
             let expected_utxos = bob_state
                 .wallet_state
                 .extract_expected_utxos(receiver_data_for_bob.into(), UtxoNotifier::Cli);
-            bob_state.wallet_state.add_expected_utxos(expected_utxos);
+            bob_state
+                .wallet_state
+                .add_expected_utxos(expected_utxos)
+                .await;
         }
 
         // Update chain states
@@ -1548,6 +1571,8 @@ mod archival_state_tests {
         let (cbtx2, cb_expected2) = {
             let genesis_state = genesis.lock_guard().await;
             make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+                .await
+                .unwrap()
         };
         let block_tx2 = cbtx2
             .merge_with(tx_from_alice, Default::default())
@@ -1565,14 +1590,10 @@ mod archival_state_tests {
         {
             let mut genesis = genesis.lock_guard_mut().await;
             let expected = genesis.wallet_state.extract_expected_utxos(
-                outputs_from_bob.concat_with(outputs_from_alice.to_vec()),
+                outputs_from_bob.concat_with(outputs_from_alice),
                 UtxoNotifier::Cli,
             );
-            genesis
-                .wallet_state
-                .add_expected_utxos(expected)
-                .await
-                .unwrap();
+            genesis.wallet_state.add_expected_utxos(expected).await;
         }
 
         genesis

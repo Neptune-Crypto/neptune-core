@@ -769,7 +769,6 @@ impl Block {
 mod block_tests {
     use std::collections::HashSet;
 
-    use rand::random;
     use rand::thread_rng;
     use rand::Rng;
     use strum::IntoEnumIterator;

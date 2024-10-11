@@ -143,14 +143,6 @@ impl GenerationSpendingKey {
     fn generate_spending_lock(&self) -> Digest {
         self.unlock_key.hash()
     }
-
-    pub(crate) fn try_decrypt_to_utxo_notification(
-        &self,
-        public_announcement: PublicAnnouncement,
-    ) -> Result<UtxoNotificationPayload> {
-        let (utxo, sender_randomness) = self.decrypt(&public_announcement.message)?;
-        Ok(UtxoNotificationPayload::new(utxo, sender_randomness))
-    }
 }
 
 impl GenerationReceivingAddress {

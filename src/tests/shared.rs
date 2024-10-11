@@ -53,27 +53,21 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::transaction_output::TxOutputList;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
-use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::database::BlockIndexKey;
@@ -83,7 +77,6 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
@@ -92,7 +85,8 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
@@ -100,7 +94,6 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
@@ -660,82 +653,6 @@ pub(crate) fn make_plenty_mock_transaction_with_primitive_witness(
         .collect_vec()
 }
 
-// TODO: Consider moving this to to the appropriate place in global state,
-// keep fn interface. Can be helper function to `create_transaction`.
-pub(crate) async fn make_mock_transaction_with_generation_key(
-    utxo_unlockers: Vec<UnlockedUtxo>,
-    tx_outputs: TxOutputList,
-    fee: NeptuneCoins,
-    tip_msa: MutatorSetAccumulator,
-) -> Transaction {
-    // Generate removal records
-    let mut inputs = vec![];
-    for unlocker in utxo_unlockers.iter() {
-        let removal_record = tip_msa.drop(unlocker.mutator_set_item(), unlocker.mutator_set_mp());
-        inputs.push(removal_record);
-    }
-
-    let mut outputs = vec![];
-    let mut output_sender_randomnesses = vec![];
-    let mut output_receiver_digests = vec![];
-    for rd in tx_outputs.iter() {
-        let addition_record = commit(
-            Hash::hash(&rd.utxo),
-            rd.sender_randomness,
-            rd.receiver_privacy_digest,
-        );
-        outputs.push(addition_record);
-        output_sender_randomnesses.push(rd.sender_randomness);
-        output_receiver_digests.push(rd.receiver_privacy_digest);
-    }
-
-    let public_announcements = tx_outputs
-        .iter()
-        .map(|x| x.public_announcement.clone())
-        .collect_vec();
-    let timestamp = Timestamp::now();
-
-    let kernel = TransactionKernel {
-        inputs: tx_inputs.removal_records(&tip_msa),
-        outputs: tx_outputs.addition_records(),
-        public_announcements: tx_outputs.public_announcements(),
-        fee,
-        timestamp,
-        coinbase: None,
-        mutator_set_hash: tip_msa.hash(),
-    };
-
-    let input_utxos = utxo_unlockers
-        .iter()
-        .map(|unlocker| unlocker.utxo.clone())
-        .collect_vec();
-    let type_scripts_and_witnesses = vec![TypeScriptAndWitness::new(NativeCurrency.program())];
-    let input_membership_proofs = utxo_unlockers
-        .iter()
-        .map(|unlocker| unlocker.mutator_set_mp())
-        .cloned()
-        .collect_vec();
-    let input_lock_scripts_and_witnesses = utxo_unlockers
-        .iter()
-        .map(|unlocker| unlocker.lock_script_and_witness().to_owned())
-        .collect_vec();
-    let output_utxos = tx_outputs.into_iter().map(|rd| rd.utxo).collect();
-    let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
-        input_utxos: SaltedUtxos::new(input_utxos),
-        type_scripts_and_witnesses,
-        lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
-        input_membership_proofs,
-        output_utxos: SaltedUtxos::new(output_utxos),
-        output_sender_randomnesses,
-        output_receiver_digests,
-        mutator_set_accumulator: tip_msa,
-        kernel: kernel.clone(),
-    };
-    let proof = TransactionProof::Witness(primitive_witness);
-
-    Transaction { kernel, proof }
-}
-
 /// Make a transaction with `Invalid` transaction proof.
 pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,
@@ -764,7 +681,7 @@ pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
         sender_randomness: Default::default(),
         receiver_preimage: Default::default(),
         received_from: UtxoNotifier::Myself,
-        notification_received: SystemTime::now(),
+        notification_received: Timestamp::now(),
         mined_in_block: None,
     }
 }
@@ -833,7 +750,9 @@ pub(crate) fn mock_block_with_transaction(
         transaction.kernel.inputs.clone(),
         transaction.kernel.outputs.clone(),
     );
-    ms_update.apply_to_accumulator(&mut next_mutator_set);
+    ms_update
+        .apply_to_accumulator(&mut next_mutator_set)
+        .unwrap();
 
     let body = BlockBody {
         transaction_kernel: transaction.kernel,

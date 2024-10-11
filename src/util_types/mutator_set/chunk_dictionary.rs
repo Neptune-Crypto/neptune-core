@@ -14,7 +14,6 @@ use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use triton_vm::prelude::Digest;
-use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 

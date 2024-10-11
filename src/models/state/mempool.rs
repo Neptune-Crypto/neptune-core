@@ -470,7 +470,6 @@ mod tests {
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
     use crate::models::blockchain::transaction::transaction_output::TxOutputList;
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
-    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -666,10 +665,7 @@ mod tests {
             utxos_from_bob.concat_with(maybe_change_output),
             UtxoNotifier::Myself,
         );
-        bob.wallet_state
-            .add_expected_utxos(expected_utxos)
-            .await
-            .unwrap();
+        bob.wallet_state.add_expected_utxos(expected_utxos).await;
 
         // Add this transaction to a mempool
         let mut mempool = Mempool::new(ByteSize::gb(1), block_1.hash());
@@ -699,7 +695,9 @@ mod tests {
 
         // Create next block which includes preminer's transaction
         let (coinbase_transaction, _expected_utxo) =
-            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months);
+            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
+                .await
+                .unwrap();
         let block_transaction = tx_by_bob.merge_with(coinbase_transaction, Default::default());
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction, in_eight_months, None);
@@ -726,7 +724,9 @@ mod tests {
         alice.set_new_tip(block_2.clone()).await.unwrap();
         bob.set_new_tip(block_2.clone()).await.unwrap();
         let (coinbase_transaction2, _expected_utxo2) =
-            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months);
+            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
+                .await
+                .unwrap();
         let block_transaction2 = tx_by_alice_updated
             .clone()
             .merge_with(coinbase_transaction2, Default::default());
@@ -764,7 +764,9 @@ mod tests {
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         let (coinbase_transaction3, _expected_utxo3) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_eight_months);
+            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_eight_months)
+                .await
+                .unwrap();
         let block_transaction3 =
             coinbase_transaction3.merge_with(tx_by_alice_updated, Default::default());
         let block_7 = Block::new_block_from_template(
@@ -810,7 +812,6 @@ mod tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let alice_address = alice_key.to_address();
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());

@@ -1,7 +1,7 @@
 use anyhow::bail;
 use anyhow::Result;
 use num_traits::Zero;
-use tracing::debug;
+use tracing::error;
 
 use super::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::models::blockchain::transaction::transaction_output::TxOutputList;
@@ -33,11 +33,12 @@ impl TransactionDetails {
     pub(crate) fn new_with_coinbase(
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
-        fee: NeptuneCoins,
         coinbase: NeptuneCoins,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
+        // Fee for coinbase txs is always zero
+        let fee = NeptuneCoins::zero();
         Self::new(
             tx_inputs,
             tx_outputs,
@@ -73,6 +74,13 @@ impl TransactionDetails {
         )
     }
 
+    /// Constructor for TransactionDetails with some sanity checks.
+    ///
+    /// # Error
+    ///
+    /// Returns an error if (any of)
+    ///  - the transaction is not balanced
+    ///  - some mutator set membership proof is invalid.
     fn new(
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
@@ -82,20 +90,22 @@ impl TransactionDetails {
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
         // total amount to be spent -- determines how many and which UTXOs to use
-        let total_spent = tx_outputs.total_native_coins() + fee;
+        let total_spend = tx_outputs.total_native_coins() + fee;
         let total_input: NeptuneCoins = tx_inputs
             .iter()
             .map(|x| x.utxo.get_native_currency_amount())
             .sum();
-        let total_spendable = total_input + coinbase.unwrap_or(NeptuneCoins::zero());
+        let coinbase_amount = coinbase.unwrap_or(NeptuneCoins::zero());
+        let total_spendable = total_input + coinbase_amount;
 
         // sanity check: do we even have enough funds?
-        if total_spent > total_spendable {
-            debug!("Insufficient funds. total_spend: {total_spent}, total_spendable: {total_spendable}");
+        if total_spend > total_spendable {
+            error!("Insufficient funds.\n\n total_spend: {total_spend}\
+            \ntotal_spendable: {total_spendable}\ntotal_input: {total_input}\ncoinbase amount: {coinbase_amount}");
             bail!("Not enough available funds.");
         }
-        if total_spent < total_spendable {
-            let diff = total_spent - total_spendable;
+        if total_spend < total_spendable {
+            let diff = total_spend - total_spendable;
             bail!("Missing change output in the amount of {}", diff);
         }
         if tx_inputs

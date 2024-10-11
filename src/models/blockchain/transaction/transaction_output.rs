@@ -58,6 +58,8 @@ pub(crate) struct UtxoNotificationPayload {
 }
 
 impl UtxoNotificationPayload {
+    // TODO: Remove test flag when used in main code.
+    #[cfg(test)]
     pub(crate) fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
         Self {
             utxo,
@@ -174,6 +176,7 @@ impl TxOutput {
     ///
     /// Warning: If care is not taken, this is an easy way to lose funds.
     /// Don't use this constructor unless you have a good reason to.
+    #[cfg(test)]
     pub(crate) fn no_notification(
         utxo: Utxo,
         sender_randomness: Digest,
@@ -259,6 +262,16 @@ impl Deref for TxOutputList {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl IntoIterator for TxOutputList {
+    type Item = TxOutput;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -378,10 +391,6 @@ impl TxOutputList {
 
     pub(crate) fn push(&mut self, tx_output: TxOutput) {
         self.0.push(tx_output);
-    }
-
-    pub(crate) fn to_vec(&self) -> Vec<TxOutput> {
-        self.0.clone()
     }
 
     pub(crate) fn concat_with<T>(mut self, maybe_tx_output: T) -> Self

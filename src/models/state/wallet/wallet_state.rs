@@ -278,7 +278,7 @@ impl WalletState {
     pub(crate) async fn add_expected_utxos(
         &mut self,
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
-    ) -> Result<()> {
+    ) {
         for expected_utxo in expected_utxos.into_iter() {
             self.add_expected_utxo(ExpectedUtxo::new(
                 expected_utxo.utxo,
@@ -288,7 +288,6 @@ impl WalletState {
             ))
             .await;
         }
-        Ok(())
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction

@@ -16,32 +16,29 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::*;
+use transaction_output::TxOutput;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
-use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::utxo::*;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
@@ -243,11 +240,11 @@ Difficulty threshold: {threshold}
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
-pub(crate) fn make_coinbase_transaction(
+pub(crate) async fn make_coinbase_transaction(
     global_state: &GlobalState,
     transaction_fees: NeptuneCoins,
     timestamp: Timestamp,
-) -> (Transaction, ExpectedUtxo) {
+) -> Result<(Transaction, ExpectedUtxo)> {
     // note: it is Ok to always use the same key here because:
     //  1. if we find a block, the utxo will go to our wallet
     //     and notification occurs offchain, so there is no privacy issue.
@@ -260,76 +257,66 @@ pub(crate) fn make_coinbase_transaction(
         .wallet_secret
         .nth_generation_spending_key(0);
     let receiving_address = coinbase_recipient_spending_key.to_address();
-    let receiver_digest = receiving_address.privacy_digest;
     let latest_block = global_state.chain.light_state();
     let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
-    let lock_script = receiving_address.lock_script();
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let coinbase_utxo = Utxo::new_native_currency(lock_script, coinbase_amount);
     let sender_randomness: Digest = global_state
         .wallet_state
         .wallet_secret
-        .generate_sender_randomness(next_block_height, receiver_digest);
+        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
 
-    let coinbase_addition_record = commit(
-        Hash::hash(&coinbase_utxo),
+    // There is no reason to put coinbase UTXO notifications on chain, because:
+    // Both sender randomness and receiver preimage are derived
+    // deterministically from the wallet's seed.
+    let coinbase_output = TxOutput::offchain_native_currency(
+        coinbase_amount,
         sender_randomness,
-        receiver_digest,
+        receiving_address.into(),
     );
 
-    let kernel = TransactionKernel {
-        inputs: vec![],
-        outputs: vec![coinbase_addition_record],
-        public_announcements: vec![],
-        fee: NeptuneCoins::zero(),
-        coinbase: Some(coinbase_amount),
-        timestamp,
-        mutator_set_hash: mutator_set_accumulator.hash(),
-    };
-
-    let primitive_witness = GlobalState::generate_primitive_witness(
+    let transaction_details = TransactionDetails::new_with_coinbase(
         vec![],
-        vec![coinbase_utxo.clone()],
-        vec![sender_randomness],
-        vec![receiver_digest],
-        kernel,
+        vec![coinbase_output.clone()].into(),
+        coinbase_amount,
+        timestamp,
         mutator_set_accumulator,
+    )
+    .expect(
+        "all inputs' ms membership proofs must be valid because inputs are empty;\
+ and tx must be balanced because the one output receives exactly the coinbase amount",
     );
+
+    // 2. Create the transaction
+    // A coinbase transaction implies mining. So you *must*
+    // be able to create a SingleProof.
+
+    info!("Start: generate single proof for coinbase transaction");
+    let transaction =
+        GlobalState::create_raw_transaction(transaction_details, TxProvingCapability::SingleProof)
+            .await?;
+    info!("Done: generating single proof for coinbase transaction");
 
     let utxo_info_for_coinbase = ExpectedUtxo::new(
-        coinbase_utxo,
-        sender_randomness,
+        coinbase_output.utxo(),
+        coinbase_output.sender_randomness(),
         coinbase_recipient_spending_key.privacy_preimage,
         UtxoNotifier::OwnMiner,
     );
 
-    // A coinbase transaction implies mining. So you *must*
-    // be able to create a SingleProof.
-    info!("Start: generate single proof for coinbase transaction");
-    let proof = SingleProof::produce(&primitive_witness);
-    info!("Done: generating single proof for coinbase transaction");
-
-    (
-        Transaction {
-            kernel: primitive_witness.kernel,
-            proof: TransactionProof::SingleProof(proof),
-        },
-        utxo_info_for_coinbase,
-    )
+    Ok((transaction, utxo_info_for_coinbase))
 }
 
 /// Create the transaction that goes into the block template. The transaction is
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
-fn create_block_transaction(
+async fn create_block_transaction(
     predecessor_block: &Block,
     global_state: &GlobalState,
     timestamp: Timestamp,
-) -> (Transaction, ExpectedUtxo) {
-    /// Return the seed that is used when shuffling inputs and outputs in the
-    /// transaction merger.
+) -> Result<(Transaction, ExpectedUtxo)> {
+    /// Return the a seed used to randomize shuffling.
     fn shuffle_seed(wallet_secret: &WalletSecret, block_height: BlockHeight) -> [u8; 32] {
         let secure_seed_from_wallet = wallet_secret.deterministic_derived_seed(block_height);
         let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
@@ -348,25 +335,35 @@ fn create_block_transaction(
     let transaction_fees = transactions_to_include
         .iter()
         .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
-    let next_block_height: BlockHeight = predecessor_block.kernel.header.height.next();
 
     let (coinbase_transaction, coinbase_as_expected_utxo) =
-        make_coinbase_transaction(global_state, transaction_fees, timestamp);
+        make_coinbase_transaction(global_state, transaction_fees, timestamp).await?;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
         predecessor_block.kernel.body.mutator_set_accumulator.hash()
     );
 
-    // Merge incoming transactions with the coinbase transaction
-    let shuffle_seed = shuffle_seed(&global_state.wallet_state.wallet_secret, next_block_height);
-    let merged_transaction = transactions_to_include
-        .into_iter()
-        .fold(coinbase_transaction, |acc, transaction| {
-            Transaction::merge_with(acc, transaction, shuffle_seed)
-        });
+    let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed(
+        &global_state.wallet_state.wallet_secret,
+        predecessor_block.kernel.header.height.next(),
+    ));
 
-    (merged_transaction, coinbase_as_expected_utxo)
+    // Merge incoming transactions with the coinbase transaction
+    let num_transactions_to_include = transactions_to_include.len();
+    let merged_transaction = transactions_to_include.into_iter().enumerate().fold(
+        coinbase_transaction,
+        |acc, (i, transaction)| {
+            info!(
+                "Merging transaction {} / {}",
+                i + 1,
+                num_transactions_to_include
+            );
+            Transaction::merge_with(acc, transaction, rng.gen())
+        },
+    );
+
+    Ok((merged_transaction, coinbase_as_expected_utxo))
 }
 
 /// Locking:
@@ -402,7 +399,8 @@ pub async fn mine(
                 &latest_block,
                 global_state_lock.lock_guard().await.deref(),
                 now,
-            );
+            )
+            .await?;
             let (block_header, block_body, block_proof) =
                 make_block_template(&latest_block, transaction, now, None);
             let miner_task = mine_block(
@@ -572,10 +570,13 @@ mod mine_loop_tests {
         );
 
         // Verify constructed coinbase transaction and block template when mempool is empty
-        let alice_mut = alice.lock_guard().await;
-        let (transaction_empty_mempool, _coinbase_utxo_info) =
-            make_coinbase_transaction(&alice_mut, NeptuneCoins::zero(), now);
-        drop(alice_mut);
+        let (transaction_empty_mempool, _coinbase_utxo_info) = {
+            let alice = alice.lock_guard().await;
+
+            make_coinbase_transaction(&alice, NeptuneCoins::zero(), now)
+                .await
+                .unwrap()
+        };
 
         assert_eq!(
             1,
@@ -604,16 +605,6 @@ mod mine_loop_tests {
         );
 
         // Add a transaction to the mempool
-        // let four_neptune_coins = NeptuneCoins::new(4).to_native_coins();
-        // let receiver_privacy_digest = Digest::default();
-        // let sender_randomness = Digest::default();
-        // let tx_output = Utxo {
-        //     coins: four_neptune_coins,
-        //     lock_script_hash: LockScript::anyone_can_spend().hash(),
-        // };
-        // let tx_output = TxOutput::offchain_native_currency(NeptuneCoins::new(4), Digest::default(), receiving_address)
-        // let utxo = Utxo::new(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
-        // let tx_output = TxOutput::offchain(utxo, Digest::default(), )
         let alice_key = alice
             .lock_guard()
             .await
@@ -645,10 +636,12 @@ mod mine_loop_tests {
         assert_eq!(1, alice.lock_guard().await.mempool.len());
 
         // Build transaction for block
-        let alice_mut = alice.lock_guard().await;
-        let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
-            create_block_transaction(&genesis_block, &alice_mut, in_seven_months);
-        drop(alice_mut);
+        let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
+            let alice = alice.lock_guard().await;
+            create_block_transaction(&genesis_block, &alice, in_seven_months)
+                .await
+                .unwrap()
+        };
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -704,7 +697,9 @@ mod mine_loop_tests {
         let launch_date = tip_block_orig.header().timestamp;
 
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), launch_date);
+            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), launch_date)
+                .await
+                .unwrap();
 
         let (block_header, block_body, block_proof) =
             Block::make_block_template(tip_block_orig, transaction, launch_date, None);
@@ -766,6 +761,8 @@ mod mine_loop_tests {
         let (transaction, coinbase_utxo_info) = {
             let global_state = global_state_lock.lock_guard().await;
             make_coinbase_transaction(&global_state, NeptuneCoins::zero(), ten_seconds_ago)
+                .await
+                .unwrap()
         };
 
         let (block_header, block_body, block_proof) =

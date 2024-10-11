@@ -37,7 +37,6 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::peer::TransactionNotification;
-use crate::models::state::wallet::expected_utxo;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
