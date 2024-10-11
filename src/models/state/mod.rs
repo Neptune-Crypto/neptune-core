@@ -1941,9 +1941,9 @@ mod global_state_tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce12210c467f93u64);
         let network = Network::Main;
 
-        let mut genesis_state_lock =
+        let mut premine_receiver =
             mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
-        let genesis_spending_key = genesis_state_lock
+        let genesis_spending_key = premine_receiver
             .lock_guard()
             .await
             .wallet_state
@@ -1952,21 +1952,21 @@ mod global_state_tests {
 
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
-        let mut alice_state_lock = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
+        let mut alice = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
 
         let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
-        let mut bob_state_lock = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
+        let mut bob = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
 
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
-        let genesis_state = genesis_state_lock.lock_guard().await;
-        let (coinbase_transaction, coinbase_expected_utxo) =
-            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+        let (coinbase_transaction, coinbase_expected_utxo) = {
+            let premine_receiver = premine_receiver.lock_guard().await;
+            make_coinbase_transaction(&premine_receiver, NeptuneCoins::zero(), in_seven_months)
                 .await
-                .unwrap();
-        drop(genesis_state);
+                .unwrap()
+        };
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let sender_randomness: Digest = rng.gen();
@@ -1998,12 +1998,12 @@ mod global_state_tests {
         ];
 
         let fee = NeptuneCoins::one();
-        let genesis_key = genesis_state_lock
+        let genesis_key = premine_receiver
             .lock_guard_mut()
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation);
-        let (tx_to_alice_and_bob, maybe_change_output) = genesis_state_lock
+        let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2023,7 +2023,7 @@ mod global_state_tests {
         };
 
         // Expect change output
-        genesis_state_lock
+        premine_receiver
             .global_state_lock
             .lock_guard_mut()
             .await
@@ -2056,31 +2056,30 @@ mod global_state_tests {
         );
 
         // Update states with `block_1`
-        let expected_utxos_for_alice = alice_state_lock
+        let expected_utxos_for_alice = alice
             .lock_guard()
             .await
             .wallet_state
             .extract_expected_utxos(tx_outputs_for_alice.into(), UtxoNotifier::Cli);
-        alice_state_lock
+        alice
             .lock_guard_mut()
             .await
             .wallet_state
             .add_expected_utxos(expected_utxos_for_alice)
             .await;
 
-        let expected_utxos_for_bob_1 = bob_state_lock
+        let expected_utxos_for_bob_1 = bob
             .lock_guard()
             .await
             .wallet_state
             .extract_expected_utxos(tx_outputs_for_bob.into(), UtxoNotifier::Cli);
-        bob_state_lock
-            .lock_guard_mut()
+        bob.lock_guard_mut()
             .await
             .wallet_state
             .add_expected_utxos(expected_utxos_for_bob_1)
             .await;
 
-        genesis_state_lock
+        premine_receiver
             .lock_guard_mut()
             .await
             .set_new_self_mined_tip(
@@ -2095,26 +2094,25 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        for state_lock in [&mut alice_state_lock, &mut bob_state_lock] {
+        for state_lock in [&mut alice, &mut bob] {
             let mut state = state_lock.lock_guard_mut().await;
             state.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         assert_eq!(
             3,
-            genesis_state_lock
+            premine_receiver
                 .lock_guard_mut()
                 .await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+                .len().await, "Genesis receiver must have 3 monitored UTXOs after block 1: change from transaction, coinbase from block 1, and premine UTXO"
         );
 
-        // Now Alice should have a balance of 3 and Bob a balance of 7
         assert_eq!(
             NeptuneCoins::new(3),
-            alice_state_lock
+            alice
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
@@ -2123,13 +2121,26 @@ mod global_state_tests {
         );
         assert_eq!(
             NeptuneCoins::new(7),
-            bob_state_lock
-                .lock_guard()
+            bob.lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_available_amount(in_seven_months)
         );
+        // TODO: No idea why this isn't working.
+        // {
+        //     let expected = NeptuneCoins::new(110);
+        //     let got = premine_receiver
+        //         .lock_guard()
+        //         .await
+        //         .get_wallet_status_for_tip()
+        //         .await
+        //         .synced_unspent_available_amount(in_seven_months);
+        //     assert_eq!(
+        //         expected, got,
+        //         "premine receiver's balance should be 110: mining reward + premine - sent - fee + fee. Expecte: {expected:?}\nGot: {got}"
+        //     );
+        // }
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
         let tx_outputs_from_alice = vec![
@@ -2144,7 +2155,7 @@ mod global_state_tests {
                 genesis_spending_key.to_address().into(),
             ),
         ];
-        let (tx_from_alice, maybe_change_for_alice) = alice_state_lock
+        let (tx_from_alice, maybe_change_for_alice) = alice
             .lock_guard()
             .await
             .create_transaction(
@@ -2156,19 +2167,10 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-
-        // inform wallet of any expected utxos from this tx.
-        let expected_utxos_alice = alice_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .extract_expected_utxos(maybe_change_for_alice.into(), UtxoNotifier::Cli);
-        alice_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .add_expected_utxos(expected_utxos_alice)
-            .await;
+        assert!(
+            maybe_change_for_alice.is_none(),
+            "No change for Alice as she spent it all"
+        );
 
         // make bob's transaction
         let tx_outputs_from_bob = vec![
@@ -2188,43 +2190,33 @@ mod global_state_tests {
                 genesis_spending_key.to_address().into(),
             ),
         ];
-        let (tx_from_bob, maybe_change_for_bob) = bob_state_lock
+        let (tx_from_bob, maybe_change_for_bob) = bob
             .lock_guard()
             .await
             .create_transaction(
                 tx_outputs_from_bob.clone().into(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(0),
+                NeptuneCoins::new(1),
                 in_seven_months,
             )
             .await
             .unwrap();
 
-        // inform wallet of any expected utxos from this tx.
-        let expected_utxos_for_bob_2 = bob_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .extract_expected_utxos(maybe_change_for_bob.into(), UtxoNotifier::Cli);
-        bob_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .add_expected_utxos(expected_utxos_for_bob_2)
-            .await;
+        assert!(
+            maybe_change_for_bob.is_none(),
+            "No change for Bob as he spent it all"
+        );
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
-        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let genesis_state_mut = genesis_state_lock.lock_guard_mut().await;
+        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase
+        let genesis_state_mut = premine_receiver.lock_guard_mut().await;
         let (coinbase_transaction2, _expected_utxo) =
             make_coinbase_transaction(&genesis_state_mut, NeptuneCoins::zero(), in_seven_months)
                 .await
                 .unwrap();
         drop(genesis_state_mut);
-
-        // don't care about change; testing correct constitution of blocks
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(tx_from_alice, Default::default())
