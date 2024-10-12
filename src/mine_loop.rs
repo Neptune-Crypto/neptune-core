@@ -545,7 +545,7 @@ mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_template_is_valid_test() -> Result<()> {
+    async fn block_template_is_valid_test() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -611,20 +611,24 @@ mod mine_loop_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
+        let output_to_alice = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(4),
+            rng.gen(),
+            alice_key.to_address().into(),
+        );
+        // About ProveCapability::SingleProof:
+        // The thing being tested is that the block template *for the _miner_*
+        // is valid. The miner is assumed capable of producing `SingleProof`s.
         let (tx_by_preminer, _maybe_change_output) = alice
             .lock_guard()
             .await
-            .create_transaction(
-                vec![TxOutput::offchain_native_currency(
-                    NeptuneCoins::new(4),
-                    rng.gen(),
-                    alice_key.to_address().into(),
-                )]
-                .into(),
+            .create_transaction_with_prover_capability(
+                vec![output_to_alice].into(),
                 alice_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
@@ -663,8 +667,6 @@ mod mine_loop_tests {
                 .is_valid(&genesis_block, in_seven_months + Timestamp::seconds(2)),
             "Block template created by miner with non-empty mempool must be valid"
         );
-
-        Ok(())
     }
 
     /// This test mines a single block at height 1 on the regtest network
