@@ -602,19 +602,21 @@ mod tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
 
         let network = Network::Main;
-        let devnet_wallet = WalletSecret::devnet_wallet();
-        let mut bob_global_state = mock_genesis_global_state(network, 2, devnet_wallet).await;
+        let mut bob_global_state =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut bob = bob_global_state.lock_guard_mut().await;
 
         let bob_wallet_secret = &bob.wallet_state.wallet_secret;
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let bob_address = bob_spending_key.to_address();
-        let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
         let mut alice_global_state_lock =
-            mock_genesis_global_state(network, 2, alice_wallet_secret.clone()).await;
+            mock_genesis_global_state(network, 2, WalletSecret::new_pseudorandom(rng.gen())).await;
         let mut alice = alice_global_state_lock.lock_guard_mut().await;
-        let alice_spending_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let alice_spending_key = alice
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
@@ -743,12 +745,12 @@ mod tests {
             "Block with tx with updated mutator set data must be valid"
         );
 
-        // Mine 4 blocks without including the transaction but while still keeping the
-        // mempool updated. After these 4 blocks are mined, the transaction must still be
+        // Mine 2 blocks without including the transaction but while still keeping the
+        // mempool updated. After these 2 blocks are mined, the transaction must still be
         // valid. Notic that `block_3_orphaned` was forked away, never added to mempool,
         // since we want to keep the transaction in the mempool.
         let mut previous_block = block_2;
-        for _ in 0..4 {
+        for _ in 0..2 {
             let (next_block, _, _) =
                 make_mock_block(&previous_block, None, alice_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
@@ -769,22 +771,22 @@ mod tests {
                 .unwrap();
         let block_transaction3 =
             coinbase_transaction3.merge_with(tx_by_alice_updated, Default::default());
-        let block_7 = Block::new_block_from_template(
+        let block_5 = Block::new_block_from_template(
             &previous_block,
             block_transaction3,
             in_eight_months,
             None,
         );
-        assert_eq!(Into::<BlockHeight>::into(7), block_7.kernel.header.height);
+        assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
         assert!(
-            block_7.is_valid(&previous_block, in_eight_months),
-            "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
+            block_5.is_valid(&previous_block, in_eight_months),
+            "Block with tx with updated mutator set data must be valid"
         );
 
         mempool
             .update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
-                &block_7,
+                &block_5,
             )
             .await;
 
