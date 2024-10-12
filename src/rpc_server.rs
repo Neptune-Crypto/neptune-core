@@ -828,7 +828,9 @@ mod rpc_server_tests {
     use anyhow::Result;
     use num_traits::One;
     use num_traits::Zero;
+    use rand::rngs::StdRng;
     use rand::Rng;
+    use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
     use ReceivingAddress;
@@ -1416,11 +1418,11 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
+        let mut rng = StdRng::seed_from_u64(1814);
         let network = Network::RegTest;
         let (rpc_server, mut state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+            test_rpc_server(network, WalletSecret::new_pseudorandom(rng.gen()), 2).await;
         let ctx = context::current();
-        let mut rng = rand::thread_rng();
 
         // --- Init.  get wallet spending key ---
         let genesis_block = Block::genesis_block(network);
