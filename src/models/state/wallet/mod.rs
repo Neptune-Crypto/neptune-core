@@ -677,7 +677,6 @@ mod wallet_tests {
 
         let network = Network::Main;
 
-        let mut rng = thread_rng();
         let alice_wallet_secret = WalletSecret::new_random();
         let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
         let alice_spending_key = alice
@@ -687,6 +686,8 @@ mod wallet_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
         let genesis_block = Block::genesis_block(network);
+
+        let mut rng = thread_rng();
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             None,
@@ -726,14 +727,7 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 ))
                 .await;
-            alice
-                .wallet_state
-                .update_wallet_state_with_new_block(
-                    &genesis_block.kernel.body.mutator_set_accumulator,
-                    &block_1,
-                )
-                .await
-                .unwrap();
+            alice.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         // Verify that the allocater returns a sane amount
@@ -773,14 +767,7 @@ mod wallet_tests {
                         UtxoNotifier::OwnMiner,
                     ))
                     .await;
-                alice
-                    .wallet_state
-                    .update_wallet_state_with_new_block(
-                        &previous_block.kernel.body.mutator_set_accumulator,
-                        &next_block_prime,
-                    )
-                    .await
-                    .unwrap();
+                alice.set_new_tip(next_block_prime.clone()).await.unwrap();
                 next_block = next_block_prime;
             }
         }
@@ -847,8 +834,7 @@ mod wallet_tests {
         alice
             .lock_guard_mut()
             .await
-            .wallet_state
-            .update_wallet_state_with_new_block(&msa_tip_previous.clone(), &next_block)
+            .set_new_tip(next_block.clone())
             .await
             .unwrap();
 
