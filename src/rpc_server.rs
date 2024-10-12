@@ -252,6 +252,122 @@ impl NeptuneRPCServer {
             Err(_) => None,
         }
     }
+
+    /// Method to create a transaction with a given timestamp.
+    ///
+    /// Factored out in order to generate deterministic transaction
+    /// kernels where tests can reuse previously generated proofs.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn send_to_many_with_timestamp(
+        mut self,
+        _ctx: context::Context,
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        owned_utxo_notification_medium: UtxoNotificationMedium,
+        fee: NeptuneCoins,
+        now: Timestamp,
+    ) -> Option<Digest> {
+        let span = tracing::debug_span!("Constructing transaction");
+        let _enter = span.enter();
+
+        // obtain next unused symmetric key for change utxo
+        let change_key = {
+            let mut s = self.state.lock_guard_mut().await;
+            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
+
+            // write state to disk. create_transaction() may be slow.
+            s.persist_wallet().await.expect("flushed");
+            key
+        };
+
+        let state = self.state.lock_guard().await;
+        let tx_outputs = state.generate_tx_outputs(outputs, owned_utxo_notification_medium);
+
+        // Pause miner if we are mining
+        let was_mining = self.state.mining().await;
+        if was_mining {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
+        }
+
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and only
+        // requires acquiring a read-lock which does not block other tasks.
+        // This is important because internally it calls prove() which is a very
+        // lengthy operation.
+        //
+        // note: A change output will be added to tx_outputs if needed.
+        let (transaction, maybe_change_output) = match state
+            .create_transaction(
+                tx_outputs.clone(),
+                change_key,
+                owned_utxo_notification_medium,
+                fee,
+                now,
+            )
+            .await
+        {
+            Ok(tx) => tx,
+            Err(err) => {
+                tracing::error!("Could not create transaction: {}", err);
+                return None;
+            }
+        };
+        drop(state);
+
+        let utxos_sent_to_self = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .extract_expected_utxos(
+                tx_outputs.concat_with(maybe_change_output),
+                UtxoNotifier::Myself,
+            );
+
+        // if the tx created offchain expected_utxos we must inform wallet.
+        if !utxos_sent_to_self.is_empty() {
+            // acquire write-lock
+            let mut gsm = self.state.lock_guard_mut().await;
+
+            // Inform wallet of any expected incoming utxos.
+            // note that this (briefly) mutates self.
+            gsm.wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await;
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
+
+        // Send transaction message to main
+        let response: Result<(), SendError<RPCServerToMain>> = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
+            .await;
+
+        // Restart mining if it was paused
+        if was_mining {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
+        }
+
+        self.state.flush_databases().await.expect("flushed DBs");
+
+        match response {
+            Ok(_) => Some(Hash::hash(&transaction)),
+            Err(e) => {
+                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+                None
+            }
+        }
+    }
 }
 
 impl RPC for NeptuneRPCServer {
@@ -630,112 +746,20 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn send_to_many(
-        mut self,
-        _ctx: context::Context,
+        self,
+        ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        let span = tracing::debug_span!("Constructing transaction");
-        let _enter = span.enter();
-        let now = Timestamp::now();
-
-        // obtain next unused symmetric key for change utxo
-        let change_key = {
-            let mut s = self.state.lock_guard_mut().await;
-            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
-
-            // write state to disk. create_transaction() may be slow.
-            s.persist_wallet().await.expect("flushed");
-            key
-        };
-
-        let state = self.state.lock_guard().await;
-        let tx_outputs = state.generate_tx_outputs(outputs, owned_utxo_notification_medium);
-
-        // Pause miner if we are mining
-        let was_mining = self.state.mining().await;
-        if was_mining {
-            let _ = self
-                .rpc_server_to_main_tx
-                .send(RPCServerToMain::PauseMiner)
-                .await;
-        }
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        let (transaction, maybe_change_output) = match state
-            .create_transaction(
-                tx_outputs.clone(),
-                change_key,
-                owned_utxo_notification_medium,
-                fee,
-                now,
-            )
-            .await
-        {
-            Ok(tx) => tx,
-            Err(err) => {
-                tracing::error!("Could not create transaction: {}", err);
-                return None;
-            }
-        };
-        drop(state);
-
-        let utxos_sent_to_self = self
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .extract_expected_utxos(
-                tx_outputs.concat_with(maybe_change_output),
-                UtxoNotifier::Myself,
-            );
-
-        // if the tx created offchain expected_utxos we must inform wallet.
-        if !utxos_sent_to_self.is_empty() {
-            // acquire write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
-            // Inform wallet of any expected incoming utxos.
-            // note that this (briefly) mutates self.
-            gsm.wallet_state
-                .add_expected_utxos(utxos_sent_to_self)
-                .await;
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        // Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
-            .await;
-
-        // Restart mining if it was paused
-        if was_mining {
-            let _ = self
-                .rpc_server_to_main_tx
-                .send(RPCServerToMain::RestartMiner)
-                .await;
-        }
-
-        self.state.flush_databases().await.expect("flushed DBs");
-
-        match response {
-            Ok(_) => Some(Hash::hash(&transaction)),
-            Err(e) => {
-                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-                None
-            }
-        }
+        self.send_to_many_with_timestamp(
+            ctx,
+            outputs,
+            owned_utxo_notification_medium,
+            fee,
+            Timestamp::now(),
+        )
+        .await
     }
 
     // documented in trait. do not add doc-comment.
@@ -891,8 +915,11 @@ mod rpc_server_tests {
         // We don't care about the actual response data in this test, just that the
         // requests do not crash the server.
 
-        let network = Network::RegTest;
-        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(123456789088u64);
+
+        let (rpc_server, _) =
+            test_rpc_server(network, WalletSecret::new_pseudorandom(rng.gen()), 2).await;
         let ctx = context::current();
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;
@@ -943,13 +970,16 @@ mod rpc_server_tests {
                 NeptuneCoins::one(),
             )
             .await;
+
+        let transaction_timestamp = network.launch_date();
         let _ = rpc_server
             .clone()
-            .send_to_many(
+            .send_to_many_with_timestamp(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::one(),
+                transaction_timestamp,
             )
             .await;
         let _ = rpc_server.clone().pause_miner(ctx).await;
@@ -1419,7 +1449,7 @@ mod rpc_server_tests {
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
         let mut rng = StdRng::seed_from_u64(1814);
-        let network = Network::RegTest;
+        let network = Network::Main;
         let (rpc_server, mut state_lock) =
             test_rpc_server(network, WalletSecret::new_pseudorandom(rng.gen()), 2).await;
         let ctx = context::current();
@@ -1433,9 +1463,10 @@ mod rpc_server_tests {
             .next_unused_spending_key(KeyType::Generation);
 
         // --- Init.  generate a block, with coinbase going to our wallet ---
+        let timestamp = network.launch_date() + Timestamp::days(1);
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
             &genesis_block,
-            None,
+            Some(timestamp),
             wallet_spending_key.to_address().try_into()?,
             rng.gen(),
         );
@@ -1486,9 +1517,18 @@ mod rpc_server_tests {
             .await;
 
         // --- Operation: perform send_to_many
+        // It's important to call a method where you get to inject the
+        // timestamp. Otherwise, proofs cannot be reused, and CI will
+        // fail.
         let result = rpc_server
             .clone()
-            .send_to_many(ctx, outputs, UtxoNotificationMedium::OffChain, fee)
+            .send_to_many_with_timestamp(
+                ctx,
+                outputs,
+                UtxoNotificationMedium::OffChain,
+                fee,
+                timestamp,
+            )
             .await;
 
         // --- Test: verify op returns a value.
