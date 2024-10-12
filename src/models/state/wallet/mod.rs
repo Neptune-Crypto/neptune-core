@@ -937,6 +937,17 @@ mod wallet_tests {
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
+        let expected_utxos_alice = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .extract_expected_utxos(receiver_data_to_alice, UtxoNotifier::Cli);
+        alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .add_expected_utxos(expected_utxos_alice)
+            .await;
         alice
             .lock_guard_mut()
             .await
