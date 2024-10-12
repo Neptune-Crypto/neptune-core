@@ -115,6 +115,7 @@ overflow-checks = false
 # that should run with `opt-level=3` set.
 [profile.test]
 build-override.opt-level = 3
+opt-level = 3                # Set to make execution of tests in this crate faster. Cf: https://github.com/Neptune-Crypto/neptune-core/issues/204
 
 [profile.release]
 build-override.opt-level = 3
