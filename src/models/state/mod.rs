@@ -2412,12 +2412,13 @@ mod global_state_tests {
 
                 // create tx.  utxo_notify_method is a test param.
                 let (alice_to_bob_tx, maybe_change_utxo) = alice_state_mut
-                    .create_transaction(
+                    .create_transaction_with_prover_capability(
                         tx_outputs.clone(),
                         alice_change_key,
                         change_notification_medium,
                         alice_to_bob_fee,
                         seven_months_post_launch,
+                        TxProvingCapability::SingleProof,
                     )
                     .await
                     .unwrap();
