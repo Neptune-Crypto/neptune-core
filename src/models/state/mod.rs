@@ -2155,15 +2155,21 @@ mod global_state_tests {
                 genesis_spending_key.to_address().into(),
             ),
         ];
+        // About prover capability: we need `SingleProof` transactions for the
+        // miner to merge them later. The thing being tested here is that the
+        // state is being updated correctly with new blocks; not the
+        // use-`ProofCollection`-instead-of-`SingleProof` functionality.
+        // Weaker machines need to use the proof server.
         let (tx_from_alice, maybe_change_for_alice) = alice
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 tx_outputs_from_alice.clone().into(),
                 alice_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
@@ -2193,12 +2199,13 @@ mod global_state_tests {
         let (tx_from_bob, maybe_change_for_bob) = bob
             .lock_guard()
             .await
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 tx_outputs_from_bob.clone().into(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
