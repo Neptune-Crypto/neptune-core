@@ -853,7 +853,7 @@ mod wallet_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn wallet_state_maintanence_multiple_inputs_outputs_test() {
+    async fn wallet_state_maintenence_multiple_inputs_outputs_test() {
         // Bob is premine receiver, Alice is not. They send coins back and forth
         // and the blockchain forks.
 
@@ -903,12 +903,13 @@ mod wallet_tests {
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
         let (tx, _change_output) = bob
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 receiver_data_to_alice.clone(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
                 UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(2),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
@@ -1172,12 +1173,13 @@ mod wallet_tests {
         );
 
         let (tx_from_bob, _maybe_change_output) = bob
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(4),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();

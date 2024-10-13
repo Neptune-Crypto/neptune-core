@@ -652,12 +652,13 @@ mod tests {
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
         let (tx_by_bob, maybe_change_output) = bob
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 utxos_from_bob.clone(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
@@ -684,12 +685,13 @@ mod tests {
             alice_address.into(),
         )];
         let (tx_from_alice_original, _maybe_change_output) = alice
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 utxos_from_alice.into(),
                 alice_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
+                TxProvingCapability::SingleProof,
             )
             .await
             .unwrap();
