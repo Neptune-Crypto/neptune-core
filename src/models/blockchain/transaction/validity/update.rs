@@ -702,6 +702,9 @@ pub(crate) mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::triton_vm::error::InstructionError;
     use tasm_lib::triton_vm::prelude::*;
     use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
@@ -716,6 +719,7 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
 
     impl UpdateWitness {
         pub(crate) fn new_kernel_mast_hash(&self) -> Digest {
@@ -728,6 +732,9 @@ pub(crate) mod test {
         num_outputs: usize,
         num_pub_announcements: usize,
     ) -> UpdateWitness {
+        // TODO: Currently only tests a new mutator set with more AOCL leafs.
+        // Should also test for removed records in the new mutator set
+        // accumulator.
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness =
             PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, num_pub_announcements))
@@ -739,28 +746,29 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let proof = SingleProof::produce(&primitive_witness);
-
-        let mut new_kernel = primitive_witness.kernel.clone();
         let mut new_msa = primitive_witness.mutator_set_accumulator.clone();
         for canonical_commitment in newly_confirmed_records.iter().copied() {
             new_msa.add(&AdditionRecord::new(canonical_commitment));
         }
-        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
-            &primitive_witness.mutator_set_accumulator.aocl,
-            &newly_confirmed_records,
-        );
 
+        let mut new_kernel = primitive_witness.kernel.clone();
         new_kernel.mutator_set_hash = new_msa.hash();
+
         new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
         assert_ne!(
             new_msa, primitive_witness.mutator_set_accumulator,
             "must update mutator set too in order for test to be meaningful"
         );
 
+        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
+            &primitive_witness.mutator_set_accumulator.aocl,
+            &newly_confirmed_records,
+        );
+        let old_proof = SingleProof::produce(&primitive_witness);
+
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
-            proof,
+            old_proof,
             primitive_witness.mutator_set_accumulator,
             new_kernel,
             new_msa,
@@ -768,9 +776,7 @@ pub(crate) mod test {
         )
     }
 
-    #[test]
-    fn can_verify_transaction_update() {
-        let update_witness = deterministic_update_witness(2, 2, 2);
+    fn positive_prop(update_witness: UpdateWitness) {
         let claim = update_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         let nondeterminism = update_witness.nondeterminism();
@@ -780,6 +786,16 @@ pub(crate) mod test {
         let tasm_result = Update.run_tasm(&input, nondeterminism);
 
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+    }
+
+    #[test]
+    fn can_verify_transaction_update_small() {
+        positive_prop(deterministic_update_witness(2, 2, 2));
+    }
+
+    #[test]
+    fn can_verify_transaction_update_medium() {
+        positive_prop(deterministic_update_witness(4, 4, 4));
     }
 
     fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
@@ -845,11 +861,45 @@ pub(crate) mod test {
         );
     }
 
-    fn bad_absolute_index_set(good_witness: &UpdateWitness) {
+    fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
         let mut bad_witness = good_witness.clone();
         bad_witness.new_kernel.inputs[0]
             .absolute_indices
             .decrement_bloom_filter_index(10);
+        let claim = bad_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+        let nondeterminism = bad_witness.nondeterminism();
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::AssertionFailed],
+        );
+    }
+
+    fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
+        let mut bad_witness = good_witness.clone();
+        bad_witness.new_kernel.inputs.remove(0);
+        let claim = bad_witness.claim();
+        let input = PublicInput::new(claim.input.clone());
+        bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+        let nondeterminism = bad_witness.nondeterminism();
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[InstructionError::AssertionFailed],
+        );
+    }
+
+    fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut bad_witness = good_witness.clone();
+        bad_witness
+            .new_kernel
+            .inputs
+            .push(pseudorandom_removal_record(rng.gen()));
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
@@ -870,6 +920,8 @@ pub(crate) mod test {
         new_timestamp_older_than_old(&good_witness);
         bad_new_aocl(&good_witness);
         bad_old_aocl(&good_witness);
-        bad_absolute_index_set(&good_witness)
+        bad_absolute_index_set_value(&good_witness);
+        bad_absolute_index_set_length_too_short(&good_witness);
+        bad_absolute_index_set_length_too_long(&good_witness);
     }
 }
