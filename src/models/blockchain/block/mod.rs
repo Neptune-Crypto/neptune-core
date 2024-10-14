@@ -210,17 +210,17 @@ impl Block {
 
         let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
         block_mmra.append(previous_block.hash());
-        let block_body: BlockBody = BlockBody {
-            transaction_kernel: transaction.kernel,
-            mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-            lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
-            block_mmr_accumulator: block_mmra,
-            uncle_blocks: vec![],
-        };
+        let block_body: BlockBody = BlockBody::new(
+            transaction.kernel,
+            next_mutator_set_accumulator.clone(),
+            MmrAccumulator::new_from_leafs(vec![]),
+            block_mmra,
+        );
 
         let zero = BFieldElement::zero();
-        let new_pow_line: U32s<5> = previous_block.kernel.header.proof_of_work_family
-            + previous_block.kernel.header.difficulty;
+        let new_cumulative_proof_of_work: U32s<5> =
+            previous_block.kernel.header.cumulative_proof_of_work
+                + previous_block.kernel.header.difficulty;
         let next_block_height = previous_block.kernel.header.height.next();
         if block_timestamp < previous_block.kernel.header.timestamp {
             warn!(
@@ -238,8 +238,7 @@ impl Block {
             timestamp: block_timestamp,
             nonce: [zero, zero, zero],
             max_block_size: MAX_BLOCK_SIZE,
-            proof_of_work_line: new_pow_line,
-            proof_of_work_family: new_pow_line,
+            cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
         };
 
@@ -361,13 +360,12 @@ impl Block {
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
         };
 
-        let body: BlockBody = BlockBody {
-            transaction_kernel: genesis_txk,
-            mutator_set_accumulator: genesis_mutator_set.clone(),
-            block_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
-            lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
-            uncle_blocks: vec![],
-        };
+        let body: BlockBody = BlockBody::new(
+            genesis_txk,
+            genesis_mutator_set.clone(),
+            MmrAccumulator::new_from_leafs(vec![]),
+            MmrAccumulator::new_from_leafs(vec![]),
+        );
 
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
@@ -378,8 +376,7 @@ impl Block {
             // TODO: to be set to something difficult to predict ahead of time
             nonce: [bfe!(0), bfe!(0), bfe!(0)],
             max_block_size: 10_000,
-            proof_of_work_line: U32s::zero(),
-            proof_of_work_family: U32s::zero(),
+            cumulative_proof_of_work: U32s::zero(),
             difficulty: MINIMUM_DIFFICULTY.into(),
         };
 
