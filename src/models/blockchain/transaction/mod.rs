@@ -164,29 +164,26 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
-    /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
-    /// `Transaction`) by updating the mutator set records according to a new
-    /// `Block`.
-    pub(crate) fn new_with_updated_mutator_set_records_given_primitive_witness(
+    /// Create a new transaction with primitive witness for a new mutator set.
+    pub(crate) fn new_with_primitive_witness_ms_data(
         old_primitive_witness: PrimitiveWitness,
-        block: &Block,
-    ) -> Result<Transaction> {
+        new_addition_records: Vec<AdditionRecord>,
+        mut new_removal_records: Vec<RemovalRecord>,
+    ) -> Result<(Transaction, MutatorSetAccumulator)> {
+        new_removal_records.reverse();
+        let mut block_removal_records: Vec<&mut RemovalRecord> =
+            new_removal_records.iter_mut().collect::<Vec<_>>();
         let mut msa_state: MutatorSetAccumulator =
             old_primitive_witness.mutator_set_accumulator.clone();
-        let block_addition_records: Vec<AdditionRecord> =
-            block.kernel.body.transaction_kernel.outputs.clone();
         let mut transaction_removal_records: Vec<RemovalRecord> =
             old_primitive_witness.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord> =
             transaction_removal_records.iter_mut().collect();
-        let mut block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
-        block_removal_records.reverse();
-        let mut block_removal_records: Vec<&mut RemovalRecord> =
-            block_removal_records.iter_mut().collect::<Vec<_>>();
+
         let mut primitive_witness = old_primitive_witness.clone();
 
         // Apply all addition records in the block
-        for block_addition_record in block_addition_records {
+        for block_addition_record in new_addition_records {
             // Batch update block's removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(&mut block_removal_records, &msa_state);
 
@@ -240,20 +237,50 @@ impl Transaction {
             msa_state.remove(removal_record);
         }
 
+        primitive_witness.kernel.mutator_set_hash = msa_state.hash();
+        primitive_witness.mutator_set_accumulator = msa_state.clone();
+        primitive_witness.kernel.inputs = transaction_removal_records
+            .into_iter()
+            .map(|x| x.to_owned())
+            .collect_vec();
+
+        let kernel = primitive_witness.kernel.clone();
+        let witness = TransactionProof::Witness(primitive_witness);
+        Ok((
+            Transaction {
+                kernel,
+                proof: witness,
+            },
+            msa_state,
+        ))
+    }
+
+    /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
+    /// `Transaction`) by updating the mutator set records according to a new
+    /// `Block`.
+    pub(crate) fn new_with_updated_mutator_set_records_given_primitive_witness(
+        old_primitive_witness: PrimitiveWitness,
+        block: &Block,
+    ) -> Result<Transaction> {
+        let block_addition_records: Vec<AdditionRecord> =
+            block.kernel.body.transaction_kernel.outputs.clone();
+        let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
+
+        let (new_tx, new_msa) = Self::new_with_primitive_witness_ms_data(
+            old_primitive_witness,
+            block_addition_records,
+            block_removal_records,
+        )?;
+
         // Sanity check of block validity
         let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
         assert_eq!(
-            msa_state.hash(),
+            new_msa.hash(),
             block_msa_hash,
             "Internal MSA state must match that from block"
         );
 
-        let kernel = primitive_witness.kernel.clone();
-        let witness = TransactionProof::Witness(primitive_witness);
-        Ok(Transaction {
-            kernel,
-            proof: witness,
-        })
+        Ok(new_tx)
     }
 
     /// Create a new `Transaction` by updating the given one with the mutator set
@@ -504,14 +531,17 @@ mod tests {
 #[cfg(test)]
 mod transaction_tests {
     use lock_script::LockScript;
+    use proptest::prelude::Strategy;
+    use proptest::test_runner::TestRunner;
     use rand::random;
     use tracing_test::traced_test;
     use transaction_tests::utxo::Utxo;
 
     use super::*;
+    use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::{make_mock_transaction, mock_block_from_transaction_and_msa};
     use crate::util_types::mutator_set::commit;
 
     #[traced_test]
@@ -535,6 +565,85 @@ mod transaction_tests {
         let encoded = empty_tx.encode();
         let decoded = *Transaction::decode(&encoded).unwrap();
         assert_eq!(empty_tx, decoded);
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn primitive_witness_updaters_are_equivalent() {
+        // Verify that various ways of updating a primitive witness are
+        // equivalent, and that they all yield valid primitive witnesses.
+        fn update_with_block(
+            to_be_updated: PrimitiveWitness,
+            mined: PrimitiveWitness,
+        ) -> Transaction {
+            let block = mock_block_from_transaction_and_msa(
+                mined.kernel,
+                mined.mutator_set_accumulator,
+                Network::Main,
+            );
+
+            Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
+                to_be_updated.clone(),
+                &block,
+            )
+            .unwrap()
+        }
+
+        fn update_with_ms_data(
+            to_be_updated: PrimitiveWitness,
+            mined: PrimitiveWitness,
+        ) -> Transaction {
+            let (updated, _msa_new) = Transaction::new_with_primitive_witness_ms_data(
+                to_be_updated,
+                mined.kernel.outputs,
+                mined.kernel.inputs,
+            )
+            .unwrap();
+
+            updated
+        }
+
+        async fn assert_valid_as_pw(transaction: &Transaction) {
+            let TransactionProof::Witness(pw) = &transaction.proof else {
+                panic!("Expected primitive witness variant");
+            };
+            assert!(pw.validate().await)
+        }
+
+        let mut test_runner = TestRunner::deterministic();
+        let [to_be_updated, mined] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(4, 4, 4), (3, 3, 3)])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        assert!(to_be_updated.validate().await);
+        assert!(mined.validate().await);
+
+        let updated_with_block = update_with_block(to_be_updated.clone(), mined.clone());
+        assert_valid_as_pw(&updated_with_block).await;
+
+        let updated_with_ms_data = update_with_ms_data(to_be_updated.clone(), mined.clone());
+        assert_valid_as_pw(&updated_with_ms_data).await;
+
+        assert_eq!(updated_with_block, updated_with_ms_data);
+
+        assert_eq!(
+            to_be_updated.kernel.coinbase,
+            updated_with_ms_data.kernel.coinbase
+        );
+        assert_eq!(to_be_updated.kernel.fee, updated_with_ms_data.kernel.fee);
+        assert_eq!(
+            to_be_updated.kernel.outputs,
+            updated_with_ms_data.kernel.outputs
+        );
+        assert_eq!(
+            to_be_updated.kernel.public_announcements,
+            updated_with_ms_data.kernel.public_announcements
+        );
+        assert_ne!(
+            to_be_updated.kernel.mutator_set_hash,
+            updated_with_ms_data.kernel.mutator_set_hash
+        );
     }
 
     // #[traced_test]

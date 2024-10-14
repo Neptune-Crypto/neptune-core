@@ -110,25 +110,24 @@ mod tests {
         let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
 
-        let [pw_for_update_original, pw_for_mining] =
+        let [to_be_updated, mined] =
             PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(4, 4, 4), (3, 3, 3)])
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        let tx_id_original = pw_for_update_original.kernel.txid();
+        let tx_id_original = to_be_updated.kernel.txid();
         let block = mock_block_from_transaction_and_msa(
-            pw_for_mining.kernel,
-            pw_for_mining.mutator_set_accumulator,
+            mined.kernel,
+            mined.mutator_set_accumulator,
             network,
         );
 
-        let pw_for_update_updated =
-            Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
-                pw_for_update_original,
-                &block,
-            )
-            .unwrap();
+        let updated = Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
+            to_be_updated,
+            &block,
+        )
+        .unwrap();
 
-        assert_eq!(tx_id_original, pw_for_update_updated.kernel.txid())
+        assert_eq!(tx_id_original, updated.kernel.txid());
     }
 }
