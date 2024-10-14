@@ -9,6 +9,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
+/// Verifies that the coinbase *amount* is in line with the issuance schedule.
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoinbaseIsValidWitness {
     pub block: Block,

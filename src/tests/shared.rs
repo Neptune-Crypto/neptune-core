@@ -264,8 +264,8 @@ pub async fn add_block_to_light_state(
     light_state: &mut LightState,
     new_block: Block,
 ) -> Result<()> {
-    let previous_pow_family = light_state.kernel.header.proof_of_work_family;
-    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
+    let previous_pow_family = light_state.kernel.header.cumulative_proof_of_work;
+    if previous_pow_family < new_block.kernel.header.cumulative_proof_of_work {
         light_state.set_block(new_block);
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
@@ -580,8 +580,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         timestamp: tx_kernel.timestamp,
         nonce: [bfe!(0), bfe!(0), bfe!(0)],
         max_block_size: 1_000_000,
-        proof_of_work_line: genesis_block.header().proof_of_work_line,
-        proof_of_work_family: genesis_block.header().proof_of_work_family,
+        cumulative_proof_of_work: genesis_block.header().cumulative_proof_of_work,
         difficulty: genesis_block.header().difficulty,
     };
 
@@ -592,13 +591,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         .unwrap();
 
     let empty_mmr = MmrAccumulator::init(vec![], 0);
-    let body = BlockBody {
-        transaction_kernel: tx_kernel,
-        mutator_set_accumulator: next_mutator_set,
-        lock_free_mmr_accumulator: empty_mmr.clone(),
-        block_mmr_accumulator: empty_mmr,
-        uncle_blocks: Default::default(),
-    };
+    let body = BlockBody::new(tx_kernel, next_mutator_set, empty_mmr.clone(), empty_mmr);
 
     Block::new(block_header, body, BlockProof::Invalid)
 }
@@ -618,8 +611,7 @@ pub(crate) fn mock_block_with_transaction(
         timestamp: transaction.kernel.timestamp,
         nonce: [bfe!(0), bfe!(0), bfe!(0)],
         max_block_size: 1_000_000,
-        proof_of_work_line: previous_block.header().proof_of_work_line,
-        proof_of_work_family: previous_block.header().proof_of_work_family,
+        cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
     };
 
@@ -635,13 +627,12 @@ pub(crate) fn mock_block_with_transaction(
         .apply_to_accumulator(&mut next_mutator_set)
         .unwrap();
 
-    let body = BlockBody {
-        transaction_kernel: transaction.kernel,
-        mutator_set_accumulator: next_mutator_set,
-        lock_free_mmr_accumulator: previous_block.body().lock_free_mmr_accumulator.clone(),
-        block_mmr_accumulator: block_mmr,
-        uncle_blocks: Default::default(),
-    };
+    let body = BlockBody::new(
+        transaction.kernel,
+        next_mutator_set,
+        previous_block.body().lock_free_mmr_accumulator.clone(),
+        block_mmr,
+    );
 
     Block::new(block_header, body, BlockProof::Invalid)
 }
@@ -692,17 +683,16 @@ pub fn make_mock_block(
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let block_body: BlockBody = BlockBody {
-        transaction_kernel: tx_kernel,
-        mutator_set_accumulator: next_mutator_set.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
-        block_mmr_accumulator: block_mmr,
-        uncle_blocks: vec![],
-    };
+    let block_body: BlockBody = BlockBody::new(
+        tx_kernel,
+        next_mutator_set.clone(),
+        MmrAccumulator::new_from_leafs(vec![]),
+        block_mmr,
+    );
 
     let block_target_difficulty = previous_block.kernel.header.difficulty;
-    let pow_line = previous_block.kernel.header.proof_of_work_line + block_target_difficulty;
-    let pow_family = pow_line;
+    let new_cumulative_proof_of_work =
+        previous_block.kernel.header.cumulative_proof_of_work + block_target_difficulty;
     let zero = BFieldElement::zero();
     let target_difficulty = Block::difficulty_control(previous_block, block_timestamp, None);
     let block_header = BlockHeader {
@@ -712,8 +702,7 @@ pub fn make_mock_block(
         timestamp: block_body.transaction_kernel.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
-        proof_of_work_line: pow_family,
-        proof_of_work_family: pow_family,
+        cumulative_proof_of_work: new_cumulative_proof_of_work,
         difficulty: target_difficulty,
     };
 
