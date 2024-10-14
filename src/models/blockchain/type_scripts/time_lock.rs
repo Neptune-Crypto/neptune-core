@@ -820,8 +820,10 @@ impl Arbitrary for TimeLockWitness {
 }
 
 /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-/// inputs, outputs, and public announcements. The UTXOs are timelocked with a
-/// release date set between `now` and six months from `now`.
+/// inputs, outputs, and public announcements, with active timelocks.
+///
+/// The UTXOs are timelocked with a release date set between `now` and six
+/// months from `now`.
 pub fn arbitrary_primitive_witness_with_active_timelocks(
     num_inputs: usize,
     num_outputs: usize,
@@ -845,8 +847,10 @@ pub fn arbitrary_primitive_witness_with_active_timelocks(
 }
 
 /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-/// inputs, outputs, and public announcements. The UTXOs are timelocked with a
-/// release date set between six months in the past relative to `now` and `now`.
+/// inputs, outputs, and public announcements, with expired timelocks.
+///
+/// The UTXOs are timelocked with a release date set between six months in the
+/// past relative to `now` and `now`.
 pub fn arbitrary_primitive_witness_with_expired_timelocks(
     num_inputs: usize,
     num_outputs: usize,

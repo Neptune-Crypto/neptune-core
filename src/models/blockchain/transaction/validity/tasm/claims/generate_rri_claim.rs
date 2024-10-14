@@ -11,6 +11,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::N
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// Generates a `RemovalRecordsIntegrity` `Claim` from a `ProofCollection` object.
+///
 /// Assumes the transaction kernel MAST hash is on the stack somewhere, but not
 /// necessarily immediately preceding the proof collection pointer.
 pub struct GenerateRriClaim;

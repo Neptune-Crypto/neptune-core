@@ -398,7 +398,7 @@ impl<'a, T> AtomicMutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> Drop for AtomicMutexGuard<'a, T> {
+impl<T> Drop for AtomicMutexGuard<'_, T> {
     fn drop(&mut self) {
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
@@ -410,14 +410,14 @@ impl<'a, T> Drop for AtomicMutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> Deref for AtomicMutexGuard<'a, T> {
+impl<T> Deref for AtomicMutexGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.guard
     }
 }
 
-impl<'a, T> DerefMut for AtomicMutexGuard<'a, T> {
+impl<T> DerefMut for AtomicMutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.guard
     }

@@ -1,5 +1,7 @@
 //! An implementation of a mempool to store broadcast transactions waiting to be
-//! mined.  The implementation maintains a mapping called `table` between
+//! mined.
+//!
+//! The implementation maintains a mapping called `table` between
 //! 'transaction digests' and the full 'transactions' object, as well as a
 //! double-ended priority queue called `queue` containing sorted pairs of
 //! 'transaction digests' and the associated 'fee density'.  The `table` can be

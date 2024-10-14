@@ -34,8 +34,10 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
-/// Neptune coins. The arithmetic for amounts are defined by the struct `NeptuneCoins`.
-/// This type script is responsible for checking that transactions that tranfer
+/// Neptune coins.
+///
+/// The arithmetic for amounts is defined by the struct `NeptuneCoins`.
+/// This type script is responsible for checking that transactions that transfer
 /// Neptune are balanced, *i.e.*,
 ///
 ///  sum inputs  +  (optional: coinbase)  ==  sum outputs  +  fee .

@@ -53,7 +53,7 @@ pub struct LockInfo<'a> {
     name: Option<&'a str>,
     lock_type: LockType,
 }
-impl<'a> LockInfo<'a> {
+impl LockInfo<'_> {
     /// get the lock's name
     #[inline]
     pub fn name(&self) -> Option<&str> {

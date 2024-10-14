@@ -12,9 +12,10 @@ pub mod tasm;
 pub mod timestamp;
 
 /// A `SecretWitness` is data that makes a `ConsensusProgram` halt gracefully, but
-/// that should be hidden behind a zero-knowledge proof. Phrased differently, after
-/// proving the matching `ConsensusProgram`, the `SecretWitness` should be securely
-/// deleted.
+/// that should be hidden behind a zero-knowledge proof.
+///
+/// Phrased differently, after proving the matching `ConsensusProgram`, the
+/// `SecretWitness` should be securely deleted.
 pub trait SecretWitness {
     /// The program's (public/standard) input
     fn standard_input(&self) -> PublicInput;

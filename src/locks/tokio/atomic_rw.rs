@@ -388,7 +388,7 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
     }
 }
 
-impl<'a, T> Drop for AtomicRwReadGuard<'a, T> {
+impl<T> Drop for AtomicRwReadGuard<'_, T> {
     fn drop(&mut self) {
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
@@ -400,7 +400,7 @@ impl<'a, T> Drop for AtomicRwReadGuard<'a, T> {
     }
 }
 
-impl<'a, T> Deref for AtomicRwReadGuard<'a, T> {
+impl<T> Deref for AtomicRwReadGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.guard
@@ -430,7 +430,7 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
     }
 }
 
-impl<'a, T> Drop for AtomicRwWriteGuard<'a, T> {
+impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     fn drop(&mut self) {
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
@@ -442,14 +442,14 @@ impl<'a, T> Drop for AtomicRwWriteGuard<'a, T> {
     }
 }
 
-impl<'a, T> Deref for AtomicRwWriteGuard<'a, T> {
+impl<T> Deref for AtomicRwWriteGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.guard
     }
 }
 
-impl<'a, T> DerefMut for AtomicRwWriteGuard<'a, T> {
+impl<T> DerefMut for AtomicRwWriteGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.guard
     }

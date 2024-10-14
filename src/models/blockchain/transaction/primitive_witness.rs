@@ -42,6 +42,8 @@ use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 
+/// A list of UTXOs with an associated salt.
+///
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
 /// is desirable to associate a random but consistent salt for the entire list of UTXOs.
 /// This situation arises when two distinct consensus programs prove different features

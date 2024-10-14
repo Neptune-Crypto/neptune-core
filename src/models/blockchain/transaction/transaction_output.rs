@@ -368,22 +368,6 @@ impl TxOutputList {
         public_announcements
     }
 
-    /// retrieves expected_utxos from possible sub-set of the list
-    // Killed because: going from `TxOutput` to `ExpectedUtxo` requires wallet
-    // info.
-    // pub fn expected_utxos_iter(&self) -> impl Iterator<Item = ExpectedUtxo> + '_ {
-    //     self.0.iter().filter_map(|u| match &u.utxo_notification {
-    //         UtxoNotification::OffChain(eu) => Some(*eu.clone()),
-    //         _ => None,
-    //     })
-    // }
-
-    /// retrieves expected_utxos from possible sub-set of the list
-    // Killed because: see `expected_utxos_iter`
-    // pub fn expected_utxos(&self) -> Vec<ExpectedUtxo> {
-    //     self.expected_utxos_iter().collect()
-    // }
-
     /// indicates if any offchain notifications exist
     pub fn has_offchain(&self) -> bool {
         self.0.iter().any(|u| u.is_offchain())

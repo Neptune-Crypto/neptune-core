@@ -8,10 +8,11 @@ use super::WriteOperation;
 use crate::database::neptune_leveldb::WriteBatchAsync;
 use crate::locks::tokio::LockCallbackFn;
 
-/// Database schema and tables logic for RustyLevelDB. You probably
-/// want to implement your own storage class after this example so
-/// that you can hardcode the schema in new(). But it is nevertheless
-/// possible to use this struct and add to the schema.
+/// Database schema and tables logic for RustyLevelDB.
+///
+/// You probably want to implement your own storage class after this example so
+/// that you can hardcode the schema in new(). But it is nevertheless possible
+/// to use this struct and add to the schema.
 pub struct SimpleRustyStorage {
     /// dynamic DB Schema.  (new tables may be added)
     pub schema: DbtSchema,

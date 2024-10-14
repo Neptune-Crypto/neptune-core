@@ -281,19 +281,22 @@ impl Iterator for EnvironmentMemoryIter {
     }
 }
 
-/// In nondeterministically-initialized memory, there lives an object of type T. Given a
-/// pointer to it, get that object. In TritonVM, this operation has no effect. the rust
-/// shadow, we decode the object that lives there.
+/// In nondeterministically-initialized memory, there lives an object of type
+/// T. Given a pointer to it, get that object.
+///
+/// In TritonVM, this operation has no effect. the rust shadow, we decode the
+/// object that lives there.
 pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
     let mut iterator = EnvironmentMemoryIter(start_address);
     *T::decode_iter(&mut iterator).expect("decode from memory failed")
 }
 
-/// Verify a STARK proof. Crashes if the (claim, proof) pair is invalid. Consumes
-/// the right number of non-deterministic digests from the ND digests stream. Also
-/// consumes the right number of non-deterministic individual tokens from the ND
-/// individual tokens stream. The latter number happens to be 0 right now, but
-/// that might change if the `StarkVerify` snippet changes.
+/// Verify a STARK proof. Crashes if the (claim, proof) pair is invalid.
+///
+/// Consumes the right number of non-deterministic digests from the ND digests
+/// stream. Also consumes the right number of non-deterministic individual
+/// tokens from the ND individual tokens stream. The latter number happens to
+/// be 0 right now, but that might change if the `StarkVerify` snippet changes.
 pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
     assert!(triton_vm::verify(stark_parameters, claim, proof));
 
@@ -320,8 +323,10 @@ pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
     });
 }
 
-/// Verify a MMR successor proof. Crashes if the proof is invalid for the given
-/// MMR accumulators. Consumes the right number of non-deterministic digests from
+/// Verify an MMR successor proof. Crashes if the proof is invalid for the given
+/// MMR accumulators.
+///
+/// Consumes the right number of non-deterministic digests from
 /// the ND digest stream.
 pub fn verify_mmr_successor_proof(
     old_mmr: &MmrAccumulator,
