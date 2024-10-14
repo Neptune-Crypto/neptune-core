@@ -94,6 +94,7 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
@@ -720,6 +721,47 @@ pub fn make_mock_transaction_with_wallet(
         kernel,
         proof: TransactionProof::Invalid,
     }
+}
+
+/// Create a block containing the supplied transaction kernel, starting from
+/// the supplied mutator set.
+///
+/// The block proof will be invalid.
+pub(crate) fn mock_block_from_transaction_and_msa(
+    tx_kernel: TransactionKernel,
+    mutator_set_before: MutatorSetAccumulator,
+    network: Network,
+) -> Block {
+    let genesis_block = Block::genesis_block(network);
+    let new_block_height: BlockHeight = BlockHeight::from(100u64);
+    let block_header = BlockHeader {
+        version: bfe!(0),
+        height: new_block_height,
+        prev_block_digest: genesis_block.hash().hash(),
+        timestamp: tx_kernel.timestamp,
+        nonce: [bfe!(0), bfe!(0), bfe!(0)],
+        max_block_size: 1_000_000,
+        proof_of_work_line: genesis_block.header().proof_of_work_line,
+        proof_of_work_family: genesis_block.header().proof_of_work_family,
+        difficulty: genesis_block.header().difficulty,
+    };
+
+    let mut next_mutator_set = mutator_set_before.clone();
+    let ms_update = MutatorSetUpdate::new(tx_kernel.inputs.clone(), tx_kernel.outputs.clone());
+    ms_update
+        .apply_to_accumulator(&mut next_mutator_set)
+        .unwrap();
+
+    let empty_mmr = MmrAccumulator::init(vec![], 0);
+    let body = BlockBody {
+        transaction_kernel: tx_kernel,
+        mutator_set_accumulator: next_mutator_set,
+        lock_free_mmr_accumulator: empty_mmr.clone(),
+        block_mmr_accumulator: empty_mmr,
+        uncle_blocks: Default::default(),
+    };
+
+    Block::new(block_header, body, BlockProof::Invalid)
 }
 
 /// Create a block containing the supplied transaction.

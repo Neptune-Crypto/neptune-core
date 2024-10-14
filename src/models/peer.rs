@@ -15,6 +15,7 @@ use super::blockchain::block::transfer_block::TransferBlock;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
 use super::blockchain::transaction::Transaction;
+use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::prelude::twenty_first;
 
@@ -254,22 +255,32 @@ pub enum ConnectionStatus {
     Accepted,
 }
 
+/// Data structure for communicating knowledge of transactions.
+///
 /// A sender broadcasts to all peers a `TransactionNotification` when it has
 /// received a transaction with the given `TransactionId`.  It is implied
 /// that interested peers can request the full transaction object from this
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
-    pub transaction_digest: Digest,
-    // TODO: Consider adding `timestamp` here
-    // pub timestamp: SystemTime,
+    /// A unique identifier of the transaction. Matches keys in the [mempool]
+    /// data structure.
+    ///
+    /// [mempool]: crate::models::state::mempool::Mempool
+    pub txid: TransactionKernelId,
+
+    /// The hash of the mutator set under which this transaction is valid.
+    /// The receiver can use this to check if it matches their tip. If not, they
+    /// can choose to ignore the transaction.
+    pub mutator_set_hash: Digest,
 }
 
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
-        let transaction_digest = Hash::hash(&transaction);
-
-        Self { transaction_digest }
+        Self {
+            txid: transaction.kernel.txid(),
+            mutator_set_hash: transaction.kernel.mutator_set_hash,
+        }
     }
 }
 
@@ -291,7 +302,7 @@ pub enum PeerMessage {
     TransactionNotification(TransactionNotification),
     /// Send a request that this node would like a copy of the transaction with
     /// digest as specified by the argument.
-    TransactionRequest(Digest),
+    TransactionRequest(TransactionKernelId),
     PeerListRequest,
     /// (socket address, instance_id)
     PeerListResponse(Vec<(SocketAddr, u128)>),

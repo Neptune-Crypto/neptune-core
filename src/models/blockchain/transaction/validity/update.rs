@@ -924,4 +924,16 @@ pub(crate) mod test {
         bad_absolute_index_set_length_too_short(&good_witness);
         bad_absolute_index_set_length_too_long(&good_witness);
     }
+
+    /// A test of the test generator, that it leaves the expected fields
+    /// untouched, or at most permuted.
+    #[test]
+    fn txid_is_constant_under_tx_updates() {
+        let update_witness = deterministic_update_witness(4, 4, 4);
+        assert_eq!(
+            update_witness.old_kernel.txid(),
+            update_witness.new_kernel.txid(),
+            "Txid function must agree before and after transaction update"
+        );
+    }
 }

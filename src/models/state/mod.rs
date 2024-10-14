@@ -5,6 +5,7 @@ pub mod mempool;
 pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
+pub(crate) mod transaction_kernel_id;
 pub mod tx_proving_capability;
 pub mod wallet;
 

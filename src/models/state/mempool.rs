@@ -38,10 +38,9 @@ use priority_queue::double_priority_queue::iterators::IntoSortedIter;
 use priority_queue::DoublePriorityQueue;
 use tracing::error;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use super::transaction_kernel_id::TransactionKernelId;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -57,7 +56,7 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
-type LookupItem<'a> = (Digest, &'a Transaction);
+type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
 
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Mempool {
@@ -65,12 +64,12 @@ pub struct Mempool {
 
     /// Contains transactions, with a mapping from transaction ID to transaction.
     /// Maintain for constant lookup
-    tx_dictionary: HashMap<Digest, Transaction>,
+    tx_dictionary: HashMap<TransactionKernelId, Transaction>,
 
     /// Allows the mempool to report transactions sorted by [`FeeDensity`] in
     /// both descending and ascending order.
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
-    queue: DoublePriorityQueue<Digest, FeeDensity>,
+    queue: DoublePriorityQueue<TransactionKernelId, FeeDensity>,
 
     /// Records the digest of the block that the transactions were synced to.
     /// Used to discover reorganizations.
@@ -99,14 +98,14 @@ impl Mempool {
     /// check if transaction exists in mempool
     ///
     /// Computes in O(1) from HashMap
-    pub fn contains(&self, transaction_id: Digest) -> bool {
+    pub fn contains(&self, transaction_id: TransactionKernelId) -> bool {
         self.tx_dictionary.contains_key(&transaction_id)
     }
 
     /// get transaction from mempool
     ///
     /// Computes in O(1) from HashMap
-    pub fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
+    pub fn get(&self, transaction_id: TransactionKernelId) -> Option<&Transaction> {
         self.tx_dictionary.get(&transaction_id)
     }
 
@@ -115,7 +114,7 @@ impl Mempool {
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
-    ) -> Option<(Digest, Transaction)> {
+    ) -> Option<(TransactionKernelId, Transaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
         let tx_sbf_indices: HashSet<_> = transaction
             .kernel
@@ -147,7 +146,7 @@ impl Mempool {
     /// # Panics
     ///
     /// Panics if the transaction's proof is of the wrong type.
-    pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
+    pub fn insert(&mut self, transaction: &Transaction) -> Option<TransactionKernelId> {
         match transaction.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => {}
@@ -169,11 +168,10 @@ impl Mempool {
             }
         };
 
-        let transaction_id: Digest = Hash::hash(transaction);
+        let txid = transaction.kernel.txid();
 
-        self.queue.push(transaction_id, transaction.fee_density());
-        self.tx_dictionary
-            .insert(transaction_id, transaction.to_owned());
+        self.queue.push(txid, transaction.fee_density());
+        self.tx_dictionary.insert(txid, transaction.to_owned());
         assert_eq!(
             self.tx_dictionary.len(),
             self.queue.len(),
@@ -190,7 +188,7 @@ impl Mempool {
     }
 
     /// remove a transaction from the `Mempool`
-    pub fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
+    pub fn remove(&mut self, transaction_id: TransactionKernelId) -> Option<Transaction> {
         if let rv @ Some(_) = self.tx_dictionary.remove(&transaction_id) {
             self.queue.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -436,8 +434,8 @@ impl Mempool {
     /// let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
-    /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
-    ///    let t = mempool.get(transaction_digest);
+    /// for (transaction_id, fee_density) in mempool.get_sorted_iter() {
+    ///    let t = mempool.get(transaction_id);
     ///    most_valuable_transactions.push(t);
     /// }
     /// ```
@@ -445,7 +443,9 @@ impl Mempool {
     /// Yields the `transaction_digest` in order of descending `fee_density`, since
     /// users (miner or transaction merger) will likely only care about the most valuable transactions
     /// Computes in O(N lg N)
-    pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
+    pub fn get_sorted_iter(
+        &self,
+    ) -> Rev<IntoSortedIter<TransactionKernelId, FeeDensity, RandomState>> {
         let dpq_clone = self.queue.clone();
         dpq_clone.into_sorted_iter().rev()
     }
@@ -461,7 +461,6 @@ mod tests {
     use rand::SeedableRng;
     use tracing::debug;
     use tracing_test::traced_test;
-    use twenty_first::prelude::Tip5;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -490,18 +489,23 @@ mod tests {
         let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
 
         let txs = make_plenty_mock_transaction_with_primitive_witness(2);
-        let transaction_digests = txs.iter().map(Tip5::hash).collect_vec();
+        let transaction_digests = txs.iter().map(|tx| tx.kernel.txid()).collect_vec();
         assert!(!mempool.contains(transaction_digests[0]));
+        assert!(!mempool.contains(transaction_digests[1]));
         mempool.insert(&txs[0]);
         assert!(mempool.contains(transaction_digests[0]));
+        assert!(!mempool.contains(transaction_digests[1]));
 
         let transaction_get_option = mempool.get(transaction_digests[0]);
         assert_eq!(Some(&txs[0]), transaction_get_option);
         assert!(mempool.contains(transaction_digests[0]));
+        assert!(!mempool.contains(transaction_digests[1]));
 
         let transaction_remove_option = mempool.remove(transaction_digests[0]);
         assert_eq!(Some(txs[0].clone()), transaction_remove_option);
-        assert!(!mempool.contains(transaction_digests[0]));
+        for tx_id in transaction_digests.iter() {
+            assert!(!mempool.contains(*tx_id));
+        }
 
         let transaction_second_remove_option = mempool.remove(transaction_digests[0]);
         assert_eq!(None, transaction_second_remove_option);
@@ -938,63 +942,47 @@ mod tests {
                 tx
             };
 
-        // Create a transaction
-        let tx_low_fee =
-            make_transaction_with_fee(NeptuneCoins::new(1), preminer.clone(), rng.gen()).await;
-
-        // No need to inform wallet, since only mempool is being tested.
-
         assert_eq!(0, preminer.lock_guard().await.mempool.len());
 
-        // Inser transaction into mempool
-        preminer.lock_guard_mut().await.mempool.insert(&tx_low_fee);
-
-        assert_eq!(1, preminer.lock_guard().await.mempool.len());
-        assert_eq!(
-            &tx_low_fee,
-            preminer
-                .lock_guard()
-                .await
-                .mempool
-                .get(Hash::hash(&tx_low_fee))
-                .unwrap()
-        );
+        // Insert transaction into mempool
+        let tx_low_fee =
+            make_transaction_with_fee(NeptuneCoins::new(1), preminer.clone(), rng.gen()).await;
+        {
+            let mempool = &mut preminer.lock_guard_mut().await.mempool;
+            mempool.insert(&tx_low_fee);
+            assert_eq!(1, mempool.len());
+            assert_eq!(&tx_low_fee, mempool.get(tx_low_fee.kernel.txid()).unwrap());
+        }
 
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
         let tx_high_fee =
             make_transaction_with_fee(NeptuneCoins::new(10), preminer.clone(), rng.gen()).await;
-        preminer.lock_guard_mut().await.mempool.insert(&tx_high_fee);
-        assert_eq!(1, preminer.lock_guard().await.mempool.len());
-        assert_eq!(
-            &tx_high_fee,
-            preminer
-                .lock_guard()
-                .await
-                .mempool
-                .get(Hash::hash(&tx_high_fee))
-                .unwrap()
-        );
+        {
+            let mempool = &mut preminer.lock_guard_mut().await.mempool;
+            mempool.insert(&tx_high_fee);
+            assert_eq!(1, mempool.len());
+            assert_eq!(
+                &tx_high_fee,
+                mempool.get(tx_high_fee.kernel.txid()).unwrap()
+            );
+        }
 
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
-        let tx_medium_fee =
-            make_transaction_with_fee(NeptuneCoins::new(4), preminer.clone(), rng.gen()).await;
-        preminer
-            .lock_guard_mut()
-            .await
-            .mempool
-            .insert(&tx_medium_fee);
-        assert_eq!(1, preminer.lock_guard().await.mempool.len());
-        assert_eq!(
-            &tx_high_fee,
-            preminer
-                .lock_guard()
-                .await
-                .mempool
-                .get(Hash::hash(&tx_high_fee))
-                .unwrap()
-        );
+        {
+            let tx_medium_fee =
+                make_transaction_with_fee(NeptuneCoins::new(4), preminer.clone(), rng.gen()).await;
+            let mempool = &mut preminer.lock_guard_mut().await.mempool;
+            mempool.insert(&tx_medium_fee);
+            assert_eq!(1, mempool.len());
+            assert_eq!(
+                &tx_high_fee,
+                mempool.get(tx_high_fee.kernel.txid()).unwrap()
+            );
+            assert!(mempool.get(tx_medium_fee.kernel.txid()).is_none());
+            assert!(mempool.get(tx_low_fee.kernel.txid()).is_none());
+        }
     }
 
     #[traced_test]

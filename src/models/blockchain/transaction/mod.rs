@@ -167,7 +167,7 @@ impl Transaction {
     /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
     /// `Transaction`) by updating the mutator set records according to a new
     /// `Block`.
-    fn new_with_updated_mutator_set_records_given_primitive_witness(
+    pub(crate) fn new_with_updated_mutator_set_records_given_primitive_witness(
         old_primitive_witness: PrimitiveWitness,
         block: &Block,
     ) -> Result<Transaction> {

@@ -861,27 +861,33 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::TransactionNotification(transaction_notification) => {
+            PeerMessage::TransactionNotification(tx_notification) => {
                 // 1. Ignore if we already know this transaction.
-                let transaction_is_known = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .mempool
-                    .contains(transaction_notification.transaction_digest);
+                let state = self.global_state_lock.lock_guard().await;
+                let transaction_is_known = state.mempool.contains(tx_notification.txid);
                 if transaction_is_known {
                     debug!("transaction was already known");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Should we check a timestamp here?
+                // Only accept transactions that do not require executing
+                // `update`.
+                if state
+                    .chain
+                    .light_state()
+                    .body()
+                    .mutator_set_accumulator
+                    .hash()
+                    != tx_notification.mutator_set_hash
+                {
+                    debug!("transaction refers to non-canonical mutator set state");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 // 2. Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
-                peer.send(PeerMessage::TransactionRequest(
-                    transaction_notification.transaction_digest,
-                ))
-                .await?;
+                peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
+                    .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -2416,9 +2422,7 @@ mod peer_loop_tests {
         let tx_notification: TransactionNotification = transaction_1.clone().into();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-            Action::Write(PeerMessage::TransactionRequest(
-                tx_notification.transaction_digest,
-            )),
+            Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
             Action::Read(PeerMessage::Transaction(Box::new(transaction_1))),
             Action::Read(PeerMessage::Bye),
         ]);
