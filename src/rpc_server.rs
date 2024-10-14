@@ -36,6 +36,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
@@ -253,20 +254,23 @@ impl NeptuneRPCServer {
         }
     }
 
-    /// Method to create a transaction with a given timestamp.
+    /// Method to create a transaction with a given timestamp and prover
+    /// capability.
     ///
-    /// Factored out in order to generate deterministic transaction
-    /// kernels where tests can reuse previously generated proofs.
+    /// Factored out from [NeptuneRPCServer::send_to_many] in order to generate
+    /// deterministic transaction kernels where tests can reuse previously
+    /// generated proofs.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn send_to_many_with_timestamp(
+    async fn send_to_many_inner(
         mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         now: Timestamp,
+        tx_proving_capability: TxProvingCapability,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
@@ -302,12 +306,13 @@ impl NeptuneRPCServer {
         //
         // note: A change output will be added to tx_outputs if needed.
         let (transaction, maybe_change_output) = match state
-            .create_transaction(
+            .create_transaction_with_prover_capability(
                 tx_outputs.clone(),
                 change_key,
                 owned_utxo_notification_medium,
                 fee,
                 now,
+                tx_proving_capability,
             )
             .await
         {
@@ -752,12 +757,14 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        self.send_to_many_with_timestamp(
+        let tx_proving_capability = self.state.lock_guard().await.net.tx_proving_capability;
+        self.send_to_many_inner(
             ctx,
             outputs,
             owned_utxo_notification_medium,
             fee,
             Timestamp::now(),
+            tx_proving_capability,
         )
         .await
     }
@@ -972,14 +979,21 @@ mod rpc_server_tests {
             .await;
 
         let transaction_timestamp = network.launch_date();
+        let proving_capability = rpc_server
+            .state
+            .lock_guard()
+            .await
+            .net
+            .tx_proving_capability;
         let _ = rpc_server
             .clone()
-            .send_to_many_with_timestamp(
+            .send_to_many_inner(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::one(),
                 transaction_timestamp,
+                proving_capability,
             )
             .await;
         let _ = rpc_server.clone().pause_miner(ctx).await;
@@ -1519,15 +1533,17 @@ mod rpc_server_tests {
         // --- Operation: perform send_to_many
         // It's important to call a method where you get to inject the
         // timestamp. Otherwise, proofs cannot be reused, and CI will
-        // fail.
+        // fail. CI might also fail if you don't set an explicit proving
+        // capability.
         let result = rpc_server
             .clone()
-            .send_to_many_with_timestamp(
+            .send_to_many_inner(
                 ctx,
                 outputs,
                 UtxoNotificationMedium::OffChain,
                 fee,
                 timestamp,
+                TxProvingCapability::ProofCollection,
             )
             .await;
 
