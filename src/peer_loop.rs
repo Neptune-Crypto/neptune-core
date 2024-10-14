@@ -455,8 +455,8 @@ impl PeerLoopHandler {
                     .light_state()
                     .kernel
                     .header
-                    .proof_of_work_family
-                    < block.kernel.header.proof_of_work_family;
+                    .cumulative_proof_of_work
+                    < block.kernel.header.cumulative_proof_of_work;
                 let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
                 {
                     Some(last_block) => last_block.kernel.header.prev_block_digest == block.hash(),
@@ -464,7 +464,7 @@ impl PeerLoopHandler {
                 };
 
                 // Determine whether
-                //  a) the incoming block's POW family is larger than what we have; or
+                //  a) the incoming block's accumulated POW is larger than what we have; or
                 //  b) we are populating a fork reconciliation blocks list.
                 if incoming_block_is_heavier || reconciliation_ongoing {
                     debug!("block is new");
@@ -472,7 +472,7 @@ impl PeerLoopHandler {
                 } else {
                     info!(
                         "Got non-canonical block from peer, height: {}, PoW family: {:?}",
-                        new_block_height, block.kernel.header.proof_of_work_family,
+                        new_block_height, block.kernel.header.cumulative_proof_of_work,
                     );
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -692,8 +692,8 @@ impl PeerLoopHandler {
                         .light_state()
                         .kernel
                         .header
-                        .proof_of_work_family
-                        < block_notification.proof_of_work_family;
+                        .cumulative_proof_of_work
+                        < block_notification.cumulative_proof_of_work;
 
                     debug!("block_is_new: {}", block_is_new);
 
@@ -711,7 +711,7 @@ impl PeerLoopHandler {
                             .send(PeerTaskToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
                                 block_notification.height,
-                                block_notification.proof_of_work_family,
+                                block_notification.cumulative_proof_of_work,
                             )))
                             .await
                             .expect("Sending to main task must succeed");
@@ -1222,7 +1222,7 @@ impl PeerLoopHandler {
             .send(PeerTaskToMain::AddPeerMaxBlockHeight((
                 self.peer_address,
                 self.peer_handshake_data.tip_header.height,
-                self.peer_handshake_data.tip_header.proof_of_work_family,
+                self.peer_handshake_data.tip_header.cumulative_proof_of_work,
             )))
             .await?;
 
@@ -1230,7 +1230,7 @@ impl PeerLoopHandler {
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
 
         // If peer indicates more canonical block, request a block notification to catch up ASAP
-        if self.peer_handshake_data.tip_header.proof_of_work_family
+        if self.peer_handshake_data.tip_header.cumulative_proof_of_work
             > self
                 .global_state_lock
                 .lock_guard()
@@ -1239,7 +1239,7 @@ impl PeerLoopHandler {
                 .light_state()
                 .kernel
                 .header
-                .proof_of_work_family
+                .cumulative_proof_of_work
         {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }

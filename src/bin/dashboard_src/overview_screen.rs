@@ -434,12 +434,11 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.block_header.as_ref().map(|bh| bh.difficulty)),
         ));
         lines.push(format!(
-            "pow line: {}",
-            dashifnotset!(data.block_header.as_ref().map(|bh| bh.proof_of_work_line))
-        ));
-        lines.push(format!(
-            "pow family: {}",
-            dashifnotset!(data.block_header.as_ref().map(|bh| bh.proof_of_work_family))
+            "cumulative pow: {}",
+            dashifnotset!(data
+                .block_header
+                .as_ref()
+                .map(|bh| bh.cumulative_proof_of_work))
         ));
         Self::report(&lines, "Blockchain")
             .style(style)

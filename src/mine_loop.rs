@@ -63,17 +63,16 @@ pub(crate) fn make_block_template(
 
     let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmra.append(previous_block.hash());
-    let block_body: BlockBody = BlockBody {
-        transaction_kernel: transaction.kernel,
-        mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::new_from_leafs(vec![]),
-        block_mmr_accumulator: block_mmra,
-        uncle_blocks: vec![],
-    };
+    let block_body: BlockBody = BlockBody::new(
+        transaction.kernel,
+        next_mutator_set_accumulator.clone(),
+        MmrAccumulator::new_from_leafs(vec![]),
+        block_mmra,
+    );
 
     let zero = BFieldElement::zero();
-    let new_pow_line: U32s<5> =
-        previous_block.kernel.header.proof_of_work_family + previous_block.kernel.header.difficulty;
+    let new_pow: U32s<5> = previous_block.kernel.header.cumulative_proof_of_work
+        + previous_block.kernel.header.difficulty;
     let next_block_height = previous_block.kernel.header.height.next();
     if block_timestamp < previous_block.kernel.header.timestamp {
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
@@ -89,8 +88,7 @@ pub(crate) fn make_block_template(
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
-        proof_of_work_line: new_pow_line,
-        proof_of_work_family: new_pow_line,
+        cumulative_proof_of_work: new_pow,
         difficulty,
     };
 

@@ -35,10 +35,7 @@ pub struct BlockHeader {
     pub max_block_size: u32,
 
     // use to compare two forks of different height
-    pub proof_of_work_line: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
-
-    // use to compare two forks of the same height
-    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
     // This is the difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
@@ -50,13 +47,11 @@ impl Display for BlockHeader {
             "Height: {}\n\
             Timestamp: {}\n\
             Prev. Digest: {}\n\
-            Proof-of-work-line: {}\n\
-            Proof-of-work-family: {}",
+            Cumulative Proof-of-Work: {}\n",
             self.height,
             self.timestamp.standard_format(),
             self.prev_block_digest.to_hex(),
-            self.proof_of_work_line,
-            self.proof_of_work_family
+            self.cumulative_proof_of_work,
         );
 
         write!(f, "{}", string)
@@ -71,8 +66,7 @@ pub enum BlockHeaderField {
     Timestamp,
     Nonce,
     MaxBlockSize,
-    ProofOfWorkLine,
-    ProofOfWorkFamily,
+    CumulativeProofOfWork,
     Difficulty,
 }
 
@@ -93,8 +87,7 @@ impl MastHash for BlockHeader {
             self.timestamp.encode(),
             self.nonce.encode(),
             self.max_block_size.encode(),
-            self.proof_of_work_line.encode(),
-            self.proof_of_work_family.encode(),
+            self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
         ]
     }
@@ -116,8 +109,7 @@ mod block_header_tests {
             timestamp: rng.gen(),
             nonce: rng.gen(),
             max_block_size: rng.gen(),
-            proof_of_work_line: rng.gen(),
-            proof_of_work_family: rng.gen(),
+            cumulative_proof_of_work: rng.gen(),
             difficulty: rng.gen(),
         }
     }

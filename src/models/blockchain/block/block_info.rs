@@ -21,12 +21,10 @@ pub struct BlockInfo {
     pub digest: Digest,
     pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
-    pub proof_of_work_line: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
-    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub num_uncle_blocks: usize,
     pub mining_reward: NeptuneCoins,
     pub fee: NeptuneCoins,
     pub is_genesis: bool,
@@ -41,12 +39,13 @@ impl std::fmt::Display for BlockInfo {
             + &format!("digest: {}\n", self.digest.to_hex())
             + &format!("prev_block_digest: {}\n", self.prev_block_digest.to_hex())
             + &format!("timestamp: {}\n", self.timestamp.standard_format())
-            + &format!("proof_of_work_line: {}\n", self.proof_of_work_line)
-            + &format!("proof_of_work_family: {}\n", self.proof_of_work_family)
+            + &format!(
+                "cumulative_proof_of_work: {}\n",
+                self.cumulative_proof_of_work
+            )
             + &format!("difficulty: {}\n", self.difficulty)
             + &format!("num_inputs: {}\n", self.num_inputs)
             + &format!("num_outputs: {}\n", self.num_outputs)
-            + &format!("num_uncle_blocks: {}\n", self.num_uncle_blocks)
             + &format!("mining_reward: {}\n", self.mining_reward)
             + &format!("fee: {}\n", self.fee)
             + &format!("is_genesis: {}\n", self.is_genesis)
@@ -71,11 +70,9 @@ impl BlockInfo {
             height: header.height,
             timestamp: header.timestamp,
             difficulty: header.difficulty,
-            proof_of_work_line: header.proof_of_work_line,
-            proof_of_work_family: header.proof_of_work_family,
+            cumulative_proof_of_work: header.cumulative_proof_of_work,
             num_inputs: body.transaction_kernel.inputs.len(),
             num_outputs: body.transaction_kernel.outputs.len(),
-            num_uncle_blocks: body.uncle_blocks.len(),
             fee: body.transaction_kernel.fee,
             mining_reward: crate::Block::get_mining_reward(header.height),
             is_genesis: digest == genesis_digest,

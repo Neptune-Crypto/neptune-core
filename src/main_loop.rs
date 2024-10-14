@@ -126,7 +126,7 @@ impl SyncState {
     ) -> Vec<SocketAddr> {
         self.peer_sync_states
             .iter()
-            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow_family > threshold_pow_family)
+            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow > threshold_pow_family)
             .map(|(sa, _)| *sa)
             .collect()
     }
@@ -287,7 +287,7 @@ fn enter_sync_mode(
     peer_synchronization_state: PeerSynchronizationState,
     max_number_of_blocks_before_syncing: usize,
 ) -> bool {
-    own_block_tip_header.proof_of_work_family < peer_synchronization_state.claimed_max_pow_family
+    own_block_tip_header.cumulative_proof_of_work < peer_synchronization_state.claimed_max_pow
         && peer_synchronization_state.claimed_max_height - own_block_tip_header.height
             > max_number_of_blocks_before_syncing as i128
 }
@@ -301,14 +301,14 @@ fn stay_in_sync_mode(
     let max_claimed_pow = sync_state
         .peer_sync_states
         .values()
-        .max_by_key(|x| x.claimed_max_pow_family);
+        .max_by_key(|x| x.claimed_max_pow);
     match max_claimed_pow {
         None => false, // we lost all connections. Can't sync.
 
         // Synchronization is left when the remaining number of block is half of what has
         // been indicated to fit into RAM
         Some(max_claim) => {
-            own_block_tip_header.proof_of_work_family < max_claim.claimed_max_pow_family
+            own_block_tip_header.cumulative_proof_of_work < max_claim.claimed_max_pow
                 && max_claim.claimed_max_height - own_block_tip_header.height
                     > max_number_of_blocks_before_syncing as i128 / 2
         }
@@ -368,21 +368,21 @@ impl MainLoopHandler {
                 let prover_lock = self.global_state_lock.proving_lock.clone();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                let (tip_hash, tip_proof_of_work_family) = (
+                let (tip_hash, tip_cumulative_proof_of_work) = (
                     global_state_mut.chain.light_state().hash(),
                     global_state_mut
                         .chain
                         .light_state()
                         .kernel
                         .header
-                        .proof_of_work_family,
+                        .cumulative_proof_of_work,
                 );
 
                 // If we received a new block from a peer and updated the global state before this message from the miner was handled,
                 // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
                 // node considered the most canonical block.
-                let block_is_new = tip_proof_of_work_family
-                    < new_block.kernel.header.proof_of_work_family
+                let block_is_new = tip_cumulative_proof_of_work
+                    < new_block.kernel.header.cumulative_proof_of_work
                     && new_block.kernel.header.prev_block_digest == tip_hash;
                 if !block_is_new {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
@@ -436,15 +436,15 @@ impl MainLoopHandler {
                     let prover_lock = self.global_state_lock.proving_lock.clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                    let tip_proof_of_work_family = global_state_mut
+                    let tip_cumulative_proof_of_work = global_state_mut
                         .chain
                         .light_state()
                         .kernel
                         .header
-                        .proof_of_work_family;
+                        .cumulative_proof_of_work;
 
-                    let block_is_new =
-                        tip_proof_of_work_family < last_block.kernel.header.proof_of_work_family;
+                    let block_is_new = tip_cumulative_proof_of_work
+                        < last_block.kernel.header.cumulative_proof_of_work;
                     if !block_is_new {
                         warn!("Blocks were not new. Not storing blocks.");
 
@@ -795,7 +795,7 @@ impl MainLoopHandler {
                 .light_state()
                 .kernel
                 .header
-                .proof_of_work_family,
+                .cumulative_proof_of_work,
         );
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state

@@ -116,7 +116,7 @@ impl Display for PeerSanctionReason {
 #[derive(Debug, Clone, Copy)]
 pub struct PeerSynchronizationState {
     pub claimed_max_height: BlockHeight,
-    pub claimed_max_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub claimed_max_pow: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
     pub synchronization_start: SystemTime,
     pub last_request_received: Option<SystemTime>,
 }
@@ -124,11 +124,11 @@ pub struct PeerSynchronizationState {
 impl PeerSynchronizationState {
     pub fn new(
         claimed_max_height: BlockHeight,
-        claimed_max_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+        claimed_max_pow: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
     ) -> Self {
         Self {
             claimed_max_height,
-            claimed_max_pow_family,
+            claimed_max_pow,
             synchronization_start: SystemTime::now(),
             last_request_received: None,
         }
@@ -205,13 +205,13 @@ pub struct HandshakeData {
     pub is_archival_node: bool,
 }
 
-/// Used to tell peers that a new block has been found without having toPeerMessage
+/// Used to tell peers that a new block has been found without having to
 /// send the entire block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
-    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 }
 
 impl From<&Block> for PeerBlockNotification {
@@ -219,7 +219,7 @@ impl From<&Block> for PeerBlockNotification {
         PeerBlockNotification {
             hash: block.hash(),
             height: block.kernel.header.height,
-            proof_of_work_family: block.kernel.header.proof_of_work_family,
+            cumulative_proof_of_work: block.kernel.header.cumulative_proof_of_work,
         }
     }
 }
@@ -229,7 +229,7 @@ impl From<Block> for PeerBlockNotification {
         PeerBlockNotification {
             hash: block.hash(),
             height: block.kernel.header.height,
-            proof_of_work_family: block.kernel.header.proof_of_work_family,
+            cumulative_proof_of_work: block.kernel.header.cumulative_proof_of_work,
         }
     }
 }
@@ -239,7 +239,7 @@ impl From<&BlockHeader> for PeerBlockNotification {
         PeerBlockNotification {
             hash: Hash::hash(value),
             height: value.height,
-            proof_of_work_family: value.proof_of_work_family,
+            cumulative_proof_of_work: value.cumulative_proof_of_work,
         }
     }
 }
