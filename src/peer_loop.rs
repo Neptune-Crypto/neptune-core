@@ -57,10 +57,12 @@ pub struct PeerLoopHandler {
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
     distance: u8,
+    #[cfg(test)]
+    mock_now: Option<Timestamp>,
 }
 
 impl PeerLoopHandler {
-    pub fn new(
+    pub(crate) fn new(
         to_main_tx: mpsc::Sender<PeerTaskToMain>,
         global_state_lock: GlobalStateLock,
         peer_address: SocketAddr,
@@ -75,6 +77,41 @@ impl PeerLoopHandler {
             peer_handshake_data,
             inbound_connection,
             distance,
+            #[cfg(test)]
+            mock_now: None,
+        }
+    }
+
+    /// Allows for mocked timestamps such that time dependencies may be tested.
+    #[cfg(test)]
+    pub(crate) fn with_mocked_time(
+        to_main_tx: mpsc::Sender<PeerTaskToMain>,
+        global_state_lock: GlobalStateLock,
+        peer_address: SocketAddr,
+        peer_handshake_data: HandshakeData,
+        inbound_connection: bool,
+        distance: u8,
+        mocked_time: Timestamp,
+    ) -> Self {
+        Self {
+            to_main_tx,
+            global_state_lock,
+            peer_address,
+            peer_handshake_data,
+            inbound_connection,
+            distance,
+            mock_now: Some(mocked_time),
+        }
+    }
+
+    fn now(&self) -> Timestamp {
+        #[cfg(not(test))]
+        {
+            Timestamp::now()
+        }
+        #[cfg(test)]
+        {
+            self.mock_now.unwrap_or(Timestamp::now())
         }
     }
 
@@ -126,7 +163,7 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
-        let now = Timestamp::now();
+        let now = self.now();
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
             if !new_block.has_proof_of_work(previous_block) {
@@ -828,7 +865,8 @@ impl PeerLoopHandler {
                 let tx_timestamp = transaction.kernel.timestamp;
 
                 // 2. Ignore if transaction is too old
-                let now = Timestamp::now();
+                let now = self.now();
+
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
@@ -1215,7 +1253,6 @@ mod peer_loop_tests {
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::make_mock_block_with_invalid_pow;
     use crate::tests::shared::make_mock_block_with_valid_pow;
-    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -1246,9 +1283,9 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn test_peer_loop_peer_list() -> Result<()> {
+    async fn test_peer_loop_peer_list() {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+            get_test_genesis_setup(Network::Alpha, 2).await.unwrap();
 
         let mut peer_infos = state_lock
             .lock_guard()
@@ -1282,15 +1319,14 @@ mod peer_loop_tests {
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await?;
+            .await
+            .unwrap();
 
         assert_eq!(
             2,
             state_lock.lock_guard().await.net.peer_map.len(),
             "peer map must have length 2 after saying goodbye to peer 2"
         );
-
-        Ok(())
     }
 
     #[traced_test]
@@ -2409,33 +2445,57 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    #[ignore = "mempool cannot hold unproven transactions, so cannot test mempool yet"]
-    async fn empty_mempool_request_tx_test() -> Result<()> {
+    async fn empty_mempool_request_tx_test() {
         // In this scenerio the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.
+        let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 1).await?;
+            get_test_genesis_setup(network, 1).await.unwrap();
 
-        let transaction_1 = make_mock_transaction(vec![], vec![]);
+        let spending_key = state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_symmetric_key_for_tests(0);
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
+        let (transaction_1, _change_output) = state_lock
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                Default::default(),
+                spending_key.into(),
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::new(0),
+                now,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = transaction_1.clone().into();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
             Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
-            Action::Read(PeerMessage::Transaction(Box::new(transaction_1))),
+            Action::Read(PeerMessage::Transaction(Box::new(transaction_1.clone()))),
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let mut peer_loop_handler = PeerLoopHandler::new(
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
+
+        // Mock a timestamp to allow transaction to be considered valid
+        let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
             to_main_tx,
             state_lock.clone(),
             get_dummy_socket_address(0),
             hsd_1.clone(),
             true,
             1,
+            now,
         );
+
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
         assert!(
@@ -2444,16 +2504,15 @@ mod peer_loop_tests {
         );
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
-            .await?;
+            .await
+            .unwrap();
 
         // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
         // by the `main_loop`.
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::Transaction(_)) => (),
-            _ => bail!("Must receive remove of peer block max height"),
-        }
-
-        Ok(())
+            _ => panic!("Must receive remove of peer block max height"),
+        };
     }
 
     #[traced_test]
