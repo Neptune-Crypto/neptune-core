@@ -62,7 +62,12 @@ type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
 
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Mempool {
+    /// Maximum size this data structure may take up in memory.
     max_total_size: usize,
+
+    /// If set, represents the maximum number of transactions allowed in the
+    /// mempool. If None, mempool is only restricted by size.
+    max_length: Option<usize>,
 
     /// Contains transactions, with a mapping from transaction ID to transaction.
     /// Maintain for constant lookup
@@ -80,12 +85,17 @@ pub struct Mempool {
 
 impl Mempool {
     /// instantiate a new, empty `Mempool`
-    pub fn new(max_total_size: ByteSize, tip_digest: Digest) -> Self {
+    pub fn new(
+        max_total_size: ByteSize,
+        max_num_transactions: Option<usize>,
+        tip_digest: Digest,
+    ) -> Self {
         let table = Default::default();
         let queue = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
         Self {
             max_total_size,
+            max_length: max_num_transactions,
             tx_dictionary: table,
             queue,
             tip_digest,
@@ -180,6 +190,7 @@ impl Mempool {
             "mempool's table and queue length must agree prior to shrink"
         );
         self.shrink_to_max_size();
+        self.shrink_to_max_length();
         assert_eq!(
             self.tx_dictionary.len(),
             self.queue.len(),
@@ -404,11 +415,23 @@ impl Mempool {
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
-    /// Likely computes in O(n)
+    /// Likely computes in O(n).
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
         while self.get_size() > self.max_total_size && self.pop_min().is_some() {
             continue;
+        }
+
+        self.shrink_to_fit()
+    }
+
+    /// Shrink the memory pool to the value of its `max_length` field,
+    /// if that field is set.
+    fn shrink_to_max_length(&mut self) {
+        if let Some(max_length) = self.max_length {
+            while self.len() > max_length && self.pop_min().is_some() {
+                continue;
+            }
         }
 
         self.shrink_to_fit()
@@ -488,7 +511,7 @@ mod tests {
     pub async fn insert_then_get_then_remove_then_get() {
         let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
         let txs = make_plenty_mock_transaction_with_primitive_witness(2);
         let transaction_digests = txs.iter().map(|tx| tx.kernel.txid()).collect_vec();
@@ -527,7 +550,7 @@ mod tests {
     /// Create a mempool with n transactions.
     async fn setup_mock_mempool(transactions_count: usize, network: Network) -> Mempool {
         let genesis_block = Block::genesis_block(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         let txs = make_plenty_mock_transaction_with_primitive_witness(transactions_count);
         for tx in txs {
             mempool.insert(&tx);
@@ -576,7 +599,7 @@ mod tests {
     async fn prune_stale_transactions() {
         let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
-        let mut mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -677,7 +700,7 @@ mod tests {
         bob.wallet_state.add_expected_utxos(expected_utxos).await;
 
         // Add this transaction to a mempool
-        let mut mempool = Mempool::new(ByteSize::gb(1), block_1.hash());
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, block_1.hash());
         mempool.insert(&tx_by_bob);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -984,6 +1007,59 @@ mod tests {
             );
             assert!(mempool.get(tx_medium_fee.kernel.txid()).is_none());
             assert!(mempool.get(tx_low_fee.kernel.txid()).is_none());
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn max_len_none() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+        let txs = make_plenty_mock_transaction_with_primitive_witness(11);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
+
+        for tx in txs.iter() {
+            mempool.insert(tx);
+        }
+
+        assert_eq!(
+            11,
+            mempool.len(),
+            "All transactions are inserted into mempool"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn max_len_is_respected() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+        let txs = make_plenty_mock_transaction_with_primitive_witness(20);
+
+        let mut expected_txs = txs.clone();
+        expected_txs.sort_by_key(|x| x.fee_density());
+        expected_txs.reverse();
+
+        for i in 0..10 {
+            let mut mempool = Mempool::new(ByteSize::gb(1), Some(i), genesis_block.hash());
+            for tx in txs.iter() {
+                mempool.insert(tx);
+            }
+
+            assert_eq!(
+                i,
+                mempool.len(),
+                "Only {i} transactions are permitted in the mempool"
+            );
+
+            let expected_txs = expected_txs.iter().take(i).cloned().collect_vec();
+
+            let mut mempool_iter = mempool.get_sorted_iter();
+            for expected_tx in expected_txs.iter() {
+                let (txid, fee_density) = mempool_iter.next().unwrap();
+                assert_eq!(expected_tx, mempool.get(txid).unwrap());
+                assert_eq!(expected_tx.fee_density(), fee_density);
+            }
         }
     }
 

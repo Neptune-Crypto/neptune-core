@@ -69,6 +69,15 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub max_mempool_size: ByteSize,
 
+    /// Maximum number of transactions permitted in the mempool.
+    ///
+    /// If too much time is spent updating transaction proofs, this
+    /// value can be capped.
+    ///
+    /// E.g. --max-mempool-num-tx=4
+    #[clap(long)]
+    pub max_mempool_num_tx: Option<usize>,
+
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
@@ -160,6 +169,7 @@ mod cli_args_tests {
             IpAddr::from(Ipv6Addr::UNSPECIFIED),
             default_args.listen_addr
         );
+        assert_eq!(None, default_args.max_mempool_num_tx);
     }
 
     #[test]

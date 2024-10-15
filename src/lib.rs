@@ -159,7 +159,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         archival_state,
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
-    let mempool = Mempool::new(cli_args.max_mempool_size, latest_block.hash());
+    let mempool = Mempool::new(
+        cli_args.max_mempool_size,
+        cli_args.max_mempool_num_tx,
+        latest_block.hash(),
+    );
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,

@@ -11,7 +11,6 @@ use std::time::SystemTime;
 use anyhow::Result;
 use bytes::Bytes;
 use bytes::BytesMut;
-use bytesize::ByteSize;
 use futures::sink;
 use futures::stream;
 use futures::task::Context;
@@ -210,11 +209,15 @@ pub(crate) async fn mock_genesis_global_state(
         light_state,
         archival_state,
     });
-    let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     let cli_args = cli_args::Args {
         network,
         ..Default::default()
     };
+    let mempool = Mempool::new(
+        cli_args.max_mempool_size,
+        cli_args.max_mempool_num_tx,
+        genesis_block.hash(),
+    );
 
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
