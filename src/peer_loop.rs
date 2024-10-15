@@ -42,7 +42,7 @@ const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
-const _DISCONNECT_CONNECTION: bool = true;
+const DISCONNECT_CONNECTION: bool = true;
 
 pub type PeerStandingNumber = i32;
 
@@ -382,7 +382,7 @@ impl PeerLoopHandler {
                 // Note that the current peer is not removed from the global_state.peer_map here
                 // but that this is done by the caller.
                 info!("Got bye. Closing connection to peer");
-                Ok(true)
+                Ok(DISCONNECT_CONNECTION)
             }
             PeerMessage::PeerListRequest => {
                 // We are interested in the address on which peers accept ingoing connections,
@@ -411,7 +411,7 @@ impl PeerLoopHandler {
 
                 debug!("Responding with: {:?}", peer_info);
                 peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::PeerListResponse(peers) => {
                 if peers.len() > MAX_PEER_LIST_LENGTH {
@@ -426,7 +426,7 @@ impl PeerLoopHandler {
                         self.distance + 1,
                     )))
                     .await?;
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Block(t_block) => {
                 info!(
@@ -473,7 +473,7 @@ impl PeerLoopHandler {
                         new_block_height, block.kernel.header.proof_of_work_family,
                     );
                 }
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestBatch(
                 peers_suggested_starting_points,
@@ -599,7 +599,7 @@ impl PeerLoopHandler {
                 let response = PeerMessage::BlockResponseBatch(returned_blocks);
                 peer.send(response).await?;
 
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockResponseBatch(t_blocks) => {
                 debug!(
@@ -609,7 +609,7 @@ impl PeerLoopHandler {
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
                     self.punish(PeerSanctionReason::TooShortBlockBatch).await?;
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Verify that we are in fact in syncing mode
@@ -619,7 +619,7 @@ impl PeerLoopHandler {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Verify that the response matches the current state
@@ -641,7 +641,7 @@ impl PeerLoopHandler {
                         warn!("Got batch reponse with invalid start height");
                         self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)
                             .await?;
-                        return Ok(false);
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
 
@@ -656,7 +656,7 @@ impl PeerLoopHandler {
                 self.handle_blocks(received_blocks, most_canonical_own_block_match)
                     .await?;
 
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
@@ -674,7 +674,7 @@ impl PeerLoopHandler {
                 ))
                 .await?;
 
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
                 debug!(
@@ -732,7 +732,7 @@ impl PeerLoopHandler {
                     }
                 }
 
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
                 match self
@@ -747,11 +747,11 @@ impl PeerLoopHandler {
                     None => {
                         // TODO: Consider punishing here
                         warn!("Peer requested unkown block with hash {}", block_digest);
-                        Ok(false)
+                        Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
                         peer.send(PeerMessage::Block(Box::new(b.into()))).await?;
-                        Ok(false)
+                        Ok(KEEP_CONNECTION_ALIVE)
                     }
                 }
             }
@@ -772,7 +772,7 @@ impl PeerLoopHandler {
                     warn!("Got block request by height for unknown block");
                     self.punish(PeerSanctionReason::BlockRequestUnknownHeight)
                         .await?;
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // If more than one block is found, we need to find the one that's canonical
@@ -807,15 +807,15 @@ impl PeerLoopHandler {
                 debug!("Sending block");
                 peer.send(block_response).await?;
                 debug!("Sent block");
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Handshake(_) => {
                 self.punish(PeerSanctionReason::InvalidMessage).await?;
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::ConnectionStatus(_) => {
                 self.punish(PeerSanctionReason::InvalidMessage).await?;
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Transaction(transaction) => {
                 debug!(
@@ -975,12 +975,12 @@ impl PeerLoopHandler {
                         .await?;
                     debug!("Sent PeerMessage::BlockNotification");
                 }
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
                 // Only ask one of the peers about the batch of blocks
                 if peer_addr_target != self.peer_address {
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 let request_batch_size = std::cmp::min(
@@ -996,7 +996,7 @@ impl PeerLoopHandler {
                 ))
                 .await?;
 
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
                 if self.peer_address != socket_addr {
@@ -1008,11 +1008,11 @@ impl PeerLoopHandler {
 
                 // If this peer failed the last synchronization attempt, we only
                 // sanction, we don't disconnect.
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::MakePeerDiscoveryRequest => {
                 peer.send(PeerMessage::PeerListRequest).await?;
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::Disconnect(target_socket_addr) => {
                 // Disconnect from this peer if its address matches that which the main
@@ -1025,7 +1025,7 @@ impl PeerLoopHandler {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
-                Ok(false)
+                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
