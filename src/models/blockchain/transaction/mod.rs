@@ -541,7 +541,8 @@ mod transaction_tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::tests::shared::{make_mock_transaction, mock_block_from_transaction_and_msa};
+    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::util_types::mutator_set::commit;
 
     #[traced_test]
