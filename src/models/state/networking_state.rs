@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use num_traits::Zero;
 use sysinfo::System;
+use tracing::info;
 
 use super::tx_proving_capability::TxProvingCapability;
 use crate::config_models::data_directory::DataDirectory;
@@ -50,10 +51,9 @@ impl NetworkingState {
         syncing: bool,
         tx_proving_capability: Option<TxProvingCapability>,
     ) -> Self {
-        println!("{tx_proving_capability:?}");
         let tx_proving_capability =
             tx_proving_capability.unwrap_or_else(Self::estimate_proving_power);
-        println!("{tx_proving_capability:?}");
+        info!("transaction proving capability set to {tx_proving_capability:?}");
         Self {
             peer_map,
             peer_databases,

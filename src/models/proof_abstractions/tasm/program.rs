@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
+use tracing::debug;
 
 use super::environment;
 
@@ -50,7 +51,7 @@ where
         input: &PublicInput,
         nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
-        println!(
+        debug!(
             "Running consensus program with input: {}",
             input.individual_tokens.iter().map(|b| b.value()).join(",")
         );
@@ -79,7 +80,7 @@ where
         match result {
             Ok(output) => Ok(output),
             Err(error) => {
-                println!("VM State:\n{}\n\n", error);
+                debug!("VM State:\n{}\n\n", error);
                 Err(ConsensusError::TritonVMPanic(
                     format!("Triton VM failed.\nVMState:\n{}", error),
                     error.source,
@@ -241,20 +242,20 @@ pub mod test {
         let name = proof_filename(claim);
         match try_load_proof_from_disk(claim) {
             Some(proof) => {
-                println!(" - Loaded proof from disk: {name}.");
+                debug!(" - Loaded proof from disk: {name}.");
                 proof
             }
             None => {
-                println!("Proof not found on disk.");
+                debug!("Proof not found on disk.");
                 match try_fetch_and_verify_proof_from_server(claim) {
                     Some(proof) => proof,
                     None => {
-                        println!("Proof not found on proof servers - Proving locally ... ");
+                        debug!("Proof not found on proof servers - Proving locally ... ");
                         stdout().flush().expect("could not flush terminal");
                         let tick = SystemTime::now();
                         let proof = produce_and_save_proof(claim, program, nondeterminism);
                         let duration = SystemTime::now().duration_since(tick).unwrap();
-                        println!(
+                        debug!(
                             "success! Proof time: {:?}. Proof stored to disk: {name}",
                             duration
                         );
@@ -269,7 +270,7 @@ pub mod test {
     fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
         let path = proof_path(claim);
         let Ok(mut input_file) = File::open(path.clone()) else {
-            println!(
+            debug!(
                 "cannot open file '{}' -- might not exist",
                 path.to_string_lossy()
             );
@@ -277,7 +278,7 @@ pub mod test {
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
-            println!("cannot read file '{}'", path.to_string_lossy());
+            debug!("cannot read file '{}'", path.to_string_lossy());
             return None;
         }
         let mut proof_data = vec![];
@@ -285,7 +286,7 @@ pub mod test {
             if let Ok(eight_bytes) = TryInto::<[u8; 8]>::try_into(ch) {
                 proof_data.push(BFieldElement::new(u64::from_be_bytes(eight_bytes)));
             } else {
-                println!("cannot cast chunk to eight bytes");
+                debug!("cannot cast chunk to eight bytes");
                 return None;
             }
         }
@@ -299,7 +300,7 @@ pub mod test {
         server_list_path.push(TEST_DATA_DIR);
         server_list_path.push(Path::new("proof_servers").with_extension("txt"));
         let Ok(mut input_file) = File::open(server_list_path.clone()) else {
-            println!(
+            debug!(
                 "cannot proof-server list '{}' -- file might not exist",
                 server_list_path.to_string_lossy()
             );
@@ -307,11 +308,11 @@ pub mod test {
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
-            println!("cannot read file '{}'", server_list_path.to_string_lossy());
+            debug!("cannot read file '{}'", server_list_path.to_string_lossy());
             return vec![];
         }
         let Ok(file_as_string) = String::from_utf8(file_contents) else {
-            println!(
+            debug!(
                 "cannot parse file '{}' -- is it valid utf8?",
                 server_list_path.to_string_lossy()
             );
