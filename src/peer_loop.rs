@@ -447,16 +447,18 @@ impl PeerLoopHandler {
                     peer_state_info.highest_shared_block_height = new_block_height;
                 }
 
-                let incoming_block_is_heavier = self
+                let current_tip = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .chain
                     .light_state()
-                    .kernel
-                    .header
-                    .cumulative_proof_of_work
-                    < block.kernel.header.cumulative_proof_of_work;
+                    .header()
+                    .clone();
+                let incoming_block_has_more_pow =
+                    current_tip.cumulative_proof_of_work < block.header().cumulative_proof_of_work;
+                let incoming_block_has_different_height =
+                    current_tip.height != block.header().height;
                 let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
                 {
                     Some(last_block) => last_block.kernel.header.prev_block_digest == block.hash(),
@@ -464,9 +466,13 @@ impl PeerLoopHandler {
                 };
 
                 // Determine whether
-                //  a) the incoming block's accumulated POW is larger than what we have; or
+                //  a) both
+                //    i)) the incoming block's accumulated POW is larger than what we have, and
+                //    ii)) the incoming block's height is different from; or
                 //  b) we are populating a fork reconciliation blocks list.
-                if incoming_block_is_heavier || reconciliation_ongoing {
+                if (incoming_block_has_more_pow && incoming_block_has_different_height)
+                    || reconciliation_ongoing
+                {
                     debug!("block is new");
                     self.receive_new_block(block, peer, peer_state_info).await?;
                 } else {

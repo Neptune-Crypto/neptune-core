@@ -436,16 +436,14 @@ impl MainLoopHandler {
                     let prover_lock = self.global_state_lock.proving_lock.clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                    let tip_cumulative_proof_of_work = global_state_mut
-                        .chain
-                        .light_state()
-                        .kernel
-                        .header
-                        .cumulative_proof_of_work;
+                    let current_tip = global_state_mut.chain.light_state().header();
 
-                    let block_is_new = tip_cumulative_proof_of_work
+                    let incoming_block_has_different_height =
+                        last_block.header().height != current_tip.height;
+                    let incoming_block_has_more_pow = current_tip.cumulative_proof_of_work
                         < last_block.kernel.header.cumulative_proof_of_work;
-                    if !block_is_new {
+
+                    if !incoming_block_has_more_pow || !incoming_block_has_different_height {
                         warn!("Blocks were not new. Not storing blocks.");
 
                         // TODO: Consider fixing deep reorganization problem described above.
