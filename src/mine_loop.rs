@@ -78,8 +78,13 @@ pub(crate) fn make_block_template(
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
         block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
     }
-    let difficulty: U32s<5> =
-        Block::difficulty_control(previous_block, block_timestamp, target_block_interval);
+    let difficulty: U32s<5> = Block::difficulty_control(
+        block_timestamp,
+        previous_block.header().timestamp,
+        previous_block.header().difficulty,
+        target_block_interval,
+        previous_block.header().height,
+    );
 
     let block_header = BlockHeader {
         version: zero,
@@ -189,8 +194,13 @@ fn mine_block_worker(
         // this is simplest impl.  Efficiencies can perhaps be gained by only
         // performing every N iterations, or other strategies.
         let now = Timestamp::now();
-        let new_difficulty: U32s<5> =
-            Block::difficulty_control(&previous_block, now, target_block_interval);
+        let new_difficulty: U32s<5> = Block::difficulty_control(
+            now,
+            previous_block.header().timestamp,
+            previous_block.header().difficulty,
+            target_block_interval,
+            previous_block.header().height,
+        );
         threshold = Block::difficulty_to_digest_threshold(new_difficulty);
         block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
@@ -720,8 +730,13 @@ mod mine_loop_tests {
             Block::make_block_template(&tip_block_orig, transaction, launch_date, None);
 
         let initial_block_timestamp = launch_date + Timestamp::seconds(1);
-        let difficulty: U32s<5> =
-            Block::difficulty_control(&tip_block_orig, initial_block_timestamp, None);
+        let difficulty: U32s<5> = Block::difficulty_control(
+            initial_block_timestamp,
+            tip_block_orig.header().timestamp,
+            tip_block_orig.header().difficulty,
+            None,
+            tip_block_orig.header().height,
+        );
         let unrestricted_mining = false;
 
         mine_block_worker(
@@ -786,7 +801,13 @@ mod mine_loop_tests {
 
         let initial_header_timestamp = block_header.timestamp;
         let unrestricted_mining = false;
-        let difficulty: U32s<5> = Block::difficulty_control(&tip_block_orig, ten_seconds_ago, None);
+        let difficulty: U32s<5> = Block::difficulty_control(
+            ten_seconds_ago,
+            tip_block_orig.header().timestamp,
+            tip_block_orig.header().difficulty,
+            None,
+            tip_block_orig.header().height,
+        );
 
         mine_block_worker(
             block_header,
@@ -897,9 +918,11 @@ mod mine_loop_tests {
             );
 
             let difficulty: U32s<5> = Block::difficulty_control(
-                &prev_block,
                 block_header.timestamp,
+                prev_block.header().timestamp,
+                prev_block.header().difficulty,
                 Some(target_block_interval),
+                prev_block.header().height,
             );
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
