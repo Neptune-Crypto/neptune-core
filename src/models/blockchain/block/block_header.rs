@@ -15,10 +15,12 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-pub const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
-pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
-pub const TARGET_BLOCK_INTERVAL: u64 = 588000; // 9.8 minutes in milliseconds
-pub const MINIMUM_DIFFICULTY: u32 = 2;
+pub(crate) const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
+pub(crate) const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
+/// 9.8 minutes in milliseconds
+pub(crate) const TARGET_BLOCK_INTERVAL: u64 = 588000;
+pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
+pub(crate) const MINIMUM_DIFFICULTY: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct BlockHeader {
@@ -27,17 +29,17 @@ pub struct BlockHeader {
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
-    // number of milliseconds since unix epoch
+    /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
     // TODO: Consider making a type for `nonce`
     pub nonce: [BFieldElement; 3],
     pub max_block_size: u32,
 
-    // use to compare two forks of different height
+    /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
-    // This is the difficulty for the *next* block. Unit: expected # hashes
+    /// The difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
 }
 

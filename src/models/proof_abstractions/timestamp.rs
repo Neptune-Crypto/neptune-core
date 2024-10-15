@@ -88,27 +88,27 @@ impl Timestamp {
         ))
     }
 
-    pub fn months(num: usize) -> Timestamp {
+    pub const fn months(num: usize) -> Timestamp {
         Timestamp(BFieldElement::new((num as u64) * 365240 * 2 * 60 * 60))
     }
 
-    pub fn days(num: usize) -> Timestamp {
+    pub const fn days(num: usize) -> Timestamp {
         Timestamp(BFieldElement::new((num as u64) * 24 * 60 * 60 * 1000))
     }
 
-    pub fn hours(num: usize) -> Timestamp {
+    pub const fn hours(num: usize) -> Timestamp {
         Timestamp(BFieldElement::new((num as u64) * 60 * 60 * 1000))
     }
 
-    pub fn minutes(num: usize) -> Timestamp {
+    pub const fn minutes(num: usize) -> Timestamp {
         Timestamp(BFieldElement::new((num as u64) * 60 * 1000))
     }
 
-    pub fn seconds(num: u64) -> Timestamp {
+    pub const fn seconds(num: u64) -> Timestamp {
         Timestamp(BFieldElement::new(num * 1000))
     }
 
-    pub fn millis(num: u64) -> Timestamp {
+    pub const fn millis(num: u64) -> Timestamp {
         Timestamp(BFieldElement::new(num))
     }
 

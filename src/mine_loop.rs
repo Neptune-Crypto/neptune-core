@@ -920,10 +920,15 @@ mod mine_loop_tests {
             let mined_block_info = worker_task_rx.await.unwrap();
 
             // note: this assertion often fails prior to fix for #154.
+            // Also note that `is_valid` is a wrapper around `is_valid_extended`
+            // which is the method we need here because it allows us to override
+            // default values for the target block interval and the minimum
+            // block interval.
             assert!(mined_block_info.block.is_valid_extended(
                 &prev_block,
                 Timestamp::now(),
-                Some(target_block_interval)
+                Some(target_block_interval),
+                Some(Timestamp::millis(0))
             ));
 
             prev_block = *mined_block_info.block;
