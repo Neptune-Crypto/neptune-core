@@ -914,7 +914,7 @@ impl MainLoopHandler {
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
                     let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
                     let incoming_peer_task_handle = tokio::task::Builder::new()
-                        .name("sigterm_handler")
+                        .name("answer_peer_wrapper")
                         .spawn(async move {
                         match answer_peer_wrapper(
                             stream,
