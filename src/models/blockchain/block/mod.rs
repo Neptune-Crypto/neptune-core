@@ -229,8 +229,13 @@ impl Block {
             );
             block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
         }
-        let difficulty: U32s<5> =
-            Block::difficulty_control(previous_block, block_timestamp, target_block_interval);
+        let difficulty = Block::difficulty_control(
+            block_timestamp,
+            previous_block.header().timestamp,
+            previous_block.header().difficulty,
+            target_block_interval,
+            previous_block.header().height,
+        );
 
         let block_header = BlockHeader {
             version: zero,
@@ -572,21 +577,25 @@ impl Block {
             return false;
         }
 
-        // 0.e) Target difficulty, and other control parameters, were updated correctly
+        // 0.e) Target difficulty was updated correctly
         if block_copy.kernel.header.difficulty
             != Self::difficulty_control(
-                previous_block,
-                block_copy.kernel.header.timestamp,
+                block_copy.header().timestamp,
+                previous_block.header().timestamp,
+                previous_block.header().difficulty,
                 target_block_interval,
+                previous_block.header().height,
             )
         {
             warn!(
                 "Value for new difficulty is incorrect.  actual: {},  expected: {}",
                 block_copy.kernel.header.difficulty,
                 Self::difficulty_control(
-                    previous_block,
-                    block_copy.kernel.header.timestamp,
-                    target_block_interval
+                    block_copy.header().timestamp,
+                    previous_block.header().timestamp,
+                    previous_block.header().difficulty,
+                    target_block_interval,
+                    previous_block.header().height,
                 )
             );
             return false;
@@ -732,24 +741,30 @@ impl Block {
         threshold_as_bui.try_into().unwrap()
     }
 
-    /// Control system for block difficulty. This function computes the new block's
-    /// difficulty from its timestamp and the previous block. It is a PID controller
-    /// (with i=d=0) regulating the block interval by tuning the difficulty.
+    /// Control system for block difficulty.
+    ///
+    /// This function computes the new block's difficulty from the block's
+    /// timestamp, the previous block's difficulty, and the previous block's
+    /// timestamp. It regulates the block interval by tuning the difficulty.
     /// We assume that the block timestamp is valid.
+    ///
+    /// This mechanism is a PID controller (with i=d=0).
     pub fn difficulty_control(
-        old_block: &Block,
         new_timestamp: Timestamp,
+        old_timestamp: Timestamp,
+        old_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
         target_block_interval: Option<u64>,
+        previous_block_height: BlockHeight,
     ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
         // no adjustment if the previous block is the genesis block
-        if old_block.kernel.header.height.is_genesis() {
-            return old_block.kernel.header.difficulty;
+        if previous_block_height.is_genesis() {
+            return old_difficulty;
         }
 
         let target_block_interval = target_block_interval.unwrap_or(TARGET_BLOCK_INTERVAL);
 
         // otherwise, compute PID control signal
-        let t = new_timestamp - old_block.kernel.header.timestamp;
+        let t = new_timestamp - old_timestamp;
 
         let new_error = t.0.value() as i64 - target_block_interval as i64;
         let adjustment = -new_error / 100;
@@ -761,11 +776,11 @@ impl Block {
             U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
 
         if adjustment_is_positive {
-            old_block.kernel.header.difficulty + adjustment_u32s
-        } else if adjustment_u32s > old_block.kernel.header.difficulty - MINIMUM_DIFFICULTY.into() {
+            old_difficulty + adjustment_u32s
+        } else if adjustment_u32s > old_difficulty - MINIMUM_DIFFICULTY.into() {
             MINIMUM_DIFFICULTY.into()
         } else {
-            old_block.kernel.header.difficulty - adjustment_u32s
+            old_difficulty - adjustment_u32s
         }
     }
 }
@@ -848,8 +863,13 @@ mod block_tests {
                     now.standard_format()
                 );
 
-                let control =
-                    Block::difficulty_control(&block_prev, block.kernel.header.timestamp, None);
+                let control = Block::difficulty_control(
+                    block.kernel.header.timestamp,
+                    block_prev.header().timestamp,
+                    block_prev.header().difficulty,
+                    None,
+                    block_prev.header().height,
+                );
                 assert_eq!(block.kernel.header.difficulty, control);
 
                 block_prev = block;
