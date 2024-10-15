@@ -584,7 +584,7 @@ impl GlobalState {
     /// result in loss of funds!
     ///
     /// The `change_utxo_notify_method` parameter should normally be
-    /// [UtxoNotifyMethod::OnChain] for safest transfer.
+    /// [UtxoNotificationMedium::OnChain] for safest transfer.
     ///
     /// The change_key should normally be a [SpendingKey::Symmetric] in
     /// order to save blockchain space compared to a regular address.
@@ -595,7 +595,7 @@ impl GlobalState {
     ///
     /// Example:
     ///
-    /// ```compile_fail
+    /// ```text
     ///
     /// // obtain a change key
     /// // note that this is a SymmetricKey, not a regular (Generation) address.
