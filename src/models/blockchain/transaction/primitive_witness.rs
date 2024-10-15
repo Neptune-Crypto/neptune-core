@@ -724,6 +724,7 @@ mod test {
     }
 
     impl PrimitiveWitness {
+        /// Arbitrary with: (num inputs, num outputs, num pub announcements)
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
             param_sets: [(usize, usize, usize); N],
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
@@ -755,7 +756,7 @@ mod test {
                 // we broke the derive macro of Arbitrary because it only supports
                 // tuples of size up to twelve
                 (
-                    arb::<u64>(),
+                    0..(u64::MAX / 2),
                     nested_vec_strategy_digests(output_counts),
                     nested_vec_strategy_digests(output_counts),
                     [arb::<Timestamp>(); N],
