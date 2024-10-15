@@ -20,6 +20,7 @@ use tokio::time;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
+use tracing::trace;
 use tracing::warn;
 use twenty_first::amount::u32s::U32s;
 
@@ -975,7 +976,7 @@ impl MainLoopHandler {
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut synchronization_timer => {
-                    debug!("Timer: block-synchronization job");
+                    trace!("Timer: block-synchronization job");
                     self.block_sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
