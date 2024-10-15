@@ -694,7 +694,13 @@ pub fn make_mock_block(
     let new_cumulative_proof_of_work =
         previous_block.kernel.header.cumulative_proof_of_work + block_target_difficulty;
     let zero = BFieldElement::zero();
-    let target_difficulty = Block::difficulty_control(previous_block, block_timestamp, None);
+    let target_difficulty = Block::difficulty_control(
+        block_timestamp,
+        previous_block.header().timestamp,
+        previous_block.header().difficulty,
+        None,
+        previous_block.header().height,
+    );
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
