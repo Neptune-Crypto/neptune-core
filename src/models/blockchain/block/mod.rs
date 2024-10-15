@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 use block_body::BlockBody;
 use block_header::BlockHeader;
+use block_header::MINIMUM_BLOCK_TIME;
 use block_header::MINIMUM_DIFFICULTY;
 use block_header::TARGET_BLOCK_INTERVAL;
 use block_header::TARGET_DIFFICULTY_U32_SIZE;
@@ -496,15 +497,18 @@ impl Block {
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
     pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
-        self.is_valid_extended(previous_block, now, None)
+        self.is_valid_extended(previous_block, now, None, None)
     }
 
-    /// like is_valid() but also allows specifying a custom target_block_interval.
+    /// Like `is_valid` but also allows specifying a custom
+    /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
+    /// these variabes take the default values.
     pub(crate) fn is_valid_extended(
         &self,
         previous_block: &Block,
         now: Timestamp,
         target_block_interval: Option<u64>,
+        minimum_block_time: Option<Timestamp>,
     ) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
@@ -553,13 +557,17 @@ impl Block {
             return false;
         }
 
-        // 0.d) Block timestamp is greater than (or equal to) that of previous block
-        if previous_block.kernel.header.timestamp > block_copy.kernel.header.timestamp {
+        // 0.d) Block timestamp is greater than (or equal to) timestamp of
+        //      previous block plus minimum block time
+        let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
+        if previous_block.kernel.header.timestamp + minimum_block_time
+            > block_copy.kernel.header.timestamp
+        {
             warn!(
-                "Block's timestamp ({}) should be greater than or equal to that of previous block ({})\nprevious <= current ?? {}",
+                "Block's timestamp ({}) should be greater than or equal to that of previous block plus minimum block time ({})\nprevious <= current ?? {}",
                 block_copy.kernel.header.timestamp,
                 previous_block.kernel.header.timestamp,
-                previous_block.kernel.header.timestamp <= block_copy.kernel.header.timestamp
+                previous_block.kernel.header.timestamp + minimum_block_time <= block_copy.kernel.header.timestamp
             );
             return false;
         }
