@@ -40,14 +40,16 @@ pub enum Network {
 
 impl Network {
     pub(crate) fn launch_date(&self) -> Timestamp {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
-        let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
         match self {
-            Network::RegTest => Timestamp(BFieldElement::new(now_rounded)),
+            Network::RegTest => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                const SEVEN_DAYS: u64 = 1000 * 60 * 60 * 24 * 7;
+                let now_rounded = (now / SEVEN_DAYS) * SEVEN_DAYS;
+                Timestamp(BFieldElement::new(now_rounded))
+            }
             // 1 July 2024 (might be revised though)
             Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
                 Timestamp(BFieldElement::new(1719792000000u64))
