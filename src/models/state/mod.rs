@@ -827,10 +827,10 @@ impl GlobalState {
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
+        let listen_port = self.cli().own_listen_port();
         HandshakeData {
             tip_header: self.chain.light_state().header().clone(),
-            // TODO: Should be `None` if incoming connections are not accepted
-            listen_port: Some(self.cli().peer_port),
+            listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
@@ -1429,6 +1429,41 @@ mod global_state_tests {
         }
 
         true
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn handshakes_listen_port_is_some_when_max_peers_is_default() {
+        let network = Network::Main;
+        let bob = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+
+        let handshake_data = bob
+            .global_state_lock
+            .lock_guard()
+            .await
+            .get_own_handshakedata()
+            .await;
+        assert!(handshake_data.listen_port.is_some());
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn handshakes_listen_port_is_none_when_max_peers_is_zero() {
+        let network = Network::Main;
+        let mut bob = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let no_incoming_connections = cli_args::Args {
+            max_peers: 0,
+            ..Default::default()
+        };
+        bob.set_cli(no_incoming_connections).await;
+
+        let handshake_data = bob
+            .global_state_lock
+            .lock_guard()
+            .await
+            .get_own_handshakedata()
+            .await;
+        assert!(handshake_data.listen_port.is_none());
     }
 
     #[traced_test]

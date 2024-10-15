@@ -122,10 +122,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let latest_block: Block = archival_state.get_tip().await;
 
     // Bind socket to port on this machine, to handle incoming connections from peers
-    let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
-        .await
-        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
-    info!("Now listening for incoming transactions");
+    let incoming_peer_listener = if cli_args.disallow_all_incoming_peer_connections() {
+        info!("Not accepting incoming peer-connections");
+        TcpListener::bind("127.0.0.1:0").await?
+    } else {
+        let ret = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
+           .await
+           .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
+        info!("Now listening for incoming peer-connections");
+        ret
+    };
 
     let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
 

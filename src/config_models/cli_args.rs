@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
+use num_traits::Zero;
 
 use super::network::Network;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -124,6 +125,23 @@ impl Default for Args {
     }
 }
 
+impl Args {
+    /// Indicates if all incoming peer connections are disallowed.
+    pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
+        self.max_peers.is_zero()
+    }
+
+    /// Return the port that peer can connect on. None if incoming connections
+    /// are disallowed.
+    pub(crate) fn own_listen_port(&self) -> Option<u16> {
+        if self.disallow_all_incoming_peer_connections() {
+            None
+        } else {
+            Some(self.peer_port)
+        }
+    }
+}
+
 #[cfg(test)]
 mod cli_args_tests {
     use std::net::Ipv6Addr;
@@ -142,5 +160,14 @@ mod cli_args_tests {
             IpAddr::from(Ipv6Addr::UNSPECIFIED),
             default_args.listen_addr
         );
+    }
+
+    #[test]
+    fn max_peers_0_means_no_incoming_connections() {
+        let args = Args {
+            max_peers: 0,
+            ..Default::default()
+        };
+        assert!(args.disallow_all_incoming_peer_connections());
     }
 }

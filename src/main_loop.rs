@@ -253,7 +253,7 @@ impl PotentialPeersState {
             .potential_peers
             .iter()
             // Prevent connecting to self. Note that we *only* use instance ID to prevent this,
-            // meaning this will allow multiple nodes e.g. runnig on the same computer to form
+            // meaning this will allow multiple nodes e.g. running on the same computer to form
             // a complete graph.
             .filter(|pp| pp.1.instance_id != own_instance_id)
             // Prevent connecting to peer we already are connected to
@@ -908,6 +908,13 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
+                    // Return early if no incoming connections are accepted. Do
+                    // not send application-handshake.
+                    if self.global_state_lock.cli().disallow_all_incoming_peer_connections() {
+                        warn!("Got incoming connection despite not accepting any. Ignoring");
+                        continue;
+                    }
+
                     let state = self.global_state_lock.lock_guard().await;
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> = self.peer_task_to_main_tx.clone();

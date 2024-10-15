@@ -76,6 +76,8 @@ pub trait RPC {
     // Return which network the client is running
     async fn network() -> Network;
 
+    /// Returns local socket used for incoming peer-connections. Does not show
+    /// the public IP address, as the client does not know this.
     async fn own_listen_address_for_peers() -> Option<SocketAddr>;
 
     /// Return the node's instance-ID which is a globally unique random generated number
@@ -147,6 +149,9 @@ pub trait RPC {
     /// Generate a report of all owned and unspent coins, whether time-locked or not.
     async fn list_own_coins() -> Vec<CoinWithPossibleTimeLock>;
 
+    /// Get CPU temperature.
+    async fn cpu_temp() -> Option<f32>;
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -212,9 +217,6 @@ pub trait RPC {
 
     /// Gracious shutdown.
     async fn shutdown() -> bool;
-
-    /// Get CPU temperature.
-    async fn cpu_temp() -> Option<f32>;
 }
 
 #[derive(Clone)]
@@ -383,10 +385,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
+        let listen_port = self.state.cli().own_listen_port();
         let listen_for_peers_ip = self.state.cli().listen_addr;
-        let listen_for_peers_socket = self.state.cli().peer_port;
-        let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
-        Some(socket_address)
+        listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port))
     }
 
     // documented in trait. do not add doc-comment.
