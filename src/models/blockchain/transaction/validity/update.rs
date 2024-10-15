@@ -695,6 +695,7 @@ impl ConsensusProgram for Update {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
@@ -714,6 +715,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
+    use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -727,7 +729,60 @@ pub(crate) mod test {
         }
     }
 
-    pub(crate) fn deterministic_update_witness(
+    /// Return an update witness where the mutator set has had both elements
+    /// added and removed.
+    pub(crate) fn deterministic_update_witness_additions_and_removals(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_pub_announcements: usize,
+    ) -> UpdateWitness {
+        let mut test_runner = TestRunner::deterministic();
+        let num_new_records = (1usize..=10).new_tree(&mut test_runner).unwrap().current();
+        let num_new_removals = (1usize..=10).new_tree(&mut test_runner).unwrap().current();
+        let num_new_pub_announcements = 2;
+        let [old_pw, mined] = PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+            (num_inputs, num_outputs, num_pub_announcements),
+            (num_new_records, num_new_removals, num_new_pub_announcements),
+        ])
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+
+        let newly_confirmed_records = mined
+            .kernel
+            .outputs
+            .iter()
+            .map(|x| x.canonical_commitment)
+            .collect_vec();
+        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
+            &old_pw.mutator_set_accumulator.aocl,
+            &newly_confirmed_records,
+        );
+
+        let (mut updated, new_msa) = Transaction::new_with_primitive_witness_ms_data(
+            old_pw.clone(),
+            mined.kernel.outputs,
+            mined.kernel.inputs,
+        )
+        .unwrap();
+
+        let old_proof = SingleProof::produce(&old_pw);
+        let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
+        updated.kernel.timestamp = updated.kernel.timestamp + Timestamp::seconds(num_seconds);
+
+        UpdateWitness::from_old_transaction(
+            old_pw.kernel,
+            old_proof,
+            old_pw.mutator_set_accumulator,
+            updated.kernel,
+            new_msa,
+            aocl_successor_proof,
+        )
+    }
+
+    /// Return an update witness where the mutator set is only changed by new
+    /// additions.
+    pub(crate) fn deterministic_update_witness_only_additions(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
@@ -789,13 +844,33 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn can_verify_transaction_update_small() {
-        positive_prop(deterministic_update_witness(2, 2, 2));
+    fn only_additions_small() {
+        positive_prop(deterministic_update_witness_only_additions(2, 2, 2));
     }
 
     #[test]
-    fn can_verify_transaction_update_medium() {
-        positive_prop(deterministic_update_witness(4, 4, 4));
+    fn only_additions_medium() {
+        positive_prop(deterministic_update_witness_only_additions(4, 4, 4));
+    }
+
+    #[test]
+    fn addition_and_removals_tiny() {
+        deterministic_update_witness_additions_and_removals(1, 1, 1);
+    }
+
+    #[test]
+    fn addition_and_removals_small() {
+        deterministic_update_witness_additions_and_removals(2, 2, 2);
+    }
+
+    #[test]
+    fn addition_and_removals_midi() {
+        deterministic_update_witness_additions_and_removals(3, 3, 3);
+    }
+
+    #[test]
+    fn addition_and_removals_medium() {
+        deterministic_update_witness_additions_and_removals(4, 4, 4);
     }
 
     fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
@@ -916,7 +991,7 @@ pub(crate) mod test {
     fn update_witness_negative_tests() {
         // It takes a long time to generate the witness, so we reuse it across
         // multiple tests
-        let good_witness = deterministic_update_witness(2, 2, 2);
+        let good_witness = deterministic_update_witness_only_additions(2, 2, 2);
         new_timestamp_older_than_old(&good_witness);
         bad_new_aocl(&good_witness);
         bad_old_aocl(&good_witness);
@@ -925,11 +1000,23 @@ pub(crate) mod test {
         bad_absolute_index_set_length_too_long(&good_witness);
     }
 
-    /// A test of the test generator, that it leaves the expected fields
+    /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
     #[test]
-    fn txid_is_constant_under_tx_updates() {
-        let update_witness = deterministic_update_witness(4, 4, 4);
+    fn txid_is_constant_under_tx_updates_only_additions() {
+        let update_witness = deterministic_update_witness_only_additions(4, 4, 4);
+        assert_eq!(
+            update_witness.old_kernel.txid(),
+            update_witness.new_kernel.txid(),
+            "Txid function must agree before and after transaction update"
+        );
+    }
+
+    /// A test of the simple test generator, that it leaves the expected fields
+    /// untouched, or at most permuted.
+    #[test]
+    fn txid_is_constant_under_tx_updates_additions_and_removals() {
+        let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4);
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),

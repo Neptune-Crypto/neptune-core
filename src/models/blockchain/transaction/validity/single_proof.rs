@@ -785,7 +785,7 @@ mod test {
     use crate::models::blockchain::transaction::validity::merge::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
-    use crate::models::blockchain::transaction::validity::update::test::deterministic_update_witness;
+    use crate::models::blockchain::transaction::validity::update::test::deterministic_update_witness_only_additions;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -865,7 +865,7 @@ mod test {
 
     #[test]
     fn can_verify_via_valid_update() {
-        let witness_for_update = deterministic_update_witness(2, 2, 2);
+        let witness_for_update = deterministic_update_witness_only_additions(2, 2, 2);
 
         let claim_for_update = witness_for_update.claim();
         let nondeterminism_for_update = witness_for_update.nondeterminism();
