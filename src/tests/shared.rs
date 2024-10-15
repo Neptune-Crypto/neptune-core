@@ -128,7 +128,8 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
 }
 
-pub fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
+/// Get a dummy-peer representing an outgoing connection.
+pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
     PeerInfo {
         connected_address: address,
         inbound: false,
@@ -178,7 +179,9 @@ pub async fn get_dummy_peer_connection_data_genesis(
 /// Get a global state object for unit test purposes. This global state
 /// populated with state from the genesis block, e.g. in the archival mutator
 /// set and the wallet.
-pub async fn mock_genesis_global_state(
+///
+/// All contained peers represent outgoing connections.
+pub(crate) async fn mock_genesis_global_state(
     network: Network,
     peer_count: u8,
     wallet: WalletSecret,

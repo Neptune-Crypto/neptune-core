@@ -46,6 +46,7 @@ pub struct Args {
     /// Maximum number of peers to accept connections from.
     ///
     /// Will not prevent outgoing connections made with `--peers`.
+    /// Set this value to 0 to refuse all incoming connections.
     #[clap(long, default_value = "10", value_name = "COUNT")]
     pub max_peers: u16,
 

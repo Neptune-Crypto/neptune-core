@@ -208,7 +208,7 @@ impl GlobalStateLock {
         &self.cli
     }
 
-    // Only for tests to simulate different CLI params.
+    /// Test helper function for fine control of CLI parameters.
     #[cfg(test)]
     pub async fn set_cli(&mut self, cli: cli_args::Args) {
         self.lock_guard_mut().await.cli = cli.clone();

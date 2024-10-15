@@ -559,6 +559,14 @@ impl MainLoopHandler {
 
         // Check if we are connected to too many peers
         if connected_peers.len() > global_state.cli().max_peers as usize {
+            // If *all* peer connections were outgoing, then it's OK to exceed
+            // the max-peer count. But in that case we don't want to connect to
+            // more peers, so we should just stop execution of this scheduled
+            // task here.
+            if connected_peers.iter().all(|x| !x.inbound) {
+                return Ok(());
+            }
+
             // This would indicate a race-condition on the peer map field in the state which
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
             // didn't request a connection to.
@@ -1079,5 +1087,192 @@ impl MainLoopHandler {
         sleep(Duration::new(0, 500 * 1_000_000));
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_test::traced_test;
+
+    use super::*;
+    use crate::config_models::cli_args;
+    use crate::config_models::network::Network;
+    use crate::tests::shared::get_test_genesis_setup;
+
+    struct TestSetup {
+        peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+        rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        task_join_handles: Vec<JoinHandle<()>>,
+        main_loop_handler: MainLoopHandler,
+        main_to_peer_rx: broadcast::Receiver<MainToPeerTask>,
+    }
+
+    async fn setup(num_init_peers_outgoing: u8) -> TestSetup {
+        let network = Network::Main;
+        let (
+            main_to_peer_tx,
+            main_to_peer_rx,
+            peer_to_main_tx,
+            peer_to_main_rx,
+            state,
+            _own_handshake_data,
+        ) = get_test_genesis_setup(network, num_init_peers_outgoing)
+            .await
+            .unwrap();
+        assert!(
+            state
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .iter()
+                .all(|(_addr, peer)| !peer.inbound),
+            "Test assumption: All initial peers must represent outgoing connections."
+        );
+
+        let incoming_peer_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        const CHANNEL_CAPACITY: usize = 10;
+        let (main_to_miner_tx, _main_to_miner_rx) =
+            watch::channel::<MainToMiner>(MainToMiner::Empty);
+        let (_miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY);
+        let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
+            mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY);
+
+        let main_loop_handler = MainLoopHandler::new(
+            incoming_peer_listener,
+            state,
+            main_to_peer_tx,
+            peer_to_main_tx,
+            main_to_miner_tx,
+        );
+
+        let task_join_handles = vec![];
+
+        TestSetup {
+            miner_to_main_rx,
+            peer_to_main_rx,
+            rpc_server_to_main_rx,
+            task_join_handles,
+            main_loop_handler,
+            main_to_peer_rx,
+        }
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn no_warning_on_peer_exceeding_limit_if_connections_are_outgoing() {
+        let num_init_peers_outgoing = 2;
+        let test_setup = setup(num_init_peers_outgoing).await;
+        let TestSetup {
+            peer_to_main_rx,
+            miner_to_main_rx,
+            rpc_server_to_main_rx,
+            task_join_handles,
+            mut main_loop_handler,
+            main_to_peer_rx,
+        } = test_setup;
+
+        // Set CLI to ban incoming connections and all outgoing peer-discovery-
+        // initiated connections.
+        let mocked_cli = cli_args::Args {
+            max_peers: 0,
+            ..Default::default()
+        };
+        main_loop_handler
+            .global_state_lock
+            .set_cli(mocked_cli)
+            .await;
+
+        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+        main_loop_handler
+            .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+            .await
+            .unwrap();
+
+        logs_assert(|lines: &[&str]| {
+            if lines.iter().any(|line| line.contains("WARN"))
+                || lines.iter().any(|line| line.contains("Max peer"))
+            {
+                Err(format!(
+                        "No warnings allowed in situation where incoming connections are banned. Got:\n{}",
+                        lines.join("\n"),
+                    ))
+            } else if lines
+                .iter()
+                .any(|line| line.contains("Performing peer discovery"))
+            {
+                Err("May not perform peer discovery when `max_peers` = 0.".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+
+        // These values are kept alive as the transmission-counterpart will
+        // otherwise fail on `send`.
+        drop(peer_to_main_rx);
+        drop(miner_to_main_rx);
+        drop(rpc_server_to_main_rx);
+        drop(main_to_peer_rx);
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn performs_peer_discovery_on_few_connections() {
+        let num_init_peers_outgoing = 2;
+        let test_setup = setup(num_init_peers_outgoing).await;
+        let TestSetup {
+            peer_to_main_rx,
+            miner_to_main_rx,
+            rpc_server_to_main_rx,
+            task_join_handles,
+            mut main_loop_handler,
+            mut main_to_peer_rx,
+        } = test_setup;
+
+        // Set CLI to attempt to make more connections
+        let mocked_cli = cli_args::Args {
+            max_peers: 10,
+            ..Default::default()
+        };
+        main_loop_handler
+            .global_state_lock
+            .set_cli(mocked_cli)
+            .await;
+
+        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+        main_loop_handler
+            .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+            .await
+            .unwrap();
+
+        logs_assert(|lines: &[&str]| {
+            if lines
+                .iter()
+                .any(|line| line.contains("Performing peer discovery"))
+            {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Must log that peer discovery is being performed. Got logs:\n{}",
+                    lines.join("\n"),
+                ))
+            }
+        });
+
+        assert!(
+            main_to_peer_rx.try_recv().is_ok(),
+            "Peer channel must have received message as part of peer discovery process"
+        );
+
+        // These values are kept alive as the transmission-counterpart will
+        // otherwise fail on `send`.
+        drop(peer_to_main_rx);
+        drop(miner_to_main_rx);
+        drop(rpc_server_to_main_rx);
+        drop(main_to_peer_rx);
     }
 }
