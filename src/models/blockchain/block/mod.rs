@@ -747,9 +747,37 @@ impl Block {
     /// This function computes the new block's difficulty from the block's
     /// timestamp, the previous block's difficulty, and the previous block's
     /// timestamp. It regulates the block interval by tuning the difficulty.
-    /// We assume that the block timestamp is valid.
+    /// It assumes that the block timestamp is valid.
     ///
-    /// This mechanism is a PID controller (with i=d=0).
+    /// This mechanism is a PID controller (with I=D=0) with the following
+    /// system diagram.
+    ///
+    /// ```notest
+    ///                          --------------
+    ///                         |              |--- new timestamp ------
+    ///  --- new difficulty --->|  blockchain  |--- old timestamp ----  |
+    /// |   (control signal)    |              |--- old difficulty -  | |
+    /// |                        --------------                     | | |
+    /// |   ---                                                     | | |
+    ///  --| + |<---------------------------------------------------  | |
+    ///     ---                                                       v v -
+    ///      ^                                                        ---
+    ///      |                                                       | + |
+    ///      |                                                        ---
+    ///      |                                              (process   |
+    ///      |                           (setpoint:)        variable:) |
+    ///      |                             target             observed |
+    ///      |                              block           block time |
+    ///      |                            interval                     v
+    ///      |                               |                     -  ---
+    ///      |                                ---------------------->| + |
+    ///      |                   _                                    ---
+    ///      |                  / |                                    |
+    ///      | adjustment      /  |                              error |
+    ///       ----------------(* P|------------------------------------
+    ///                        \  |
+    ///                         \_|
+    /// ```
     pub fn difficulty_control(
         new_timestamp: Timestamp,
         old_timestamp: Timestamp,
@@ -762,26 +790,35 @@ impl Block {
             return old_difficulty;
         }
 
+        // otherwise, compute PID control signal
+        const ONE_OVER_P: i64 = -100;
+
+        // target; signal to follow
         let target_block_interval = target_block_interval.unwrap_or(TARGET_BLOCK_INTERVAL);
 
-        // otherwise, compute PID control signal
-        let t = new_timestamp - old_timestamp;
+        // most recent observed block time
+        let delta_t = new_timestamp - old_timestamp;
 
-        let new_error = t.0.value() as i64 - target_block_interval as i64;
-        let adjustment = -new_error / 100;
+        // distance to target
+        let error = delta_t.0.value() as i64 - target_block_interval as i64;
+
+        // change to control signal
+        let adjustment = error / ONE_OVER_P;
+
+        // make adjustment work for u160s
         let absolute_adjustment = abs(adjustment) as u64;
         let adjustment_is_positive = adjustment >= 0;
         let adj_hi = (absolute_adjustment >> 32) as u32;
         let adj_lo = absolute_adjustment as u32;
-        let adjustment_u32s =
+        let absolute_adjustment_u32s =
             U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
 
         if adjustment_is_positive {
-            old_difficulty + adjustment_u32s
-        } else if adjustment_u32s > old_difficulty - MINIMUM_DIFFICULTY.into() {
+            old_difficulty + absolute_adjustment_u32s
+        } else if absolute_adjustment_u32s > old_difficulty - MINIMUM_DIFFICULTY.into() {
             MINIMUM_DIFFICULTY.into()
         } else {
-            old_difficulty - adjustment_u32s
+            old_difficulty - absolute_adjustment_u32s
         }
     }
 }
