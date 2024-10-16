@@ -569,9 +569,10 @@ impl Block {
             > block_copy.kernel.header.timestamp
         {
             warn!(
-                "Block's timestamp ({}) should be greater than or equal to that of previous block plus minimum block time ({})\nprevious <= current ?? {}",
+                "Block's timestamp ({}) should be greater than or equal to that of previous block ({}) plus minimum block time ({}) \nprevious <= current ?? {}",
                 block_copy.kernel.header.timestamp,
                 previous_block.kernel.header.timestamp,
+                minimum_block_time,
                 previous_block.kernel.header.timestamp + minimum_block_time <= block_copy.kernel.header.timestamp
             );
             return false;

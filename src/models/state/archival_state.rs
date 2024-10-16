@@ -937,6 +937,7 @@ mod archival_state_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::make_coinbase_transaction;
+    use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
     use crate::models::blockchain::transaction::transaction_output::TxOutputList;
@@ -1743,7 +1744,12 @@ mod archival_state_tests {
             .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
             .await
             .unwrap();
-        let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);
+        let block_2 = Block::new_block_from_template(
+            &block_1,
+            block_tx2,
+            in_seven_months + MINIMUM_BLOCK_TIME,
+            None,
+        );
 
         println!("Generated new block");
 
