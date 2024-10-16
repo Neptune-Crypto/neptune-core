@@ -96,7 +96,7 @@ impl MastHash for BlockHeader {
 }
 
 #[cfg(test)]
-mod block_header_tests {
+pub(crate) mod block_header_tests {
     use rand::thread_rng;
     use rand::Rng;
 
