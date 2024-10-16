@@ -1000,7 +1000,7 @@ impl PeerLoopHandler {
             }
             MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
                 if self.peer_address != socket_addr {
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 self.punish(PeerSanctionReason::SynchronizationTimeout)
