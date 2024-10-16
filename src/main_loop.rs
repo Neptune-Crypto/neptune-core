@@ -31,6 +31,7 @@ use crate::models::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
+use crate::models::channel::MainToPeerTaskBatchBlockRequest;
 use crate::models::channel::MinerToMain;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::RPCServerToMain;
@@ -789,8 +790,10 @@ impl MainLoopHandler {
         );
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::RequestBlockBatch(
-                most_canonical_digests,
-                *chosen_peer,
+                MainToPeerTaskBatchBlockRequest {
+                    peer_addr_target: *chosen_peer,
+                    known_blocks: most_canonical_digests,
+                },
             ))
             .expect("Sending message to peers must succeed");
 

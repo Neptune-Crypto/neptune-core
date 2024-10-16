@@ -41,9 +41,20 @@ pub enum MinerToMain {
 }
 
 #[derive(Clone, Debug)]
+pub struct MainToPeerTaskBatchBlockRequest {
+    /// The peer to whom this request should be directed.
+    pub(crate) peer_addr_target: SocketAddr,
+
+    /// Sorted list of most preferred blocks. The first digest is the block
+    /// that the we would prefer to build on top off, if it belongs to the
+    /// canonical chain.
+    pub(crate) known_blocks: Vec<Digest>,
+}
+
+#[derive(Clone, Debug)]
 pub enum MainToPeerTask {
     Block(Box<Block>),
-    RequestBlockBatch(Vec<Digest>, SocketAddr), // (most canonical known digests, peer_socket_to_request)
+    RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
@@ -56,7 +67,7 @@ impl MainToPeerTask {
     pub fn get_type(&self) -> String {
         match self {
             MainToPeerTask::Block(_) => "block".to_string(),
-            MainToPeerTask::RequestBlockBatch(_, _) => "req block batch".to_string(),
+            MainToPeerTask::RequestBlockBatch(_) => "req block batch".to_string(),
             MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
             MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {

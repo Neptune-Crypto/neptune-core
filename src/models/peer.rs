@@ -285,6 +285,17 @@ impl From<Transaction> for TransactionNotification {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockRequestBatch {
+    /// Sorted list of most preferred blocks. The first digest is the block
+    /// that the peer would prefer to build on top off, if it belongs to the
+    /// canonical chain.
+    pub(crate) known_blocks: Vec<Digest>,
+
+    /// Indicates the maximum allowed number of blocks in the response.
+    pub(crate) max_response_len: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
@@ -292,7 +303,9 @@ pub enum PeerMessage {
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
-    BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
+
+    /// A list of block digests containing the
+    BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     /// Send a full transaction object to a peer.
     Transaction(Box<Transaction>),
@@ -320,7 +333,7 @@ impl PeerMessage {
             PeerMessage::BlockNotification(_) => "block notification".to_string(),
             PeerMessage::BlockRequestByHeight(_) => "block req by height".to_string(),
             PeerMessage::BlockRequestByHash(_) => "block req by hash".to_string(),
-            PeerMessage::BlockRequestBatch(_, _) => "block req batch".to_string(),
+            PeerMessage::BlockRequestBatch(_) => "block req batch".to_string(),
             PeerMessage::BlockResponseBatch(_) => "block resp batch".to_string(),
             PeerMessage::Transaction(_) => "send".to_string(),
             PeerMessage::TransactionNotification(_) => "transaction notification".to_string(),
@@ -340,7 +353,7 @@ impl PeerMessage {
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
-            PeerMessage::BlockRequestBatch(_, _) => false,
+            PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::Transaction(_) => false,
             PeerMessage::TransactionNotification(_) => false,
@@ -361,7 +374,7 @@ impl PeerMessage {
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
-            PeerMessage::BlockRequestBatch(_, _) => false,
+            PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => false,
             PeerMessage::Transaction(_) => true,
             PeerMessage::TransactionNotification(_) => false,

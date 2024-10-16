@@ -26,6 +26,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
+use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
 use crate::models::peer::PeerInfo;
@@ -475,81 +476,78 @@ impl PeerLoopHandler {
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockRequestBatch(
-                peers_suggested_starting_points,
-                requested_batch_size,
-            ) => {
+            PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                known_blocks,
+                max_response_len,
+            }) => {
                 // Find the block that the peer is requesting to start from
-                let mut peers_latest_canonical_block: Option<Block> = None;
+                let mut peers_preferred_canonical_block: Option<Block> = None;
 
-                for digest in peers_suggested_starting_points {
-                    debug!("Looking up block {} in batch request", digest);
-                    let block_candidate = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .archival_state()
-                        .get_block(digest)
-                        .await
-                        .expect("Lookup must work");
-                    if let Some(block_candidate) = block_candidate {
-                        // Verify that this block is not only known but also belongs to the canonical
-                        // chain. Also check if it's the genesis block.
-
-                        let global_state = self.global_state_lock.lock_guard().await;
-
-                        let tip_digest = global_state.chain.light_state().hash();
-
-                        if global_state
+                let tip_digest = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .hash();
+                {
+                    let global_state = self.global_state_lock.lock_guard().await;
+                    // Find the 1st match (known and canonical block) of the
+                    // request. break as soon as a match is found.
+                    for digest in known_blocks {
+                        debug!("Looking up block {} in batch request", digest);
+                        let block_candidate = global_state
                             .chain
                             .archival_state()
-                            .block_belongs_to_canonical_chain(block_candidate.hash(), tip_digest)
+                            .get_block(digest)
                             .await
-                        {
-                            peers_latest_canonical_block = match peers_latest_canonical_block {
-                                None => Some(block_candidate),
-                                Some(running_latest_block) => {
-                                    if running_latest_block.kernel.header.height
-                                        < block_candidate.kernel.header.height
-                                    {
-                                        Some(block_candidate)
-                                    } else {
-                                        Some(running_latest_block)
-                                    }
-                                }
-                            };
-                            debug!("Found block in canonical chain: {}", digest);
+                            .expect("Lookup must work");
+                        if let Some(block_candidate) = block_candidate {
+                            // Verify that this block is not only known but also belongs to the canonical
+                            // chain. Also check if it's the genesis block.
+
+                            if global_state
+                                .chain
+                                .archival_state()
+                                .block_belongs_to_canonical_chain(
+                                    block_candidate.hash(),
+                                    tip_digest,
+                                )
+                                .await
+                            {
+                                peers_preferred_canonical_block = Some(block_candidate);
+                                debug!("Found block in canonical chain: {}", digest);
+                                break;
+                            }
                         }
                     }
                 }
 
-                let peers_latest_canonical_block = match peers_latest_canonical_block {
+                let peers_latest_canonical_block = match peers_preferred_canonical_block {
                     Some(plcb) => plcb,
                     None => {
                         self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)
                             .await?;
-                        return Ok(false);
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
 
                 // Get the relevant blocks, at most batch size many, descending from the
                 // peer's most canonical block.
-                let responded_batch_size = cmp::min(
-                    requested_batch_size,
+                let len_of_response = cmp::min(
+                    max_response_len,
                     self.global_state_lock
                         .cli()
                         .max_number_of_blocks_before_syncing
                         / 2,
                 );
-                let global_state = self.global_state_lock.lock_guard().await;
-                let tip_digest = global_state.chain.light_state().hash();
 
-                let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
+                let responded_batch_size = cmp::max(len_of_response, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
                 let mut current_digest = peers_latest_canonical_block.hash();
+                let global_state = self.global_state_lock.lock_guard().await;
                 while returned_blocks.len() < responded_batch_size {
                     let children = global_state
                         .chain
@@ -563,6 +561,8 @@ impl PeerLoopHandler {
                     let canonical_child_digest = if children.len() == 1 {
                         children[0]
                     } else {
+                        // Excactly *one* of the children must be canonical,
+                        // so we can just stop when we find it.
                         let mut canonical = children[0];
                         for child in children.into_iter().skip(1) {
                             if global_state
@@ -977,23 +977,23 @@ impl PeerLoopHandler {
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
+            MainToPeerTask::RequestBlockBatch(batch_block_request) => {
                 // Only ask one of the peers about the batch of blocks
-                if peer_addr_target != self.peer_address {
+                if batch_block_request.peer_addr_target != self.peer_address {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                let request_batch_size = std::cmp::min(
+                let max_response_len = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
                     self.global_state_lock
                         .cli()
                         .max_number_of_blocks_before_syncing,
                 );
 
-                peer.send(PeerMessage::BlockRequestBatch(
-                    most_canonical_block_digests,
-                    request_batch_size,
-                ))
+                peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                    known_blocks: batch_block_request.known_blocks,
+                    max_response_len,
+                }))
                 .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -1618,10 +1618,10 @@ mod peer_loop_tests {
         drop(global_state_mut);
 
         let mut mock = Mock::new(vec![
-            Action::Read(PeerMessage::BlockRequestBatch(
-                vec![genesis_block.hash()],
-                14,
-            )),
+            Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                known_blocks: vec![genesis_block.hash()],
+                max_response_len: 14,
+            })),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
                 block_1.clone().into(),
                 block_2_a.clone().into(),
@@ -1645,10 +1645,10 @@ mod peer_loop_tests {
 
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
         mock = Mock::new(vec![
-            Action::Read(PeerMessage::BlockRequestBatch(
-                vec![block_2_b.hash(), block_1.hash(), genesis_block.hash()],
-                14,
-            )),
+            Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                known_blocks: vec![block_2_b.hash(), block_1.hash(), genesis_block.hash()],
+                max_response_len: 14,
+            })),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
                 block_2_a.into(),
                 block_3_a.into(),
@@ -1676,8 +1676,10 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn block_request_batch_out_of_order_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
-        // A peer requests a batch of blocks starting from block 1,  but the peer supplies their
+        // A peer requests a batch of blocks starting from block 1, but the peer supplies their
         // hashes in a wrong order. Ensure that the correct blocks are returned, in the right order.
+        // The blocks will be supplied in the correct order but starting from the first digest in
+        // the list that is known and canonical.
 
         let mut rng = thread_rng();
         let network = Network::Alpha;
@@ -1711,11 +1713,14 @@ mod peer_loop_tests {
 
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::BlockRequestBatch(
-                vec![block_2_b.hash(), genesis_block.hash(), block_1.hash()],
-                14,
-            )),
+            Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
+                known_blocks: vec![block_2_b.hash(), genesis_block.hash(), block_1.hash()],
+                max_response_len: 14,
+            })),
+            // Since genesis block is the 1st known in the list of known blocks,
+            // it's immediate descendent, block_1, is the first one returned.
             Action::Write(PeerMessage::BlockResponseBatch(vec![
+                block_1.into(),
                 block_2_a.into(),
                 block_3_a.into(),
             ])),
