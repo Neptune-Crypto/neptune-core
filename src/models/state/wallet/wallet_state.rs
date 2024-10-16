@@ -1526,10 +1526,9 @@ mod tests {
         #[traced_test]
         #[tokio::test]
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
-            let mut rng = thread_rng();
-            let network = Network::RegTest;
+            let network = Network::Main;
             let mut global_state_lock =
-                mock_genesis_global_state(network, 0, WalletSecret::new_random()).await;
+                mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
             let change_key = global_state_lock
                 .lock_guard_mut()
                 .await
@@ -1560,23 +1559,29 @@ mod tests {
 
                 // generate an output that our wallet cannot claim.
                 let outputs = vec![(
-                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(
+                        tip_digest,
+                    )),
                     send_amt,
                 )];
 
                 let tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotificationMedium::OnChain);
+                let timestamp = gs.chain.light_state().header().timestamp + Timestamp::minutes(1);
 
+                info!("START transaction generation!");
                 let (tx, _change_output) = gs
                     .create_transaction(
                         tx_outputs,
                         change_key,
                         UtxoNotificationMedium::OnChain,
                         NeptuneCoins::zero(),
-                        Timestamp::now(),
+                        timestamp,
                     )
                     .await?;
                 tx
             };
+
+            info!("transaction generation DONE!");
 
             // add the tx to the mempool.
             // note that the wallet should be notified of these changes.
