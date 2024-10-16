@@ -111,7 +111,6 @@ async fn mine_block(
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
-    difficulty: U32s<5>,
     unrestricted_mining: bool,
     target_block_interval: Option<u64>,
 ) {
@@ -135,7 +134,6 @@ async fn mine_block(
             previous_block,
             sender,
             coinbase_utxo_info,
-            difficulty,
             unrestricted_mining,
             target_block_interval,
         )
@@ -152,11 +150,12 @@ fn mine_block_worker(
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
-    difficulty: U32s<5>,
     unrestricted_mining: bool,
     target_block_interval: Option<u64>,
 ) {
-    let mut threshold = Block::difficulty_to_digest_threshold(difficulty);
+    // This must match the rules in `[Block::has_proof_of_work]`.
+    let prev_difficulty = previous_block.header().difficulty;
+    let threshold = Block::difficulty_to_digest_threshold(prev_difficulty);
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
         block_body.transaction_kernel.outputs.len(),
@@ -201,10 +200,8 @@ fn mine_block_worker(
             target_block_interval,
             previous_block.header().height,
         );
-        threshold = Block::difficulty_to_digest_threshold(new_difficulty);
         block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
-        // This must match the rules in `[Block::has_proof_of_work]`.
         if block.hash() <= threshold {
             break;
         }
@@ -237,7 +234,7 @@ fn mine_block_worker(
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
-          Difficulty: {difficulty}
+          Difficulty: {prev_difficulty}
 "#
     );
 
@@ -430,7 +427,6 @@ pub async fn mine(
                 latest_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,
-                latest_block.kernel.header.difficulty,
                 global_state_lock.cli().unrestricted_mining,
                 None, // using default TARGET_BLOCK_INTERVAL
             );
@@ -553,6 +549,7 @@ pub async fn mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
+    use block_header::block_header_tests::random_block_header;
     use tracing_test::traced_test;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
@@ -564,6 +561,9 @@ mod mine_loop_tests {
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::random_transaction_kernel;
+    use crate::util_types::test_shared::mutator_set::random_mmra;
+    use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
 
     #[traced_test]
@@ -729,14 +729,6 @@ mod mine_loop_tests {
         let (block_header, block_body, block_proof) =
             Block::make_block_template(&tip_block_orig, transaction, launch_date, None);
 
-        let initial_block_timestamp = launch_date + Timestamp::seconds(1);
-        let difficulty: U32s<5> = Block::difficulty_control(
-            initial_block_timestamp,
-            tip_block_orig.header().timestamp,
-            tip_block_orig.header().difficulty,
-            None,
-            tip_block_orig.header().height,
-        );
         let unrestricted_mining = false;
 
         mine_block_worker(
@@ -746,7 +738,6 @@ mod mine_loop_tests {
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
-            difficulty,
             unrestricted_mining,
             None,
         );
@@ -801,13 +792,6 @@ mod mine_loop_tests {
 
         let initial_header_timestamp = block_header.timestamp;
         let unrestricted_mining = false;
-        let difficulty: U32s<5> = Block::difficulty_control(
-            ten_seconds_ago,
-            tip_block_orig.header().timestamp,
-            tip_block_orig.header().difficulty,
-            None,
-            tip_block_orig.header().height,
-        );
 
         mine_block_worker(
             block_header,
@@ -816,7 +800,6 @@ mod mine_loop_tests {
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
-            difficulty,
             unrestricted_mining,
             None,
         );
@@ -917,14 +900,6 @@ mod mine_loop_tests {
                 Some(target_block_interval),
             );
 
-            let difficulty: U32s<5> = Block::difficulty_control(
-                block_header.timestamp,
-                prev_block.header().timestamp,
-                prev_block.header().difficulty,
-                Some(target_block_interval),
-                prev_block.header().height,
-            );
-
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
             let height = block_header.height;
 
@@ -935,7 +910,6 @@ mod mine_loop_tests {
                 prev_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,
-                difficulty,
                 unrestricted_mining,
                 Some(target_block_interval),
             );
@@ -976,5 +950,63 @@ mod mine_loop_tests {
         assert!(actual_duration < max_duration);
 
         Ok(())
+    }
+
+    #[test]
+    fn block_hash_relates_to_predecessor_difficulty() {
+        let difficulty = 100;
+        // Difficulty X means we expect X trials before success.
+        // Modeling the process as a geometric distribution gives the
+        // probability of success in a single trial, p = 1/X.
+        // Then the probability of seeing k failures is (1-1/X)^k.
+        // We want this to be five nines certain that we do get a success
+        // after k trials, so this quantity must be less than 0.0001.
+        // So: log_10 0.0001 = -4 > log_10 (1-1/X)^k = k * log_10 (1 - 1/X).
+        // Difficulty 100 sets k = 917.
+        let cofactor = (1.0 - (1.0 / (difficulty as f64))).log10();
+        let k = (-4.0 / cofactor).ceil() as usize;
+
+        let mut predecessor_header = random_block_header();
+        predecessor_header.difficulty = difficulty.into();
+        let predecessor_body = BlockBody::new(
+            random_transaction_kernel(),
+            random_mutator_set_accumulator(),
+            random_mmra(),
+            random_mmra(),
+        );
+        let predecessor_block =
+            Block::new(predecessor_header, predecessor_body, BlockProof::Invalid);
+
+        let mut successor_header = random_block_header();
+        successor_header.prev_block_digest = predecessor_block.hash();
+        // note that successor's difficulty is random
+        let successor_body = BlockBody::new(
+            random_transaction_kernel(),
+            random_mutator_set_accumulator(),
+            random_mmra(),
+            random_mmra(),
+        );
+
+        let mut rng = thread_rng();
+        let mut counter = 0;
+        loop {
+            successor_header.nonce = rng.gen();
+            let successor_block = Block::new(
+                successor_header.clone(),
+                successor_body.clone(),
+                BlockProof::Invalid,
+            );
+
+            if successor_block.has_proof_of_work(&predecessor_block) {
+                break;
+            }
+
+            counter += 1;
+
+            assert!(
+                counter < k,
+                "number of hash trials before finding valid pow exceeds statistical limit"
+            )
+        }
     }
 }
