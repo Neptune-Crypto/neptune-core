@@ -2297,6 +2297,54 @@ mod global_state_tests {
             .is_valid(&genesis_block, now));
     }
 
+    #[traced_test]
+    #[tokio::test]
+    async fn setting_same_tip_twice_is_allowed() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let mut global_state_lock =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp;
+        let address = global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
+
+        let (block_1, _cb_utxo, _cb_output_randomness) =
+            make_mock_block(&genesis_block, None, address, rng.gen());
+
+        global_state.set_new_tip(block_1.clone()).await.unwrap();
+        global_state.set_new_tip(block_1.clone()).await.unwrap();
+
+        assert!(global_state
+            .chain
+            .light_state()
+            .is_valid(&genesis_block, now));
+        assert_eq!(
+            block_1.hash(),
+            global_state
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .get_sync_label()
+                .await
+        );
+        assert_eq!(
+            block_1.hash(),
+            global_state
+                .chain
+                .archival_state()
+                .get_block(block_1.hash())
+                .await
+                .unwrap()
+                .unwrap()
+                .hash()
+        );
+    }
+
     /// tests that pertain to restoring a wallet from seed-phrase
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {

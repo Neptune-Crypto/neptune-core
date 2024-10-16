@@ -431,6 +431,15 @@ impl MainLoopHandler {
                             new_block.kernel.header.timestamp.standard_format()
                         );
 
+                        // Potential race condition here.
+                        // What if last block is new and canonical, but first
+                        // block is already known then we'll store the same block
+                        // twice. That should be OK though, as the appropriate
+                        // database entries are simply overwritten with the new
+                        // block info. See the
+                        // [GlobalState::test::setting_same_tip_twice_is_allowed]
+                        // test for a test of this phenomenon.
+
                         global_state_mut.set_new_tip(new_block).await?;
                     }
                 }
