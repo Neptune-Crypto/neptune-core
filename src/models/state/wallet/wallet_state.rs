@@ -927,7 +927,7 @@ impl WalletState {
         }
     }
 
-    /// Allocate sufficient UTXOs to generate a transaction. `requested_amount`
+    /// Allocate sufficient UTXOs to generate a transaction. Requested amount
     /// must include fees that are paid in the transaction.
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
@@ -935,7 +935,6 @@ impl WalletState {
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> Result<Vec<UnlockedUtxo>> {
-        // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
@@ -954,11 +953,13 @@ impl WalletState {
                 tip_digest);
         }
 
-        let mut ret = vec![];
+        let mut input_funds = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
-        while allocated_amount < total_spend {
-            let (wallet_status_element, membership_proof) =
-                wallet_status.synced_unspent[ret.len()].clone();
+        for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
+            // Don't attempt to use UTXOs that are still timelocked.
+            if !wallet_status_element.utxo.can_spend_at(timestamp) {
+                continue;
+            }
 
             // find spending key for this utxo.
             let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
@@ -972,16 +973,21 @@ impl WalletState {
                 }
             };
 
+            input_funds.push(UnlockedUtxo::unlock(
+                wallet_status_element.utxo.clone(),
+                spending_key,
+                membership_proof.clone(),
+            ));
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
-            ret.push(UnlockedUtxo::unlock(
-                wallet_status_element.utxo,
-                spending_key,
-                membership_proof,
-            ));
+
+            // Don't allocate more than needed
+            if allocated_amount >= total_spend {
+                break;
+            }
         }
 
-        Ok(ret)
+        Ok(input_funds)
     }
 
     pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
@@ -1023,6 +1029,95 @@ mod tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
+
+    #[tokio::test]
+    #[traced_test]
+    async fn does_not_make_tx_with_timelocked_utxos() {
+        // Ensure that timelocked UTXOs are not used when selecting input-UTXOs
+        // to a transaction.
+        // This test is a regression test for issue:
+        // <https://github.com/Neptune-Crypto/neptune-core/issues/207>.
+
+        let network = Network::Main;
+        let mut alice = mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
+
+        let mut alice = alice.global_state_lock.lock_guard_mut().await;
+        let launch_timestamp = alice.chain.light_state().header().timestamp;
+        let released_timestamp = launch_timestamp + Timestamp::months(12);
+        let genesis = alice.chain.light_state();
+        let genesis_digest = genesis.hash();
+        let alice_ws_genesis = alice
+            .wallet_state
+            .get_wallet_status_from_lock(genesis_digest)
+            .await;
+
+        // First, check that error is returned, when available balance is not
+        // there, as it is timelocked.
+        let one_coin = NeptuneCoins::new(1);
+        assert!(alice_ws_genesis
+            .synced_unspent_available_amount(launch_timestamp)
+            .is_zero());
+        assert!(!alice_ws_genesis
+            .synced_unspent_available_amount(released_timestamp)
+            .is_zero());
+        assert!(
+            alice
+                .wallet_state
+                .allocate_sufficient_input_funds(one_coin, genesis_digest, launch_timestamp)
+                .await
+                .is_err(),
+            "Disallow allocation of timelocked UTXOs"
+        );
+        assert!(
+            alice
+                .wallet_state
+                .allocate_sufficient_input_funds(one_coin, genesis_digest, released_timestamp)
+                .await
+                .is_ok(),
+            "Allow allocation when timelock is expired"
+        );
+
+        // Then check that the timelocked UTXO (from the premine) is not
+        // selected even when the necessary balance is there through other UTXOs
+        // that are *not* timelocked.
+        let block_1_timestamp = launch_timestamp + Timestamp::minutes(2);
+        let alice_key = alice
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
+        let alice_address = alice_key.to_address();
+        let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
+            genesis,
+            Some(block_1_timestamp),
+            alice_address,
+            Default::default(),
+        );
+        alice
+            .set_new_self_mined_tip(
+                block1.clone(),
+                ExpectedUtxo::new(
+                    cb_utxo,
+                    cb_sender_randomness,
+                    alice_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                ),
+            )
+            .await
+            .unwrap();
+
+        let input_utxos = alice
+            .wallet_state
+            .allocate_sufficient_input_funds(one_coin, block1.hash(), block_1_timestamp)
+            .await
+            .unwrap();
+
+        assert!(
+            input_utxos
+                .iter()
+                .all(|unlocker| unlocker.utxo.can_spend_at(block_1_timestamp)),
+            "All allocated UTXOs must be spendable now"
+        );
+    }
 
     #[tokio::test]
     #[traced_test]
