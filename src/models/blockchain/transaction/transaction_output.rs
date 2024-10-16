@@ -33,7 +33,7 @@ pub enum UtxoNotificationMedium {
 ///
 /// see also: [UtxoNotification]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-enum UtxoNotifyMethod {
+pub(crate) enum UtxoNotifyMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),
 

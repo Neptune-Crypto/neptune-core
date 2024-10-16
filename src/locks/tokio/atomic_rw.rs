@@ -6,6 +6,7 @@ use futures::future::BoxFuture;
 use tokio::sync::RwLock;
 use tokio::sync::RwLockReadGuard;
 use tokio::sync::RwLockWriteGuard;
+use tokio::sync::TryLockError;
 
 use super::LockAcquisition;
 use super::LockCallbackFn;
@@ -238,6 +239,15 @@ impl<T> AtomicRw<T> {
         self.try_acquire_write_cb();
         let guard = self.inner.write().await;
         AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
+    }
+
+    /// Attempt to acquire write lock immediately.
+    ///
+    /// If the lock cannot be acquired without waiting, an error is returned.
+    pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
+        self.try_acquire_write_cb();
+        let guard = self.inner.try_write()?;
+        Ok(AtomicRwWriteGuard::new(guard, &self.lock_callback_info))
     }
 
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`

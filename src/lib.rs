@@ -164,6 +164,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         cli_args.max_mempool_num_tx,
         latest_block.hash(),
     );
+
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,

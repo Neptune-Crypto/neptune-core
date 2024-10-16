@@ -292,8 +292,9 @@ pub async fn add_block_to_archival_state(
 /// For now we use databases on disk. In-memory databases would be nicer.
 pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
     let mut rng = rand::thread_rng();
+    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
-        .join("neptune-unit-tests")
+        .join(format!("neptune-unit-tests-{}", user))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
@@ -814,4 +815,29 @@ pub async fn mock_genesis_archival_state(
     let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams, network).await;
 
     (archival_state, peer_db, data_dir)
+}
+
+// this will create and store the next block including any transactions
+// presently in the mempool.  The coinbase will go to our own wallet.
+//
+// the stored block does NOT have valid proof-of-work.
+pub async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> Result<Block> {
+    let state = global_state_lock.lock_guard().await;
+    let tip_block = state.chain.light_state();
+
+    // we use a deterministic timestamp so we can use cached proofs.
+    let timestamp = tip_block.kernel.header.timestamp + Timestamp::millis(TARGET_BLOCK_INTERVAL);
+    let (transaction, coinbase_expected_utxo) =
+        crate::mine_loop::create_block_transaction(tip_block, &state, timestamp).await?;
+
+    let (header, body, proof) =
+        crate::mine_loop::make_block_template(tip_block, transaction, timestamp, None);
+    let block = Block::new(header, body, proof);
+    drop(state);
+
+    global_state_lock
+        .store_coinbase_block(block.clone(), coinbase_expected_utxo)
+        .await?;
+
+    Ok(block)
 }
