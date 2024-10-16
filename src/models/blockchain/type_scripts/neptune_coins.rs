@@ -15,9 +15,6 @@ use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
 use num_traits::One;
 use num_traits::Zero;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -365,12 +362,6 @@ impl std::fmt::Debug for NeptuneCoins {
             .field(&self.to_string())
             .finish()
     }
-}
-
-pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: u128 = rng.gen::<u128>() >> 10;
-    NeptuneCoins(number)
 }
 
 impl<'a> Arbitrary<'a> for NeptuneCoins {

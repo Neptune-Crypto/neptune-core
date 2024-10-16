@@ -6,10 +6,6 @@ use std::ops::IndexMut;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use serde::de::SeqAccess;
 use serde::de::Visitor;
 use serde::ser::SerializeTuple;
@@ -24,7 +20,6 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use super::chunk_dictionary::pseudorandom_chunk_dictionary;
 use super::chunk_dictionary::ChunkDictionary;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::shared::get_batch_mutation_argument_for_removal_record;
@@ -354,24 +349,6 @@ impl RemovalRecord {
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
         indices_to_hash_map(&self.absolute_indices.to_array())
-    }
-}
-
-/// Generate a pseudorandom removal record from the given seed, for testing purposes.
-pub fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let absolute_indices = AbsoluteIndexSet::new(
-        &(0..NUM_TRIALS as usize)
-            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
-    let target_chunks = pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>());
-
-    RemovalRecord {
-        absolute_indices,
-        target_chunks,
     }
 }
 

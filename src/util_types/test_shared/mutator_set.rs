@@ -18,6 +18,7 @@ use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::active_window::ActiveWindow;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -26,10 +27,11 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
 pub fn random_chunk_dictionary() -> ChunkDictionary {
@@ -119,6 +121,37 @@ pub fn random_mutator_set_accumulator() -> MutatorSetAccumulator {
 /// Generate a random MMRA. For testing. Might not be a consistent or valid object.
 pub fn random_mmra() -> MmrAccumulator {
     pseudorandom_mmra(thread_rng().gen())
+}
+
+/// Generate a pseudorandom removal record from the given seed, for testing purposes.
+pub(crate) fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let absolute_indices = AbsoluteIndexSet::new(
+        &(0..NUM_TRIALS as usize)
+            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+            .collect_vec()
+            .try_into()
+            .unwrap(),
+    );
+    let target_chunks = pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>());
+
+    RemovalRecord {
+        absolute_indices,
+        target_chunks,
+    }
+}
+
+pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let ar: Digest = rng.gen();
+    AdditionRecord {
+        canonical_commitment: ar,
+    }
+}
+
+pub fn random_addition_record() -> AdditionRecord {
+    let mut rng = thread_rng();
+    pseudorandom_addition_record(rng.gen::<[u8; 32]>())
 }
 
 pub fn pseudorandom_mmra(seed: [u8; 32]) -> MmrAccumulator {

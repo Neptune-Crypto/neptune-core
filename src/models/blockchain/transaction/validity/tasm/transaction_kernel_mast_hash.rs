@@ -1,9 +1,3 @@
-use std::collections::HashMap;
-
-use num_traits::One;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
 use tasm_lib::data_type::DataType;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
@@ -11,48 +5,15 @@ use tasm_lib::list::get::Get;
 use tasm_lib::list::new::New;
 use tasm_lib::list::set::Set;
 use tasm_lib::list::set_length::SetLength;
-use tasm_lib::rust_shadowing_helper_functions;
-use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-use tasm_lib::traits::function::Function;
-use tasm_lib::traits::function::FunctionInitialState;
-use tasm_lib::InitVmState;
 use triton_vm::prelude::*;
-use twenty_first::math::bfield_codec::BFieldCodec;
-use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::prelude::triton_vm;
-use crate::prelude::twenty_first;
 
 /// Computes the mast hash of a transaction kernel object
 #[derive(Debug, Clone)]
 pub struct TransactionKernelMastHash;
-
-impl TransactionKernelMastHash {
-    pub(crate) fn input_state_with_kernel_in_memory(
-        address: BFieldElement,
-        transaction_kernel_encoded: &[BFieldElement],
-    ) -> InitVmState {
-        assert!(address.value() > 1);
-        // populate memory
-        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-        for (i, t) in transaction_kernel_encoded.iter().enumerate() {
-            memory.insert(address + BFieldElement::new(i as u64), *t);
-        }
-        memory.insert(
-            address - BFieldElement::new(1),
-            BFieldElement::new(transaction_kernel_encoded.len() as u64),
-        );
-
-        let mut stack = tasm_lib::empty_stack();
-        stack.push(address);
-        InitVmState::with_stack_and_memory(stack, memory)
-    }
-}
 
 impl BasicSnippet for TransactionKernelMastHash {
     fn inputs(&self) -> Vec<(DataType, String)> {
@@ -239,204 +200,240 @@ impl BasicSnippet for TransactionKernelMastHash {
     }
 }
 
-impl Function for TransactionKernelMastHash {
-    fn rust_shadow(
-        &self,
-        stack: &mut Vec<triton_vm::prelude::BFieldElement>,
-        memory: &mut std::collections::HashMap<
-            triton_vm::prelude::BFieldElement,
-            triton_vm::prelude::BFieldElement,
-        >,
-    ) {
-        // read address
-        let address = stack.pop().unwrap();
-
-        let mut sequence = vec![];
-        let size = memory
-            .get(&(address - BFieldElement::new(1)))
-            .unwrap()
-            .value();
-        for i in 0..size {
-            sequence.push(*memory.get(&(BFieldElement::new(i) + address)).unwrap());
-        }
-        let kernel = *TransactionKernel::decode(&sequence).unwrap();
-
-        // inputs
-        // let inputs_size = memory.get(&address).unwrap().value() as usize;
-        // let inputs_encoded = (0..inputs_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let inputs = kernel.inputs;
-        let inputs_encoded = inputs.encode();
-        let inputs_hash = Hash::hash_varlen(&inputs_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(inputs_size as u64);
-
-        // outputs
-        // let outputs_size = memory.get(&address).unwrap().value() as usize;
-        // let outputs_encoded = (0..outputs_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let outputs = kernel.outputs;
-        let outputs_encoded = outputs.encode();
-        let outputs_hash = Hash::hash_varlen(&outputs_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
-
-        // public_announcements
-        // let public_announcements_size = memory.get(&address).unwrap().value() as usize;
-        // let public_announcements_encoded = (0..public_announcements_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let public_announcements = kernel.public_announcements;
-        let public_announcements_encoded = public_announcements.encode();
-        let public_announcements_hash = Hash::hash_varlen(&public_announcements_encoded);
-        // address +=
-        //     BFieldElement::one() + BFieldElement::new(public_announcements_size as u64);
-
-        // fee
-        // let fee_size = memory.get(&address).unwrap().value() as usize;
-        // let fee_encoded = (0..fee_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let fee = kernel.fee;
-        let fee_encoded = fee.encode();
-        let fee_hash = Hash::hash_varlen(&fee_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(fee_size as u64);
-
-        // coinbase
-        // let coinbase_size = memory.get(&address).unwrap().value() as usize;
-        // let coinbase_encoded = (0..coinbase_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let coinbase = kernel.coinbase;
-        let coinbase_encoded = coinbase.encode();
-        let coinbase_hash = Hash::hash_varlen(&coinbase_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(coinbase_size as u64);
-
-        // timestamp
-        // let timestamp_size = memory.get(&address).unwrap().value() as usize;
-        // assert_eq!(timestamp_size, 1);
-        // let timestamp_encoded = (0..timestamp_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let timestamp = kernel.timestamp;
-        let timestamp_encoded = timestamp.encode();
-        let timestamp_hash = Hash::hash_varlen(&timestamp_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(timestamp_size as u64);
-
-        // mutator_set_hash
-        // let mutator_set_hash_size = memory.get(&address).unwrap().value() as usize;
-        // let mutator_set_hash_encoded = (0..mutator_set_hash_size)
-        //     .map(|i| {
-        //         *memory
-        //             .get(&(address + BFieldElement::new(i as u64)))
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
-        let mutator_set_hash = kernel.mutator_set_hash;
-        let mutator_set_hash_encoded = mutator_set_hash.encode();
-        let mutator_set_hash_hash = Hash::hash_varlen(&mutator_set_hash_encoded);
-        // address += BFieldElement::one() + BFieldElement::new(mutator_set_hash_size as u64);
-
-        // padding
-        let zero = Digest::default();
-
-        // Merkleize
-        let leafs = [
-            inputs_hash,
-            outputs_hash,
-            public_announcements_hash,
-            fee_hash,
-            coinbase_hash,
-            timestamp_hash,
-            mutator_set_hash_hash,
-            zero,
-        ];
-        let mut nodes = [[zero; 8], leafs].concat();
-        for i in (1..=7).rev() {
-            nodes[i] = Hash::hash_pair(nodes[2 * i], nodes[2 * i + 1]);
-        }
-        let root = nodes[1].to_owned();
-
-        // populate memory with merkle tree
-        let list_address = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
-        rust_shadowing_helper_functions::list::list_new(list_address, memory);
-        rust_shadowing_helper_functions::list::list_set_length(list_address, 16, memory);
-        for (i, node) in nodes.into_iter().enumerate().skip(1) {
-            for j in 0..Digest::LEN {
-                memory.insert(
-                    list_address
-                        + BFieldElement::one()
-                        + BFieldElement::new((i * Digest::LEN + j) as u64),
-                    node.values()[j],
-                );
-            }
-        }
-
-        // write digest to stack
-        stack.push(root.values()[4]);
-        stack.push(root.values()[3]);
-        stack.push(root.values()[2]);
-        stack.push(root.values()[1]);
-        stack.push(root.values()[0]);
-    }
-
-    fn pseudorandom_initial_state(
-        &self,
-        seed: [u8; 32],
-        _bench_case: Option<BenchmarkCase>,
-    ) -> FunctionInitialState {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let input_state = Self::input_state_with_kernel_in_memory(
-            BFieldElement::new(rng.gen_range(0..(1 << 20))),
-            &twenty_first::math::bfield_codec::BFieldCodec::encode(
-                &pseudorandom_transaction_kernel(rand::Rng::gen::<[u8; 32]>(&mut rng), 4, 4, 2),
-            ),
-        );
-        FunctionInitialState {
-            stack: input_state.stack,
-            memory: input_state.nondeterminism.ram,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
+    use crate::prelude::twenty_first;
+    use num_traits::One;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::rust_shadowing_helper_functions;
+    use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
+    use tasm_lib::traits::function::Function;
+    use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::twenty_first::math::tip5::Tip5;
+    use tasm_lib::InitVmState;
     use twenty_first::math::bfield_codec::BFieldCodec;
+    use twenty_first::math::tip5::Digest;
+    use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
     use super::*;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+
+    impl TransactionKernelMastHash {
+        pub(crate) fn input_state_with_kernel_in_memory(
+            address: BFieldElement,
+            transaction_kernel_encoded: &[BFieldElement],
+        ) -> InitVmState {
+            assert!(address.value() > 1);
+            // populate memory
+            let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+            for (i, t) in transaction_kernel_encoded.iter().enumerate() {
+                memory.insert(address + BFieldElement::new(i as u64), *t);
+            }
+            memory.insert(
+                address - BFieldElement::new(1),
+                BFieldElement::new(transaction_kernel_encoded.len() as u64),
+            );
+
+            let mut stack = tasm_lib::empty_stack();
+            stack.push(address);
+            InitVmState::with_stack_and_memory(stack, memory)
+        }
+    }
+
+    impl Function for TransactionKernelMastHash {
+        fn rust_shadow(
+            &self,
+            stack: &mut Vec<triton_vm::prelude::BFieldElement>,
+            memory: &mut std::collections::HashMap<
+                triton_vm::prelude::BFieldElement,
+                triton_vm::prelude::BFieldElement,
+            >,
+        ) {
+            // read address
+            let address = stack.pop().unwrap();
+
+            let mut sequence = vec![];
+            let size = memory
+                .get(&(address - BFieldElement::new(1)))
+                .unwrap()
+                .value();
+            for i in 0..size {
+                sequence.push(*memory.get(&(BFieldElement::new(i) + address)).unwrap());
+            }
+            let kernel = *TransactionKernel::decode(&sequence).unwrap();
+
+            // inputs
+            // let inputs_size = memory.get(&address).unwrap().value() as usize;
+            // let inputs_encoded = (0..inputs_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let inputs = kernel.inputs;
+            let inputs_encoded = inputs.encode();
+            let inputs_hash = Hash::hash_varlen(&inputs_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(inputs_size as u64);
+
+            // outputs
+            // let outputs_size = memory.get(&address).unwrap().value() as usize;
+            // let outputs_encoded = (0..outputs_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let outputs = kernel.outputs;
+            let outputs_encoded = outputs.encode();
+            let outputs_hash = Hash::hash_varlen(&outputs_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
+
+            // public_announcements
+            // let public_announcements_size = memory.get(&address).unwrap().value() as usize;
+            // let public_announcements_encoded = (0..public_announcements_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let public_announcements = kernel.public_announcements;
+            let public_announcements_encoded = public_announcements.encode();
+            let public_announcements_hash = Hash::hash_varlen(&public_announcements_encoded);
+            // address +=
+            //     BFieldElement::one() + BFieldElement::new(public_announcements_size as u64);
+
+            // fee
+            // let fee_size = memory.get(&address).unwrap().value() as usize;
+            // let fee_encoded = (0..fee_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let fee = kernel.fee;
+            let fee_encoded = fee.encode();
+            let fee_hash = Hash::hash_varlen(&fee_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(fee_size as u64);
+
+            // coinbase
+            // let coinbase_size = memory.get(&address).unwrap().value() as usize;
+            // let coinbase_encoded = (0..coinbase_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let coinbase = kernel.coinbase;
+            let coinbase_encoded = coinbase.encode();
+            let coinbase_hash = Hash::hash_varlen(&coinbase_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(coinbase_size as u64);
+
+            // timestamp
+            // let timestamp_size = memory.get(&address).unwrap().value() as usize;
+            // assert_eq!(timestamp_size, 1);
+            // let timestamp_encoded = (0..timestamp_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let timestamp = kernel.timestamp;
+            let timestamp_encoded = timestamp.encode();
+            let timestamp_hash = Hash::hash_varlen(&timestamp_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(timestamp_size as u64);
+
+            // mutator_set_hash
+            // let mutator_set_hash_size = memory.get(&address).unwrap().value() as usize;
+            // let mutator_set_hash_encoded = (0..mutator_set_hash_size)
+            //     .map(|i| {
+            //         *memory
+            //             .get(&(address + BFieldElement::new(i as u64)))
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            let mutator_set_hash = kernel.mutator_set_hash;
+            let mutator_set_hash_encoded = mutator_set_hash.encode();
+            let mutator_set_hash_hash = Hash::hash_varlen(&mutator_set_hash_encoded);
+            // address += BFieldElement::one() + BFieldElement::new(mutator_set_hash_size as u64);
+
+            // padding
+            let zero = Digest::default();
+
+            // Merkleize
+            let leafs = [
+                inputs_hash,
+                outputs_hash,
+                public_announcements_hash,
+                fee_hash,
+                coinbase_hash,
+                timestamp_hash,
+                mutator_set_hash_hash,
+                zero,
+            ];
+            let mut nodes = [[zero; 8], leafs].concat();
+            for i in (1..=7).rev() {
+                nodes[i] = Hash::hash_pair(nodes[2 * i], nodes[2 * i + 1]);
+            }
+            let root = nodes[1].to_owned();
+
+            // populate memory with merkle tree
+            let list_address =
+                rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
+            rust_shadowing_helper_functions::list::list_new(list_address, memory);
+            rust_shadowing_helper_functions::list::list_set_length(list_address, 16, memory);
+            for (i, node) in nodes.into_iter().enumerate().skip(1) {
+                for j in 0..Digest::LEN {
+                    memory.insert(
+                        list_address
+                            + BFieldElement::one()
+                            + BFieldElement::new((i * Digest::LEN + j) as u64),
+                        node.values()[j],
+                    );
+                }
+            }
+
+            // write digest to stack
+            stack.push(root.values()[4]);
+            stack.push(root.values()[3]);
+            stack.push(root.values()[2]);
+            stack.push(root.values()[1]);
+            stack.push(root.values()[0]);
+        }
+
+        fn pseudorandom_initial_state(
+            &self,
+            seed: [u8; 32],
+            _bench_case: Option<BenchmarkCase>,
+        ) -> FunctionInitialState {
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+            let input_state = Self::input_state_with_kernel_in_memory(
+                BFieldElement::new(rng.gen_range(0..(1 << 20))),
+                &twenty_first::math::bfield_codec::BFieldCodec::encode(
+                    &pseudorandom_transaction_kernel(rand::Rng::gen::<[u8; 32]>(&mut rng), 4, 4, 2),
+                ),
+            );
+            FunctionInitialState {
+                stack: input_state.stack,
+                memory: input_state.nondeterminism.ram,
+            }
+        }
+    }
 
     #[test]
     fn verify_agreement_with_tx_kernel_mast_hash() {

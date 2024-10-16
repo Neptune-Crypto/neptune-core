@@ -1,10 +1,6 @@
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -16,23 +12,13 @@ use twenty_first::math::tip5::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
-use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let len = 10 + (rng.next_u32() % 50) as usize;
-    let message = (0..len).map(|_| rng.gen()).collect_vec();
-    PublicAnnouncement { message }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
@@ -107,47 +93,6 @@ impl MastHash for TransactionKernel {
     }
 }
 
-pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    if rng.next_u32() % 2 == 0 {
-        None
-    } else {
-        Some(thing)
-    }
-}
-
-pub fn pseudorandom_transaction_kernel(
-    seed: [u8; 32],
-    num_inputs: usize,
-    num_outputs: usize,
-    num_public_announcements: usize,
-) -> TransactionKernel {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let inputs = (0..num_inputs)
-        .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let outputs = (0..num_outputs)
-        .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let public_announcements = (0..num_public_announcements)
-        .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
-    let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
-    let timestamp: Timestamp = rng.gen();
-    let mutator_set_hash: Digest = rng.gen();
-
-    TransactionKernel {
-        inputs,
-        outputs,
-        public_announcements,
-        fee,
-        coinbase,
-        timestamp,
-        mutator_set_hash,
-    }
-}
-
 impl<'a> Arbitrary<'a> for TransactionKernel {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let num_inputs = u.int_in_range(0..=4)?;
@@ -184,15 +129,54 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use rand::random;
+    use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
     use rand::RngCore;
+    use rand::SeedableRng;
 
     use super::*;
+    use crate::tests::shared::pseudorandom_amount;
+    use crate::tests::shared::pseudorandom_option;
+    use crate::tests::shared::pseudorandom_public_announcement;
     use crate::tests::shared::random_public_announcement;
     use crate::tests::shared::random_transaction_kernel;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
+    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
+
+    pub fn pseudorandom_transaction_kernel(
+        seed: [u8; 32],
+        num_inputs: usize,
+        num_outputs: usize,
+        num_public_announcements: usize,
+    ) -> TransactionKernel {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let inputs = (0..num_inputs)
+            .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
+            .collect_vec();
+        let outputs = (0..num_outputs)
+            .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
+            .collect_vec();
+        let public_announcements = (0..num_public_announcements)
+            .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
+            .collect_vec();
+        let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
+        let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
+        let timestamp: Timestamp = rng.gen();
+        let mutator_set_hash: Digest = rng.gen();
+
+        TransactionKernel {
+            inputs,
+            outputs,
+            public_announcements,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_hash,
+        }
+    }
 
     #[test]
     pub fn decode_public_announcement() {

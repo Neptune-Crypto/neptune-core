@@ -1,8 +1,5 @@
 use arbitrary::Arbitrary;
 use get_size::GetSize;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -34,14 +31,6 @@ impl AdditionRecord {
         Self {
             canonical_commitment,
         }
-    }
-}
-
-pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let ar: Digest = rng.gen();
-    AdditionRecord {
-        canonical_commitment: ar,
     }
 }
 

@@ -56,15 +56,12 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
+use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::channel::MainToPeerTask;
@@ -90,7 +87,6 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -397,6 +393,21 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
+pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    if rng.next_u32() % 2 == 0 {
+        None
+    } else {
+        Some(thing)
+    }
+}
+
+pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let number: u128 = rng.gen::<u128>() >> 10;
+    NeptuneCoins::from_nau(number.into()).unwrap()
+}
+
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     Utxo {
@@ -413,9 +424,11 @@ pub fn random_transaction_kernel() -> TransactionKernel {
     pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_public_announcements)
 }
 
-pub fn random_addition_record() -> AdditionRecord {
-    let mut rng = thread_rng();
-    pseudorandom_addition_record(rng.gen::<[u8; 32]>())
+pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let len = 10 + (rng.next_u32() % 50) as usize;
+    let message = (0..len).map(|_| rng.gen()).collect_vec();
+    PublicAnnouncement { message }
 }
 
 pub fn random_public_announcement() -> PublicAnnouncement {

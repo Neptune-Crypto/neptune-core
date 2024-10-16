@@ -721,7 +721,7 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::mutator_set::removal_record::pseudorandom_removal_record;
+    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
     impl UpdateWitness {
         pub(crate) fn new_kernel_mast_hash(&self) -> Digest {
