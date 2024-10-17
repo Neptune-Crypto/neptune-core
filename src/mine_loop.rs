@@ -46,7 +46,7 @@ pub(crate) fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     mut block_timestamp: Timestamp,
-    target_block_interval: Option<u64>,
+    target_block_interval: Option<Timestamp>,
 ) -> (BlockHeader, BlockBody, BlockProof) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
@@ -112,7 +112,7 @@ async fn mine_block(
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
     unrestricted_mining: bool,
-    target_block_interval: Option<u64>,
+    target_block_interval: Option<Timestamp>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
     // very lengthy and CPU intensive task, which should execute
@@ -151,7 +151,7 @@ fn mine_block_worker(
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
     unrestricted_mining: bool,
-    target_block_interval: Option<u64>,
+    target_block_interval: Option<Timestamp>,
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block.header().difficulty;
@@ -867,13 +867,13 @@ mod mine_loop_tests {
         // with shorter or longer target intervals.
         // expected_duration = num_blocks * target_block_interval
         let num_blocks = 10;
-        let target_block_interval = 1000; // 1 seconds.
+        let target_block_interval = Timestamp::seconds(1);
 
         let unrestricted_mining = false;
-        let expected_duration = (target_block_interval * num_blocks) as u128;
+        let expected_duration = target_block_interval * num_blocks;
         let allowed_variance = 1.3;
-        let min_duration = (expected_duration as f64 / allowed_variance) as u64;
-        let max_duration = (expected_duration as f64 * allowed_variance) as u64;
+        let min_duration = (expected_duration.0.value() as f64 / allowed_variance) as u64;
+        let max_duration = (expected_duration.0.value() as f64 * allowed_variance) as u64;
         let max_test_time = expected_duration * 3;
 
         // we ignore the first 2 blocks after genesis because they are
@@ -937,7 +937,7 @@ mod mine_loop_tests {
             );
 
             let elapsed = start_instant.elapsed()?.as_millis();
-            if elapsed > max_test_time {
+            if elapsed > max_test_time.0.value().into() {
                 panic!("test time limit exceeded.  expected_duration: {expected_duration}, limit: {max_test_time}, actual: {elapsed}");
             }
         }

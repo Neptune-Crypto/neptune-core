@@ -17,8 +17,8 @@ use crate::prelude::twenty_first;
 
 pub(crate) const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
 pub(crate) const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
-/// 9.8 minutes in milliseconds
-pub(crate) const TARGET_BLOCK_INTERVAL: u64 = 588000;
+/// 9.8 minutes
+pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
 pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
 pub(crate) const MINIMUM_DIFFICULTY: u32 = 2;
 
