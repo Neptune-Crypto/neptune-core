@@ -194,7 +194,7 @@ impl Block {
         previous_block: &Block,
         transaction: Transaction,
         mut block_timestamp: Timestamp,
-        target_block_interval: Option<u64>,
+        target_block_interval: Option<Timestamp>,
     ) -> (BlockHeader, BlockBody, BlockProof) {
         let additions = transaction.kernel.outputs.clone();
         let removals = transaction.kernel.inputs.clone();
@@ -512,7 +512,7 @@ impl Block {
         &self,
         previous_block: &Block,
         now: Timestamp,
-        target_block_interval: Option<u64>,
+        target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
     ) -> bool {
         // The block value doesn't actually change. Some function calls just require
@@ -782,7 +782,7 @@ impl Block {
         new_timestamp: Timestamp,
         old_timestamp: Timestamp,
         old_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-        target_block_interval: Option<u64>,
+        target_block_interval: Option<Timestamp>,
         previous_block_height: BlockHeight,
     ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
         // no adjustment if the previous block is the genesis block
@@ -800,7 +800,7 @@ impl Block {
         let delta_t = new_timestamp - old_timestamp;
 
         // distance to target
-        let error = delta_t.0.value() as i64 - target_block_interval as i64;
+        let error = delta_t.0.value() as i64 - target_block_interval.0.value() as i64;
 
         // change to control signal
         let adjustment = error / ONE_OVER_P;
@@ -847,7 +847,7 @@ mod block_tests {
             previous_block: &Block,
             transaction: Transaction,
             block_timestamp: Timestamp,
-            target_block_interval: Option<u64>,
+            target_block_interval: Option<Timestamp>,
         ) -> Self {
             let (header, body, proof) = Block::make_block_template(
                 previous_block,

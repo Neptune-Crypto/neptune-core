@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::ops::Add;
+use std::ops::Mul;
 use std::ops::Sub;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -75,6 +76,23 @@ impl Sub for Timestamp {
 
     fn sub(self, rhs: Self) -> Self::Output {
         Timestamp(self.0 - rhs.0)
+    }
+}
+
+impl Mul<usize> for Timestamp {
+    type Output = Timestamp;
+
+    /// Multiply the duration a number of times.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is overflow mod P = 2^64 - 2^32 + 1.
+    fn mul(self, rhs: usize) -> Self::Output {
+        let value: u128 = (self.0.value() as u128) * (u128::try_from(rhs).unwrap());
+
+        assert!(value < BFieldElement::P as u128);
+
+        Self(BFieldElement::new(value as u64))
     }
 }
 

@@ -670,7 +670,7 @@ pub fn make_mock_block(
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
-        None => previous_block.kernel.header.timestamp + Timestamp::millis(TARGET_BLOCK_INTERVAL),
+        None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
     let tx_kernel = TransactionKernel {
