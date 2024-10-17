@@ -678,10 +678,11 @@ pub fn make_mock_block(
     let new_cumulative_proof_of_work =
         previous_block.kernel.header.cumulative_proof_of_work + block_target_difficulty;
     let zero = BFieldElement::zero();
-    let target_difficulty = difficulty_control(
+    let (difficulty, control_signals) = difficulty_control(
         block_timestamp,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
+        previous_block.header().control_signals,
         None,
         previous_block.header().height,
     );
@@ -693,8 +694,8 @@ pub fn make_mock_block(
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         cumulative_proof_of_work: new_cumulative_proof_of_work,
-        difficulty: target_difficulty,
-        control_signals: Default::default(),
+        difficulty,
+        control_signals,
     };
 
     (

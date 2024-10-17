@@ -82,10 +82,11 @@ fn make_block_template(
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
         block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
     }
-    let difficulty: U32s<5> = difficulty_control(
+    let (difficulty, control_signals) = difficulty_control(
         block_timestamp,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
+        previous_block.header().control_signals,
         target_block_interval,
         previous_block.header().height,
     );
@@ -99,7 +100,7 @@ fn make_block_template(
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         cumulative_proof_of_work: new_pow,
         difficulty,
-        control_signals: Default::default(),
+        control_signals,
     };
 
     let block_proof = BlockProof::DummyProof; // TODO: produce SingleProof
@@ -198,14 +199,19 @@ fn mine_block_worker(
         // this is simplest impl.  Efficiencies can perhaps be gained by only
         // performing every N iterations, or other strategies.
         let now = Timestamp::now();
-        let new_difficulty: U32s<5> = difficulty_control(
+        let (new_difficulty, new_control_signals) = difficulty_control(
             now,
             previous_block.header().timestamp,
             previous_block.header().difficulty,
+            previous_block.header().control_signals,
             target_block_interval,
             previous_block.header().height,
         );
-        block.set_header_timestamp_and_difficulty(now, new_difficulty);
+        block.set_header_timestamp_and_difficulty_and_control_signals(
+            now,
+            new_difficulty,
+            new_control_signals,
+        );
 
         if block.hash() <= threshold {
             break;

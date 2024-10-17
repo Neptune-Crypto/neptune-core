@@ -18,6 +18,7 @@ use block_header::MINIMUM_DIFFICULTY;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use difficulty_control::target;
+use difficulty_control::ControlSignals;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
@@ -228,10 +229,11 @@ impl Block {
             );
             block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
         }
-        let difficulty = difficulty_control(
+        let (difficulty, control_signals) = difficulty_control(
             block_timestamp,
             previous_block.header().timestamp,
             previous_block.header().difficulty,
+            previous_block.header().control_signals,
             target_block_interval,
             previous_block.header().height,
         );
@@ -245,7 +247,7 @@ impl Block {
             max_block_size: MAX_BLOCK_SIZE,
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
-            control_signals: Default::default(),
+            control_signals,
         };
 
         // TODO: Produce a proof of block correctness.
@@ -280,20 +282,22 @@ impl Block {
         self.unset_digest();
     }
 
-    /// sets header timestamp and difficulty.
+    /// sets header timestamp and difficulty and control signals.
     ///
-    /// These must be set as a pair because the difficulty depends
-    /// on the timestamp, and may change with it.
+    /// These must be set as a tuple because the difficulty and control signals
+    /// depends on the timestamp, and may change with it.
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub fn set_header_timestamp_and_difficulty(
+    pub fn set_header_timestamp_and_difficulty_and_control_signals(
         &mut self,
         timestamp: Timestamp,
         difficulty: U32s<5>,
+        control_signals: ControlSignals,
     ) {
         self.kernel.header.timestamp = timestamp;
         self.kernel.header.difficulty = difficulty;
+        self.kernel.header.control_signals = control_signals;
 
         self.unset_digest();
     }
@@ -526,7 +530,7 @@ impl Block {
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
         //   d) Block timestamp is greater than previous block timestamp
-        //   e) Target difficulty, and other control parameters, were adjusted correctly
+        //   e) Difficulty and control signals were adjusted correctly
         //   f) Block timestamp is less than host-time (utc) + 2 hours.
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
@@ -579,26 +583,26 @@ impl Block {
             return false;
         }
 
-        // 0.e) Target difficulty was updated correctly
-        if block_copy.kernel.header.difficulty
-            != difficulty_control(
-                block_copy.header().timestamp,
-                previous_block.header().timestamp,
-                previous_block.header().difficulty,
-                target_block_interval,
-                previous_block.header().height,
-            )
+        // 0.e) Difficulty and control signals were updated correctly
+        let (computed_difficulty, computed_control_signals) = difficulty_control(
+            block_copy.header().timestamp,
+            previous_block.header().timestamp,
+            previous_block.header().difficulty,
+            previous_block.header().control_signals,
+            target_block_interval,
+            previous_block.header().height,
+        );
+        if (
+            block_copy.header().difficulty,
+            block_copy.header().control_signals,
+        ) != (computed_difficulty, computed_control_signals)
         {
             warn!(
-                "Value for new difficulty is incorrect.  actual: {},  expected: {}",
-                block_copy.kernel.header.difficulty,
-                difficulty_control(
-                    block_copy.header().timestamp,
-                    previous_block.header().timestamp,
-                    previous_block.header().difficulty,
-                    target_block_interval,
-                    previous_block.header().height,
-                )
+                "Value for new difficulty or control signals is incorrect.\nobserved difficulty: {}\nobserved control signals: {}\ncomputed difficulty: {}\ncomputed control signals: {}",
+                block_copy.header().difficulty,
+                block_copy.header().control_signals,
+                computed_difficulty,
+                computed_control_signals
             );
             return false;
         }
@@ -807,14 +811,16 @@ mod block_tests {
                     now.standard_format()
                 );
 
-                let control = difficulty_control(
+                let (difficulty, control_signals) = difficulty_control(
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,
+                    block_prev.header().control_signals,
                     None,
                     block_prev.header().height,
                 );
-                assert_eq!(block.kernel.header.difficulty, control);
+                assert_eq!(block.kernel.header.difficulty, difficulty);
+                assert_eq!(block.kernel.header.control_signals, control_signals);
 
                 block_prev = block;
             }
