@@ -1388,6 +1388,7 @@ impl GlobalState {
 mod global_state_tests {
     use num_traits::One;
     use num_traits::Zero;
+    use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
@@ -2297,52 +2298,221 @@ mod global_state_tests {
             .is_valid(&genesis_block, now));
     }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn setting_same_tip_twice_is_allowed() {
-        let mut rng = thread_rng();
-        let network = Network::Main;
-        let mut global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
-        let address = global_state
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address();
+    mod state_update_on_reorganizations {
+        use super::*;
 
-        let (block_1, _cb_utxo, _cb_output_randomness) =
-            make_mock_block(&genesis_block, None, address, rng.gen());
+        async fn assert_correct_global_state(
+            global_state: &GlobalState,
+            expected_tip: Block,
+            expected_parent: Block,
+            expected_num_blocks_at_tip_height: usize,
+            expected_num_spendable_utxos: usize,
+        ) {
+            // Verifying light state integrity
+            let expected_tip_digest = expected_tip.hash();
+            assert_eq!(expected_tip_digest, global_state.chain.light_state().hash());
 
-        global_state.set_new_tip(block_1.clone()).await.unwrap();
-        global_state.set_new_tip(block_1.clone()).await.unwrap();
+            // Peeking into archival state
+            assert_eq!(
+                expected_tip_digest,
+                global_state
+                    .chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .get_sync_label()
+                    .await,
+                "Archival state must have expected sync-label"
+            );
+            assert_eq!(
+                expected_tip_digest,
+                global_state
+                    .chain
+                    .archival_state()
+                    .get_block(expected_tip.hash())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .hash(),
+                "Expected block must be returned"
+            );
+            assert_eq!(
+                expected_num_blocks_at_tip_height,
+                global_state
+                    .chain
+                    .archival_state()
+                    .block_height_to_block_digests(expected_tip.header().height)
+                    .await
+                    .len(),
+                "Exactly {expected_num_blocks_at_tip_height} blocks at height must be known"
+            );
+            assert_eq!(
+                expected_parent.hash(),
+                global_state
+                    .chain
+                    .archival_state()
+                    .get_tip_parent()
+                    .await
+                    .unwrap()
+                    .hash()
+            );
 
-        assert!(global_state
-            .chain
-            .light_state()
-            .is_valid(&genesis_block, now));
-        assert_eq!(
-            block_1.hash(),
-            global_state
-                .chain
-                .archival_state()
-                .archival_mutator_set
-                .get_sync_label()
-                .await
-        );
-        assert_eq!(
-            block_1.hash(),
-            global_state
-                .chain
-                .archival_state()
-                .get_block(block_1.hash())
-                .await
-                .unwrap()
-                .unwrap()
-                .hash()
-        );
+            // Peek into wallet
+            let tip_msa = expected_tip.body().mutator_set_accumulator.clone();
+            let mutxos = global_state
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .get_all()
+                .await;
+            let mut mutxos_on_tip = vec![];
+            for mutxo in mutxos {
+                if !mutxo
+                    .was_abandoned(expected_tip_digest, global_state.chain.archival_state())
+                    .await
+                {
+                    mutxos_on_tip.push(mutxo);
+                }
+            }
+
+            assert_eq!(expected_num_spendable_utxos, mutxos_on_tip.len(), "Number of monitored UTXOS must match expected value of {expected_num_spendable_utxos}");
+            assert!(
+                mutxos_on_tip.iter().all(|mutxo| tip_msa.verify(
+                    Tip5::hash(&mutxo.utxo),
+                    &mutxo
+                        .get_membership_proof_for_block(expected_tip.hash())
+                        .unwrap()
+                )),
+                "All wallet's membership proofs must still be valid"
+            );
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn set_new_tip_can_roll_back() {
+            // Verify that [GlobalState::set_new_tip] works for rolling back the
+            // blockchain to a previous block.
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let genesis_block = Block::genesis_block(network);
+            let wallet_secret = WalletSecret::devnet_wallet();
+            let spending_key = wallet_secret.nth_generation_spending_key(0);
+
+            let mut block_with_cb = move |previous_block: &Block| {
+                let (new_block, cb_utxo, cb_output_randomness) =
+                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
+                (
+                    new_block,
+                    ExpectedUtxo::new(
+                        cb_utxo,
+                        cb_output_randomness,
+                        spending_key.privacy_preimage,
+                        UtxoNotifier::OwnMiner,
+                    ),
+                )
+            };
+
+            let (block_1a, cb_1a) = block_with_cb(&genesis_block);
+            let (block_2a, cb_2a) = block_with_cb(&block_1a);
+            let (block_3a, cb_3a) = block_with_cb(&block_2a);
+
+            for claim_coinbase in [false, true] {
+                let mut global_state_lock =
+                    mock_genesis_global_state(network, 2, wallet_secret.clone()).await;
+                let mut global_state = global_state_lock.lock_guard_mut().await;
+
+                if claim_coinbase {
+                    global_state
+                        .set_new_self_mined_tip(block_1a.clone(), cb_1a.clone())
+                        .await
+                        .unwrap();
+                    global_state
+                        .set_new_self_mined_tip(block_2a.clone(), cb_2a.clone())
+                        .await
+                        .unwrap();
+                    global_state
+                        .set_new_self_mined_tip(block_3a.clone(), cb_3a.clone())
+                        .await
+                        .unwrap();
+                    global_state
+                        .set_new_self_mined_tip(block_1a.clone(), cb_1a.clone())
+                        .await
+                        .unwrap();
+                } else {
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_2a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_3a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
+                }
+
+                let expected_number_of_mutxos = if claim_coinbase { 2 } else { 1 };
+
+                assert_correct_global_state(
+                    &global_state,
+                    block_1a.clone(),
+                    genesis_block.clone(),
+                    1,
+                    expected_number_of_mutxos,
+                )
+                .await;
+
+                // Verify that we can also reorganize with last shared ancestor being
+                // the genesis block.
+                let (block_1b, _, _) =
+                    make_mock_block(&genesis_block, None, spending_key.to_address(), random());
+                global_state.set_new_tip(block_1b.clone()).await.unwrap();
+                assert_correct_global_state(&global_state, block_1b, genesis_block.clone(), 2, 1)
+                    .await;
+            }
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn setting_same_tip_twice_is_allowed() {
+            let mut rng = thread_rng();
+            let network = Network::Main;
+            let wallet_secret = WalletSecret::devnet_wallet();
+            let genesis_block = Block::genesis_block(network);
+            let spend_key = wallet_secret.nth_generation_spending_key(0);
+
+            let (block_1, cb_utxo1, cb_sender_randomness1) =
+                make_mock_block(&genesis_block, None, spend_key.to_address(), rng.gen());
+            let cb = ExpectedUtxo::new(
+                cb_utxo1,
+                cb_sender_randomness1,
+                spend_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            );
+
+            for claim_cb in [false, true] {
+                let expected_num_mutxos = if claim_cb { 2 } else { 1 };
+                let mut global_state_lock =
+                    mock_genesis_global_state(network, 2, wallet_secret.clone()).await;
+                let mut global_state = global_state_lock.lock_guard_mut().await;
+
+                if claim_cb {
+                    global_state
+                        .set_new_self_mined_tip(block_1.clone(), cb.clone())
+                        .await
+                        .unwrap();
+                    global_state
+                        .set_new_self_mined_tip(block_1.clone(), cb.clone())
+                        .await
+                        .unwrap();
+                } else {
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
+                }
+
+                assert_correct_global_state(
+                    &global_state,
+                    block_1.clone(),
+                    genesis_block.clone(),
+                    1,
+                    expected_num_mutxos,
+                )
+                .await;
+            }
+        }
     }
 
     /// tests that pertain to restoring a wallet from seed-phrase
