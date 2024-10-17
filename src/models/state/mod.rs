@@ -2460,8 +2460,32 @@ mod global_state_tests {
                 let (block_1b, _, _) =
                     make_mock_block(&genesis_block, None, spending_key.to_address(), random());
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
-                assert_correct_global_state(&global_state, block_1b, genesis_block.clone(), 2, 1)
+                assert_correct_global_state(
+                    &global_state,
+                    block_1b.clone(),
+                    genesis_block.clone(),
+                    2,
+                    1,
+                )
+                .await;
+
+                let mut previous_block = block_1b;
+                for block_height in 2..60 {
+                    let (next_block, next_cb) = block_with_cb(&previous_block);
+                    global_state
+                        .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                        .await
+                        .unwrap();
+                    assert_correct_global_state(
+                        &global_state,
+                        next_block.clone(),
+                        previous_block.clone(),
+                        if block_height <= 3 { 2 } else { 1 },
+                        block_height,
+                    )
                     .await;
+                    previous_block = next_block;
+                }
             }
         }
 
