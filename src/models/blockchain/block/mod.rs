@@ -4,6 +4,7 @@ pub mod block_height;
 pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
+pub mod difficulty_control;
 pub mod mutator_set_update;
 pub mod transfer_block;
 pub mod validity;
@@ -14,15 +15,12 @@ use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::MINIMUM_BLOCK_TIME;
 use block_header::MINIMUM_DIFFICULTY;
-use block_header::TARGET_BLOCK_INTERVAL;
-use block_header::TARGET_DIFFICULTY_U32_SIZE;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
 use num_bigint::BigUint;
-use num_traits::abs;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -45,6 +43,7 @@ use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -229,7 +228,7 @@ impl Block {
             );
             block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
         }
-        let difficulty = Block::difficulty_control(
+        let difficulty = difficulty_control(
             block_timestamp,
             previous_block.header().timestamp,
             previous_block.header().difficulty,
@@ -580,7 +579,7 @@ impl Block {
 
         // 0.e) Target difficulty was updated correctly
         if block_copy.kernel.header.difficulty
-            != Self::difficulty_control(
+            != difficulty_control(
                 block_copy.header().timestamp,
                 previous_block.header().timestamp,
                 previous_block.header().difficulty,
@@ -591,7 +590,7 @@ impl Block {
             warn!(
                 "Value for new difficulty is incorrect.  actual: {},  expected: {}",
                 block_copy.kernel.header.difficulty,
-                Self::difficulty_control(
+                difficulty_control(
                     block_copy.header().timestamp,
                     previous_block.header().timestamp,
                     previous_block.header().difficulty,
@@ -741,86 +740,6 @@ impl Block {
 
         threshold_as_bui.try_into().unwrap()
     }
-
-    /// Control system for block difficulty.
-    ///
-    /// This function computes the new block's difficulty from the block's
-    /// timestamp, the previous block's difficulty, and the previous block's
-    /// timestamp. It regulates the block interval by tuning the difficulty.
-    /// It assumes that the block timestamp is valid.
-    ///
-    /// This mechanism is a PID controller (with I=D=0) with the following
-    /// system diagram.
-    ///
-    /// ```notest
-    ///                          --------------
-    ///                         |              |--- new timestamp ------
-    ///  --- new difficulty --->|  blockchain  |--- old timestamp ----  |
-    /// |   (control signal)    |              |--- old difficulty -  | |
-    /// |                        --------------                     | | |
-    /// |   ---                                                     | | |
-    ///  --| + |<---------------------------------------------------  | |
-    ///     ---                                                       v v -
-    ///      ^                                                        ---
-    ///      |                                                       | + |
-    ///      |                                                        ---
-    ///      |                                              (process   |
-    ///      |                           (setpoint:)        variable:) |
-    ///      |                             target             observed |
-    ///      |                              block           block time |
-    ///      |                            interval                     v
-    ///      |                               |                     -  ---
-    ///      |                                ---------------------->| + |
-    ///      |                   _                                    ---
-    ///      |                  / |                                    |
-    ///      | adjustment      /  |                              error |
-    ///       ----------------(* P|------------------------------------
-    ///                        \  |
-    ///                         \_|
-    /// ```
-    pub fn difficulty_control(
-        new_timestamp: Timestamp,
-        old_timestamp: Timestamp,
-        old_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-        target_block_interval: Option<Timestamp>,
-        previous_block_height: BlockHeight,
-    ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
-        // no adjustment if the previous block is the genesis block
-        if previous_block_height.is_genesis() {
-            return old_difficulty;
-        }
-
-        // otherwise, compute PID control signal
-        const ONE_OVER_P: i64 = -100;
-
-        // target; signal to follow
-        let target_block_interval = target_block_interval.unwrap_or(TARGET_BLOCK_INTERVAL);
-
-        // most recent observed block time
-        let delta_t = new_timestamp - old_timestamp;
-
-        // distance to target
-        let error = delta_t.0.value() as i64 - target_block_interval.0.value() as i64;
-
-        // change to control signal
-        let adjustment = error / ONE_OVER_P;
-
-        // make adjustment work for u160s
-        let absolute_adjustment = abs(adjustment) as u64;
-        let adjustment_is_positive = adjustment >= 0;
-        let adj_hi = (absolute_adjustment >> 32) as u32;
-        let adj_lo = absolute_adjustment as u32;
-        let absolute_adjustment_u32s =
-            U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
-
-        if adjustment_is_positive {
-            old_difficulty + absolute_adjustment_u32s
-        } else if absolute_adjustment_u32s > old_difficulty - MINIMUM_DIFFICULTY.into() {
-            MINIMUM_DIFFICULTY.into()
-        } else {
-            old_difficulty - absolute_adjustment_u32s
-        }
-    }
 }
 
 #[cfg(test)]
@@ -901,7 +820,7 @@ mod block_tests {
                     now.standard_format()
                 );
 
-                let control = Block::difficulty_control(
+                let control = difficulty_control(
                     block.kernel.header.timestamp,
                     block_prev.header().timestamp,
                     block_prev.header().difficulty,

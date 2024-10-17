@@ -52,6 +52,7 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
@@ -694,7 +695,7 @@ pub fn make_mock_block(
     let new_cumulative_proof_of_work =
         previous_block.kernel.header.cumulative_proof_of_work + block_target_difficulty;
     let zero = BFieldElement::zero();
-    let target_difficulty = Block::difficulty_control(
+    let target_difficulty = difficulty_control(
         block_timestamp,
         previous_block.header().timestamp,
         previous_block.header().difficulty,

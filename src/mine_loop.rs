@@ -23,6 +23,7 @@ use twenty_first::math::digest::Digest;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
@@ -78,7 +79,7 @@ pub(crate) fn make_block_template(
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
         block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
     }
-    let difficulty: U32s<5> = Block::difficulty_control(
+    let difficulty: U32s<5> = difficulty_control(
         block_timestamp,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
@@ -193,7 +194,7 @@ fn mine_block_worker(
         // this is simplest impl.  Efficiencies can perhaps be gained by only
         // performing every N iterations, or other strategies.
         let now = Timestamp::now();
-        let new_difficulty: U32s<5> = Block::difficulty_control(
+        let new_difficulty: U32s<5> = difficulty_control(
             now,
             previous_block.header().timestamp,
             previous_block.header().difficulty,
