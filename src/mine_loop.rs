@@ -99,6 +99,7 @@ fn make_block_template(
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         cumulative_proof_of_work: new_pow,
         difficulty,
+        control_signals: Default::default(),
     };
 
     let block_proof = BlockProof::DummyProof; // TODO: produce SingleProof

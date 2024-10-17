@@ -10,6 +10,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
 use super::block_height::BlockHeight;
+use super::difficulty_control::ControlSignals;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -41,6 +42,8 @@ pub struct BlockHeader {
 
     /// The difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+
+    pub(crate) control_signals: ControlSignals,
 }
 
 impl Display for BlockHeader {
@@ -70,6 +73,7 @@ pub enum BlockHeaderField {
     MaxBlockSize,
     CumulativeProofOfWork,
     Difficulty,
+    ControlSignals,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -91,6 +95,7 @@ impl MastHash for BlockHeader {
             self.max_block_size.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
+            self.control_signals.encode(),
         ]
     }
 }
@@ -113,6 +118,7 @@ pub(crate) mod block_header_tests {
             max_block_size: rng.gen(),
             cumulative_proof_of_work: rng.gen(),
             difficulty: rng.gen(),
+            control_signals: rng.gen(),
         }
     }
     #[test]

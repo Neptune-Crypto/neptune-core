@@ -245,6 +245,7 @@ impl Block {
             max_block_size: MAX_BLOCK_SIZE,
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
+            control_signals: Default::default(),
         };
 
         // TODO: Produce a proof of block correctness.
@@ -383,6 +384,7 @@ impl Block {
             max_block_size: 10_000,
             cumulative_proof_of_work: U32s::zero(),
             difficulty: MINIMUM_DIFFICULTY.into(),
+            control_signals: Default::default(),
         };
 
         Self::new(header, body, BlockProof::Genesis)

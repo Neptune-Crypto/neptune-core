@@ -564,6 +564,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         max_block_size: 1_000_000,
         cumulative_proof_of_work: genesis_block.header().cumulative_proof_of_work,
         difficulty: genesis_block.header().difficulty,
+        control_signals: Default::default(),
     };
 
     let mut next_mutator_set = mutator_set_before.clone();
@@ -595,6 +596,7 @@ pub(crate) fn mock_block_with_transaction(
         max_block_size: 1_000_000,
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
+        control_signals: Default::default(),
     };
 
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
@@ -692,6 +694,7 @@ pub fn make_mock_block(
         max_block_size: 1_000_000,
         cumulative_proof_of_work: new_cumulative_proof_of_work,
         difficulty: target_difficulty,
+        control_signals: Default::default(),
     };
 
     (

@@ -116,8 +116,7 @@ impl OverviewData {
             ),
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
-                    .kernel
-                    .header
+                    .header()
                     .clone(),
             ),
             block_interval: Some(558u64),

@@ -17,6 +17,28 @@ use crate::models::{
 
 use super::block_height::BlockHeight;
 
+/// Signals for PID controller.
+//
+// The fields are treated as signed fixed point rational numbers with 31 bits
+// for the integer part and 32 bits for the fractional part, in two's complement
+// format.
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize, Default,
+)]
+pub(crate) struct ControlSignals {
+    pub(crate) integral: u64,
+    pub(crate) old_error: u64,
+}
+
+impl Distribution<ControlSignals> for Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ControlSignals {
+        ControlSignals {
+            integral: rng.gen(),
+            old_error: rng.gen(),
+        }
+    }
+}
+
 /// Convert a difficulty to a target threshold so as to test whether a block
 /// has proof-of-work.
 pub(crate) fn target(difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>) -> Digest {
