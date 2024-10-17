@@ -968,6 +968,25 @@ mod archival_state_tests {
             "AMS must be synced to genesis block after initialization from genesis block"
         );
 
+        for (i, tx_output) in Block::genesis_block(network)
+            .kernel
+            .body
+            .transaction_kernel
+            .outputs
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(
+                tx_output.canonical_commitment,
+                archival_state
+                    .archival_mutator_set
+                    .ams()
+                    .aocl
+                    .get_leaf_async(i as u64)
+                    .await
+            );
+        }
+
         Ok(())
     }
 
