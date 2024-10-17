@@ -17,10 +17,10 @@ use block_header::MINIMUM_BLOCK_TIME;
 use block_header::MINIMUM_DIFFICULTY;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
+use difficulty_control::target;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
-use num_bigint::BigUint;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -716,8 +716,7 @@ impl Block {
     /// the previous.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
         let hash = self.hash();
-        let threshold =
-            Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty);
+        let threshold = target(previous_block.kernel.header.difficulty);
         let satisfied = hash <= threshold;
 
         if !satisfied {
@@ -725,20 +724,6 @@ impl Block {
         }
 
         satisfied
-    }
-
-    /// Converts `difficulty` to type `Digest` so that the hash of a block can be
-    /// tested against the target difficulty using `<`. The unit of `difficulty`
-    /// is expected number of hashes for solving the proof-of-work puzzle.
-    pub fn difficulty_to_digest_threshold(difficulty: U32s<5>) -> Digest {
-        assert!(!difficulty.is_zero(), "Difficulty cannot be less than 1");
-
-        let difficulty_as_bui: BigUint = difficulty.into();
-        let max_threshold_as_bui: BigUint =
-            Digest([BFieldElement::new(BFieldElement::MAX); Digest::LEN]).into();
-        let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
-
-        threshold_as_bui.try_into().unwrap()
     }
 }
 
@@ -839,8 +824,7 @@ mod block_tests {
         // Verify that a difficulty of 2 accepts half of the digests
         let difficulty: u32 = 2;
         let difficulty_u32s = U32s::<5>::from(difficulty);
-        let threshold_for_difficulty_two: Digest =
-            Block::difficulty_to_digest_threshold(difficulty_u32s);
+        let threshold_for_difficulty_two: Digest = target(difficulty_u32s);
 
         for elem in threshold_for_difficulty_two.values() {
             assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
@@ -848,7 +832,7 @@ mod block_tests {
 
         // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
         let some_difficulty = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
-        let some_threshold_actual: Digest = Block::difficulty_to_digest_threshold(some_difficulty);
+        let some_threshold_actual: Digest = target(some_difficulty);
 
         let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
         let some_threshold_expected = Digest::new([

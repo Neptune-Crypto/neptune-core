@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
+use difficulty_control::target;
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
 use rand::rngs::StdRng;
@@ -156,7 +157,7 @@ fn mine_block_worker(
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block.header().difficulty;
-    let threshold = Block::difficulty_to_digest_threshold(prev_difficulty);
+    let threshold = target(prev_difficulty);
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
         block_body.transaction_kernel.outputs.len(),

@@ -1,5 +1,12 @@
+use get_size::GetSize;
+use num_bigint::BigUint;
 use num_traits::abs;
-use tasm_lib::twenty_first::prelude::U32s;
+use rand::{distributions::Standard, prelude::Distribution};
+use serde::{Deserialize, Serialize};
+use tasm_lib::{
+    triton_vm::prelude::{BFieldCodec, BFieldElement, Digest},
+    twenty_first::prelude::U32s,
+};
 
 use crate::models::{
     blockchain::block::block_header::{
@@ -9,6 +16,17 @@ use crate::models::{
 };
 
 use super::block_height::BlockHeight;
+
+/// Convert a difficulty to a target threshold so as to test whether a block
+/// has proof-of-work.
+pub(crate) fn target(difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>) -> Digest {
+    let difficulty_as_bui: BigUint = difficulty.into();
+    let max_threshold_as_bui: BigUint =
+        Digest([BFieldElement::new(BFieldElement::MAX); Digest::LEN]).into();
+    let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
+
+    threshold_as_bui.try_into().unwrap()
+}
 
 /// Control system for block difficulty.
 ///
