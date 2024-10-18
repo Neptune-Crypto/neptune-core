@@ -1,6 +1,7 @@
 use anyhow::bail;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::EnumIter;
 use tasm_lib::triton_vm::proof::Proof;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -14,7 +15,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 /// coinbase transaction, which also is supported by a SingleProof.
 /// ProofCollection requires upgrade to a SingleProof before mining, so it is
 /// of lover quality.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, EnumIter, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TransactionProofQuality {
     // OnlyLockScripts, // TODO: Add this once Transaction has support
     ProofCollection,
@@ -69,5 +70,9 @@ mod tests {
     #[test]
     fn transaction_proof_quality_ordering() {
         assert!(TransactionProofQuality::ProofCollection < TransactionProofQuality::SingleProof);
+        assert!(
+            TransactionProofQuality::ProofCollection >= TransactionProofQuality::ProofCollection
+        );
+        assert!(TransactionProofQuality::SingleProof >= TransactionProofQuality::SingleProof);
     }
 }

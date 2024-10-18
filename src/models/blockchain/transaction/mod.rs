@@ -1,4 +1,5 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
@@ -119,6 +120,15 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
+    pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
+        match self {
+            TransactionProof::Invalid => bail!("Invalid proof does not have a proof quality"),
+            TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
+            TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
+            TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
+        }
+    }
+
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
             TransactionProof::Invalid => false,

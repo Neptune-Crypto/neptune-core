@@ -900,11 +900,16 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(tx_notification) => {
-                // 1. Ignore if we already know this transaction.
+                // 1. Ignore if we already know this transaction, and
+                // the proof quality is not higher than what we already know.
                 let state = self.global_state_lock.lock_guard().await;
-                let transaction_is_known = state.mempool.contains(tx_notification.txid);
-                if transaction_is_known {
-                    debug!("transaction was already known");
+                let transaction_of_same_or_higher_proof_quality_is_known =
+                    state.mempool.contains_with_higher_proof_quality(
+                        tx_notification.txid,
+                        tx_notification.proof_quality,
+                    );
+                if transaction_of_same_or_higher_proof_quality_is_known {
+                    debug!("transaction with same or higher proof quality was already known");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -2600,5 +2605,134 @@ mod peer_loop_tests {
             Err(TryRecvError::Disconnected) => panic!("to_main channel must still be open"),
             Ok(_) => panic!("to_main channel must be empty"),
         };
+    }
+
+    mod proof_qualities {
+        use strum::IntoEnumIterator;
+
+        use super::*;
+        use crate::models::blockchain::transaction::Transaction;
+        use crate::models::peer::transfer_transaction::TransactionProofQuality;
+        use crate::tests::shared::mock_genesis_global_state;
+
+        async fn tx_of_proof_quality(
+            network: Network,
+            quality: TransactionProofQuality,
+        ) -> Transaction {
+            let wallet_secret = WalletSecret::devnet_wallet();
+            let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
+            let alice = mock_genesis_global_state(network, 1, wallet_secret).await;
+            let alice = alice.lock_guard().await;
+            let genesis_block = alice.chain.light_state();
+            let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
+            let prover_capability = match quality {
+                TransactionProofQuality::ProofCollection => TxProvingCapability::ProofCollection,
+                TransactionProofQuality::SingleProof => TxProvingCapability::SingleProof,
+            };
+            alice
+                .create_transaction_with_prover_capability(
+                    vec![].into(),
+                    alice_key.into(),
+                    UtxoNotificationMedium::OffChain,
+                    NeptuneCoins::new(1),
+                    in_seven_months,
+                    prover_capability,
+                )
+                .await
+                .unwrap()
+                .0
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn client_favors_higher_proof_quality() {
+            // In this scenario the peer is informed of a transaction that it
+            // already knows, and it's tested that it checks the proof quality
+            // field and verifies that it exceeds the proof in the mempool
+            // before requesting the transasction.
+            let network = Network::Main;
+            let proof_collection_tx =
+                tx_of_proof_quality(network, TransactionProofQuality::ProofCollection).await;
+            let single_proof_tx =
+                tx_of_proof_quality(network, TransactionProofQuality::SingleProof).await;
+
+            for (own_tx_pq, new_tx_pq) in
+                TransactionProofQuality::iter().cartesian_product(TransactionProofQuality::iter())
+            {
+                let (
+                    _peer_broadcast_tx,
+                    from_main_rx_clone,
+                    to_main_tx,
+                    mut to_main_rx1,
+                    mut alice,
+                    handshake_data,
+                ) = get_test_genesis_setup(network, 1).await.unwrap();
+
+                use TransactionProofQuality::*;
+                let (own_tx, new_tx) = match (own_tx_pq, new_tx_pq) {
+                    (ProofCollection, ProofCollection) => {
+                        (&proof_collection_tx, &proof_collection_tx)
+                    }
+                    (ProofCollection, SingleProof) => (&proof_collection_tx, &single_proof_tx),
+                    (SingleProof, ProofCollection) => (&single_proof_tx, &proof_collection_tx),
+                    (SingleProof, SingleProof) => (&single_proof_tx, &single_proof_tx),
+                };
+
+                alice.lock_guard_mut().await.mempool.insert(own_tx);
+
+                let tx_notification: TransactionNotification = new_tx.try_into().unwrap();
+
+                let own_proof_is_supreme = own_tx_pq >= new_tx_pq;
+                let mock = if own_proof_is_supreme {
+                    Mock::new(vec![
+                        Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                        Action::Read(PeerMessage::Bye),
+                    ])
+                } else {
+                    Mock::new(vec![
+                        Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                        Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
+                        Action::Read(PeerMessage::Transaction(Box::new(new_tx.clone()))),
+                        Action::Read(PeerMessage::Bye),
+                    ])
+                };
+
+                let now = proof_collection_tx.kernel.timestamp;
+                let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                    to_main_tx,
+                    alice.clone(),
+                    get_dummy_socket_address(0),
+                    handshake_data.clone(),
+                    true,
+                    1,
+                    now,
+                );
+                let mut peer_state = MutablePeerState::new(handshake_data.tip_header.height);
+
+                peer_loop_handler
+                    .run(mock, from_main_rx_clone, &mut peer_state)
+                    .await
+                    .unwrap();
+
+                if own_proof_is_supreme {
+                    match to_main_rx1.try_recv() {
+                        Err(TryRecvError::Empty) => (),
+                        Err(TryRecvError::Disconnected) => {
+                            panic!("to_main channel must still be open")
+                        }
+                        Ok(_) => panic!("to_main channel must be empty"),
+                    }
+                } else {
+                    match to_main_rx1.try_recv() {
+                        Err(TryRecvError::Empty) => panic!("Transaction must be sent to main loop"),
+                        Err(TryRecvError::Disconnected) => {
+                            panic!("to_main channel must still be open")
+                        }
+                        Ok(PeerTaskToMain::Transaction(_)) => (),
+                        _ => panic!("Unexpected result from channel"),
+                    }
+                }
+            }
+        }
     }
 }
