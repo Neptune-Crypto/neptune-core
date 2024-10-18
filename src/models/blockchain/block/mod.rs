@@ -89,7 +89,6 @@ pub enum BlockProof {
 /// // mutate an internal field.
 /// block.kernel.header.nonce = nonce;
 /// ```
-
 // ## About the private `digest` field:
 //
 // The `digest` field represents the `Block` hash.  It is an optimization so
@@ -118,8 +117,9 @@ pub enum BlockProof {
 // exist no impls for `OnceLock<_>` so derive fails.
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
-#[readonly::make]
+#[allow(non_local_definitions)] // needed for [Deserialize] macro from serde
 #[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[readonly::make]
 pub struct Block {
     /// Everything but the proof
     pub kernel: BlockKernel,

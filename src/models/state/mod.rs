@@ -2346,7 +2346,7 @@ mod global_state_tests {
                 "Exactly {expected_num_blocks_at_tip_height} blocks at height must be known"
             );
             assert_eq!(
-                expected_parent.hash(),
+                expected_parent_digest,
                 global_state
                     .chain
                     .archival_state()

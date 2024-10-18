@@ -204,9 +204,6 @@ impl BasicSnippet for TransactionKernelMastHash {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
-    use crate::prelude::twenty_first;
     use num_traits::One;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -226,7 +223,10 @@ mod tests {
     use twenty_first::util_types::algebraic_hasher::Domain;
 
     use super::*;
+    use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::prelude::twenty_first;
 
     impl TransactionKernelMastHash {
         pub(crate) fn input_state_with_kernel_in_memory(
