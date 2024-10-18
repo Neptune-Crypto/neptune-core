@@ -46,6 +46,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -105,6 +106,34 @@ impl Mempool {
     /// Update the block digest to which all transactions are synced.
     fn set_tip_digest_sync_label(&mut self, tip_digest: Digest) {
         self.tip_digest = tip_digest;
+    }
+
+    /// Check if mempool contains the specified transaction with a higher
+    /// proof quality.
+    ///
+    /// Returns true if transaction is already known *and* if the proof quality
+    /// contained in the mempool is higher than the argument.
+    pub(crate) fn contains_with_higher_proof_quality(
+        &self,
+        transaction_id: TransactionKernelId,
+        proof_quality: TransactionProofQuality,
+    ) -> bool {
+        if let Some(tx) = self.tx_dictionary.get(&transaction_id) {
+            match tx.proof.proof_quality() {
+                Ok(mempool_proof_quality) => mempool_proof_quality >= proof_quality,
+                Err(_) => {
+                    // Any proof quality is better than none.
+                    // This would indicate that this client has a transaction with
+                    // e.g. primitive witness in mempool and now the same transaction
+                    // with an associated proof is queried. That probably shouldn't
+                    // happen.
+                    error!("Failed to read proof quality for tx in mempool");
+                    true
+                }
+            }
+        } else {
+            false
+        }
     }
 
     /// check if transaction exists in mempool
