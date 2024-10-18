@@ -1129,7 +1129,7 @@ impl PeerLoopHandler {
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    pub async fn run_wrapper<S>(
+    pub(crate) async fn run_wrapper<S>(
         &mut self,
         mut peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerTask>,

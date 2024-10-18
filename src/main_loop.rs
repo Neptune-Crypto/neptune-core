@@ -62,7 +62,7 @@ pub struct MainLoopHandler {
 }
 
 impl MainLoopHandler {
-    pub fn new(
+    pub(crate) fn new(
         incoming_peer_listener: TcpListener,
         global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,

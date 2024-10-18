@@ -271,7 +271,7 @@ pub struct BlockRequestBatch {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PeerMessage {
+pub(crate) enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
     BlockNotificationRequest,

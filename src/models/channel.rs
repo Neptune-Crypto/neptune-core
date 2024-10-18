@@ -52,7 +52,7 @@ pub struct MainToPeerTaskBatchBlockRequest {
 }
 
 #[derive(Clone, Debug)]
-pub enum MainToPeerTask {
+pub(crate) enum MainToPeerTask {
     Block(Box<Block>),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request

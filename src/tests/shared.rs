@@ -153,7 +153,7 @@ pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> Handshake
     }
 }
 
-pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
+pub(crate) fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     let mut transport = LengthDelimitedCodec::new();
     let mut formating = SymmetricalBincode::<PeerMessage>::default();
     let mut buf = BytesMut::new();
@@ -232,7 +232,7 @@ pub(crate) async fn mock_genesis_global_state(
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, global state, peer's handshake data)
 #[allow(clippy::type_complexity)]
-pub async fn get_test_genesis_setup(
+pub(crate) async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
 ) -> Result<(
