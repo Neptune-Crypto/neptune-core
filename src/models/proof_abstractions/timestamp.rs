@@ -130,6 +130,10 @@ impl Timestamp {
         Timestamp(BFieldElement::new(num))
     }
 
+    pub const fn to_millis(&self) -> u64 {
+        self.0.value()
+    }
+
     pub fn format(&self, format_descriptor: &str) -> String {
         match DateTime::from_timestamp_millis(self.0.value() as i64) {
             Some(dt) => dt.format(format_descriptor).to_string(),

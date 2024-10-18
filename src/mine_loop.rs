@@ -159,8 +159,9 @@ fn mine_block_worker(
     let prev_difficulty = previous_block.header().difficulty;
     let threshold = target(prev_difficulty);
     info!(
-        "Mining on block with {} outputs. Attempting to find block with height {} with digest less than difficulty threshold: {}",
+        "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
         block_body.transaction_kernel.outputs.len(),
+        previous_block.header().difficulty,
         block_header.height,
         threshold
     );
@@ -172,45 +173,26 @@ fn mine_block_worker(
 
     let mut block = Block::new(block_header, block_body, block_proof);
 
-    // Mining takes place here
-    loop {
-        // If the sender is cancelled, the parent to this thread most
-        // likely received a new block, and this thread hasn't been stopped
-        // yet by the operating system, although the call to abort this
-        // thread *has* been made.
-        if sender.is_canceled() {
-            info!(
-                "Abandoning mining of current block with height {}",
-                block.kernel.header.height
-            );
-            return;
-        }
-
-        // mutate nonce in the block's header.
-        // Block::hash() will subsequently return a new digest.
-        block.set_header_nonce(rng.gen());
-
-        // See issue #149 and test block_timestamp_represents_time_block_found()
-        // this ensures header timestamp represents the moment block is found.
-        // this is simplest impl.  Efficiencies can perhaps be gained by only
-        // performing every N iterations, or other strategies.
-        let now = Timestamp::now();
-        let new_difficulty: U32s<5> = difficulty_control(
-            now,
-            previous_block.header().timestamp,
-            previous_block.header().difficulty,
-            target_block_interval,
-            previous_block.header().height,
+    // Mining loop
+    while !mine_iteration(
+        &mut block,
+        &previous_block,
+        &sender,
+        target_block_interval,
+        threshold,
+        unrestricted_mining,
+        &mut rng,
+    ) {}
+    // If the sender is cancelled, the parent to this thread most
+    // likely received a new block, and this thread hasn't been stopped
+    // yet by the operating system, although the call to abort this
+    // thread *has* been made.
+    if sender.is_canceled() {
+        info!(
+            "Abandoning mining of current block with height {}",
+            block.kernel.header.height
         );
-        block.set_header_timestamp_and_difficulty(now, new_difficulty);
-
-        if block.hash() <= threshold {
-            break;
-        }
-
-        if !unrestricted_mining {
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        return;
     }
 
     let nonce = block.kernel.header.nonce;
@@ -243,6 +225,54 @@ Difficulty threshold: {threshold}
     sender
         .send(new_block_found)
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
+}
+
+/// Run a single iteration of the mining loop.
+///
+/// Returns true if a) a valid block is found; or b) the task is terminated.
+#[inline]
+fn mine_iteration(
+    block: &mut Block,
+    previous_block: &Block,
+    sender: &oneshot::Sender<NewBlockFound>,
+    target_block_interval: Option<Timestamp>,
+    threshold: Digest,
+    unrestricted_mining: bool,
+    rng: &mut StdRng,
+) -> bool {
+    if sender.is_canceled() {
+        info!(
+            "Abandoning mining of current block with height {}",
+            block.kernel.header.height
+        );
+        return true;
+    }
+
+    // mutate nonce in the block's header.
+    // Block::hash() will subsequently return a new digest.
+    block.set_header_nonce(rng.gen());
+
+    // See issue #149 and test block_timestamp_represents_time_block_found()
+    // this ensures header timestamp represents the moment block is found.
+    // this is simplest impl.  Efficiencies can perhaps be gained by only
+    // performing every N iterations, or other strategies.
+    let now = Timestamp::now();
+    let new_difficulty: U32s<5> = difficulty_control(
+        now,
+        previous_block.header().timestamp,
+        previous_block.header().difficulty,
+        target_block_interval,
+        previous_block.header().height,
+    );
+    block.set_header_timestamp_and_difficulty(now, new_difficulty);
+
+    let success = block.hash() <= threshold;
+
+    if !unrestricted_mining {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    success
 }
 
 pub(crate) async fn make_coinbase_transaction(
@@ -552,6 +582,7 @@ pub async fn mine(
 #[cfg(test)]
 mod mine_loop_tests {
     use block_header::block_header_tests::random_block_header;
+    use num_bigint::BigUint;
     use tracing_test::traced_test;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
@@ -567,6 +598,55 @@ mod mine_loop_tests {
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
+
+    /// Estimates the hash rate in number of hashes per milliseconds
+    async fn estimate_own_hash_rate(
+        target_block_interval: Option<Timestamp>,
+        unrestricted_mining: bool,
+    ) -> f64 {
+        let mut rng: StdRng = SeedableRng::from_rng(thread_rng()).unwrap();
+        let network = Network::RegTest;
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+
+        let previous_block = global_state_lock
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .clone();
+
+        let (transaction, _coinbase_utxo_info) =
+            { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
+        let start_time = Timestamp::now();
+        let (block_header, block_body, block_proof) = Block::make_block_template(
+            &previous_block,
+            transaction,
+            start_time,
+            target_block_interval,
+        );
+        let mut block = Block::new(block_header, block_body, block_proof);
+        let threshold = target(previous_block.header().difficulty);
+
+        let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
+
+        let num_iterations = 10000;
+        let tick = std::time::SystemTime::now();
+        for _ in 0..num_iterations {
+            mine_iteration(
+                &mut block,
+                &previous_block,
+                &worker_task_tx,
+                target_block_interval,
+                threshold,
+                unrestricted_mining,
+                &mut rng,
+            );
+        }
+        let time_spent_mining = tick.elapsed().unwrap();
+
+        (num_iterations as f64) / (time_spent_mining.as_millis() as f64)
+    }
 
     #[traced_test]
     #[tokio::test]
@@ -868,10 +948,22 @@ mod mine_loop_tests {
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
         // expected_duration = num_blocks * target_block_interval
-        let num_blocks = 10;
-        let target_block_interval = Timestamp::seconds(1);
+        let num_blocks = 100;
+        let target_block_interval = Timestamp::millis(100);
 
-        let unrestricted_mining = false;
+        // set initial difficulty in accordance with own hash rate
+        let unrestricted_mining = true;
+        let hash_rate =
+            estimate_own_hash_rate(Some(target_block_interval), unrestricted_mining).await;
+        println!("estimating hash rate at {} per millisecond", hash_rate);
+        let initial_difficulty =
+            BigUint::from((hash_rate * (target_block_interval.to_millis() as f64)) as u128);
+        println!("initial difficulty: {}", initial_difficulty);
+        prev_block.set_header_timestamp_and_difficulty(
+            prev_block.header().timestamp,
+            initial_difficulty.into(),
+        );
+
         let expected_duration = target_block_interval * num_blocks;
         let allowed_variance = 1.3;
         let min_duration = (expected_duration.0.value() as f64 / allowed_variance) as u64;
