@@ -7,7 +7,7 @@ use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
-use super::peer::TransactionNotification;
+use super::peer::transaction_notification::TransactionNotification;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 
 #[derive(Clone, Debug)]

@@ -1245,7 +1245,7 @@ mod peer_loop_tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::peer::TransactionNotification;
+    use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
@@ -2480,7 +2480,7 @@ mod peer_loop_tests {
             .unwrap();
 
         // Build the resulting transaction notification
-        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
             Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
@@ -2584,7 +2584,7 @@ mod peer_loop_tests {
         // Run the peer loop and verify expected exchange -- namely that the
         // tx notification is received and the the transaction is *not*
         // requested.
-        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let tx_notification: TransactionNotification = (&transaction_1).try_into().unwrap();
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
             Action::Read(PeerMessage::Bye),

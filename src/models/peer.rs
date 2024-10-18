@@ -1,9 +1,13 @@
+pub mod transaction_notification;
+pub mod transfer_transaction;
+
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use serde::Deserialize;
 use serde::Serialize;
+use transaction_notification::TransactionNotification;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -253,35 +257,6 @@ pub enum ConnectionRefusedReason {
 pub enum ConnectionStatus {
     Refused(ConnectionRefusedReason),
     Accepted,
-}
-
-/// Data structure for communicating knowledge of transactions.
-///
-/// A sender broadcasts to all peers a `TransactionNotification` when it has
-/// received a transaction with the given `TransactionId`.  It is implied
-/// that interested peers can request the full transaction object from this
-/// sender.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransactionNotification {
-    /// A unique identifier of the transaction. Matches keys in the [mempool]
-    /// data structure.
-    ///
-    /// [mempool]: crate::models::state::mempool::Mempool
-    pub txid: TransactionKernelId,
-
-    /// The hash of the mutator set under which this transaction is valid.
-    /// The receiver can use this to check if it matches their tip. If not, they
-    /// can choose to ignore the transaction.
-    pub mutator_set_hash: Digest,
-}
-
-impl From<Transaction> for TransactionNotification {
-    fn from(transaction: Transaction) -> Self {
-        Self {
-            txid: transaction.kernel.txid(),
-            mutator_set_hash: transaction.kernel.mutator_set_hash,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

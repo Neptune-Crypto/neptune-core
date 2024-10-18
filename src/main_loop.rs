@@ -35,10 +35,10 @@ use crate::models::channel::MainToPeerTaskBatchBlockRequest;
 use crate::models::channel::MinerToMain;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::RPCServerToMain;
+use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
-use crate::models::peer::TransactionNotification;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
@@ -544,7 +544,7 @@ impl MainLoopHandler {
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
-                    pt2m_transaction.transaction.into();
+                    (&pt2m_transaction.transaction).try_into()?;
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::TransactionNotification(
                         transaction_notification,
@@ -1048,7 +1048,7 @@ impl MainLoopHandler {
                 );
 
                 // send notification to peers
-                let notification: TransactionNotification = transaction.as_ref().clone().into();
+                let notification: TransactionNotification = transaction.as_ref().try_into()?;
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerTask::TransactionNotification(notification))?;
 
