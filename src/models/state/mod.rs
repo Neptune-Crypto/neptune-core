@@ -1036,15 +1036,14 @@ impl GlobalState {
                     .get_block(revert_block_hash)
                     .await?
                     .unwrap();
-                let maybe_revert_block_predecessor = self
+                let revert_block_parent = self
                     .chain
                     .archival_state()
                     .get_block(revert_block.kernel.header.prev_block_digest)
-                    .await?;
-                let previous_mutator_set = match maybe_revert_block_predecessor {
-                    Some(block) => block.kernel.body.mutator_set_accumulator.clone(),
-                    None => MutatorSetAccumulator::default(),
-                };
+                    .await?
+                    .expect("All blocks that are reverted must have a parent, since genesis block can never be reverted.");
+                let previous_mutator_set =
+                    revert_block_parent.body().mutator_set_accumulator.clone();
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
@@ -2310,6 +2309,7 @@ mod global_state_tests {
         ) {
             // Verifying light state integrity
             let expected_tip_digest = expected_tip.hash();
+            let expected_parent_digest = expected_parent.hash();
             assert_eq!(expected_tip_digest, global_state.chain.light_state().hash());
 
             // Peeking into archival state
@@ -2365,6 +2365,10 @@ mod global_state_tests {
                 .get_all()
                 .await;
             let mut mutxos_on_tip = vec![];
+            assert!(
+                mutxos.iter().all(|x| x.confirmed_in_block.is_some()),
+                "All monitored UTXOs must be mined."
+            );
             for mutxo in mutxos {
                 if !mutxo
                     .was_abandoned(expected_tip_digest, global_state.chain.archival_state())
@@ -2384,6 +2388,82 @@ mod global_state_tests {
                 )),
                 "All wallet's membership proofs must still be valid"
             );
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn can_handle_deep_reorganization() {
+            // Mine 60 blocks, then switch to a new chain branching off from
+            // genesis block. Verify that state is integral after each block.
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let genesis_block = Block::genesis_block(network);
+            let wallet_secret = WalletSecret::devnet_wallet();
+            let spending_key = wallet_secret.nth_generation_spending_key(0);
+
+            let mut block_with_cb = move |previous_block: &Block| {
+                let (new_block, cb_utxo, cb_output_randomness) =
+                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
+                (
+                    new_block,
+                    ExpectedUtxo::new(
+                        cb_utxo,
+                        cb_output_randomness,
+                        spending_key.privacy_preimage,
+                        UtxoNotifier::OwnMiner,
+                    ),
+                )
+            };
+
+            let mut global_state_lock =
+                mock_genesis_global_state(network, 2, wallet_secret.clone()).await;
+            let mut global_state = global_state_lock.lock_guard_mut().await;
+
+            // Branch A
+            let mut previous_block = genesis_block.clone();
+            for block_height in 1..60 {
+                let (next_block, next_cb) = block_with_cb(&previous_block);
+                global_state
+                    .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                    .await
+                    .unwrap();
+                assert_correct_global_state(
+                    &global_state,
+                    next_block.clone(),
+                    previous_block.clone(),
+                    1,
+                    block_height + 1,
+                )
+                .await;
+                previous_block = next_block;
+            }
+
+            // Branch B
+            previous_block = genesis_block.clone();
+            for block_height in 1..60 {
+                let (next_block, next_cb) = block_with_cb(&previous_block);
+                global_state
+                    .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                    .await
+                    .unwrap();
+
+                // Resync membership proofs after block 1 on branch B, otherwise
+                // the genesis block's premine UTXO will not have a valid
+                // membership proof.
+                if block_height == 1 {
+                    global_state.resync_membership_proofs().await.unwrap();
+                }
+
+                assert_correct_global_state(
+                    &global_state,
+                    next_block.clone(),
+                    previous_block.clone(),
+                    2,
+                    block_height + 1,
+                )
+                .await;
+                previous_block = next_block;
+            }
         }
 
         #[traced_test]
@@ -2469,9 +2549,14 @@ mod global_state_tests {
                 )
                 .await;
 
+                // Add many blocks, verify state-validity after each.
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
                     let (next_block, next_cb) = block_with_cb(&previous_block);
+                    global_state
+                        .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                        .await
+                        .unwrap();
                     global_state
                         .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
                         .await
