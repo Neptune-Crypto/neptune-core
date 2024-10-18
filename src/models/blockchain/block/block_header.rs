@@ -15,7 +15,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-pub(crate) const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
+pub(crate) const DIFFICULTY_NUM_LIMBS: usize = 5;
 pub(crate) const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 /// 9.8 minutes
 pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
@@ -40,7 +40,7 @@ pub struct BlockHeader {
     pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
     /// The difficulty for the *next* block. Unit: expected # hashes
-    pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+    pub difficulty: U32s<DIFFICULTY_NUM_LIMBS>,
 }
 
 impl Display for BlockHeader {
