@@ -4,23 +4,21 @@ use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
 use super::block_height::BlockHeight;
+use super::difficulty_control::Difficulty;
+use super::difficulty_control::ProofOfWork;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-pub(crate) const DIFFICULTY_NUM_LIMBS: usize = 5;
-pub(crate) const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 /// 9.8 minutes
 pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
 pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
-pub(crate) const MINIMUM_DIFFICULTY: u32 = 1000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct BlockHeader {
@@ -37,10 +35,10 @@ pub struct BlockHeader {
     pub max_block_size: u32,
 
     /// Total proof-of-work accumulated by this chain
-    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub cumulative_proof_of_work: ProofOfWork,
 
     /// The difficulty for the *next* block. Unit: expected # hashes
-    pub difficulty: U32s<DIFFICULTY_NUM_LIMBS>,
+    pub difficulty: Difficulty,
 }
 
 impl Display for BlockHeader {

@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
-use difficulty_control::target;
+use difficulty_control::Difficulty;
+use difficulty_control::ProofOfWork;
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
 use rand::rngs::StdRng;
@@ -17,7 +18,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::*;
 use transaction_output::TxOutput;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 
@@ -73,14 +73,14 @@ pub(crate) fn make_block_template(
     );
 
     let zero = BFieldElement::zero();
-    let new_pow: U32s<5> = previous_block.kernel.header.cumulative_proof_of_work
+    let new_pow: ProofOfWork = previous_block.kernel.header.cumulative_proof_of_work
         + previous_block.kernel.header.difficulty;
     let next_block_height = previous_block.kernel.header.height.next();
     if block_timestamp < previous_block.kernel.header.timestamp {
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
         block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
     }
-    let difficulty: U32s<5> = difficulty_control(
+    let difficulty: Difficulty = difficulty_control(
         block_timestamp,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
@@ -157,7 +157,7 @@ fn mine_block_worker(
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block.header().difficulty;
-    let threshold = target(prev_difficulty);
+    let threshold = prev_difficulty.target();
     info!(
         "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
         block_body.transaction_kernel.outputs.len(),
@@ -257,7 +257,7 @@ fn mine_iteration(
     // this is simplest impl.  Efficiencies can perhaps be gained by only
     // performing every N iterations, or other strategies.
     let now = Timestamp::now();
-    let new_difficulty: U32s<5> = difficulty_control(
+    let new_difficulty = difficulty_control(
         now,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
@@ -626,7 +626,7 @@ mod mine_loop_tests {
             target_block_interval,
         );
         let mut block = Block::new(block_header, block_body, block_proof);
-        let threshold = target(previous_block.header().difficulty);
+        let threshold = previous_block.header().difficulty.target();
 
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
@@ -811,7 +811,7 @@ mod mine_loop_tests {
         let (block_header, block_body, block_proof) =
             Block::make_block_template(&tip_block_orig, transaction, launch_date, None);
 
-        let unrestricted_mining = false;
+        let unrestricted_mining = true;
 
         mine_block_worker(
             block_header,
@@ -873,7 +873,7 @@ mod mine_loop_tests {
         assert_eq!(block_header.timestamp, ten_seconds_ago);
 
         let initial_header_timestamp = block_header.timestamp;
-        let unrestricted_mining = false;
+        let unrestricted_mining = true;
 
         mine_block_worker(
             block_header,
@@ -961,7 +961,7 @@ mod mine_loop_tests {
         println!("initial difficulty: {}", initial_difficulty);
         prev_block.set_header_timestamp_and_difficulty(
             prev_block.header().timestamp,
-            initial_difficulty.into(),
+            Difficulty::from_biguint(initial_difficulty),
         );
 
         let expected_duration = target_block_interval * num_blocks;
@@ -1048,7 +1048,7 @@ mod mine_loop_tests {
 
     #[test]
     fn block_hash_relates_to_predecessor_difficulty() {
-        let difficulty = 100;
+        let difficulty = 100u32;
         // Difficulty X means we expect X trials before success.
         // Modeling the process as a geometric distribution gives the
         // probability of success in a single trial, p = 1/X.
@@ -1061,7 +1061,7 @@ mod mine_loop_tests {
         let k = (-4.0 / cofactor).ceil() as usize;
 
         let mut predecessor_header = random_block_header();
-        predecessor_header.difficulty = difficulty.into();
+        predecessor_header.difficulty = Difficulty::from(difficulty);
         let predecessor_body = BlockBody::new(
             random_transaction_kernel(),
             random_mutator_set_accumulator(),

@@ -1,10 +1,9 @@
 use std::net::SocketAddr;
 
 use tasm_lib::triton_vm::prelude::Digest;
-use tasm_lib::twenty_first::prelude::U32s;
 
-use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
 use super::peer::transaction_notification::TransactionNotification;
@@ -81,9 +80,9 @@ impl MainToPeerTask {
 }
 
 #[derive(Clone, Debug)]
-pub enum PeerTaskToMain {
+pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
-    AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
+    AddPeerMaxBlockHeight((SocketAddr, BlockHeight, ProofOfWork)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
     Transaction(Box<PeerTaskToMainTransaction>),

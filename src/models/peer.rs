@@ -9,13 +9,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::blockchain::block::block_header::BlockHeader;
-use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::transfer_block::TransferBlock;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
@@ -116,16 +115,13 @@ impl Display for PeerSanctionReason {
 #[derive(Debug, Clone, Copy)]
 pub struct PeerSynchronizationState {
     pub claimed_max_height: BlockHeight,
-    pub claimed_max_pow: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub(crate) claimed_max_pow: ProofOfWork,
     pub synchronization_start: SystemTime,
     pub last_request_received: Option<SystemTime>,
 }
 
 impl PeerSynchronizationState {
-    pub fn new(
-        claimed_max_height: BlockHeight,
-        claimed_max_pow: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
-    ) -> Self {
+    pub(crate) fn new(claimed_max_height: BlockHeight, claimed_max_pow: ProofOfWork) -> Self {
         Self {
             claimed_max_height,
             claimed_max_pow,
@@ -211,7 +207,7 @@ pub struct HandshakeData {
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
-    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub(crate) cumulative_proof_of_work: ProofOfWork,
 }
 
 impl From<&Block> for PeerBlockNotification {

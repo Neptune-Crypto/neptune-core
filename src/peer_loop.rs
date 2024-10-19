@@ -21,7 +21,6 @@ use tracing::warn;
 
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::difficulty_control::target;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
@@ -177,7 +176,7 @@ impl PeerLoopHandler {
                 warn!("Difficulty is {}.", previous_block.kernel.header.difficulty);
                 warn!(
                     "Proof of work should be {} (or more) but was [{}].",
-                    target(previous_block.kernel.header.difficulty),
+                    previous_block.kernel.header.difficulty.target(),
                     new_block.hash().values().iter().join(", ")
                 );
                 self.punish(PeerSanctionReason::InvalidBlock((

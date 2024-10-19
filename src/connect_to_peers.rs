@@ -432,7 +432,7 @@ where
 ///
 /// Locking:
 ///   * acquires `global_state_lock` for write
-pub async fn close_peer_connected_callback(
+pub(crate) async fn close_peer_connected_callback(
     mut global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,

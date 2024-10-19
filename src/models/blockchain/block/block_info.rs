@@ -4,10 +4,9 @@
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::digest::Digest;
-use twenty_first::prelude::U32s;
 
-use super::block_header::DIFFICULTY_NUM_LIMBS;
-use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
+use super::difficulty_control::Difficulty;
+use super::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -21,8 +20,8 @@ pub struct BlockInfo {
     pub digest: Digest,
     pub prev_block_digest: Digest,
     pub timestamp: Timestamp,
-    pub cumulative_proof_of_work: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
-    pub difficulty: U32s<DIFFICULTY_NUM_LIMBS>,
+    pub cumulative_proof_of_work: ProofOfWork,
+    pub difficulty: Difficulty,
     pub num_inputs: usize,
     pub num_outputs: usize,
     pub mining_reward: NeptuneCoins,
