@@ -1847,6 +1847,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand",
+ "rand_distr",
  "ratatui",
  "readonly",
  "regex",
