@@ -21,13 +21,12 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
-use twenty_first::amount::u32s::U32s;
 
 use crate::connect_to_peers::answer_peer_wrapper;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::MinerToMain;
@@ -38,7 +37,6 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::peer::TransactionNotification;
 use crate::models::state::GlobalStateLock;
-use crate::prelude::twenty_first;
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
@@ -60,7 +58,7 @@ pub struct MainLoopHandler {
 }
 
 impl MainLoopHandler {
-    pub fn new(
+    pub(crate) fn new(
         incoming_peer_listener: TcpListener,
         global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
@@ -112,15 +110,12 @@ impl SyncState {
         self.last_sync_request = Some((SystemTime::now(), requested_block_height, peer));
     }
 
-    /// Return a list of peers that have reported to be in possession of blocks with a PoW family
-    /// above a threshold.
-    fn get_potential_peers_for_sync_request(
-        &self,
-        threshold_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
-    ) -> Vec<SocketAddr> {
+    /// Return a list of peers that have reported to be in possession of blocks
+    /// with a PoW above a threshold.
+    fn get_potential_peers_for_sync_request(&self, threshold_pow: ProofOfWork) -> Vec<SocketAddr> {
         self.peer_sync_states
             .iter()
-            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow > threshold_pow_family)
+            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow > threshold_pow)
             .map(|(sa, _)| *sa)
             .collect()
     }
@@ -792,7 +787,7 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    pub async fn run(
+    pub(crate) async fn run(
         &mut self,
         mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
