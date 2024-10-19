@@ -14,10 +14,10 @@ use std::sync::OnceLock;
 use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::MINIMUM_BLOCK_TIME;
-use block_header::MINIMUM_DIFFICULTY;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
-use difficulty_control::target;
+use difficulty_control::Difficulty;
+use difficulty_control::ProofOfWork;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
@@ -31,7 +31,6 @@ use tracing::debug;
 use tracing::error;
 use tracing::warn;
 use transfer_block::TransferBlock;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -218,7 +217,7 @@ impl Block {
         );
 
         let zero = BFieldElement::zero();
-        let new_cumulative_proof_of_work: U32s<5> =
+        let new_cumulative_proof_of_work: ProofOfWork =
             previous_block.kernel.header.cumulative_proof_of_work
                 + previous_block.kernel.header.difficulty;
         let next_block_height = previous_block.kernel.header.height.next();
@@ -286,10 +285,10 @@ impl Block {
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub fn set_header_timestamp_and_difficulty(
+    pub(crate) fn set_header_timestamp_and_difficulty(
         &mut self,
         timestamp: Timestamp,
-        difficulty: U32s<5>,
+        difficulty: Difficulty,
     ) {
         self.kernel.header.timestamp = timestamp;
         self.kernel.header.difficulty = difficulty;
@@ -381,8 +380,8 @@ impl Block {
             // TODO: to be set to something difficult to predict ahead of time
             nonce: [bfe!(0), bfe!(0), bfe!(0)],
             max_block_size: 10_000,
-            cumulative_proof_of_work: U32s::zero(),
-            difficulty: MINIMUM_DIFFICULTY.into(),
+            cumulative_proof_of_work: ProofOfWork::zero(),
+            difficulty: Difficulty::MINIMUM,
         };
 
         Self::new(header, body, BlockProof::Genesis)
@@ -716,7 +715,7 @@ impl Block {
     /// the previous.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
         let hash = self.hash();
-        let threshold = target(previous_block.kernel.header.difficulty);
+        let threshold = previous_block.kernel.header.difficulty.target();
         let satisfied = hash <= threshold;
 
         if !satisfied {
@@ -823,16 +822,16 @@ mod block_tests {
     fn difficulty_to_threshold_test() {
         // Verify that a difficulty of 2 accepts half of the digests
         let difficulty: u32 = 2;
-        let difficulty_u32s = U32s::<5>::from(difficulty);
-        let threshold_for_difficulty_two: Digest = target(difficulty_u32s);
+        let difficulty_u32s = Difficulty::from(difficulty);
+        let threshold_for_difficulty_two: Digest = difficulty_u32s.target();
 
         for elem in threshold_for_difficulty_two.values() {
             assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
         }
 
         // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
-        let some_difficulty = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
-        let some_threshold_actual: Digest = target(some_difficulty);
+        let some_difficulty = Difficulty::new([1, u32::MAX, 0, 0, 0]);
+        let some_threshold_actual: Digest = some_difficulty.target();
 
         let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
         let some_threshold_expected = Digest::new([

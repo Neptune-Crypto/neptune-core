@@ -1,27 +1,210 @@
-use num_bigint::BigUint;
-use tasm_lib::{
-    triton_vm::prelude::{BFieldElement, Digest},
-    twenty_first::prelude::U32s,
-};
+use std::cmp::Ordering;
+use std::fmt::Display;
+use std::ops::Add;
 
-use crate::models::{
-    blockchain::block::block_header::{
-        DIFFICULTY_NUM_LIMBS, MINIMUM_DIFFICULTY, TARGET_BLOCK_INTERVAL,
-    },
-    proof_abstractions::timestamp::Timestamp,
-};
+use get_size::GetSize;
+use num_bigint::BigUint;
+use num_traits::Zero;
+use rand::Rng;
+use rand_distr::Distribution;
+use rand_distr::Standard;
+use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::prelude::Digest;
+
+use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 
 use super::block_height::BlockHeight;
 
-/// Convert a difficulty to a target threshold so as to test a block's
-/// proof-of-work.
-pub(crate) fn target(difficulty: U32s<DIFFICULTY_NUM_LIMBS>) -> Digest {
-    let difficulty_as_bui: BigUint = difficulty.into();
-    let max_threshold_as_bui: BigUint =
-        Digest([BFieldElement::new(BFieldElement::MAX); Digest::LEN]).into();
-    let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
+const DIFFICULTY_NUM_LIMBS: usize = 5;
 
-    threshold_as_bui.try_into().unwrap()
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
+
+impl Difficulty {
+    pub const NUM_LIMBS: usize = DIFFICULTY_NUM_LIMBS;
+    pub const MINIMUM: Self = Self::new([1000, 0, 0, 0, 0]);
+    pub(crate) const fn new(difficulty: [u32; DIFFICULTY_NUM_LIMBS]) -> Self {
+        Self(difficulty)
+    }
+
+    /// Convert a difficulty to a target threshold so as to test a block's
+    /// proof-of-work.
+    pub(crate) fn target(&self) -> Digest {
+        let difficulty_as_bui: BigUint = BigUint::from(*self);
+        let max_threshold_as_bui: BigUint =
+            Digest([BFieldElement::new(BFieldElement::MAX); Digest::LEN]).into();
+        let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
+
+        threshold_as_bui.try_into().unwrap()
+    }
+}
+
+impl IntoIterator for Difficulty {
+    type Item = u32;
+    type IntoIter = std::array::IntoIter<Self::Item, { Self::NUM_LIMBS }>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl From<Difficulty> for BigUint {
+    fn from(value: Difficulty) -> Self {
+        let mut bi = BigUint::zero();
+        for &limb in value.0.iter().rev() {
+            bi = (bi << 32) + limb;
+        }
+        bi
+    }
+}
+
+impl PartialOrd for Difficulty {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Difficulty {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .into_iter()
+            .rev()
+            .zip(other.0.into_iter().rev())
+            .map(|(lhs, rhs)| lhs.cmp(&rhs))
+            .fold(Ordering::Equal, |acc, new| match acc {
+                Ordering::Less => acc,
+                Ordering::Equal => new,
+                Ordering::Greater => acc,
+            })
+    }
+}
+
+impl Display for Difficulty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", BigUint::from(*self))
+    }
+}
+
+impl Distribution<Difficulty> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Difficulty {
+        Difficulty(rng.gen::<[u32; Difficulty::NUM_LIMBS]>())
+    }
+}
+
+impl<T> From<T> for Difficulty
+where
+    T: Into<u32>,
+{
+    fn from(value: T) -> Self {
+        let mut array = [0u32; Self::NUM_LIMBS];
+        array[0] = value.into();
+        Self(array)
+    }
+}
+
+const POW_NUM_LIMBS: usize = 6;
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+pub struct ProofOfWork([u32; POW_NUM_LIMBS]);
+
+impl ProofOfWork {
+    pub(crate) const NUM_LIMBS: usize = POW_NUM_LIMBS;
+    pub(crate) const fn new(amount: [u32; Self::NUM_LIMBS]) -> Self {
+        Self(amount)
+    }
+}
+
+impl IntoIterator for ProofOfWork {
+    type Item = u32;
+    type IntoIter = std::array::IntoIter<Self::Item, { Self::NUM_LIMBS }>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<T> Add<T> for ProofOfWork
+where
+    T: IntoIterator<Item = u32>,
+{
+    type Output = ProofOfWork;
+
+    fn add(self, rhs: T) -> Self::Output {
+        let mut result = [0u32; Self::NUM_LIMBS];
+        let mut carry = 0u32;
+        let mut n = 0;
+        for (i, (difficulty_digit, pow_digit)) in
+            rhs.into_iter().zip(self.0.into_iter()).enumerate()
+        {
+            let sum = (carry as u64) + (difficulty_digit as u64) + (pow_digit as u64);
+            result[i] = sum as u32;
+            carry = (sum >> 32) as u32;
+            n += 1;
+        }
+        for (self_i, result_i) in self.into_iter().zip(result.iter_mut()).skip(n) {
+            let sum = (carry as u64) + (self_i as u64);
+            *result_i = sum as u32;
+            carry = (sum >> 32) as u32;
+        }
+        Self(result)
+    }
+}
+
+impl Zero for ProofOfWork {
+    fn zero() -> Self {
+        Self::new([0u32; Self::NUM_LIMBS])
+    }
+
+    fn is_zero(&self) -> bool {
+        *self == Self::zero()
+    }
+}
+
+impl From<ProofOfWork> for BigUint {
+    fn from(value: ProofOfWork) -> Self {
+        let mut bi = BigUint::zero();
+        for &limb in value.0.iter().rev() {
+            bi = (bi << 32) + limb;
+        }
+        bi
+    }
+}
+
+impl PartialOrd for ProofOfWork {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProofOfWork {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0
+            .into_iter()
+            .rev()
+            .zip(other.0.into_iter().rev())
+            .map(|(lhs, rhs)| lhs.cmp(&rhs))
+            .fold(Ordering::Equal, |acc, new| match acc {
+                Ordering::Less => acc,
+                Ordering::Equal => new,
+                Ordering::Greater => acc,
+            })
+    }
+}
+
+impl Display for ProofOfWork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", BigUint::from(*self))
+    }
+}
+
+impl Distribution<ProofOfWork> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ProofOfWork {
+        ProofOfWork(rng.gen::<[u32; ProofOfWork::NUM_LIMBS]>())
+    }
 }
 
 /// Control system for block difficulty.
@@ -77,10 +260,10 @@ pub(crate) fn target(difficulty: U32s<DIFFICULTY_NUM_LIMBS>) -> Digest {
 pub(crate) fn difficulty_control(
     new_timestamp: Timestamp,
     old_timestamp: Timestamp,
-    old_difficulty: U32s<DIFFICULTY_NUM_LIMBS>,
+    old_difficulty: Difficulty,
     target_block_interval: Option<Timestamp>,
     previous_block_height: BlockHeight,
-) -> U32s<DIFFICULTY_NUM_LIMBS> {
+) -> Difficulty {
     // no adjustment if the previous block is the genesis block
     if previous_block_height.is_genesis() {
         return old_difficulty;
@@ -109,7 +292,7 @@ pub(crate) fn difficulty_control(
     let mut new_difficulty = [0u32; DIFFICULTY_NUM_LIMBS + 1];
     let mut carry = 0u32;
     for (old_difficulty_i, new_difficulty_i) in old_difficulty
-        .as_ref()
+        .0
         .iter()
         .zip(new_difficulty.iter_mut().take(DIFFICULTY_NUM_LIMBS))
     {
@@ -120,7 +303,7 @@ pub(crate) fn difficulty_control(
     new_difficulty[DIFFICULTY_NUM_LIMBS] = carry;
     carry = 0u32;
     for (old_difficulty_i, new_difficulty_i_plus_one) in old_difficulty
-        .as_ref()
+        .0
         .iter()
         .zip(new_difficulty.iter_mut().skip(1))
     {
@@ -129,11 +312,10 @@ pub(crate) fn difficulty_control(
         *new_difficulty_i_plus_one = digit;
         carry = ((sum >> 32) as u32) + (carry_bit as u32);
     }
-    let new_difficulty =
-        U32s::<DIFFICULTY_NUM_LIMBS>::new(new_difficulty[1..].to_owned().try_into().unwrap());
+    let new_difficulty = Difficulty::new(new_difficulty[1..].to_owned().try_into().unwrap());
 
-    if new_difficulty < MINIMUM_DIFFICULTY.into() {
-        MINIMUM_DIFFICULTY.into()
+    if new_difficulty < Difficulty::MINIMUM {
+        Difficulty::MINIMUM
     } else {
         new_difficulty
     }
@@ -141,26 +323,39 @@ pub(crate) fn difficulty_control(
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use num_bigint::{BigInt, BigUint};
     use num_rational::BigRational;
     use num_traits::ToPrimitive;
     use rand::{rngs::StdRng, thread_rng, SeedableRng};
     use rand_distr::{Distribution, Geometric};
-    use tasm_lib::twenty_first::prelude::U32s;
 
     use crate::models::{
-        blockchain::block::{
-            block_header::{DIFFICULTY_NUM_LIMBS, MINIMUM_DIFFICULTY},
-            block_height::BlockHeight,
-        },
+        blockchain::block::{block_height::BlockHeight, difficulty_control::Difficulty},
         proof_abstractions::timestamp::Timestamp,
     };
 
     use super::difficulty_control;
 
+    impl Difficulty {
+        pub(crate) fn from_biguint(bi: BigUint) -> Self {
+            if bi.iter_u32_digits().count() > Self::NUM_LIMBS {
+                panic!("BigUint too large to convert to Difficulty");
+            }
+            Self(
+                bi.iter_u32_digits()
+                    .take(Self::NUM_LIMBS)
+                    .pad_using(Self::NUM_LIMBS, |_| 0u32)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap(),
+            )
+        }
+    }
+
     fn sample_block_time(
         hash_rate: f64,
-        difficulty: U32s<DIFFICULTY_NUM_LIMBS>,
+        difficulty: Difficulty,
         proving_time: f64,
         rng: &mut StdRng,
     ) -> f64 {
@@ -216,7 +411,7 @@ mod test {
         // run simulation
         let mut rng: StdRng = SeedableRng::from_rng(thread_rng()).unwrap();
         let mut block_times = vec![];
-        let mut difficulty = U32s::<DIFFICULTY_NUM_LIMBS>::from(MINIMUM_DIFFICULTY);
+        let mut difficulty = Difficulty::MINIMUM;
         let target_block_time = 600f64;
         let target_block_interval = Timestamp::seconds(target_block_time.round() as u64);
         let mut new_timestamp = Timestamp::now();

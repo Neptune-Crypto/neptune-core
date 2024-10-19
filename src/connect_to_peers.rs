@@ -138,7 +138,7 @@ async fn check_if_connection_is_allowed(
     ConnectionStatus::Accepted
 }
 
-pub async fn answer_peer_wrapper<S>(
+pub(crate) async fn answer_peer_wrapper<S>(
     stream: S,
     state_lock: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -274,7 +274,7 @@ where
 
 /// Perform handshake and establish connection to a new peer while handling any panics in the peer
 /// task gracefully.
-pub async fn call_peer_wrapper(
+pub(crate) async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
     state: GlobalStateLock,
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
@@ -432,7 +432,7 @@ where
 ///
 /// Locking:
 ///   * acquires `global_state_lock` for write
-pub async fn close_peer_connected_callback(
+pub(crate) async fn close_peer_connected_callback(
     mut global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
