@@ -32,8 +32,9 @@ pub(crate) fn target(difficulty: U32s<DIFFICULTY_NUM_LIMBS>) -> Digest {
 /// timestamp. It regulates the block interval by tuning the difficulty.
 /// It assumes that the block timestamp is valid.
 ///
-/// This mechanism is a PID controller (with P = -2^-4 and I = D = 0) with
-/// the following system diagram.
+/// This mechanism is a PID controller with P = -2^-4 (and I = D = 0) and with
+/// the relative error being clamped within [-1;4]. The following diagram
+/// describes the mechanism.
 ///
 /// ```notest
 ///                          --------------
@@ -48,24 +49,31 @@ pub(crate) fn target(difficulty: U32s<DIFFICULTY_NUM_LIMBS>) -> Digest {
 ///      |                                                       | + |
 ///     ---                                                       ---
 ///    | + |<--- 1.0                                    (process   |
-///     ---                          (setpoint:)        variable:) |
-///      ^                             target             observed |
-///      |                              block           block time |
-///      |                            interval                     v
-///      |                               |                     -  ---
-///      |                               |---------------------->| + |
-///      |                   _           |   -----                ---
-///      |                  / |          '->| ^-1 |------v         |
-///      | adjustment      /  |              -----      ---  error |
-///       ----------------(P* |<-----------------------| * |<------
-///                        \  |                         ---
-///                         \_|
-///
-/// This controller does have a systematic error up to -5% of the setpoint,
-/// whose exact magnitude depends on the relation between proving and guessing
-/// time. This bias could be eliminated in principle by setting I and D; but the
-/// resulting controller is more complex (=> difficult to implement), generates
-/// overshoot (=> bad for liveness), and periodicity (=> attack vector).
+///     ---                              (setpoint:)    variable:) |
+///      ^                                 target         observed |
+///      |                                  block       block time |
+///      |                                interval                 v
+///      |                                   |                 -  ---
+///      |                                   |------------------>| + |
+///      |                                   |                    ---
+///      |                                   |                     |
+///      |                                   v                     |
+///      |                                 -----                   |
+///      |                                | 1/x |                  |
+///      |      _                          -----                   |
+///      |     / |                           v                     |
+///      |    /  |    ---------------       ---     absolute error |
+///       ---(P* |<--| clamp [-1; 4] |<----| * |<------------------
+///           \  |    ---------------  rel. ---
+///            \_|                    error
+///``
+/// The P-controller (without clamping) does have a systematic error up to -5%
+/// of the setpoint, whose exact magnitude depends on the relation between
+/// proving and guessing time. This bias could be eliminated in principle by
+/// setting I and D; but the resulting controller is more complex (=> difficult
+/// to implement), generates overshoot (=> bad for liveness), and periodicity
+/// (=> attack vector). Most importantly, the bias is counteracted to some
+/// degree by the clamping.
 /// ```
 pub(crate) fn difficulty_control(
     new_timestamp: Timestamp,
@@ -88,15 +96,16 @@ pub(crate) fn difficulty_control(
     let delta_t = new_timestamp - old_timestamp;
 
     // distance to target
-    let error = (delta_t.0.value() as f64 - target_block_interval.0.value() as f64)
-        / (target_block_interval.0.value() as f64);
+    let absolute_error = (delta_t.0.value() as i64) - (target_block_interval.0.value() as i64);
+    let relative_error = absolute_error * ((1i64 << 32) / (target_block_interval.0.value() as i64));
+    let clamped_error = relative_error.clamp(-1 << 32, 4 << 32);
 
     // change to control signal
     // adjustment_factor = (1 + P * error)
-    const P: f64 = -1.0 / 16.0;
-    let adjustment_factor = 1.0 + P * error;
-    let hi = adjustment_factor.floor() as u32;
-    let lo = ((adjustment_factor - (hi as f64)) * (1u64 << 32) as f64).floor() as u32;
+    // const P: f64 = -1.0 / 16.0;
+    let one_plus_p_times_error = (1i64 << 32) + ((-clamped_error) >> 4);
+    let lo = one_plus_p_times_error as u32;
+    let hi = (one_plus_p_times_error >> 32) as u32;
     let adjustment = U32s::<6>::new([lo, hi, 0, 0, 0, 0]);
     let old_difficulty = U32s::<6>::new(
         old_difficulty
