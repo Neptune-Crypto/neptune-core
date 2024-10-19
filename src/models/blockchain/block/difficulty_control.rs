@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use num_bigint::BigUint;
 use tasm_lib::{
     triton_vm::prelude::{BFieldElement, Digest},
@@ -106,29 +105,32 @@ pub(crate) fn difficulty_control(
     let one_plus_p_times_error = (1i64 << 32) + ((-clamped_error) >> 4);
     let lo = one_plus_p_times_error as u32;
     let hi = (one_plus_p_times_error >> 32) as u32;
-    let adjustment = U32s::<6>::new([lo, hi, 0, 0, 0, 0]);
-    let old_difficulty = U32s::<6>::new(
-        old_difficulty
-            .as_ref()
-            .iter()
-            .copied()
-            .chain([0])
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
 
-    let new_difficulty = old_difficulty * adjustment;
-    let new_difficulty = U32s::<5>::new(
-        new_difficulty
-            .as_ref()
-            .iter()
-            .skip(1)
-            .copied()
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
+    let mut new_difficulty = [0u32; DIFFICULTY_NUM_LIMBS + 1];
+    let mut carry = 0u32;
+    for (old_difficulty_i, new_difficulty_i) in old_difficulty
+        .as_ref()
+        .iter()
+        .zip(new_difficulty.iter_mut().take(DIFFICULTY_NUM_LIMBS))
+    {
+        let sum = (carry as u64) + (*old_difficulty_i as u64) * (lo as u64);
+        *new_difficulty_i = sum as u32;
+        carry = (sum >> 32) as u32;
+    }
+    new_difficulty[DIFFICULTY_NUM_LIMBS] = carry;
+    carry = 0u32;
+    for (old_difficulty_i, new_difficulty_i_plus_one) in old_difficulty
+        .as_ref()
+        .iter()
+        .zip(new_difficulty.iter_mut().skip(1))
+    {
+        let sum = (carry as u64) + (*old_difficulty_i as u64) * (hi as u64);
+        let (digit, carry_bit) = new_difficulty_i_plus_one.overflowing_add(sum as u32);
+        *new_difficulty_i_plus_one = digit;
+        carry = ((sum >> 32) as u32) + (carry_bit as u32);
+    }
+    let new_difficulty =
+        U32s::<DIFFICULTY_NUM_LIMBS>::new(new_difficulty[1..].to_owned().try_into().unwrap());
 
     if new_difficulty < MINIMUM_DIFFICULTY.into() {
         MINIMUM_DIFFICULTY.into()
