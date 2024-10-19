@@ -6,8 +6,8 @@ use serde::Serialize;
 use twenty_first::math::digest::Digest;
 use twenty_first::prelude::U32s;
 
-use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::block_header::DIFFICULTY_NUM_LIMBS;
+use super::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
