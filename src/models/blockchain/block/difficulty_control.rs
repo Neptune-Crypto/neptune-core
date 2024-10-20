@@ -21,6 +21,14 @@ use super::block_height::BlockHeight;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
 
+/// Estimated number of hashes required to find a block.
+///
+/// Every `Difficulty` determines a *target*, which is a hash digest. A block
+/// has proof-of-work if its hash is smaller than the difficulty of its
+/// predecessor.
+///
+/// The `Difficulty` is set by the `difficulty_control` mechanism such that the
+/// target block interval is by actual block times.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
 
@@ -108,6 +116,11 @@ where
 
 const POW_NUM_LIMBS: usize = 6;
 
+/// Estimates how many hashes were used to produce the data object.
+///
+/// Proof-of-work is used in the fork choice rule: when presented with
+/// two forks of different height, a node will choose the one with the greater
+/// amount of proof-of-work.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct ProofOfWork([u32; POW_NUM_LIMBS]);
 
