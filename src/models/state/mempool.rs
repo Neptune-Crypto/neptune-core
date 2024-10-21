@@ -260,14 +260,22 @@ impl Mempool {
     }
 
     /// Return a vector with copies of the transactions, in descending order by fee
-    /// density and using at most `remaining_storage` bytes.
-    pub fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
+    /// density.
+    ///
+    /// Number of transactions returned can be capped by either size (measured
+    /// in bytes), or by transaction count. The function guarantees that neither
+    /// of the specified limits will be exceeded.
+    pub fn get_transactions_for_block(
+        &self,
+        mut remaining_storage: usize,
+        max_num_txs: Option<usize>,
+    ) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = NeptuneCoins::zero();
 
         for (transaction_digest, _fee_density) in self.get_sorted_iter() {
             // No more transactions can possibly be packed
-            if remaining_storage == 0 {
+            if remaining_storage == 0 || max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
             }
 
@@ -593,13 +601,34 @@ mod tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn get_densest_transactions() {
+    async fn get_densest_transactions_no_tx_cap() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let mempool = setup_mock_mempool(10, Network::Main).await;
+        let num_txs = 10;
+        let mempool = setup_mock_mempool(num_txs, Network::Main).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES) {
+        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, None) {
+            let curr_fee_density = curr_transaction.fee_density();
+            assert!(curr_fee_density <= prev_fee_density);
+            prev_fee_density = curr_fee_density;
+        }
+
+        assert!(!mempool.is_empty())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn get_densest_transactions_with_tx_cap() {
+        // Verify that transactions are returned ordered by fee density, with highest fee density first
+        let num_txs = 12;
+        let mempool = setup_mock_mempool(num_txs, Network::Main).await;
+
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
+        let mut prev_fee_density = max_fee_density;
+        for curr_transaction in
+            mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(num_txs))
+        {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
@@ -622,6 +651,21 @@ mod tests {
         }
 
         assert!(!mempool.is_empty())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn max_num_transactions_is_respected() {
+        let num_txs = 12;
+        let mempool = setup_mock_mempool(num_txs, Network::Main).await;
+        for i in 0..num_txs {
+            assert_eq!(
+                i,
+                mempool
+                    .get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(i))
+                    .len()
+            );
+        }
     }
 
     #[traced_test]
@@ -780,7 +824,7 @@ mod tests {
         // Create a new block to verify that the non-mined transaction contains
         // updated and valid-again mutator set data
         let mut tx_by_alice_updated: Transaction =
-            mempool.get_transactions_for_block(usize::MAX)[0].clone();
+            mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
         assert!(
             tx_by_alice_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
@@ -828,7 +872,7 @@ mod tests {
             previous_block = next_block;
         }
 
-        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
+        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
         let (coinbase_transaction3, _expected_utxo3) =
             make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_eight_months)
                 .await
@@ -914,7 +958,7 @@ mod tests {
                 make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
-            let mempool_txs = alice.mempool.get_transactions_for_block(usize::MAX);
+            let mempool_txs = alice.mempool.get_transactions_for_block(usize::MAX, None);
             assert_eq!(
                 1,
                 mempool_txs.len(),
@@ -949,7 +993,7 @@ mod tests {
         assert!(
             alice
                 .mempool
-                .get_transactions_for_block(usize::MAX)
+                .get_transactions_for_block(usize::MAX, None)
                 .iter()
                 .all(|tx| tx.is_confirmable_relative_to(&block_1b.body().mutator_set_accumulator)),
             "All retained txs in the mempool must be confirmable relative to the new block.

@@ -329,7 +329,7 @@ async fn create_block_transaction(
     // Get most valuable transactions from mempool
     let transactions_to_include = global_state
         .mempool
-        .get_transactions_for_block(block_capacity_for_transactions);
+        .get_transactions_for_block(block_capacity_for_transactions, None);
 
     // Build coinbase UTXO
     let transaction_fees = transactions_to_include
