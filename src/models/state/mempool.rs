@@ -150,12 +150,14 @@ impl Mempool {
         self.tx_dictionary.get(&transaction_id)
     }
 
-    /// Returns `Some(txid, transaction)` iff a transaction conflicts with a transaction
-    /// that's already in the mempool. Returns `None` otherwise.
+    /// Returns the list of transactions already in the mempool that a
+    /// transaction conflicts with.
+    ///
+    /// Returns the empty list if there are no conflicts
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
-    ) -> Option<(TransactionKernelId, Transaction)> {
+    ) -> Vec<(TransactionKernelId, Transaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
         let tx_sbf_indices: HashSet<_> = transaction
             .kernel
@@ -164,15 +166,16 @@ impl Mempool {
             .map(|x| x.absolute_indices.to_array())
             .collect();
 
+        let mut conflict_txs_in_mempool = vec![];
         for (txid, tx) in self.tx_dictionary.iter() {
             for mempool_tx_input in tx.kernel.inputs.iter() {
                 if tx_sbf_indices.contains(&mempool_tx_input.absolute_indices.to_array()) {
-                    return Some((*txid, tx.to_owned()));
+                    conflict_txs_in_mempool.push((*txid, tx.to_owned()));
                 }
             }
         }
 
-        None
+        conflict_txs_in_mempool
     }
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to validate
@@ -195,19 +198,28 @@ impl Mempool {
             TransactionProof::ProofCollection(_) => {}
         };
 
-        // If transaction to be inserted conflicts with a transaction that's already
-        // in the mempool we preserve only the one with the highest fee density.
-        if let Some((txid, tx)) = self.transaction_conflicts_with(transaction) {
-            if tx.fee_density() < transaction.fee_density() {
-                // If new transaction has a higher fee density than the one previously seen
-                // remove the old one.
-                self.remove(txid);
+        // If transaction to be inserted conflicts with transactions already in
+        // the mempool, we replace them -- but only if the new transaction has a
+        // higher fee-density than the ones already in mempool. This should have
+        // the effect that merged transactions always replace those transactions
+        // that were merged since the merged transaction is *very* likely to
+        // have a higher fee density that the lowest one of the ones that were
+        // merged.
+        let conflicts = self.transaction_conflicts_with(transaction);
+        let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
+        if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
+            if min_fee_of_conflicting_tx < transaction.fee_density() {
+                for (conflicting_txid, _) in conflicts {
+                    self.remove(conflicting_txid);
+                }
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
                 // ignore it. Stop execution here.
-                return Some(txid);
+                // TODO: Rewrite this when merging #198:
+                // https://github.com/Neptune-Crypto/neptune-core/pull/198
+                return Some(conflicts[0].0);
             }
-        };
+        }
 
         let txid = transaction.kernel.txid();
 
@@ -519,6 +531,10 @@ mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::Zero;
+    use proptest::prelude::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -529,9 +545,11 @@ mod tests {
     use crate::config_models::network::Network;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
     use crate::models::blockchain::transaction::transaction_output::TxOutputList;
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
+    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -903,6 +921,57 @@ mod tests {
             mempool.is_empty(),
             "Mempool must be empty after 2nd tx was mined"
         );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn merged_tx_kicks_out_merge_inputs() {
+        /// Returns three transactions: Two transactions that are input to the
+        /// transaction-merge function, and the resulting merged transaction.
+        async fn merge_tx_triplet() -> ((Transaction, Transaction), Transaction) {
+            let mut test_runner = TestRunner::deterministic();
+            let [left, right] = PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                (2, 2, 2),
+                (2, 2, 2),
+            ])
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+            let left_single_proof = SingleProof::produce(&left).await;
+            let right_single_proof = SingleProof::produce(&right).await;
+
+            let left = Transaction {
+                kernel: left.kernel,
+                proof: TransactionProof::SingleProof(left_single_proof),
+            };
+            let right = Transaction {
+                kernel: right.kernel,
+                proof: TransactionProof::SingleProof(right_single_proof),
+            };
+
+            let shuffle_seed = arb::<[u8; 32]>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let merged = Transaction::merge_with(left.clone(), right.clone(), shuffle_seed).await;
+
+            ((left, right), merged)
+        }
+        // Verify that a merged transaction replaces the two transactions that
+        // are the input into the merge.
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
+
+        let ((left, right), merged) = merge_tx_triplet().await;
+        mempool.insert(&left);
+        mempool.insert(&right);
+        assert_eq!(2, mempool.len());
+
+        mempool.insert(&merged);
+        assert_eq!(1, mempool.len());
+        assert_eq!(&merged, mempool.get(merged.kernel.txid()).unwrap());
     }
 
     #[traced_test]
