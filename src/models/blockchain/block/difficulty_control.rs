@@ -35,6 +35,8 @@ pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
 impl Difficulty {
     pub const NUM_LIMBS: usize = DIFFICULTY_NUM_LIMBS;
     pub const MINIMUM: Self = Self::new([1000, 0, 0, 0, 0]);
+    pub const MAXIMUM: Self = Self::new([u32::MAX; Self::NUM_LIMBS]);
+
     pub(crate) const fn new(difficulty: [u32; DIFFICULTY_NUM_LIMBS]) -> Self {
         Self(difficulty)
     }
@@ -48,6 +50,39 @@ impl Difficulty {
         let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
 
         threshold_as_bui.try_into().unwrap()
+    }
+
+    /// Multiply the `Difficulty` with a positive fixed point rational number
+    /// consisting of two u32s as limbs separated by the point. Returns the
+    /// (wrapping) result and the out-of-bounds limb containing the overflow, if
+    /// any.
+    fn safe_mul_fixed_point_rational(&self, lo: u32, hi: u32) -> (Self, u32) {
+        let mut new_difficulty = [0u32; Self::NUM_LIMBS + 1];
+        let mut carry = 0u32;
+        for (old_difficulty_i, new_difficulty_i) in self
+            .0
+            .iter()
+            .zip(new_difficulty.iter_mut().take(Self::NUM_LIMBS))
+        {
+            let sum = (carry as u64) + (*old_difficulty_i as u64) * (lo as u64);
+            *new_difficulty_i = sum as u32;
+            carry = (sum >> 32) as u32;
+        }
+        new_difficulty[Self::NUM_LIMBS] = carry;
+        carry = 0u32;
+        for (old_difficulty_i, new_difficulty_i_plus_one) in
+            self.0.iter().zip(new_difficulty.iter_mut().skip(1))
+        {
+            let sum = (carry as u64) + (*old_difficulty_i as u64) * (hi as u64);
+            let (digit, carry_bit) = new_difficulty_i_plus_one.overflowing_add(sum as u32);
+            *new_difficulty_i_plus_one = digit;
+            carry = ((sum >> 32) as u32) + (carry_bit as u32);
+        }
+
+        (
+            Difficulty::new(new_difficulty[1..].to_owned().try_into().unwrap()),
+            carry,
+        )
     }
 }
 
@@ -292,42 +327,30 @@ pub(crate) fn difficulty_control(
 
     // distance to target
     let absolute_error = (delta_t.0.value() as i64) - (target_block_interval.0.value() as i64);
-    let relative_error = absolute_error * ((1i64 << 32) / (target_block_interval.0.value() as i64));
+    let relative_error =
+        (absolute_error as i128) * ((1i128 << 32) / (target_block_interval.0.value() as i128));
     let clamped_error = relative_error.clamp(-1 << 32, 4 << 32);
+
+    // Errors smaller than -1 cannot occur because delta_t >= MINIMUM_BLOCK_TIME > 0.
+    // Errors greater than 4 can occur but are clamped away because otherwise a
+    // single arbitrarily large concrete block time can induce an arbitrarily
+    // large downward adjustment to the difficulty.
+    // After clamping a `u64` suffices but before clamping we might get overflow
+    // for very large block times so we use i128 for the `relative_errror`.
 
     // change to control signal
     // adjustment_factor = (1 + P * error)
     // const P: f64 = -1.0 / 16.0;
-    let one_plus_p_times_error = (1i64 << 32) + ((-clamped_error) >> 4);
+    let one_plus_p_times_error = (1i128 << 32) + ((-clamped_error) >> 4);
+    debug_assert!(one_plus_p_times_error.is_positive());
+
     let lo = one_plus_p_times_error as u32;
     let hi = (one_plus_p_times_error >> 32) as u32;
+    let (new_difficulty, overflow) = old_difficulty.safe_mul_fixed_point_rational(lo, hi);
 
-    let mut new_difficulty = [0u32; DIFFICULTY_NUM_LIMBS + 1];
-    let mut carry = 0u32;
-    for (old_difficulty_i, new_difficulty_i) in old_difficulty
-        .0
-        .iter()
-        .zip(new_difficulty.iter_mut().take(DIFFICULTY_NUM_LIMBS))
-    {
-        let sum = (carry as u64) + (*old_difficulty_i as u64) * (lo as u64);
-        *new_difficulty_i = sum as u32;
-        carry = (sum >> 32) as u32;
-    }
-    new_difficulty[DIFFICULTY_NUM_LIMBS] = carry;
-    carry = 0u32;
-    for (old_difficulty_i, new_difficulty_i_plus_one) in old_difficulty
-        .0
-        .iter()
-        .zip(new_difficulty.iter_mut().skip(1))
-    {
-        let sum = (carry as u64) + (*old_difficulty_i as u64) * (hi as u64);
-        let (digit, carry_bit) = new_difficulty_i_plus_one.overflowing_add(sum as u32);
-        *new_difficulty_i_plus_one = digit;
-        carry = ((sum >> 32) as u32) + (carry_bit as u32);
-    }
-    let new_difficulty = Difficulty::new(new_difficulty[1..].to_owned().try_into().unwrap());
-
-    if new_difficulty < Difficulty::MINIMUM {
+    if overflow > 0 {
+        Difficulty::MAXIMUM
+    } else if new_difficulty < Difficulty::MINIMUM {
         Difficulty::MINIMUM
     } else {
         new_difficulty
@@ -336,19 +359,45 @@ pub(crate) fn difficulty_control(
 
 #[cfg(test)]
 mod test {
+    use arbitrary::Arbitrary;
     use itertools::Itertools;
-    use num_bigint::{BigInt, BigUint};
+    use num_bigint::BigInt;
+    use num_bigint::BigUint;
     use num_rational::BigRational;
+    use num_traits::One;
     use num_traits::ToPrimitive;
-    use rand::{rngs::StdRng, thread_rng, SeedableRng};
-    use rand_distr::{Distribution, Geometric};
+    use num_traits::Zero;
+    use proptest_arbitrary_interop::arb;
+    use rand::rngs::StdRng;
+    use rand::thread_rng;
+    use rand::SeedableRng;
+    use rand_distr::Distribution;
+    use rand_distr::Geometric;
+    use test_strategy::proptest;
 
-    use crate::models::{
-        blockchain::block::{block_height::BlockHeight, difficulty_control::Difficulty},
-        proof_abstractions::timestamp::Timestamp,
-    };
+    use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::block::difficulty_control::Difficulty;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
 
     use super::difficulty_control;
+
+    impl<'a> Arbitrary<'a> for Difficulty {
+        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+            let mut array = [0u32; Self::NUM_LIMBS];
+
+            array.iter_mut().skip(1).for_each(|a| {
+                *a = u32::arbitrary(u).unwrap();
+            });
+            if array.iter().skip(1).all(|limb| limb.is_zero()) {
+                array[0] = Self::MINIMUM.0[0].wrapping_mul(u32::arbitrary(u).unwrap());
+            } else {
+                array[0] = u32::arbitrary(u).unwrap();
+            }
+
+            let difficulty = Self::new(array);
+            Ok(difficulty)
+        }
+    }
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
@@ -453,7 +502,7 @@ mod test {
             }
         }
 
-        // filter out monitored block times
+        // select monitored block times
         let allowed_adjustment_period = 1000usize;
         let mut monitored_block_times = vec![];
         let mut counter = 0;
@@ -474,5 +523,49 @@ mod test {
         let margin = 0.05;
         assert!(target_block_time * (1.0 - margin) < mean);
         assert!(mean < target_block_time * (1.0 + margin));
+    }
+
+    #[proptest]
+    fn mul_by_fixed_point_rational_distributes(
+        #[strategy(arb())] a: Difficulty,
+        #[strategy(arb())] b: Difficulty,
+        #[strategy(arb())] lo: u32,
+        #[strategy(arb())] hi: u32,
+    ) {
+        let a_bui = BigUint::from(a);
+        let b_bui = BigUint::from(b);
+        let a_plus_b_bui = a_bui + b_bui;
+        if a_plus_b_bui.clone() >= BigUint::one() << (Difficulty::NUM_LIMBS * 32) {
+            // a + b generates overflow which is not caught
+            // so ignore test in this case
+            return Ok(());
+        }
+
+        let r = (lo as u64) + ((hi as u64) << 32);
+        let r_times_a_plus_b_bui: BigUint = (a_plus_b_bui.clone() * r) >> 32;
+
+        let (ra, ra_overflow) = a.safe_mul_fixed_point_rational(lo, hi);
+        let (rb, rb_overflow) = b.safe_mul_fixed_point_rational(lo, hi);
+
+        let r_times_a_bui = BigUint::new(
+            ra.into_iter()
+                .pad_using(Difficulty::NUM_LIMBS, |_| 0u32)
+                .chain([ra_overflow].into_iter())
+                .collect_vec(),
+        );
+        let r_times_b_bui = BigUint::new(
+            rb.into_iter()
+                .pad_using(Difficulty::NUM_LIMBS, |_| 0u32)
+                .chain([rb_overflow].into_iter())
+                .collect_vec(),
+        );
+        let r_times_a_plus_r_times_b_bui = r_times_a_bui + r_times_b_bui;
+
+        // ignore least significant bit because it might differ due to a carry
+        // from the fractional part
+        assert!(
+            r_times_a_plus_r_times_b_bui.clone() == r_times_a_plus_b_bui.clone()
+                || r_times_a_plus_r_times_b_bui + BigUint::one() == r_times_a_plus_b_bui
+        );
     }
 }
