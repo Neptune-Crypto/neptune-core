@@ -1,8 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::Add;
+use std::ops::Shr;
+use std::ops::ShrAssign;
 
 use get_size::GetSize;
+use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::Zero;
 use rand::Rng;
@@ -14,6 +17,8 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
+use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
+use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
@@ -34,11 +39,24 @@ pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
 
 impl Difficulty {
     pub const NUM_LIMBS: usize = DIFFICULTY_NUM_LIMBS;
-    pub const MINIMUM: Self = Self::new([1000, 0, 0, 0, 0]);
+    const LIMBS_FOR_MINIMUM: [u32; Self::NUM_LIMBS] = [1000, 0, 0, 0, 0];
+    pub const MINIMUM: Self = Self::new(Self::LIMBS_FOR_MINIMUM);
     pub const MAXIMUM: Self = Self::new([u32::MAX; Self::NUM_LIMBS]);
 
     pub(crate) const fn new(difficulty: [u32; DIFFICULTY_NUM_LIMBS]) -> Self {
-        Self(difficulty)
+        let mut lte_minimum = true;
+        let mut i = 0;
+        while i < Self::NUM_LIMBS {
+            if difficulty[i] > Self::LIMBS_FOR_MINIMUM[i] {
+                lte_minimum = false;
+            }
+            i += 1;
+        }
+        if lte_minimum {
+            Self(Self::LIMBS_FOR_MINIMUM)
+        } else {
+            Self(difficulty)
+        }
     }
 
     /// Convert a difficulty to a target threshold so as to test a block's
@@ -123,6 +141,40 @@ impl Ord for Difficulty {
                 Ordering::Equal => new,
                 Ordering::Greater => acc,
             })
+    }
+}
+
+impl Shr<usize> for Difficulty {
+    type Output = Self;
+
+    fn shr(self, rhs: usize) -> Self::Output {
+        let limb_offset = rhs / 32;
+        let mut array = self
+            .0
+            .into_iter()
+            .skip(limb_offset)
+            .pad_using(Self::NUM_LIMBS, |_| 0u32)
+            .collect_vec();
+
+        let remainder = rhs % 32;
+        if remainder.is_zero() {
+            return Difficulty::new(array.try_into().unwrap());
+        }
+
+        let mut borrow = 0u32;
+        for i in (0..Self::NUM_LIMBS).rev() {
+            let new_borrow = array[i] & ((1 << remainder) - 1);
+            array[i] = (array[i] >> remainder) | (borrow << (32 - remainder));
+            borrow = new_borrow;
+        }
+
+        Difficulty::new(array.try_into().unwrap())
+    }
+}
+
+impl ShrAssign<usize> for Difficulty {
+    fn shr_assign(&mut self, rhs: usize) {
+        *self = *self >> rhs;
     }
 }
 
@@ -263,39 +315,41 @@ impl Distribution<ProofOfWork> for Standard {
 /// It assumes that the block timestamp is valid.
 ///
 /// This mechanism is a PID controller with P = -2^-4 (and I = D = 0) and with
-/// the relative error being clamped within [-1;4]. The following diagram
-/// describes the mechanism.
+/// with a few modifications such as clamping and advance correction.
+/// The following diagram describes the mechanism.
 ///
 /// ```notest
-///                          --------------
-///                         |              |--- new timestamp ------
-///  --- new difficulty --->|  blockchain  |--- old timestamp ----  |
-/// |   (control signal)    |              |--- old difficulty -  | |
-/// |                        --------------                     | | |
-/// |   ---                                                     | | |
-///  --| * |<---------------------------------------------------  | |
-///     ---                                                     - v v
-///      ^                                                        ---
-///      |                                                       | + |
-///     ---                                                       ---
-///    | + |<--- 1.0                                    (process   |
-///     ---                              (setpoint:)    variable:) |
-///      ^                                 target         observed |
-///      |                                  block       block time |
-///      |                                interval                 v
-///      |                                   |                 -  ---
-///      |                                   |------------------>| + |
-///      |                                   |                    ---
-///      |                                   |                     |
-///      |                                   v                     |
-///      |                                 -----                   |
-///      |                                | 1/x |                  |
-///      |      _                          -----                   |
-///      |     / |                           v                     |
-///      |    /  |    ---------------       ---     absolute error |
-///       ---(P* |<--| clamp [-1; 4] |<----| * |<------------------
-///           \  |    ---------------  rel. ---
-///            \_|                    error
+///                             --------------
+///                            |              |------ new timestamp ------
+///  --- new difficulty    --->|  blockchain  |------ old timestamp ----  |
+/// |   (control signal)       |              |------ old difficulty -  | |
+/// |                           --------------                        | | |
+/// |   ---                            ---                            | | |
+///  --| * |<-------------------------| * |<--------------------------  | |
+///     ---                            ---                              | |
+///      ^ PID                          ^  advance                      | |
+///      | adjustment                   |  correction                 - v v
+///      |                              |                               ---
+///      |                           ------                            | + |
+///     ---                         | 2^-x |                            ---
+///    | + |<--- 1.0                 ------                   (process   |
+///     ---                             ^      (setpoint:)    variable:) |
+///      ^                              |        target         observed |
+///      |                           -------      block       block time |
+///      |                          | floor |    interval                v
+///      |                           -------       |                 -  ---
+///      |                              ^          |------------------>| + |
+///      |                              |          |                    ---
+///      |                            -----        |                     |
+///      |                           | 1/7 |       v                     |
+///      |   (P =)                    -----      -----                   |
+///      |   -2^-4                      ^       | 1/x |                  |
+///      |     |                        |        -----                   |
+///      |     v                        |          v                     |
+///      |    ---     ---------------   |         ---     absolute error |
+///       ---| * |<--| clamp [-1; 4] |<----------| * |<------------------
+///           ---     ---------------   relative  ---
+///                                      error
 ///``
 /// The P-controller (without clamping) does have a systematic error up to -5%
 /// of the setpoint, whose exact magnitude depends on the relation between
@@ -308,7 +362,7 @@ impl Distribution<ProofOfWork> for Standard {
 pub(crate) fn difficulty_control(
     new_timestamp: Timestamp,
     old_timestamp: Timestamp,
-    old_difficulty: Difficulty,
+    mut old_difficulty: Difficulty,
     target_block_interval: Option<Timestamp>,
     previous_block_height: BlockHeight,
 ) -> Difficulty {
@@ -338,6 +392,20 @@ pub(crate) fn difficulty_control(
     // After clamping a `u64` suffices but before clamping we might get overflow
     // for very large block times so we use i128 for the `relative_errror`.
 
+    // Every time ADVANCE_DIFFICULTY_CORRECTION_WAIT target block times pass
+    // between two blocks, the effective difficulty (the thing being compared
+    // against the new block's hash) drops by a factor
+    // ADVANCE_DIFFICULTY_CORRECTION_FACTOR, or drops to the minimum difficulty,
+    // whichever is largest.
+    let num_advance_reductions =
+        relative_error >> (32 + ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2());
+    if num_advance_reductions > 0 {
+        let shift_amount = ((num_advance_reductions as u128)
+            * (ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2() as u128))
+            as usize;
+        old_difficulty >>= shift_amount;
+    }
+
     // change to control signal
     // adjustment_factor = (1 + P * error)
     // const P: f64 = -1.0 / 16.0;
@@ -350,8 +418,6 @@ pub(crate) fn difficulty_control(
 
     if overflow > 0 {
         Difficulty::MAXIMUM
-    } else if new_difficulty < Difficulty::MINIMUM {
-        Difficulty::MINIMUM
     } else {
         new_difficulty
     }
@@ -367,14 +433,19 @@ mod test {
     use num_traits::One;
     use num_traits::ToPrimitive;
     use num_traits::Zero;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::SeedableRng;
+    use rand_distr::Bernoulli;
     use rand_distr::Distribution;
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
+    use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
+    use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::difficulty_control::Difficulty;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -417,19 +488,59 @@ mod test {
 
     fn sample_block_time(
         hash_rate: f64,
-        difficulty: Difficulty,
+        mut difficulty: Difficulty,
         proving_time: f64,
+        target_block_time: f64,
         rng: &mut StdRng,
     ) -> f64 {
-        let p_rational = BigRational::from_integer(1.into())
-            / BigRational::from_integer(BigInt::from(BigUint::from(difficulty)));
-        let p = p_rational
-            .to_f64()
-            .expect("difficulty-to-target conversion from `BigRational` to `f64` should succeed");
-        let geo = Geometric::new(p).unwrap();
-        let num_hashes = 1u64 + geo.sample(rng);
-        let guessing_time = (num_hashes as f64) / hash_rate;
-        proving_time + guessing_time
+        let mut block_time_so_far = proving_time;
+        let window_duration = target_block_time * (ADVANCE_DIFFICULTY_CORRECTION_WAIT as f64);
+        let num_hashes_calculated_per_window = hash_rate * window_duration;
+        for window in 0.. {
+            // probability of success per Bernoulli trial
+            let p_rational = BigRational::from_integer(1.into())
+                / BigRational::from_integer(BigInt::from(BigUint::from(difficulty)));
+            let p = p_rational.to_f64().expect(
+                "difficulty-to-target conversion from `BigRational` to `f64` should succeed",
+            );
+
+            // determine whether we are successful in this time window
+            let log_prob_failure = (-p).ln_1p(); // ln (1-p)
+            let log_prob_collective_failure = log_prob_failure * num_hashes_calculated_per_window;
+            let prob_collective_success = -log_prob_collective_failure.exp_m1(); // 1-e^x
+
+            let success = Bernoulli::new(prob_collective_success).unwrap().sample(rng);
+
+            // if not, advance-correct difficulty
+            if !success {
+                println!(
+                    "window {window}: time spent mining so far is {block_time_so_far}; \
+                    probability of collective success is \
+                    {prob_collective_success} and success was {success}, \
+                    so correcting difficulty ...",
+                );
+                difficulty >>= ADVANCE_DIFFICULTY_CORRECTION_FACTOR
+                    .ilog2()
+                    .try_into()
+                    .unwrap();
+                block_time_so_far += window_duration;
+                continue;
+            }
+
+            // else, determine time spent hashing
+            // reject samples that exceed window bounds
+            let distribution = Geometric::new(p).unwrap();
+            let mut num_hashes = 1u64 + distribution.sample(rng);
+            let mut time_spent_guessing = (num_hashes as f64) / hash_rate;
+            while time_spent_guessing > window_duration {
+                num_hashes = 1u64 + distribution.sample(rng);
+                time_spent_guessing = (num_hashes as f64) / hash_rate;
+            }
+            block_time_so_far += time_spent_guessing;
+            break;
+        }
+
+        block_time_so_far
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -486,7 +597,13 @@ mod test {
         {
             let hash_rate = 10f64.powf(log_hash_rate);
             for _ in 0..num_iterations {
-                let block_time = sample_block_time(hash_rate, difficulty, proving_time, &mut rng);
+                let block_time = sample_block_time(
+                    hash_rate,
+                    difficulty,
+                    proving_time,
+                    target_block_time,
+                    &mut rng,
+                );
                 block_times.push(block_time);
                 let old_timestamp = new_timestamp;
                 new_timestamp = new_timestamp + Timestamp::seconds(block_time.round() as u64);
@@ -590,9 +707,37 @@ mod test {
 
         // ignore least significant bit because it might differ due to a carry
         // from the fractional part
-        assert!(
+        prop_assert!(
             r_times_a_plus_r_times_b_bui.clone() == r_times_a_plus_b_bui.clone()
                 || r_times_a_plus_r_times_b_bui + BigUint::one() == r_times_a_plus_b_bui
         );
+    }
+
+    #[proptest]
+    fn shift_right_accumulates(
+        #[strategy(arb())] diff: Difficulty,
+        #[strategy(0usize..100)] a: usize,
+        #[strategy(0usize..100)] b: usize,
+    ) {
+        prop_assert_eq!((diff >> a) >> b, diff >> (a + b));
+        prop_assert_eq!((diff >> b) >> a, diff >> (a + b));
+    }
+
+    #[proptest]
+    fn shift_right_matches_biguint(
+        #[strategy(arb())] diff: Difficulty,
+        #[strategy(0usize..100)] a: usize,
+    ) {
+        prop_assert_eq!(BigUint::from(diff) >> a, BigUint::from(diff >> a));
+    }
+
+    #[proptest]
+    fn shift_right_assign_matches_shift_right(
+        #[strategy(arb())] diff: Difficulty,
+        #[strategy(0usize..100)] a: usize,
+    ) {
+        let mut running_diff = diff;
+        running_diff >>= a;
+        prop_assert_eq!(diff >> a, running_diff);
     }
 }

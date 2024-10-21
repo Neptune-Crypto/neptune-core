@@ -16,9 +16,45 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-/// 9.8 minutes
+/// Desired/average time between blocks.
+///
+/// 558000 milliseconds equals 9.8 minutes.
 pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
+
+/// Minimum time between blocks.
+///
+/// Blocks spaced apart by less than this amount of time are not confirmable.
 pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
+
+/// Controls how long to wait before the difficulty for the *next* block is
+/// reduced.
+///
+/// Typically, the difficulty of the block's predecessor is used to determine
+/// whether the new block has enough proof-of-work. But if the time difference
+/// (relative to the target block interval) exceeds this parameter, the
+/// difficulty is effectively reduced by a factor
+/// [`ADVANCE_DIFFICULTY_CORRECTION_FACTOR`]. Consequently, if for whatever
+/// reason the difficulty is set too high for the available mining power to find
+/// blocks, then the network has to wait some time (without needing to find
+/// blocks) before the difficulty is automatically lowered.
+///
+/// This parameter must be a power of two.
+pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_WAIT: usize = 128;
+
+/// Controls by how much the advance difficulty correction reduces the effective
+/// difficulty by.
+///
+/// Typically, the difficulty of the block's predecessor is used to determine
+/// whether the new block has enough proof-of-work. But if the time difference
+/// (relative to the target block interval) exceeds parameter
+/// [`ADVANCE_DIFFICULTY_CORRECTION_WAIT`], the
+/// difficulty is effectively reduced by this amount. Consequently, if for
+/// whatever reason the difficulty is set too high for the available mining
+/// power to find blocks, then the network has to wait some time (without
+/// needing to find blocks) before the difficulty is automatically lowered.
+///
+/// This parameter must be a power of two.
+pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct BlockHeader {
@@ -119,5 +155,17 @@ pub(crate) mod block_header_tests {
         let encoded = block_header.encode();
         let decoded = *BlockHeader::decode(&encoded).unwrap();
         assert_eq!(block_header, decoded);
+    }
+
+    #[test]
+    fn advance_difficulty_correction_parameters_are_powers_of_two() {
+        assert_eq!(
+            ADVANCE_DIFFICULTY_CORRECTION_WAIT,
+            1 << ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()
+        );
+        assert_eq!(
+            ADVANCE_DIFFICULTY_CORRECTION_FACTOR,
+            1 << ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()
+        );
     }
 }
