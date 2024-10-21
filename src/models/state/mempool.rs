@@ -38,11 +38,14 @@ use num_rational::BigRational as FeeDensity;
 use num_traits::Zero;
 use priority_queue::double_priority_queue::iterators::IntoSortedIter;
 use priority_queue::DoublePriorityQueue;
+use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -134,6 +137,39 @@ impl Mempool {
         } else {
             false
         }
+    }
+
+    /// Return the proof collection-supported transaction with highest
+    /// fee-density if mempool contains any such transactions. Otherwise None.
+    pub(crate) fn most_dense_proof_collection(
+        &self,
+    ) -> Option<(&TransactionKernel, &ProofCollection)> {
+        for (txid, _fee_density) in self.get_sorted_iter() {
+            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            if let TransactionProof::ProofCollection(proof_collection) = &candidate.proof {
+                return Some((&candidate.kernel, proof_collection));
+            }
+        }
+
+        None
+    }
+
+    /// Return the two most dense single-proof transactions. Returns `None` if
+    /// no such pair exists in the mempool.
+    pub(crate) fn most_dense_single_proof_pair(&self) -> Option<[(&TransactionKernel, &Proof); 2]> {
+        let mut ret = vec![];
+        for (txid, _fee_density) in self.get_sorted_iter() {
+            let candidate = self.tx_dictionary.get(&txid).unwrap();
+            if let TransactionProof::SingleProof(proof) = &candidate.proof {
+                ret.push((&candidate.kernel, proof));
+            }
+
+            if ret.len() == 2 {
+                return Some(ret.try_into().unwrap());
+            }
+        }
+
+        None
     }
 
     /// check if transaction exists in mempool
@@ -818,6 +854,20 @@ mod tests {
             .unwrap();
         mempool.insert(&tx_from_alice_original);
 
+        {
+            // Verify that `most_dense_single_proof_pair` returns expected value
+            // now that two single proofs are in the mempool.
+            let densest_txs = mempool.get_sorted_iter().map(|x| x.0).collect_vec();
+            assert_eq!(
+                densest_txs,
+                mempool
+                    .most_dense_single_proof_pair()
+                    .unwrap()
+                    .map(|x| x.0.txid())
+                    .to_vec()
+            );
+        }
+
         // Create next block which includes preminer's transaction
         let (coinbase_transaction, _expected_utxo) =
             make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
@@ -969,9 +1019,25 @@ mod tests {
         mempool.insert(&right);
         assert_eq!(2, mempool.len());
 
+        // Verify that `most_dense_single_proof_pair` returns expected value
+        // now that two single proofs are in the mempool.
+        let densest_txs = mempool.get_sorted_iter().map(|x| x.0).collect_vec();
+        assert_eq!(
+            densest_txs,
+            mempool
+                .most_dense_single_proof_pair()
+                .unwrap()
+                .map(|x| x.0.txid())
+                .to_vec()
+        );
+
         mempool.insert(&merged);
         assert_eq!(1, mempool.len());
         assert_eq!(&merged, mempool.get(merged.kernel.txid()).unwrap());
+
+        // Verify that `most_dense_single_proof_pair` returns expected value
+        // now that there's only *one* tx in the mempool.
+        assert!(mempool.most_dense_single_proof_pair().is_none());
     }
 
     #[traced_test]
