@@ -35,7 +35,6 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -316,14 +315,6 @@ async fn create_block_transaction(
     global_state: &GlobalState,
     timestamp: Timestamp,
 ) -> Result<(Transaction, ExpectedUtxo)> {
-    /// Return the a seed used to randomize shuffling.
-    fn shuffle_seed(wallet_secret: &WalletSecret, block_height: BlockHeight) -> [u8; 32] {
-        let secure_seed_from_wallet = wallet_secret.deterministic_derived_seed(block_height);
-        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
-
-        seed[0..32].try_into().unwrap()
-    }
-
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
@@ -344,10 +335,7 @@ async fn create_block_transaction(
         predecessor_block.kernel.body.mutator_set_accumulator.hash()
     );
 
-    let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed(
-        &global_state.wallet_state.wallet_secret,
-        predecessor_block.kernel.header.height.next(),
-    ));
+    let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
