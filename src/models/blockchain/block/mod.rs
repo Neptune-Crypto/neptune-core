@@ -13,7 +13,10 @@ use std::sync::OnceLock;
 
 use block_body::BlockBody;
 use block_header::BlockHeader;
+use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
+use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use block_header::MINIMUM_BLOCK_TIME;
+use block_header::TARGET_BLOCK_INTERVAL;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use difficulty_control::Difficulty;
@@ -497,8 +500,9 @@ impl Block {
     // }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
-    /// Note that this function does **not** check that the PoW digest is below the threshold.
-    /// That must be done separately by the caller.
+    /// Note that this function does **not** check that the block has enough
+    /// proof of work; that must be done separately by the caller, for instance
+    /// by calling [`Self::has_proof_of_work`].
     pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
         self.is_valid_extended(previous_block, now, None, None)
     }
@@ -710,19 +714,37 @@ impl Block {
         true
     }
 
-    /// Determine if the the proof-of-work puzzle was solved correctly. Specifically,
-    /// compare the hash of the current block against the difficulty determined by
-    /// the previous.
+    /// Determine whether the the proof-of-work puzzle was solved correctly.
+    ///
+    /// Specifically, compare the hash of the current block against the
+    /// target corresponding to the previous block;s difficulty and return true
+    /// if the former is smaller. If the timestamp difference exceeds the
+    /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
+    /// then the effective difficulty is reduced by a factor
+    /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
         let hash = self.hash();
         let threshold = previous_block.kernel.header.difficulty.target();
-        let satisfied = hash <= threshold;
-
-        if !satisfied {
-            warn!("Invalid proof of work for block. Got: {hash}\nThreshold: {threshold}");
+        if hash <= threshold {
+            return true;
         }
 
-        satisfied
+        let delta_t = self.header().timestamp - previous_block.header().timestamp;
+        let excess_multiple = usize::try_from(
+            delta_t.to_millis() / TARGET_BLOCK_INTERVAL.to_millis(),
+        )
+        .expect("excessive timestamp on incoming block should have been caught by peer loop");
+        let shift = usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()).unwrap()
+            * (excess_multiple
+                >> usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()).unwrap());
+        let effective_difficulty = previous_block.header().difficulty >> shift;
+        if hash <= effective_difficulty.target() {
+            return true;
+        }
+
+        warn!("Invalid proof of work for block. Got: {hash}\nThreshold: {threshold}");
+
+        false
     }
 }
 
