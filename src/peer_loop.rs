@@ -23,6 +23,7 @@ use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
@@ -825,14 +826,16 @@ impl PeerLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
-                // If transaction is invalid, punish
+                let transaction: Transaction = (*transaction).into();
+
+                // 1. If transaction is invalid, punish.
                 if !transaction.is_valid().await {
                     warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // If transaction has coinbase, punish.
+                // 2. If transaction has coinbase, punish.
                 // Transactions received from peers have not been mined yet.
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
@@ -842,7 +845,25 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // if transaction is not confirmable, punish
+                // 3. If transaction is already known, ignore.
+                if self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mempool
+                    .contains_with_higher_proof_quality(
+                        transaction.kernel.txid(),
+                        transaction.proof.proof_quality()?,
+                    )
+                {
+                    warn!("Received transaction that was already known");
+
+                    // We received a transaction that we *probably* haven't requested.
+                    // Consider punishing here, if this is abused.
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 4 if transaction is not confirmable, punish.
                 let confirmable = transaction.is_confirmable_relative_to(
                     &self
                         .global_state_lock
@@ -861,19 +882,17 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Get transaction timestamp
                 let tx_timestamp = transaction.kernel.timestamp;
 
-                // 2. Ignore if transaction is too old
+                // 5. Ignore if transaction is too old
                 let now = self.now();
-
                 if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 3. Ignore if transaction is too far into the future
+                // 6. Ignore if transaction is too far into the future
                 if tx_timestamp
                     > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
@@ -884,7 +903,7 @@ impl PeerLoopHandler {
 
                 // Otherwise relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
-                    transaction: *transaction.to_owned(),
+                    transaction,
                     confirmable_for_block: self
                         .global_state_lock
                         .lock_guard()
@@ -942,8 +961,12 @@ impl PeerLoopHandler {
                     .mempool
                     .get(transaction_identifier)
                 {
-                    peer.send(PeerMessage::Transaction(Box::new(transaction.clone())))
-                        .await?;
+                    if let Ok(transfer_transaction) = transaction.try_into() {
+                        peer.send(PeerMessage::Transaction(Box::new(transfer_transaction)))
+                            .await?;
+                    } else {
+                        warn!("Peer requested transaction that cannot be converted to transfer object");
+                    }
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -2489,7 +2512,9 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::TransactionNotification(tx_notification)),
             Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
-            Action::Read(PeerMessage::Transaction(Box::new(transaction_1.clone()))),
+            Action::Read(PeerMessage::Transaction(Box::new(
+                (&transaction_1).try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2692,7 +2717,9 @@ mod peer_loop_tests {
                     Mock::new(vec![
                         Action::Read(PeerMessage::TransactionNotification(tx_notification)),
                         Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
-                        Action::Read(PeerMessage::Transaction(Box::new(new_tx.clone()))),
+                        Action::Read(PeerMessage::Transaction(Box::new(
+                            new_tx.try_into().unwrap(),
+                        ))),
                         Action::Read(PeerMessage::Bye),
                     ])
                 };

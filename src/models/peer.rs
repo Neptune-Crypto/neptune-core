@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use serde::Serialize;
 use transaction_notification::TransactionNotification;
+use transfer_transaction::TransferTransaction;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -18,7 +19,6 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::transfer_block::TransferBlock;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
-use super::blockchain::transaction::Transaction;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::prelude::twenty_first;
@@ -283,7 +283,7 @@ pub(crate) enum PeerMessage {
     BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     /// Send a full transaction object to a peer.
-    Transaction(Box<Transaction>),
+    Transaction(Box<TransferTransaction>),
     /// Send a notification to a peer, informing it that this node stores the
     /// transaction with digest and timestamp specified in
     /// `TransactionNotification`.

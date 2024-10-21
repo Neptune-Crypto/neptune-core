@@ -41,25 +41,43 @@ pub(crate) struct TransferTransaction {
     pub(crate) proof: TransferTransactionProof,
 }
 
-impl TryFrom<Transaction> for TransferTransaction {
+impl TryFrom<&Transaction> for TransferTransaction {
     type Error = anyhow::Error;
 
-    fn try_from(value: Transaction) -> Result<Self, Self::Error> {
-        let transfer_proof = match value.proof {
+    fn try_from(value: &Transaction) -> Result<Self, Self::Error> {
+        let transfer_proof = match &value.proof {
             TransactionProof::Invalid => bail!("Cannot share invalid transaction with peer"),
             TransactionProof::Witness(_) => {
                 bail!("Cannot share primitive witness-supported transaction, as this would leak secret data")
             }
-            TransactionProof::SingleProof(proof) => TransferTransactionProof::SingleProof(proof),
+            TransactionProof::SingleProof(proof) => {
+                TransferTransactionProof::SingleProof(proof.to_owned())
+            }
             TransactionProof::ProofCollection(proof_collection) => {
-                TransferTransactionProof::ProofCollection(Box::new(proof_collection))
+                TransferTransactionProof::ProofCollection(Box::new(proof_collection.to_owned()))
             }
         };
 
         Ok(Self {
-            kernel: value.kernel,
+            kernel: value.kernel.to_owned(),
             proof: transfer_proof,
         })
+    }
+}
+
+impl From<TransferTransaction> for Transaction {
+    fn from(value: TransferTransaction) -> Self {
+        Self {
+            kernel: value.kernel,
+            proof: match value.proof {
+                TransferTransactionProof::ProofCollection(proof_collection) => {
+                    TransactionProof::ProofCollection(*proof_collection)
+                }
+                TransferTransactionProof::SingleProof(proof) => {
+                    TransactionProof::SingleProof(proof)
+                }
+            },
+        }
     }
 }
 
