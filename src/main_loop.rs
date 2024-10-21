@@ -911,30 +911,31 @@ impl MainLoopHandler {
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
-        // Set peer discovery to run every N seconds. The timer must be reset every time it has run.
+        // Set peer discovery to run every N seconds. All timers must be reset
+        // every time they have run.
         let peer_discovery_timer_interval = Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS);
         let peer_discovery_timer = time::sleep(peer_discovery_timer_interval);
         tokio::pin!(peer_discovery_timer);
 
-        // Set synchronization to run every M seconds. The timer must be reset every time it has run.
-        let sync_timer_interval = Duration::from_secs(SYNC_REQUEST_INTERVAL_IN_SECONDS);
-        let synchronization_timer = time::sleep(sync_timer_interval);
-        tokio::pin!(synchronization_timer);
+        // Set synchronization to run every M seconds.
+        let block_sync_interval = Duration::from_secs(SYNC_REQUEST_INTERVAL_IN_SECONDS);
+        let block_sync_timer = time::sleep(block_sync_interval);
+        tokio::pin!(block_sync_timer);
 
-        // Set removal of transactions from mempool that have timed out to run every P seconds
-        let mempool_cleanup_timer_interval = Duration::from_secs(MEMPOOL_PRUNE_INTERVAL_IN_SECS);
-        let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
+        // Set removal of transactions from mempool.
+        let mempool_cleanup_interval = Duration::from_secs(MEMPOOL_PRUNE_INTERVAL_IN_SECS);
+        let mempool_cleanup_timer = time::sleep(mempool_cleanup_interval);
         tokio::pin!(mempool_cleanup_timer);
 
-        // Set removal of stale notifications for incoming UTXOs
-        let utxo_notification_cleanup_timer_interval =
+        // Set removal of stale notifications for incoming UTXOs.
+        let utxo_notification_cleanup_interval =
             Duration::from_secs(EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS);
-        let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_timer_interval);
+        let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_interval);
         tokio::pin!(utxo_notification_cleanup_timer);
 
-        // Set restoration of membership proofs to run every Q seconds
-        let mp_resync_timer_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
-        let mp_resync_timer = time::sleep(mp_resync_timer_interval);
+        // Set restoration of membership proofs to run every Q seconds.
+        let mp_resync_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
+        let mp_resync_timer = time::sleep(mp_resync_interval);
         tokio::pin!(mp_resync_timer);
 
         // Set transasction-proof-upgrade-checker to run every R secnods.
@@ -1079,12 +1080,12 @@ impl MainLoopHandler {
                 }
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
-                _ = &mut synchronization_timer => {
+                _ = &mut block_sync_timer => {
                     trace!("Timer: block-synchronization job");
                     self.block_sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
-                    synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
+                    block_sync_timer.as_mut().reset(tokio::time::Instant::now() + block_sync_interval);
                 }
 
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
@@ -1093,7 +1094,7 @@ impl MainLoopHandler {
                     self.global_state_lock.lock_mut(|s| s.mempool.prune_stale_transactions()).await;
 
                     // Reset the timer to run this branch again in P seconds
-                    mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
+                    mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_interval);
                 }
 
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
@@ -1109,7 +1110,7 @@ impl MainLoopHandler {
                     // it can be called safely without possible loss of funds.
                     // self.global_state_lock.lock_mut(|s| s.wallet_state.prune_stale_expected_utxos()).await;
 
-                    utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
+                    utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_interval);
                 }
 
                 // Handle membership proof resynchronization
@@ -1117,7 +1118,7 @@ impl MainLoopHandler {
                     debug!("Timer: Membership proof resync job");
                     self.global_state_lock.resync_membership_proofs().await?;
 
-                    mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
+                    mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_interval);
                 }
 
                 // Check if it's time to run the proof upgrader
