@@ -423,6 +423,7 @@ impl Mempool {
             if let Ok(new_tx) = tx
                 .clone()
                 .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+                .await
             {
                 *tx = new_tx;
             } else {
@@ -760,7 +761,9 @@ mod tests {
             make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
                 .await
                 .unwrap();
-        let block_transaction = tx_by_bob.merge_with(coinbase_transaction, Default::default());
+        let block_transaction = tx_by_bob
+            .merge_with(coinbase_transaction, Default::default())
+            .await;
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction, in_eight_months, None);
 
@@ -791,7 +794,8 @@ mod tests {
                 .unwrap();
         let block_transaction2 = tx_by_alice_updated
             .clone()
-            .merge_with(coinbase_transaction2, Default::default());
+            .merge_with(coinbase_transaction2, Default::default())
+            .await;
         let block_3_orphaned =
             Block::new_block_from_template(&block_2, block_transaction2, in_eight_months, None);
 
@@ -829,8 +833,9 @@ mod tests {
             make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_eight_months)
                 .await
                 .unwrap();
-        let block_transaction3 =
-            coinbase_transaction3.merge_with(tx_by_alice_updated, Default::default());
+        let block_transaction3 = coinbase_transaction3
+            .merge_with(tx_by_alice_updated, Default::default())
+            .await;
         let block_5 = Block::new_block_from_template(
             &previous_block,
             block_transaction3,

@@ -97,8 +97,9 @@ where
     ///
     /// This method is a thin wrapper around [`prove_consensus_program`], which
     /// does the same but for arbitrary programs.
-    fn prove(&self, claim: &Claim, nondeterminism: NonDeterminism) -> Proof {
-        prove_consensus_program(self.program(), claim.clone(), nondeterminism)
+    #[allow(async_fn_in_trait)] // Trait must be public bc of benchmarks.
+    async fn prove(&self, claim: &Claim, nondeterminism: NonDeterminism) -> Proof {
+        prove_consensus_program(self.program(), claim.clone(), nondeterminism).await
     }
 }
 
@@ -114,7 +115,7 @@ where
 // Currently, only lock scripts and type scripts fit that description. It may be
 // worthwhile to investigate whether they can be made to implement
 // ConsensusProgram.
-pub fn prove_consensus_program(
+pub async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
@@ -124,17 +125,29 @@ pub fn prove_consensus_program(
     let init_vm_state = VMState::new(&program, claim.input.clone().into(), nondeterminism.clone());
     maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
 
-    #[cfg(test)]
-    let proof =
-        test::load_proof_or_produce_and_save(&claim, program.clone(), nondeterminism.clone());
-    #[cfg(not(test))]
-    let proof = tasm_lib::triton_vm::prove(
-        tasm_lib::triton_vm::stark::Stark::default(),
-        &claim,
-        &program,
-        nondeterminism.clone(),
-    )
-    .unwrap();
+    let proof = {
+        #[cfg(test)]
+        {
+            test::load_proof_or_produce_and_save(&claim, program.clone(), nondeterminism.clone())
+        }
+        #[cfg(not(test))]
+        {
+            let claim_clone = claim.clone();
+            let program_clone = program.clone();
+            let nondeterminism_clone = nondeterminism.clone();
+            tokio::task::spawn_blocking(move || {
+                tasm_lib::triton_vm::prove(
+                    tasm_lib::triton_vm::stark::Stark::default(),
+                    &claim_clone,
+                    &program_clone,
+                    nondeterminism_clone,
+                )
+                .unwrap()
+            })
+            .await
+            .unwrap()
+        }
+    };
 
     let vm_output = VM::run(&program, claim.input.clone().into(), nondeterminism);
     assert!(vm_output.is_ok());

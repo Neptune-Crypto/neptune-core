@@ -275,14 +275,14 @@ impl SingleProof {
     /// witness.
     ///
     /// This involves generating a [ProofCollection] as an intermediate step.
-    pub(crate) fn produce(primitive_witness: &PrimitiveWitness) -> Proof {
-        let proof_collection = ProofCollection::produce(primitive_witness);
+    pub(crate) async fn produce(primitive_witness: &PrimitiveWitness) -> Proof {
+        let proof_collection = ProofCollection::produce(primitive_witness).await;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
-        let single_proof = SingleProof.prove(&claim, nondeterminism);
+        let single_proof = SingleProof.prove(&claim, nondeterminism).await;
         info!("Done");
 
         single_proof
@@ -792,8 +792,8 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
-    #[test]
-    fn can_verify_via_valid_proof_collection() {
+    #[tokio::test]
+    async fn can_verify_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
@@ -801,7 +801,7 @@ mod test {
             .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection = ProofCollection::produce(&primitive_witness);
+        let proof_collection = ProofCollection::produce(&primitive_witness).await;
         assert!(proof_collection.verify(txk_mast_hash));
 
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
@@ -824,8 +824,8 @@ mod test {
         assert_eq!(rust_result, tasm_result);
     }
 
-    #[test]
-    fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
+    #[tokio::test]
+    async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
         let mut test_runner = TestRunner::deterministic();
         let deterministic_now = arb::<Timestamp>()
             .new_tree(&mut test_runner)
@@ -838,7 +838,7 @@ mod test {
                 .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection = ProofCollection::produce(&primitive_witness);
+        let proof_collection = ProofCollection::produce(&primitive_witness).await;
         assert!(proof_collection.verify(txk_mast_hash));
 
         println!("Have proof collection. \\o/");
@@ -863,13 +863,15 @@ mod test {
         assert_eq!(rust_result, tasm_result);
     }
 
-    #[test]
-    fn can_verify_via_valid_update() {
-        let witness_for_update = deterministic_update_witness_only_additions(2, 2, 2);
+    #[tokio::test]
+    async fn can_verify_via_valid_update() {
+        let witness_for_update = deterministic_update_witness_only_additions(2, 2, 2).await;
 
         let claim_for_update = witness_for_update.claim();
         let nondeterminism_for_update = witness_for_update.nondeterminism();
-        let proof = Update.prove(&claim_for_update, nondeterminism_for_update);
+        let proof = Update
+            .prove(&claim_for_update, nondeterminism_for_update)
+            .await;
         Stark::default().verify(&claim_for_update, &proof).unwrap();
 
         let witness_of_update = WitnessOfUpdate {
@@ -891,13 +893,15 @@ mod test {
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
-    #[test]
-    fn can_verify_via_valid_merge() {
-        let witness_for_merge = deterministic_merge_witness((2, 2, 2), (2, 2, 2));
+    #[tokio::test]
+    async fn can_verify_via_valid_merge() {
+        let witness_for_merge = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
 
         let claim_for_merge = witness_for_merge.claim();
         let nondeterminism_for_witness = witness_for_merge.nondeterminism();
-        let proof = Merge.prove(&claim_for_merge, nondeterminism_for_witness);
+        let proof = Merge
+            .prove(&claim_for_merge, nondeterminism_for_witness)
+            .await;
         Stark::default().verify(&claim_for_merge, &proof).unwrap();
 
         let witness_of_merge = WitnessOfMerge {

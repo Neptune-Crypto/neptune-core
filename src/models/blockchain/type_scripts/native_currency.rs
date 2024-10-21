@@ -828,8 +828,8 @@ pub mod test {
         )?;
     }
 
-    #[test]
-    fn native_currency_failing_proof() {
+    #[tokio::test]
+    async fn native_currency_failing_proof() {
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
             .new_tree(&mut test_runner)
@@ -858,11 +858,13 @@ pub mod test {
 
         let claim = Claim::new(NativeCurrency.program().hash())
             .with_input(native_currency_witness.standard_input().individual_tokens);
-        let proof = type_script_and_witness.prove(
-            txk_mast_hash,
-            salted_input_utxos_hash,
-            salted_output_utxos_hash,
-        );
+        let proof = type_script_and_witness
+            .prove(
+                txk_mast_hash,
+                salted_input_utxos_hash,
+                salted_output_utxos_hash,
+            )
+            .await;
         assert!(
             triton_vm::verify(Stark::default(), &claim, &proof),
             "proof fails"

@@ -731,7 +731,7 @@ pub(crate) mod test {
 
     /// Return an update witness where the mutator set has had both elements
     /// added and removed.
-    pub(crate) fn deterministic_update_witness_additions_and_removals(
+    pub(crate) async fn deterministic_update_witness_additions_and_removals(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
@@ -766,7 +766,7 @@ pub(crate) mod test {
         )
         .unwrap();
 
-        let old_proof = SingleProof::produce(&old_pw);
+        let old_proof = SingleProof::produce(&old_pw).await;
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
         updated.kernel.timestamp = updated.kernel.timestamp + Timestamp::seconds(num_seconds);
 
@@ -782,7 +782,7 @@ pub(crate) mod test {
 
     /// Return an update witness where the mutator set is only changed by new
     /// additions.
-    pub(crate) fn deterministic_update_witness_only_additions(
+    pub(crate) async fn deterministic_update_witness_only_additions(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
@@ -819,7 +819,7 @@ pub(crate) mod test {
             &primitive_witness.mutator_set_accumulator.aocl,
             &newly_confirmed_records,
         );
-        let old_proof = SingleProof::produce(&primitive_witness);
+        let old_proof = SingleProof::produce(&primitive_witness).await;
 
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,
@@ -843,34 +843,34 @@ pub(crate) mod test {
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
-    #[test]
-    fn only_additions_small() {
-        positive_prop(deterministic_update_witness_only_additions(2, 2, 2));
+    #[tokio::test]
+    async fn only_additions_small() {
+        positive_prop(deterministic_update_witness_only_additions(2, 2, 2).await);
     }
 
-    #[test]
-    fn only_additions_medium() {
-        positive_prop(deterministic_update_witness_only_additions(4, 4, 4));
+    #[tokio::test]
+    async fn only_additions_medium() {
+        positive_prop(deterministic_update_witness_only_additions(4, 4, 4).await);
     }
 
-    #[test]
-    fn addition_and_removals_tiny() {
-        deterministic_update_witness_additions_and_removals(1, 1, 1);
+    #[tokio::test]
+    async fn addition_and_removals_tiny() {
+        positive_prop(deterministic_update_witness_additions_and_removals(1, 1, 1).await);
     }
 
-    #[test]
-    fn addition_and_removals_small() {
-        deterministic_update_witness_additions_and_removals(2, 2, 2);
+    #[tokio::test]
+    async fn addition_and_removals_small() {
+        positive_prop(deterministic_update_witness_additions_and_removals(2, 2, 2).await);
     }
 
-    #[test]
-    fn addition_and_removals_midi() {
-        deterministic_update_witness_additions_and_removals(3, 3, 3);
+    #[tokio::test]
+    async fn addition_and_removals_midi() {
+        positive_prop(deterministic_update_witness_additions_and_removals(3, 3, 3).await);
     }
 
-    #[test]
-    fn addition_and_removals_medium() {
-        deterministic_update_witness_additions_and_removals(4, 4, 4);
+    #[tokio::test]
+    async fn addition_and_removals_medium() {
+        positive_prop(deterministic_update_witness_additions_and_removals(4, 4, 4).await);
     }
 
     fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
@@ -987,11 +987,11 @@ pub(crate) mod test {
         );
     }
 
-    #[test]
-    fn update_witness_negative_tests() {
+    #[tokio::test]
+    async fn update_witness_negative_tests() {
         // It takes a long time to generate the witness, so we reuse it across
         // multiple tests
-        let good_witness = deterministic_update_witness_only_additions(2, 2, 2);
+        let good_witness = deterministic_update_witness_only_additions(2, 2, 2).await;
         new_timestamp_older_than_old(&good_witness);
         bad_new_aocl(&good_witness);
         bad_old_aocl(&good_witness);
@@ -1002,9 +1002,9 @@ pub(crate) mod test {
 
     /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
-    #[test]
-    fn txid_is_constant_under_tx_updates_only_additions() {
-        let update_witness = deterministic_update_witness_only_additions(4, 4, 4);
+    #[tokio::test]
+    async fn txid_is_constant_under_tx_updates_only_additions() {
+        let update_witness = deterministic_update_witness_only_additions(4, 4, 4).await;
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),
@@ -1014,9 +1014,9 @@ pub(crate) mod test {
 
     /// A test of the simple test generator, that it leaves the expected fields
     /// untouched, or at most permuted.
-    #[test]
-    fn txid_is_constant_under_tx_updates_additions_and_removals() {
-        let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4);
+    #[tokio::test]
+    async fn txid_is_constant_under_tx_updates_additions_and_removals() {
+        let update_witness = deterministic_update_witness_additions_and_removals(4, 4, 4).await;
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),

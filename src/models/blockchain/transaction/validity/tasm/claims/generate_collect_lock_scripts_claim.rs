@@ -260,7 +260,8 @@ mod tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-            let proof_collection = ProofCollection::produce(&primitive_witness);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let proof_collection = rt.block_on(ProofCollection::produce(&primitive_witness));
 
             let pw_pointer = rng.next_u32();
             let pw_pointer = bfe!(pw_pointer);

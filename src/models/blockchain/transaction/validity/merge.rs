@@ -959,9 +959,9 @@ pub(crate) mod test {
         }
     }
 
-    #[test]
-    fn can_verify_transaction_merger() {
-        let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2));
+    #[tokio::test]
+    async fn can_verify_transaction_merger() {
+        let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
 
         let claim = merge_witness.claim();
         let public_input = PublicInput::new(claim.input);
@@ -971,7 +971,7 @@ pub(crate) mod test {
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
-    pub(crate) fn deterministic_merge_witness(
+    pub(crate) async fn deterministic_merge_witness(
         params_left: (usize, usize, usize),
         params_right: (usize, usize, usize),
     ) -> MergeWitness {
@@ -992,8 +992,8 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(&primitive_witness_1);
-        let single_proof_2 = SingleProof::produce(&primitive_witness_2);
+        let single_proof_1 = SingleProof::produce(&primitive_witness_1).await;
+        let single_proof_2 = SingleProof::produce(&primitive_witness_2).await;
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,

@@ -351,19 +351,18 @@ async fn create_block_transaction(
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
-    let merged_transaction = transactions_to_include.into_iter().enumerate().fold(
-        coinbase_transaction,
-        |acc, (i, transaction)| {
-            info!(
-                "Merging transaction {} / {}",
-                i + 1,
-                num_transactions_to_include
-            );
-            Transaction::merge_with(acc, transaction, rng.gen())
-        },
-    );
+    let mut block_transaction = coinbase_transaction;
+    for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
+        info!(
+            "Merging transaction {} / {}",
+            i + 1,
+            num_transactions_to_include
+        );
+        block_transaction =
+            Transaction::merge_with(block_transaction, transaction_to_include, rng.gen()).await;
+    }
 
-    Ok((merged_transaction, coinbase_as_expected_utxo))
+    Ok((block_transaction, coinbase_as_expected_utxo))
 }
 
 /// Locking:

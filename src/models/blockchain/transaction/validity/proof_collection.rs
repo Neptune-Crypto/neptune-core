@@ -133,7 +133,7 @@ impl ProofCollection {
             || all_type_scripts_halt
     }
 
-    pub fn produce(primitive_witness: &PrimitiveWitness) -> Self {
+    pub async fn produce(primitive_witness: &PrimitiveWitness) -> Self {
         let (
             removal_records_integrity_witness,
             collect_lock_scripts_witness,
@@ -151,46 +151,60 @@ impl ProofCollection {
 
         // prove
         debug!("proving RemovalRecordsIntegrity");
-        let removal_records_integrity = RemovalRecordsIntegrity.prove(
-            &removal_records_integrity_witness.claim(),
-            removal_records_integrity_witness.nondeterminism(),
-        );
+        let removal_records_integrity = RemovalRecordsIntegrity
+            .prove(
+                &removal_records_integrity_witness.claim(),
+                removal_records_integrity_witness.nondeterminism(),
+            )
+            .await;
 
         debug!("proving CollectLockScripts");
-        let collect_lock_scripts = CollectLockScripts.prove(
-            &collect_lock_scripts_witness.claim(),
-            collect_lock_scripts_witness.nondeterminism(),
-        );
+        let collect_lock_scripts = CollectLockScripts
+            .prove(
+                &collect_lock_scripts_witness.claim(),
+                collect_lock_scripts_witness.nondeterminism(),
+            )
+            .await;
 
         debug!("proving KernelToOutputs");
-        let kernel_to_outputs = KernelToOutputs.prove(
-            &kernel_to_outputs_witness.claim(),
-            kernel_to_outputs_witness.nondeterminism(),
-        );
+        let kernel_to_outputs = KernelToOutputs
+            .prove(
+                &kernel_to_outputs_witness.claim(),
+                kernel_to_outputs_witness.nondeterminism(),
+            )
+            .await;
 
         debug!("proving CollectTypeScripts");
-        let collect_type_scripts = CollectTypeScripts.prove(
-            &collect_type_scripts_witness.claim(),
-            collect_type_scripts_witness.nondeterminism(),
-        );
+        let collect_type_scripts = CollectTypeScripts
+            .prove(
+                &collect_type_scripts_witness.claim(),
+                collect_type_scripts_witness.nondeterminism(),
+            )
+            .await;
 
         debug!("proving lock scripts");
-        let lock_scripts_halt = primitive_witness
-            .lock_scripts_and_witnesses
-            .iter()
-            .map(|lsaw| lsaw.prove(txk_mast_hash_as_input.clone()))
-            .collect_vec();
+        let mut lock_scripts_halt = vec![];
+        for lock_script_and_witness in primitive_witness.lock_scripts_and_witnesses.iter() {
+            lock_scripts_halt.push(
+                lock_script_and_witness
+                    .prove(txk_mast_hash_as_input.clone())
+                    .await,
+            );
+        }
 
         debug!("proving type scripts");
-        let type_scripts_halt = primitive_witness
+        let mut type_scripts_halt = vec![];
+        for (i, tsaw) in primitive_witness
             .type_scripts_and_witnesses
             .iter()
             .enumerate()
-            .map(|(i, tsaw)| {
-                debug!("proving type script number {i}: {}", tsaw.program.hash());
+        {
+            debug!("proving type script number {i}: {}", tsaw.program.hash());
+            type_scripts_halt.push(
                 tsaw.prove(txk_mast_hash, salted_inputs_hash, salted_outputs_hash)
-            })
-            .collect_vec();
+                    .await,
+            );
+        }
         info!("done proving proof collection");
 
         // collect hashes

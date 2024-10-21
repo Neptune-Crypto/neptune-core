@@ -129,9 +129,9 @@ impl LockScriptAndWitness {
     }
 
     /// Assuming the lock script halts gracefully, prove it.
-    pub fn prove(&self, public_input: PublicInput) -> Proof {
+    pub async fn prove(&self, public_input: PublicInput) -> Proof {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
-        prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
+        prove_consensus_program(self.program.clone(), claim, self.nondeterminism()).await
     }
 }
 

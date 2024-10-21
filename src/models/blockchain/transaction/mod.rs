@@ -295,12 +295,12 @@ impl Transaction {
 
     /// Create a new `Transaction` by updating the given one with the mutator set
     /// update contained in the `Block`. No primitive witness is present, instead
-    /// a proof (or faith witness) is given. So:
+    /// a proof is given. So:
     ///  1. Verify the proof
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
     ///  4. Use resulting proof as new witness.
-    fn new_with_updated_mutator_set_records_given_proof(
+    async fn new_with_updated_mutator_set_records_given_proof(
         old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -353,17 +353,19 @@ impl Transaction {
         let update_claim = update_witness.claim();
         let update_nondeterminism = update_witness.nondeterminism();
         info!("updating transaction; starting update proof ...");
-        let update_proof = Update.prove(&update_claim, update_nondeterminism);
+        let update_proof = Update.prove(&update_claim, update_nondeterminism).await;
         info!("done.");
 
         let new_single_proof_witness = SingleProofWitness::from_update(update_proof, &new_kernel);
         let new_single_proof_claim = new_single_proof_witness.claim();
 
         info!("starting single proof via update ...");
-        let new_single_proof = SingleProof.prove(
-            &new_single_proof_claim,
-            new_single_proof_witness.nondeterminism(),
-        );
+        let new_single_proof = SingleProof
+            .prove(
+                &new_single_proof_claim,
+                new_single_proof_witness.nondeterminism(),
+            )
+            .await;
         info!("done.");
 
         Ok(Transaction {
@@ -375,7 +377,7 @@ impl Transaction {
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that for Proof witnesses, this will
     /// invalidate the proof, requiring an update.
-    pub fn new_with_updated_mutator_set_records(
+    pub async fn new_with_updated_mutator_set_records(
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -395,6 +397,7 @@ impl Transaction {
                     block,
                     proof,
                 )
+                .await
                 .map_err(|_| TransactionProofError::CannotUpdateSingleProof)
             }
             _ => Err(TransactionProofError::CannotUpdateProofVariant),
@@ -418,7 +421,7 @@ impl Transaction {
     /// set hashes are not the same, if both transactions have coinbase a
     /// coinbase UTXO, or if either of the transactions are *not* a single
     /// proof.
-    pub fn merge_with(self, other: Transaction, shuffle_seed: [u8; 32]) -> Transaction {
+    pub async fn merge_with(self, other: Transaction, shuffle_seed: [u8; 32]) -> Transaction {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
@@ -454,16 +457,20 @@ impl Transaction {
         );
         info!("Start: creating merge proof");
         let merge_claim = merge_witness.claim();
-        let merge_proof = Merge.prove(&merge_claim, merge_witness.nondeterminism());
+        let merge_proof = Merge
+            .prove(&merge_claim, merge_witness.nondeterminism())
+            .await;
         info!("Done: creating merge proof");
         let new_single_proof_witness =
             SingleProofWitness::from_merge(merge_proof, &merge_witness.new_kernel);
         let new_single_proof_claim = new_single_proof_witness.claim();
         info!("Start: creating new single proof");
-        let new_single_proof = SingleProof.prove(
-            &new_single_proof_claim,
-            new_single_proof_witness.nondeterminism(),
-        );
+        let new_single_proof = SingleProof
+            .prove(
+                &new_single_proof_claim,
+                new_single_proof_witness.nondeterminism(),
+            )
+            .await;
         info!("Done: creating new single proof");
 
         Transaction {

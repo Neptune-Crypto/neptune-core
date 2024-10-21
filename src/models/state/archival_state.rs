@@ -1419,7 +1419,9 @@ mod archival_state_tests {
                 .unwrap()
         };
 
-        let block_tx = cbtx.merge_with(tx_to_alice_and_bob, Default::default());
+        let block_tx = cbtx
+            .merge_with(tx_to_alice_and_bob, Default::default())
+            .await;
         println!("Generated block transaction");
 
         let block_1 =
@@ -1623,7 +1625,9 @@ mod archival_state_tests {
         };
         let block_tx2 = cbtx2
             .merge_with(tx_from_alice, Default::default())
-            .merge_with(tx_from_bob, Default::default());
+            .await
+            .merge_with(tx_from_bob, Default::default())
+            .await;
         let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);
 
         println!("Generated new block");

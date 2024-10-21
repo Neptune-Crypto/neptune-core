@@ -1189,7 +1189,9 @@ mod wallet_tests {
             make_coinbase_transaction(&alice_state, NeptuneCoins::zero(), in_seven_months)
                 .await
                 .unwrap();
-        let merged_tx = coinbase_tx.merge_with(tx_from_bob, Default::default());
+        let merged_tx = coinbase_tx
+            .merge_with(tx_from_bob, Default::default())
+            .await;
         let block_3_b =
             Block::new_block_from_template(&block_2_b, merged_tx, in_seven_months, None);
         assert!(
@@ -1352,7 +1354,7 @@ mod wallet_tests {
             )
             .await
             .unwrap();
-        let tx_for_block = sender_tx.merge_with(cbtx, Default::default());
+        let tx_for_block = sender_tx.merge_with(cbtx, Default::default()).await;
         let block_1 =
             Block::new_block_from_template(&genesis_block, tx_for_block, in_seven_months, None);
 

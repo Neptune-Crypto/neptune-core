@@ -747,14 +747,10 @@ impl GlobalState {
         proving_power: TxProvingCapability,
     ) -> Result<Transaction> {
         // note: this executes the prover which can take a very
-        //       long time, perhaps minutes.  As such, we use
-        //       spawn_blocking() to execute on tokio's blocking
-        //       threadpool and avoid blocking the tokio executor
-        //       and other async tasks.
-        let transaction = tokio::task::spawn_blocking(move || {
-            Self::create_transaction_from_data_worker(transaction_details, proving_power)
-        })
-        .await?;
+        //       long time, perhaps minutes.  The `await` here, should avoid
+        //       block the tokio executor and other async tasks.
+        let transaction =
+            Self::create_transaction_from_data_worker(transaction_details, proving_power).await;
 
         Ok(transaction)
     }
@@ -764,7 +760,7 @@ impl GlobalState {
     //       called directly.
     //       Use create_transaction_from_data() instead.
     //
-    fn create_transaction_from_data_worker(
+    async fn create_transaction_from_data_worker(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
     ) -> Transaction {
@@ -815,11 +811,11 @@ impl GlobalState {
         );
         let proof = match proving_power {
             TxProvingCapability::LockScript => todo!(),
-            TxProvingCapability::ProofCollection => {
-                TransactionProof::ProofCollection(ProofCollection::produce(&primitive_witness))
-            }
+            TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
+                ProofCollection::produce(&primitive_witness).await,
+            ),
             TxProvingCapability::SingleProof => {
-                TransactionProof::SingleProof(SingleProof::produce(&primitive_witness))
+                TransactionProof::SingleProof(SingleProof::produce(&primitive_witness).await)
             }
         };
 
@@ -2072,8 +2068,9 @@ mod global_state_tests {
             ))
             .await;
 
-        let block_transaction =
-            tx_to_alice_and_bob.merge_with(coinbase_transaction, Default::default());
+        let block_transaction = tx_to_alice_and_bob
+            .merge_with(coinbase_transaction, Default::default())
+            .await;
 
         let block_1 = Block::new_block_from_template(
             &genesis_block,
@@ -2263,7 +2260,9 @@ mod global_state_tests {
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(tx_from_alice, Default::default())
-            .merge_with(tx_from_bob, Default::default());
+            .await
+            .merge_with(tx_from_bob, Default::default())
+            .await;
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction2, in_seven_months, None);
 

@@ -169,7 +169,7 @@ impl TypeScriptAndWitness {
     }
 
     /// Assuming the type script halts gracefully, prove it.
-    pub fn prove(
+    pub async fn prove(
         &self,
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
@@ -180,7 +180,7 @@ impl TypeScriptAndWitness {
             .flat_map(|d| d.reversed().values())
             .collect_vec();
         let claim = Claim::new(self.program.hash()).with_input(input);
-        prove_consensus_program(self.program.clone(), claim, self.nondeterminism())
+        prove_consensus_program(self.program.clone(), claim, self.nondeterminism()).await
     }
 }
 
