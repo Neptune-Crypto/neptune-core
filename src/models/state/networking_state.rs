@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 
 use anyhow::Result;
 use num_traits::Zero;
@@ -42,6 +43,9 @@ pub struct NetworkingState {
 
     /// The capabilities of this machine to produce STARK proofs
     pub tx_proving_capability: TxProvingCapability,
+
+    /// Timestamp for when the last tx-proof upgrade was attempted.
+    pub last_tx_proof_upgrade: std::time::SystemTime,
 }
 
 impl NetworkingState {
@@ -60,6 +64,10 @@ impl NetworkingState {
             syncing,
             instance_id: rand::random(),
             tx_proving_capability,
+
+            // Initialize to now to prevent tx proof upgrade to run immediately
+            // after startup of the client.
+            last_tx_proof_upgrade: SystemTime::now(),
         }
     }
 

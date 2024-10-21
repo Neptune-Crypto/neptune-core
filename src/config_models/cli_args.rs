@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
@@ -121,6 +122,14 @@ pub struct Args {
     #[clap(long)]
     pub tx_proving_capability: Option<TxProvingCapability>,
 
+    /// The number of seconds between each attempt to upgrade transactions in
+    /// the mempool to proofs of a higher quality. Will only run if the machine
+    /// on which the client runs is powerful enough to produce `SingleProof`s.
+    ///
+    /// Set to 0 to never perform this task.
+    #[structopt(long, default_value = "1800")]
+    pub(crate) tx_proof_upgrade_interval: u64,
+
     /// Enable tokio tracing for consumption by the tokio-console application
     /// note: this will attempt to connect to localhost:6669
     #[structopt(long, name = "tokio-console", default_value = "false")]
@@ -149,6 +158,14 @@ impl Args {
             Some(self.peer_port)
         }
     }
+
+    /// Returns how often we should attempt to upgrade transaction proofs.
+    pub(crate) fn tx_upgrade_interval(&self) -> Option<Duration> {
+        match self.tx_proof_upgrade_interval {
+            0 => None,
+            n => Some(Duration::from_secs(n)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +187,16 @@ mod cli_args_tests {
             default_args.listen_addr
         );
         assert_eq!(None, default_args.max_mempool_num_tx);
+        assert_eq!(1800, default_args.tx_proof_upgrade_interval);
+    }
+
+    #[test]
+    fn sane_tx_upgrade_interval_value() {
+        let args = Args {
+            tx_proof_upgrade_interval: 900,
+            ..Default::default()
+        };
+        assert_eq!(900, args.tx_upgrade_interval().unwrap().as_secs());
     }
 
     #[test]
