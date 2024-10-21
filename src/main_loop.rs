@@ -1,3 +1,5 @@
+pub mod proof_upgrader;
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::thread::sleep;
@@ -6,6 +8,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
+use proof_upgrader::get_transaction_upgrade_task;
 use rand::prelude::IteratorRandom;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
@@ -39,6 +42,8 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
@@ -47,6 +52,11 @@ const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
 const EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
+
+/// Interval for when transaction-upgrade checker is run. Note that this does
+/// *not* define how often a transaction-proof upgrade is actually performed.
+/// Only how often we check if we're ready to perform an upgrade.
+const TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS: u64 = 60; // 1 minute
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
@@ -59,24 +69,6 @@ pub struct MainLoopHandler {
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_miner_tx: watch::Sender<MainToMiner>,
-}
-
-impl MainLoopHandler {
-    pub(crate) fn new(
-        incoming_peer_listener: TcpListener,
-        global_state_lock: GlobalStateLock,
-        main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
-        peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-        main_to_miner_tx: watch::Sender<MainToMiner>,
-    ) -> Self {
-        Self {
-            incoming_peer_listener,
-            global_state_lock,
-            main_to_miner_tx,
-            main_to_peer_broadcast_tx,
-            peer_task_to_main_tx,
-        }
-    }
 }
 
 /// The mutable part of the main loop function
@@ -310,6 +302,22 @@ fn stay_in_sync_mode(
 }
 
 impl MainLoopHandler {
+    pub(crate) fn new(
+        incoming_peer_listener: TcpListener,
+        global_state_lock: GlobalStateLock,
+        main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+        peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
+        main_to_miner_tx: watch::Sender<MainToMiner>,
+    ) -> Self {
+        Self {
+            incoming_peer_listener,
+            global_state_lock,
+            main_to_miner_tx,
+            main_to_peer_broadcast_tx,
+            peer_task_to_main_tx,
+        }
+    }
+
     /// Locking:
     ///   * acquires `global_state_lock` for write
     async fn handle_miner_task_message(&mut self, msg: MinerToMain) -> Result<()> {
@@ -815,6 +823,84 @@ impl MainLoopHandler {
         Ok(())
     }
 
+    /// Scheduled task for upgrading the proofs of transactions in the mempool.
+    ///
+    /// Will either perform a merge of two transactions supported with single
+    /// proofs, or will upgrade a transaction proof of the type
+    /// `ProofCollection` to `SingleProof`.
+    pub(crate) async fn proof_upgrader(&mut self) -> Result<()> {
+        fn attempt_upgrade(
+            global_state_lock: &GlobalState,
+            now: SystemTime,
+            tx_upgrade_interval: Option<Duration>,
+        ) -> Result<bool> {
+            let duration_since_last_upgrade =
+                now.duration_since(global_state_lock.net.last_tx_proof_upgrade)?;
+            Ok(!global_state_lock.net.syncing
+                && global_state_lock.net.tx_proving_capability == TxProvingCapability::SingleProof
+                && tx_upgrade_interval
+                    .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
+        }
+
+        // Check if it's time to run the proof-upgrader, and if we're capable
+        // of upgrading a transaction proof.
+        let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
+
+        let new_tx = {
+            let global_state = self.global_state_lock.lock_guard().await;
+            let now = SystemTime::now();
+            if !attempt_upgrade(&global_state, now, tx_upgrade_interval)? {
+                return Ok(());
+            }
+
+            debug!("Attempting to run transaction-proof-upgrade");
+
+            // Find a candidate for proof upgrade
+            let Some(upgrade_candidate) = get_transaction_upgrade_task(&global_state) else {
+                debug!("Found no transaction-proof to upgrade");
+                return Ok(());
+            };
+
+            let affected_txids = upgrade_candidate.affected_txids();
+            info!(
+                "Attempting to upgrade transaction proofs of: {}",
+                affected_txids.iter().join("; ")
+            );
+
+            // Perform the upgrade (expensive)
+            upgrade_candidate.upgrade().await
+        };
+
+        // Insert the upgraded transactions into the mempool
+        {
+            let mut global_state = self.global_state_lock.lock_guard_mut().await;
+            // Did we receive a new block while proving? If so, throw away the
+            // result, as it is wasted (it would need an update).
+
+            if new_tx.kernel.mutator_set_hash
+                != global_state
+                    .chain
+                    .light_state()
+                    .body()
+                    .mutator_set_accumulator
+                    .hash()
+            {
+                warn!("Got new block while proving. Discarding result.");
+                return Ok(());
+            }
+
+            global_state.mempool.insert(&new_tx);
+        }
+
+        // Inform all peers about our hard work
+        self.main_to_peer_broadcast_tx
+            .send(MainToPeerTask::TransactionNotification(
+                (&new_tx).try_into().unwrap(),
+            ))?;
+
+        Ok(())
+    }
+
     pub async fn run(
         &mut self,
         mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
@@ -850,6 +936,12 @@ impl MainLoopHandler {
         let mp_resync_timer_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
+
+        // Set transasction-proof-upgrade-checker to run every R secnods.
+        let tx_proof_upgrade_interval =
+            Duration::from_secs(TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS);
+        let tx_proof_upgrade_timer = time::sleep(tx_proof_upgrade_interval);
+        tokio::pin!(tx_proof_upgrade_timer);
 
         // Spawn tasks to monitor for SIGTERM, SIGINT, and SIGQUIT. These
         // signals are only used on Unix systems.
@@ -1027,6 +1119,15 @@ impl MainLoopHandler {
 
                     mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
                 }
+
+                // Check if it's time to run the proof upgrader
+                _ = &mut tx_proof_upgrade_timer => {
+                    trace!("Timer: tx-proof-upgrader");
+                    self.proof_upgrader().await?;
+
+                    tx_proof_upgrade_timer.as_mut().reset(tokio::time::Instant::now() + tx_proof_upgrade_interval);
+                }
+
             }
         }
 

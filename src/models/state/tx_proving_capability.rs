@@ -3,7 +3,7 @@ use std::str::FromStr;
 use clap::error::ErrorKind;
 use clap::Parser;
 
-#[derive(Parser, Debug, Clone, Copy)]
+#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxProvingCapability {
     LockScript,
     ProofCollection,
