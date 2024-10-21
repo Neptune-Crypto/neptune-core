@@ -154,6 +154,12 @@ impl Timestamp {
             .prop_map(|v| Timestamp(BFieldElement::new(v)))
             .boxed()
     }
+
+    pub fn arbitrary_after(reference: Timestamp) -> BoxedStrategy<Timestamp> {
+        (reference.0.value()..BFieldElement::P)
+            .prop_map(|v| Timestamp(BFieldElement::new(v)))
+            .boxed()
+    }
 }
 
 impl Display for Timestamp {

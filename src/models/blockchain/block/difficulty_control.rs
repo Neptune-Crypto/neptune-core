@@ -525,6 +525,33 @@ mod test {
         assert!(mean < target_block_time * (1.0 + margin));
     }
 
+    #[proptest(cases = 10000)]
+    fn one_plus_p_times_error_is_never_negative(
+        #[strategy(arb())] old_timestamp: Timestamp,
+        #[strategy(Timestamp::arbitrary_after(#old_timestamp))] new_timestamp: Timestamp,
+        #[strategy(arb())] old_difficulty: Difficulty,
+        #[strategy(Timestamp::arbitrary_between(Timestamp::seconds(0), Timestamp::days(1)))]
+        target_block_interval: Timestamp,
+        #[strategy(arb())] previous_block_height: BlockHeight,
+    ) {
+        // Function `difficulty_control` debug-asserts that the relevant
+        // quantity is positive; so we just call the function to try to
+        // trigger the error.
+        difficulty_control(
+            new_timestamp,
+            old_timestamp,
+            old_difficulty,
+            Some(target_block_interval),
+            previous_block_height,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn debug_assert_fails() {
+        debug_assert!(false);
+    }
+
     #[proptest]
     fn mul_by_fixed_point_rational_distributes(
         #[strategy(arb())] a: Difficulty,
