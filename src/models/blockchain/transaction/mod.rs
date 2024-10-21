@@ -429,7 +429,7 @@ impl Transaction {
 
         assert!(
             self.kernel.coinbase.is_none() || other.kernel.coinbase.is_none(),
-            "Cannot merge two "
+            "Cannot merge two coinbase transactions"
         );
 
         let as_single_proof = |tx_proof: &TransactionProof, indicator: &str| {
