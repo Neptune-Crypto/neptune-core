@@ -1058,11 +1058,12 @@ mod tests {
         }
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
-        let (coinbase_transaction3, _expected_utxo3) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_nine_months)
+        let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
+        let (cbtx, _eutxo) =
+            make_coinbase_transaction(&alice, NeptuneCoins::zero(), block_5_timestamp)
                 .await
                 .unwrap();
-        let block_transaction3 = coinbase_transaction3
+        let block_tx_5 = cbtx
             .merge_with(
                 tx_by_alice_updated,
                 Default::default(),
@@ -1070,12 +1071,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let block_5 = Block::new_block_from_template(
-            &previous_block,
-            block_transaction3,
-            in_eight_months,
-            None,
-        );
+        let block_5 =
+            Block::new_block_from_template(&previous_block, block_tx_5, block_5_timestamp, None);
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
         assert!(
             block_5.is_valid(&previous_block, in_eight_months),
