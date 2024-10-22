@@ -150,10 +150,7 @@ impl Eq for Block {}
 
 impl From<TransferBlock> for Block {
     fn from(t_block: TransferBlock) -> Self {
-        let kernel = BlockKernel {
-            header: t_block.header,
-            body: t_block.body,
-        };
+        let kernel = BlockKernel::new(t_block.header, t_block.body);
         let proof = if t_block.proof.0.is_empty() {
             BlockProof::DummyProof
         } else {
@@ -429,7 +426,7 @@ impl Block {
     }
 
     pub fn new(header: BlockHeader, body: BlockBody, block_proof: BlockProof) -> Self {
-        let kernel = BlockKernel { body, header };
+        let kernel = BlockKernel::new(header, body);
         Self {
             digest: Default::default(), // calc'd in hash()
             kernel,

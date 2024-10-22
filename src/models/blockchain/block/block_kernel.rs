@@ -2,6 +2,7 @@ use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -15,12 +16,27 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 pub struct BlockKernel {
     pub header: BlockHeader,
     pub body: BlockBody,
+
+    pub(crate) appendix: Vec<Claim>,
+}
+
+impl BlockKernel {
+    pub(crate) fn new(header: BlockHeader, body: BlockBody) -> Self {
+        // todo: populate appendix properly
+        let appendix = vec![];
+        Self {
+            header,
+            body,
+            appendix,
+        }
+    }
 }
 
 #[derive(Debug, Clone, EnumCount)]
 pub enum BlockKernelField {
     Header,
     Body,
+    Appendix,
 }
 
 impl HasDiscriminant for BlockKernelField {
@@ -36,6 +52,7 @@ impl MastHash for BlockKernel {
         let sequences = vec![
             self.header.mast_hash().encode(),
             self.body.mast_hash().encode(),
+            self.appendix.encode(),
         ];
         sequences
     }

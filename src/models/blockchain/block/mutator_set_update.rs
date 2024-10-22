@@ -23,17 +23,25 @@ impl MutatorSetUpdate {
         }
     }
 
-    /// Apply a mutator-set-update to a mutator-set-accumulator. Changes the mutator
+    /// Apply a mutator-set-update to a mutator-set-accumulator.
+    ///
+    /// Changes the mutator
     /// set accumulator according to the provided addition and removal records.
     pub fn apply_to_accumulator(&self, ms_accumulator: &mut MutatorSetAccumulator) -> Result<()> {
         self.apply_to_accumulator_and_records(ms_accumulator, &mut [])
     }
 
     /// Apply a mutator-set-update to a mutator-set-accumulator and a bunch of
-    /// removal records. Changes the mutator set accumulator according to the
+    /// removal records.
+    ///
+    /// Changes the mutator set accumulator according to the
     /// to-be-applied addition and removal records. This method assumes that the
     /// removal records in the update are distinct from the ones that are to be
     /// updated.
+    ///
+    /// # Return Value
+    ///
+    /// Returns an error if some removal record could not be removed.
     pub fn apply_to_accumulator_and_records(
         &self,
         ms_accumulator: &mut MutatorSetAccumulator,
