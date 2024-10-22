@@ -9,12 +9,14 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::info;
 
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::locks::tokio::AtomicMutex;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -25,6 +27,7 @@ use crate::models::blockchain::transaction::validity::removal_records_integrity:
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 
@@ -133,7 +136,10 @@ impl ProofCollection {
             || all_type_scripts_halt
     }
 
-    pub async fn produce(primitive_witness: &PrimitiveWitness) -> Self {
+    pub async fn produce(
+        primitive_witness: &PrimitiveWitness,
+        sync_device: &TritonProverSync,
+    ) -> Result<Self, TryLockError> {
         let (
             removal_records_integrity_witness,
             collect_lock_scripts_witness,
@@ -155,40 +161,44 @@ impl ProofCollection {
             .prove(
                 &removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
 
         debug!("proving CollectLockScripts");
         let collect_lock_scripts = CollectLockScripts
             .prove(
                 &collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
 
         debug!("proving KernelToOutputs");
         let kernel_to_outputs = KernelToOutputs
             .prove(
                 &kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
 
         debug!("proving CollectTypeScripts");
         let collect_type_scripts = CollectTypeScripts
             .prove(
                 &collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
 
         debug!("proving lock scripts");
         let mut lock_scripts_halt = vec![];
         for lock_script_and_witness in primitive_witness.lock_scripts_and_witnesses.iter() {
             lock_scripts_halt.push(
                 lock_script_and_witness
-                    .prove(txk_mast_hash_as_input.clone())
-                    .await,
+                    .prove(txk_mast_hash_as_input.clone(), sync_device)
+                    .await?,
             );
         }
 
@@ -201,8 +211,13 @@ impl ProofCollection {
         {
             debug!("proving type script number {i}: {}", tsaw.program.hash());
             type_scripts_halt.push(
-                tsaw.prove(txk_mast_hash, salted_inputs_hash, salted_outputs_hash)
-                    .await,
+                tsaw.prove(
+                    txk_mast_hash,
+                    salted_inputs_hash,
+                    salted_outputs_hash,
+                    sync_device,
+                )
+                .await?,
             );
         }
         info!("done proving proof collection");
@@ -220,7 +235,7 @@ impl ProofCollection {
             .collect_vec();
 
         // assemble data into struct and return
-        ProofCollection {
+        Ok(ProofCollection {
             removal_records_integrity,
             collect_lock_scripts,
             lock_scripts_halt,
@@ -232,7 +247,7 @@ impl ProofCollection {
             kernel_mast_hash: txk_mast_hash,
             salted_inputs_hash,
             salted_outputs_hash,
-        }
+        })
     }
 
     pub fn verify(&self, txk_mast_hash: Digest) -> bool {

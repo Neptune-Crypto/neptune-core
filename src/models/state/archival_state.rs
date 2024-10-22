@@ -886,6 +886,7 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1037,23 +1038,36 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let alice_wallet = alice_wallet.wallet_secret;
-        let allice_address = alice_wallet
+        let alice_address = alice_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
-        let mut alice = alice.lock_guard_mut().await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &alice.chain.archival_state_mut().genesis_block,
+            &alice
+                .lock_guard_mut()
+                .await
+                .chain
+                .archival_state_mut()
+                .genesis_block,
             None,
-            allice_address,
+            alice_address,
             rng.gen(),
         );
 
         {
             alice.set_new_tip(mock_block_1.clone()).await.unwrap();
-            let ams_ref = &alice.chain.archival_state().archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().aocl.num_leafs().await);
+            let num_aocl_leafs = alice
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .aocl
+                .num_leafs()
+                .await;
+            assert_ne!(0, num_aocl_leafs);
         }
 
         let in_seven_months = mock_block_1.kernel.header.timestamp + Timestamp::months(7);
@@ -1062,11 +1076,15 @@ mod archival_state_tests {
         // to the block, and this removal record will insert indices in the Bloom filter.
         let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
         let change_key = alice
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
         let tx_output_anyone_can_spend = TxOutput::no_notification(utxo, rng.gen(), rng.gen());
         let (sender_tx, _change_output) = alice
+            .lock_guard()
+            .await
             .create_transaction_with_prover_capability(
                 vec![tx_output_anyone_can_spend].into(),
                 change_key.into(),
@@ -1074,6 +1092,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -1084,8 +1103,23 @@ mod archival_state_tests {
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await?;
 
-        let ams_ref = &alice.chain.archival_state().archival_mutator_set;
-        assert_ne!(0, ams_ref.ams().swbf_active.sbf.len());
+        let ams_ref = &alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set;
+        let swbf_active_sbf_len = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .swbf_active
+            .sbf
+            .len();
+        assert_ne!(0, swbf_active_sbf_len);
 
         Ok(())
     }
@@ -1147,11 +1181,9 @@ mod archival_state_tests {
         let mut rng = thread_rng();
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let genesis_block = Block::genesis_block(network);
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
-
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let num_premine_utxos = Block::premine_utxos(network).len();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
@@ -1184,15 +1216,23 @@ mod archival_state_tests {
         let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
         let block_1b = Block::new_block_from_template(&genesis_block, tx_1b, in_seven_months, None);
 
-        global_state.set_new_tip(block_1a.clone()).await.unwrap();
-        global_state.set_new_tip(block_1b.clone()).await.unwrap();
+        global_state_lock
+            .set_new_tip(block_1a.clone())
+            .await
+            .unwrap();
+        global_state_lock
+            .set_new_tip(block_1b.clone())
+            .await
+            .unwrap();
 
         // Verify correct rollback
 
         // Verify that the new state of the archival mutator set contains
         // two UTXOs and that none have been removed
         assert!(
-            global_state
+            global_state_lock
+                .lock_guard()
+                .await
                 .chain
                 .archival_state()
                 .archival_mutator_set
@@ -1205,7 +1245,9 @@ mod archival_state_tests {
 
         assert_eq!(
             num_premine_utxos + 5,
-            global_state
+            global_state_lock
+                .lock_guard()
+                .await
                 .chain
                 .archival_state()
                 .archival_mutator_set
@@ -1229,14 +1271,13 @@ mod archival_state_tests {
         let mut rng = thread_rng();
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let genesis_block = Block::genesis_block(network);
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let mut state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
 
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
@@ -1257,7 +1298,7 @@ mod archival_state_tests {
                 Block::new_block_from_template(&previous_block, tx, in_seven_months, None);
 
             // 2. Update archival-mutator set with produced block
-            global_state.set_new_tip(next_block.clone()).await.unwrap();
+            state_lock.set_new_tip(next_block.clone()).await.unwrap();
 
             previous_block = next_block;
         }
@@ -1273,7 +1314,9 @@ mod archival_state_tests {
             num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
-            global_state
+            state_lock
+                .lock_guard_mut()
+                .await
                 .chain
                 .archival_state_mut()
                 .update_mutator_set(&mock_block_1b)
@@ -1286,7 +1329,9 @@ mod archival_state_tests {
         // Verify that the new state of the archival mutator set contains
         // two UTXOs and that none have been removed
         assert!(
-            global_state
+            state_lock
+                .lock_guard()
+                .await
                 .chain
                 .archival_state()
                 .archival_mutator_set
@@ -1299,7 +1344,8 @@ mod archival_state_tests {
 
         assert_eq!(
             num_utxos,
-            global_state
+            state_lock.lock_guard()
+            .await
                 .chain
                 .archival_state()
                 .archival_mutator_set
@@ -1407,21 +1453,25 @@ mod archival_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
         println!("Generated transaction for Alice and Bob.");
 
-        let (cbtx, cb_expected) = {
-            let genesis_state = genesis.lock_guard().await;
-            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+        let (cbtx, cb_expected) =
+            make_coinbase_transaction(&genesis, NeptuneCoins::zero(), in_seven_months)
                 .await
-                .unwrap()
-        };
+                .unwrap();
 
         let block_tx = cbtx
-            .merge_with(tx_to_alice_and_bob, Default::default())
-            .await;
+            .merge_with(
+                tx_to_alice_and_bob,
+                Default::default(),
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         println!("Generated block transaction");
 
         let block_1 =
@@ -1480,8 +1530,7 @@ mod archival_state_tests {
 
         // Update chain states
         for state_lock in [&mut genesis, &mut alice, &mut bob] {
-            let mut state = state_lock.lock_guard_mut().await;
-            state.set_new_tip(block_1.clone()).await.unwrap();
+            state_lock.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         {
@@ -1562,6 +1611,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -1604,6 +1654,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -1617,17 +1668,21 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (cbtx2, cb_expected2) = {
-            let genesis_state = genesis.lock_guard().await;
-            make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), in_seven_months)
+        let (cbtx2, cb_expected2) =
+            make_coinbase_transaction(&genesis, NeptuneCoins::zero(), in_seven_months)
                 .await
-                .unwrap()
-        };
+                .unwrap();
         let block_tx2 = cbtx2
-            .merge_with(tx_from_alice, Default::default())
+            .merge_with(
+                tx_from_alice,
+                Default::default(),
+                &TritonProverSync::dummy(),
+            )
             .await
-            .merge_with(tx_from_bob, Default::default())
-            .await;
+            .unwrap()
+            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .await
+            .unwrap();
         let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);
 
         println!("Generated new block");
@@ -1656,8 +1711,7 @@ mod archival_state_tests {
 
         // Update chain states
         for state_lock in [&mut genesis, &mut alice, &mut bob] {
-            let mut state = state_lock.lock_guard_mut().await;
-            state.set_new_tip(block_2.clone()).await.unwrap();
+            state_lock.set_new_tip(block_2.clone()).await.unwrap();
         }
 
         assert!(alice

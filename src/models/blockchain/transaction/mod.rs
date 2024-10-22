@@ -2,6 +2,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -30,6 +31,7 @@ use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -152,6 +154,7 @@ pub enum TransactionProofError {
     CannotUpdateProofVariant,
     CannotUpdatePrimitiveWitness,
     CannotUpdateSingleProof,
+    ProverLockWasTaken,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -179,7 +182,7 @@ impl Transaction {
         old_primitive_witness: PrimitiveWitness,
         new_addition_records: Vec<AdditionRecord>,
         mut new_removal_records: Vec<RemovalRecord>,
-    ) -> Result<(Transaction, MutatorSetAccumulator)> {
+    ) -> (Transaction, MutatorSetAccumulator) {
         new_removal_records.reverse();
         let mut block_removal_records: Vec<&mut RemovalRecord> =
             new_removal_records.iter_mut().collect::<Vec<_>>();
@@ -238,11 +241,9 @@ impl Transaction {
                 .input_membership_proofs
                 .iter_mut()
                 .collect_vec();
-            if let Err(e) =
-                MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
-            {
-                bail!("`MsMembershipProof::batch_update_from_remove` must work when updating mutator set records on transaction. Got error: {}", e);
-            }
+
+            MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
+                .expect("MS MP update from add must succeed in wallet handler");
 
             msa_state.remove(removal_record);
         }
@@ -256,13 +257,14 @@ impl Transaction {
 
         let kernel = primitive_witness.kernel.clone();
         let witness = TransactionProof::Witness(primitive_witness);
-        Ok((
+
+        (
             Transaction {
                 kernel,
                 proof: witness,
             },
             msa_state,
-        ))
+        )
     }
 
     /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
@@ -271,7 +273,7 @@ impl Transaction {
     pub(crate) fn new_with_updated_mutator_set_records_given_primitive_witness(
         old_primitive_witness: PrimitiveWitness,
         block: &Block,
-    ) -> Result<Transaction> {
+    ) -> Transaction {
         let block_addition_records: Vec<AdditionRecord> =
             block.kernel.body.transaction_kernel.outputs.clone();
         let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
@@ -280,7 +282,7 @@ impl Transaction {
             old_primitive_witness,
             block_addition_records,
             block_removal_records,
-        )?;
+        );
 
         // Sanity check of block validity
         let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
@@ -290,7 +292,7 @@ impl Transaction {
             "Internal MSA state must match that from block"
         );
 
-        Ok(new_tx)
+        new_tx
     }
 
     /// Create a new `Transaction` by updating the given one with the mutator set
@@ -305,7 +307,8 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
         old_single_proof: Proof,
-    ) -> Result<Transaction> {
+        sync_device: &TritonProverSync,
+    ) -> Result<Transaction, TryLockError> {
         let block_addition_records = block.kernel.body.transaction_kernel.outputs.clone();
         let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
         let mutator_set_update =
@@ -353,7 +356,9 @@ impl Transaction {
         let update_claim = update_witness.claim();
         let update_nondeterminism = update_witness.nondeterminism();
         info!("updating transaction; starting update proof ...");
-        let update_proof = Update.prove(&update_claim, update_nondeterminism).await;
+        let update_proof = Update
+            .prove(&update_claim, update_nondeterminism, sync_device)
+            .await?;
         info!("done.");
 
         let new_single_proof_witness = SingleProofWitness::from_update(update_proof, &new_kernel);
@@ -364,8 +369,9 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
         info!("done.");
 
         Ok(Transaction {
@@ -381,24 +387,25 @@ impl Transaction {
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
+        sync_device: &TritonProverSync,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
-            TransactionProof::Witness(primitive_witness) => {
+            TransactionProof::Witness(primitive_witness) => Ok(
                 Self::new_with_updated_mutator_set_records_given_primitive_witness(
                     primitive_witness,
                     block,
-                )
-                .map_err(|_| TransactionProofError::CannotUpdatePrimitiveWitness)
-            }
+                ),
+            ),
             TransactionProof::SingleProof(proof) => {
                 Self::new_with_updated_mutator_set_records_given_proof(
                     self.kernel,
                     previous_mutator_set_accumulator,
                     block,
                     proof,
+                    sync_device,
                 )
                 .await
-                .map_err(|_| TransactionProofError::CannotUpdateSingleProof)
+                .map_err(|_| TransactionProofError::ProverLockWasTaken)
             }
             _ => Err(TransactionProofError::CannotUpdateProofVariant),
         }
@@ -421,7 +428,12 @@ impl Transaction {
     /// set hashes are not the same, if both transactions have coinbase a
     /// coinbase UTXO, or if either of the transactions are *not* a single
     /// proof.
-    pub async fn merge_with(self, other: Transaction, shuffle_seed: [u8; 32]) -> Transaction {
+    pub async fn merge_with(
+        self,
+        other: Transaction,
+        shuffle_seed: [u8; 32],
+        sync_device: &TritonProverSync,
+    ) -> Result<Transaction, TryLockError> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
@@ -458,8 +470,8 @@ impl Transaction {
         info!("Start: creating merge proof");
         let merge_claim = merge_witness.claim();
         let merge_proof = Merge
-            .prove(&merge_claim, merge_witness.nondeterminism())
-            .await;
+            .prove(&merge_claim, merge_witness.nondeterminism(), sync_device)
+            .await?;
         info!("Done: creating merge proof");
         let new_single_proof_witness =
             SingleProofWitness::from_merge(merge_proof, &merge_witness.new_kernel);
@@ -469,14 +481,15 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
+                sync_device,
             )
-            .await;
+            .await?;
         info!("Done: creating new single proof");
 
-        Transaction {
+        Ok(Transaction {
             kernel: merge_witness.new_kernel,
             proof: TransactionProof::SingleProof(new_single_proof),
-        }
+        })
     }
 
     /// Calculates a fraction representing the fee-density, defined as:
@@ -604,7 +617,6 @@ mod transaction_tests {
                 to_be_updated.clone(),
                 &block,
             )
-            .unwrap()
         }
 
         fn update_with_ms_data(
@@ -615,8 +627,7 @@ mod transaction_tests {
                 to_be_updated,
                 mined.kernel.outputs,
                 mined.kernel.inputs,
-            )
-            .unwrap();
+            );
 
             updated
         }

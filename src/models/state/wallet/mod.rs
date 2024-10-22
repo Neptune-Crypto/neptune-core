@@ -443,6 +443,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -679,6 +680,7 @@ mod wallet_tests {
 
         let alice_wallet_secret = WalletSecret::new_random();
         let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
+        let alice_proving_lock = alice.proving_lock.clone();
         let alice_spending_key = alice
             .lock_guard()
             .await
@@ -727,7 +729,10 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 ))
                 .await;
-            alice.set_new_tip(block_1.clone()).await.unwrap();
+            alice
+                .set_new_tip(block_1.clone(), &alice_proving_lock)
+                .await
+                .unwrap();
         }
 
         // Verify that the allocater returns a sane amount
@@ -749,6 +754,7 @@ mod wallet_tests {
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
         {
+            let alice_proving_lock = alice.proving_lock.clone();
             let mut alice = alice.lock_guard_mut().await;
             for _ in 0..21 {
                 let previous_block = next_block;
@@ -767,7 +773,10 @@ mod wallet_tests {
                         UtxoNotifier::OwnMiner,
                     ))
                     .await;
-                alice.set_new_tip(next_block_prime.clone()).await.unwrap();
+                alice
+                    .set_new_tip(next_block_prime.clone(), &alice_proving_lock)
+                    .await
+                    .unwrap();
                 next_block = next_block_prime;
             }
         }
@@ -831,12 +840,7 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
 
-        alice
-            .lock_guard_mut()
-            .await
-            .set_new_tip(next_block.clone())
-            .await
-            .unwrap();
+        alice.set_new_tip(next_block.clone()).await.unwrap();
 
         assert_eq!(
             20,
@@ -873,6 +877,7 @@ mod wallet_tests {
             .await
             .wallet_secret;
         let mut bob = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
+        let bob_proving_lock = bob.proving_lock.clone();
         let mut bob = bob.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
@@ -910,6 +915,7 @@ mod wallet_tests {
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -926,7 +932,9 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone()).await.unwrap();
+        bob.set_new_tip(block_1.clone(), &bob_proving_lock)
+            .await
+            .unwrap();
 
         assert_eq!(
             bobs_original_balance
@@ -938,6 +946,7 @@ mod wallet_tests {
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
+        let alice_proving_lock = alice.proving_lock.clone();
         let expected_utxos_alice = alice
             .lock_guard()
             .await
@@ -949,12 +958,7 @@ mod wallet_tests {
             .wallet_state
             .add_expected_utxos(expected_utxos_alice)
             .await;
-        alice
-            .lock_guard_mut()
-            .await
-            .set_new_tip(block_1.clone())
-            .await
-            .unwrap();
+        alice.set_new_tip(block_1.clone()).await.unwrap();
 
         // Verify that update added 2 UTXOs to list of monitored transactions,
         // from Bob's tx.
@@ -1004,13 +1008,10 @@ mod wallet_tests {
                 .wallet_state
                 .add_expected_utxo(expected_utxo)
                 .await;
-            alice
-                .lock_guard_mut()
-                .await
-                .set_new_tip(next_block.clone())
+            alice.set_new_tip(next_block.clone()).await.unwrap();
+            bob.set_new_tip(next_block.clone(), &bob_proving_lock)
                 .await
                 .unwrap();
-            bob.set_new_tip(next_block.clone()).await.unwrap();
         }
 
         let first_block_after_spree = next_block;
@@ -1082,13 +1083,10 @@ mod wallet_tests {
             bob_wallet_spending_key.to_address(),
             rng.gen(),
         );
-        alice
-            .lock_guard_mut()
-            .await
-            .set_new_tip(block_2_b.clone())
+        alice.set_new_tip(block_2_b.clone()).await.unwrap();
+        bob.set_new_tip(block_2_b.clone(), &bob_proving_lock)
             .await
             .unwrap();
-        bob.set_new_tip(block_2_b.clone()).await.unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await
@@ -1180,18 +1178,19 @@ mod wallet_tests {
                 NeptuneCoins::new(4),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
-        let alice_state = alice.global_state_lock.lock_guard().await;
         let (coinbase_tx, cb_expected) =
-            make_coinbase_transaction(&alice_state, NeptuneCoins::zero(), in_seven_months)
+            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_seven_months)
                 .await
                 .unwrap();
         let merged_tx = coinbase_tx
-            .merge_with(tx_from_bob, Default::default())
-            .await;
+            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .await
+            .unwrap();
         let block_3_b =
             Block::new_block_from_template(&block_2_b, merged_tx, in_seven_months, None);
         assert!(
@@ -1204,7 +1203,6 @@ mod wallet_tests {
             alice_spending_key.privacy_preimage,
             UtxoNotifier::OwnMiner,
         );
-        drop(alice_state);
 
         alice
             .lock_guard_mut()
@@ -1330,7 +1328,6 @@ mod wallet_tests {
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let bob = mock_genesis_global_state(network, 42, WalletSecret::devnet_wallet()).await;
-        let bob = bob.lock_guard().await;
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
@@ -1344,6 +1341,8 @@ mod wallet_tests {
         let tx_output = TxOutput::no_notification(anyone_can_spend_utxo, rng.gen(), rng.gen());
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
         let (sender_tx, _change_output) = bob
+            .lock_guard()
+            .await
             .create_transaction_with_prover_capability(
                 vec![tx_output].into(),
                 change_key.into(),
@@ -1351,10 +1350,14 @@ mod wallet_tests {
                 one_money,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
-        let tx_for_block = sender_tx.merge_with(cbtx, Default::default()).await;
+        let tx_for_block = sender_tx
+            .merge_with(cbtx, Default::default(), &TritonProverSync::dummy())
+            .await
+            .unwrap();
         let block_1 =
             Block::new_block_from_template(&genesis_block, tx_for_block, in_seven_months, None);
 

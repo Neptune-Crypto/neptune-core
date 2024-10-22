@@ -94,6 +94,7 @@ mod test {
     use super::GenerateLockScriptClaimTemplate;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 
     impl Function for GenerateLockScriptClaimTemplate {
         fn rust_shadow(
@@ -152,7 +153,12 @@ mod test {
                 .unwrap()
                 .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let proof_collection = rt.block_on(ProofCollection::produce(&primitive_witness));
+            let proof_collection = rt
+                .block_on(ProofCollection::produce(
+                    &primitive_witness,
+                    &TritonProverSync::dummy(),
+                ))
+                .unwrap();
 
             let mut rng: StdRng = SeedableRng::from_seed(seed);
             let pw_pointer = rng.next_u32();

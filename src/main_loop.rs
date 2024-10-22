@@ -331,6 +331,7 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // This block spans global state write lock for updating.
+                let prover_lock = self.global_state_lock.proving_lock.clone();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 let (tip_hash, tip_proof_of_work_family) = (
@@ -358,6 +359,7 @@ impl MainLoopHandler {
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         new_block_info.coinbase_utxo_info.as_ref().clone(),
+                        &prover_lock,
                     )
                     .await?;
                 drop(global_state_mut);
@@ -397,6 +399,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
+                    let prover_lock = self.global_state_lock.proving_lock.clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                     let tip_proof_of_work_family = global_state_mut
@@ -448,7 +451,9 @@ impl MainLoopHandler {
                         // [GlobalState::test::setting_same_tip_twice_is_allowed]
                         // test for a test of this phenomenon.
 
-                        global_state_mut.set_new_tip(new_block).await?;
+                        global_state_mut
+                            .set_new_tip(new_block, &prover_lock)
+                            .await?;
                     }
                 }
 
@@ -867,8 +872,24 @@ impl MainLoopHandler {
                 affected_txids.iter().join("; ")
             );
 
-            // Perform the upgrade (expensive)
-            upgrade_candidate.upgrade().await
+            // Perform the upgrade (expensive), if we're not using the prover
+            // for anything else, like mining, or proving our own transaction.
+            let skip_if_busy = self.global_state_lock.skip_if_busy();
+            match upgrade_candidate.upgrade(&skip_if_busy).await {
+                Ok(upgraded_tx) => {
+                    info!(
+                        "Successfully upgraded transaction {}",
+                        upgraded_tx.kernel.txid()
+                    );
+                    upgraded_tx
+                }
+                Err(err) => {
+                    info!(
+                        "Failed to upgrade mempool transaction because prover was occupied:\n{err}"
+                    );
+                    return Ok(());
+                }
+            }
         };
 
         // Insert the upgraded transactions into the mempool

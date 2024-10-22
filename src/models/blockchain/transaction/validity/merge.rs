@@ -950,6 +950,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::triton_vm::prelude::Digest;
 
@@ -992,8 +993,12 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(&primitive_witness_1).await;
-        let single_proof_2 = SingleProof::produce(&primitive_witness_2).await;
+        let single_proof_1 = SingleProof::produce(&primitive_witness_1, &TritonProverSync::dummy())
+            .await
+            .unwrap();
+        let single_proof_2 = SingleProof::produce(&primitive_witness_2, &TritonProverSync::dummy())
+            .await
+            .unwrap();
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,

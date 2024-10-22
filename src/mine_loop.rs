@@ -240,7 +240,7 @@ Difficulty threshold: {threshold}
 }
 
 pub(crate) async fn make_coinbase_transaction(
-    global_state: &GlobalState,
+    global_state_lock: &GlobalStateLock,
     transaction_fees: NeptuneCoins,
     timestamp: Timestamp,
 ) -> Result<(Transaction, ExpectedUtxo)> {
@@ -251,6 +251,8 @@ pub(crate) async fn make_coinbase_transaction(
     //     have large gaps since an address only receives funds when
     //     we actually win the mining lottery.
     //  3. also this way we do not have to modify global/wallet state.
+
+    let global_state = global_state_lock.lock_guard().await;
     let coinbase_recipient_spending_key = global_state
         .wallet_state
         .wallet_secret
@@ -292,9 +294,13 @@ pub(crate) async fn make_coinbase_transaction(
     // be able to create a SingleProof.
 
     info!("Start: generate single proof for coinbase transaction");
-    let transaction =
-        GlobalState::create_raw_transaction(transaction_details, TxProvingCapability::SingleProof)
-            .await?;
+    let wait_if_busy = global_state_lock.wait_if_busy();
+    let transaction = GlobalState::create_raw_transaction(
+        transaction_details,
+        TxProvingCapability::SingleProof,
+        &wait_if_busy,
+    )
+    .await?;
     info!("Done: generating single proof for coinbase transaction");
 
     let utxo_info_for_coinbase = ExpectedUtxo::new(
@@ -312,13 +318,15 @@ pub(crate) async fn make_coinbase_transaction(
 /// "sender randomness" used in the coinbase transaction.
 async fn create_block_transaction(
     predecessor_block: &Block,
-    global_state: &GlobalState,
+    global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
 ) -> Result<(Transaction, ExpectedUtxo)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
-    let transactions_to_include = global_state
+    let transactions_to_include = global_state_lock
+        .lock_guard()
+        .await
         .mempool
         .get_transactions_for_block(block_capacity_for_transactions, None);
 
@@ -328,26 +336,34 @@ async fn create_block_transaction(
         .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
 
     let (coinbase_transaction, coinbase_as_expected_utxo) =
-        make_coinbase_transaction(global_state, transaction_fees, timestamp).await?;
+        make_coinbase_transaction(global_state_lock, transaction_fees, timestamp).await?;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
         predecessor_block.kernel.body.mutator_set_accumulator.hash()
     );
 
-    let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
+    let mut rng: StdRng =
+        SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
     let mut block_transaction = coinbase_transaction;
+    let wait_if_busy = global_state_lock.wait_if_busy();
     for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
         info!(
             "Merging transaction {} / {}",
             i + 1,
             num_transactions_to_include
         );
-        block_transaction =
-            Transaction::merge_with(block_transaction, transaction_to_include, rng.gen()).await;
+        block_transaction = Transaction::merge_with(
+            block_transaction,
+            transaction_to_include,
+            rng.gen(),
+            &wait_if_busy,
+        )
+        .await
+        .expect("Must be able to merge transactions in mining context");
     }
 
     Ok((block_transaction, coinbase_as_expected_utxo))
@@ -382,12 +398,8 @@ pub async fn mine(
         } else {
             // Build the block template and spawn the worker task to mine on it
             let now = Timestamp::now();
-            let (transaction, coinbase_utxo_info) = create_block_transaction(
-                &latest_block,
-                global_state_lock.lock_guard().await.deref(),
-                now,
-            )
-            .await?;
+            let (transaction, coinbase_utxo_info) =
+                create_block_transaction(&latest_block, &global_state_lock, now).await?;
             let (block_header, block_body, block_proof) =
                 make_block_template(&latest_block, transaction, now, None);
             let miner_task = mine_block(
@@ -524,6 +536,7 @@ mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;
@@ -558,8 +571,6 @@ mod mine_loop_tests {
 
         // Verify constructed coinbase transaction and block template when mempool is empty
         let (transaction_empty_mempool, _coinbase_utxo_info) = {
-            let alice = alice.lock_guard().await;
-
             make_coinbase_transaction(&alice, NeptuneCoins::zero(), now)
                 .await
                 .unwrap()
@@ -616,6 +627,7 @@ mod mine_loop_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -628,7 +640,6 @@ mod mine_loop_tests {
 
         // Build transaction for block
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
-            let alice = alice.lock_guard().await;
             create_block_transaction(&genesis_block, &alice, in_seven_months)
                 .await
                 .unwrap()
@@ -678,24 +689,21 @@ mod mine_loop_tests {
         let network = Network::Main;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-
+        let tip_block_orig = Block::genesis_block(network);
+        let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let global_state = global_state_lock.lock_guard().await;
-        let tip_block_orig = global_state.chain.light_state();
-        let launch_date = tip_block_orig.header().timestamp;
-
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), launch_date)
+            make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), launch_date)
                 .await
                 .unwrap();
 
         let (block_header, block_body, block_proof) =
-            Block::make_block_template(tip_block_orig, transaction, launch_date, None);
+            Block::make_block_template(&tip_block_orig, transaction, launch_date, None);
 
         let initial_block_timestamp = launch_date + Timestamp::seconds(1);
         let difficulty: U32s<5> =
-            Block::difficulty_control(tip_block_orig, initial_block_timestamp, None);
+            Block::difficulty_control(&tip_block_orig, initial_block_timestamp, None);
         let unrestricted_mining = false;
 
         mine_block_worker(
@@ -714,8 +722,8 @@ mod mine_loop_tests {
 
         assert!(mined_block_info
             .block
-            .is_valid(tip_block_orig, Timestamp::now()));
-        assert!(mined_block_info.block.has_proof_of_work(tip_block_orig));
+            .is_valid(&tip_block_orig, Timestamp::now()));
+        assert!(mined_block_info.block.has_proof_of_work(&tip_block_orig));
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -747,12 +755,10 @@ mod mine_loop_tests {
         // pretend/simulate that it takes at least 10 seconds to mine the block.
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
-        let (transaction, coinbase_utxo_info) = {
-            let global_state = global_state_lock.lock_guard().await;
-            make_coinbase_transaction(&global_state, NeptuneCoins::zero(), ten_seconds_ago)
+        let (transaction, coinbase_utxo_info) =
+            make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), ten_seconds_ago)
                 .await
-                .unwrap()
-        };
+                .unwrap();
 
         let (block_header, block_body, block_proof) =
             Block::make_block_template(&tip_block_orig, transaction, ten_seconds_ago, None);

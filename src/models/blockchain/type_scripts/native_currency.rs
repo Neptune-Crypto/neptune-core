@@ -656,6 +656,7 @@ pub mod test {
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::triton_vm::prelude::InstructionError;
 
@@ -863,8 +864,10 @@ pub mod test {
                 txk_mast_hash,
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
+                &TritonProverSync::dummy(),
             )
-            .await;
+            .await
+            .unwrap();
         assert!(
             triton_vm::verify(Stark::default(), &claim, &proof),
             "proof fails"

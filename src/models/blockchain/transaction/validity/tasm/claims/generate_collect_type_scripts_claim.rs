@@ -234,6 +234,7 @@ mod tests {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
@@ -306,7 +307,12 @@ mod tests {
                 .current()
             };
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let proof_collection = rt.block_on(ProofCollection::produce(&primitive_witness));
+            let proof_collection = rt
+                .block_on(ProofCollection::produce(
+                    &primitive_witness,
+                    &TritonProverSync::dummy(),
+                ))
+                .unwrap();
 
             let pw_pointer = rng.next_u32();
             let pw_pointer = bfe!(pw_pointer);

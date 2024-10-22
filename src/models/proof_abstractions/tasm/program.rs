@@ -8,14 +8,55 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 use tracing::debug;
+use tracing::info;
 
 use super::environment;
+use crate::models::state::ProvingLock;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
     TritonVMPanic(String, InstructionError),
+}
+
+/// Holds a lock ensuring that maximum one instance of the Triton VM STARK
+/// prover is running at a time, and the policy of what to do if an instance is
+/// already waiting: Wait or return an error.
+pub(crate) struct TritonProverSync {
+    wait_if_busy: bool,
+    proving_lock: ProvingLock,
+}
+
+impl<'a> TritonProverSync {
+    /// Block execution until prover is free.
+    pub(crate) fn wait_if_busy(lock: ProvingLock) -> Self {
+        Self {
+            wait_if_busy: true,
+            proving_lock: lock,
+        }
+    }
+
+    /// Skip proof generation if prover is busy.
+    pub(crate) fn skip_if_busy(lock: ProvingLock) -> Self {
+        Self {
+            wait_if_busy: false,
+            proving_lock: lock,
+        }
+    }
+
+    /// Prover synchronization instance for unit tests. Does not guarantee
+    /// that only one instance of the Triton VM prover is running.
+    #[cfg(test)]
+    pub(crate) fn dummy() -> Self {
+        use crate::locks::tokio::AtomicMutex;
+
+        Self {
+            wait_if_busy: true,
+            proving_lock: AtomicMutex::from(()),
+        }
+    }
 }
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
@@ -98,8 +139,15 @@ where
     /// This method is a thin wrapper around [`prove_consensus_program`], which
     /// does the same but for arbitrary programs.
     #[allow(async_fn_in_trait)] // Trait must be public bc of benchmarks.
-    async fn prove(&self, claim: &Claim, nondeterminism: NonDeterminism) -> Proof {
-        prove_consensus_program(self.program(), claim.clone(), nondeterminism).await
+    async fn prove(
+        &self,
+        claim: &Claim,
+        nondeterminism: NonDeterminism,
+        priority: &TritonProverSync,
+    ) -> Result<Proof, TryLockError> {
+        {
+            prove_consensus_program(self.program(), claim.clone(), nondeterminism, priority).await
+        }
     }
 }
 
@@ -112,14 +160,28 @@ where
 /// This method works for arbitrary programs, including ones that do not
 /// implement trait [`ConsensusProgram`].
 ///
-// Currently, only lock scripts and type scripts fit that description. It may be
-// worthwhile to investigate whether they can be made to implement
-// ConsensusProgram.
+/// Holds a mutex lock to ensure no two tasks run the prover simultaneously.
 pub async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-) -> Proof {
+    priority: &TritonProverSync,
+) -> Result<Proof, TryLockError> {
+    // Hold proving lock until this function has terminated to prevent multiple
+    // tasks from attempting to produce proofs simultaneously -- as this will
+    // crash most computers and since the prover is already heavily parallel.
+    let _lock = if priority.wait_if_busy {
+        priority.proving_lock.lock_guard().await
+    } else {
+        match priority.proving_lock.try_lock_guard() {
+            Ok(lock) => lock,
+            Err(err) => {
+                info!("Failed to grab prover lock. Not waiting because this is a non-blocking call to proof. Is prover already running?");
+                return Err(err);
+            }
+        }
+    };
+
     assert_eq!(program.hash(), claim.program_digest);
 
     let init_vm_state = VMState::new(&program, claim.input.clone().into(), nondeterminism.clone());
@@ -154,7 +216,7 @@ pub async fn prove_consensus_program(
     assert_eq!(claim.program_digest, program.hash());
     assert_eq!(claim.output, vm_output.unwrap());
 
-    proof
+    Ok(proof)
 }
 
 #[cfg(test)]

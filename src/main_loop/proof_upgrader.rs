@@ -2,6 +2,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::proof::Proof;
+use tokio::sync::TryLockError;
 use tracing::error;
 use tracing::info;
 
@@ -12,6 +13,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProofW
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::GlobalState;
@@ -46,20 +48,23 @@ impl UpgradeDecision {
         }
     }
 
-    pub(super) async fn upgrade(&self) -> Transaction {
+    pub(super) async fn upgrade(
+        &self,
+        priority: &TritonProverSync,
+    ) -> Result<Transaction, TryLockError> {
         match self {
             UpgradeDecision::ProduceSingleProof { kernel, proof } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
                 let claim = single_proof_witness.claim();
                 let nondeterminism = single_proof_witness.nondeterminism();
                 info!("Proof-upgrader: Start generate single proof");
-                let single_proof = SingleProof.prove(&claim, nondeterminism).await;
+                let single_proof = SingleProof.prove(&claim, nondeterminism, priority).await?;
                 info!("Proof-upgrader: Done");
 
-                Transaction {
+                Ok(Transaction {
                     kernel: kernel.to_owned(),
                     proof: TransactionProof::SingleProof(single_proof),
-                }
+                })
             }
             UpgradeDecision::Merge {
                 left_kernel,
@@ -77,9 +82,11 @@ impl UpgradeDecision {
                     proof: TransactionProof::SingleProof(single_proof_right.to_owned()),
                 };
                 info!("Proof-upgrader: Start merging");
-                let ret = Transaction::merge_with(left, right, shuffle_seed.to_owned()).await;
+                let ret =
+                    Transaction::merge_with(left, right, shuffle_seed.to_owned(), priority).await?;
                 info!("Proof-upgrader: Done");
-                ret
+
+                Ok(ret)
             }
         }
     }

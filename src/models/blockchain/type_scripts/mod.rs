@@ -17,12 +17,14 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -174,13 +176,20 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
-    ) -> Proof {
+        sync_device: &TritonProverSync,
+    ) -> Result<Proof, TryLockError> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect_vec();
         let claim = Claim::new(self.program.hash()).with_input(input);
-        prove_consensus_program(self.program.clone(), claim, self.nondeterminism()).await
+        prove_consensus_program(
+            self.program.clone(),
+            claim,
+            self.nondeterminism(),
+            sync_device,
+        )
+        .await
     }
 }
 

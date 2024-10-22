@@ -43,6 +43,7 @@ use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
+use super::ProvingLock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -50,6 +51,7 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -422,6 +424,7 @@ impl Mempool {
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
+        prover_lock: &ProvingLock,
     ) {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
@@ -474,11 +477,18 @@ impl Mempool {
 
         // Update the remaining transactions so their mutator set data is still valid
         // But kick out those transactions that we were unable to update.
+        // TODO: Always upgrade *own* transaction proofs. So on
+        // `TritonProverSync` value if tx is own.
+        let skip_if_prover_is_busy = &TritonProverSync::skip_if_busy(prover_lock.to_owned());
         let mut kick_outs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if let Ok(new_tx) = tx
                 .clone()
-                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+                .new_with_updated_mutator_set_records(
+                    &previous_mutator_set_accumulator,
+                    block,
+                    &skip_if_prover_is_busy,
+                )
                 .await
             {
                 *tx = new_tx;
@@ -579,6 +589,7 @@ mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::locks::tokio::AtomicMutex;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -712,6 +723,7 @@ mod tests {
                 high_fee,
                 in_seven_months,
                 TxProvingCapability::ProofCollection,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -797,22 +809,16 @@ mod tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
 
         let network = Network::Main;
-        let mut bob_global_state =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let mut bob = bob_global_state.lock_guard_mut().await;
-
-        let bob_wallet_secret = &bob.wallet_state.wallet_secret;
+        let bob_wallet_secret = WalletSecret::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut bob = mock_genesis_global_state(network, 2, bob_wallet_secret).await;
+
         let bob_address = bob_spending_key.to_address();
 
-        let mut alice_global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::new_pseudorandom(rng.gen())).await;
-        let mut alice = alice_global_state_lock.lock_guard_mut().await;
-        let alice_spending_key = alice
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+        let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_spending_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_spending_key.to_address();
+        let mut alice = mock_genesis_global_state(network, 2, alice_wallet).await;
 
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block(network);
@@ -821,6 +827,8 @@ mod tests {
 
         // Update both states with block 1
         alice
+            .lock_guard_mut()
+            .await
             .wallet_state
             .add_expected_utxo(ExpectedUtxo::new(
                 coinbase_utxo_1,
@@ -847,6 +855,8 @@ mod tests {
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
         let (tx_by_bob, maybe_change_output) = bob
+            .lock_guard()
+            .await
             .create_transaction_with_prover_capability(
                 utxos_from_bob.clone(),
                 bob_spending_key.into(),
@@ -854,16 +864,21 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
         // inform wallet of any expected utxos from this tx.
-        let expected_utxos = bob.wallet_state.extract_expected_utxos(
+        let expected_utxos = bob.lock_guard().await.wallet_state.extract_expected_utxos(
             utxos_from_bob.concat_with(maybe_change_output),
             UtxoNotifier::Myself,
         );
-        bob.wallet_state.add_expected_utxos(expected_utxos).await;
+        bob.lock_guard_mut()
+            .await
+            .wallet_state
+            .add_expected_utxos(expected_utxos)
+            .await;
 
         // Add this transaction to a mempool
         let mut mempool = Mempool::new(ByteSize::gb(1), None, block_1.hash());
@@ -880,6 +895,8 @@ mod tests {
             alice_address.into(),
         )];
         let (tx_from_alice_original, _maybe_change_output) = alice
+            .lock_guard()
+            .await
             .create_transaction_with_prover_capability(
                 utxos_from_alice.into(),
                 alice_spending_key.into(),
@@ -887,6 +904,7 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
@@ -912,8 +930,13 @@ mod tests {
                 .await
                 .unwrap();
         let block_transaction = tx_by_bob
-            .merge_with(coinbase_transaction, Default::default())
-            .await;
+            .merge_with(
+                coinbase_transaction,
+                Default::default(),
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         let block_2 =
             Block::new_block_from_template(&block_1, block_transaction, in_eight_months, None);
 
@@ -923,6 +946,7 @@ mod tests {
             .update_with_block(
                 block_1.kernel.body.mutator_set_accumulator.clone(),
                 &block_2,
+                &AtomicMutex::from(()),
             )
             .await;
         assert_eq!(1, mempool.len());
@@ -944,8 +968,13 @@ mod tests {
                 .unwrap();
         let block_transaction2 = tx_by_alice_updated
             .clone()
-            .merge_with(coinbase_transaction2, Default::default())
-            .await;
+            .merge_with(
+                coinbase_transaction2,
+                Default::default(),
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         let block_3_orphaned =
             Block::new_block_from_template(&block_2, block_transaction2, in_eight_months, None);
 
@@ -973,6 +1002,7 @@ mod tests {
                 .update_with_block(
                     previous_block.kernel.body.mutator_set_accumulator.clone(),
                     &next_block,
+                    &AtomicMutex::from(()),
                 )
                 .await;
             previous_block = next_block;
@@ -984,8 +1014,13 @@ mod tests {
                 .await
                 .unwrap();
         let block_transaction3 = coinbase_transaction3
-            .merge_with(tx_by_alice_updated, Default::default())
-            .await;
+            .merge_with(
+                tx_by_alice_updated,
+                Default::default(),
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         let block_5 = Block::new_block_from_template(
             &previous_block,
             block_transaction3,
@@ -1002,6 +1037,7 @@ mod tests {
             .update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
                 &block_5,
+                &AtomicMutex::from(()),
             )
             .await;
 
@@ -1026,8 +1062,12 @@ mod tests {
             .unwrap()
             .current();
 
-            let left_single_proof = SingleProof::produce(&left).await;
-            let right_single_proof = SingleProof::produce(&right).await;
+            let left_single_proof = SingleProof::produce(&left, &TritonProverSync::dummy())
+                .await
+                .unwrap();
+            let right_single_proof = SingleProof::produce(&right, &TritonProverSync::dummy())
+                .await
+                .unwrap();
 
             let left = Transaction {
                 kernel: left.kernel,
@@ -1042,7 +1082,14 @@ mod tests {
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-            let merged = Transaction::merge_with(left.clone(), right.clone(), shuffle_seed).await;
+            let merged = Transaction::merge_with(
+                left.clone(),
+                right.clone(),
+                shuffle_seed,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
 
             ((left, right), merged)
         }
@@ -1088,14 +1135,9 @@ mod tests {
         // not contain this transaction, such that mempool is still non-empty.
         // Then mine a a block 1b that also does not contain this transaction.
         let network = Network::Main;
-        let devnet_wallet = WalletSecret::devnet_wallet();
-        let mut premine_receiver_global_state =
-            mock_genesis_global_state(network, 2, devnet_wallet).await;
-        let mut alice = premine_receiver_global_state.lock_guard_mut().await;
-        let alice_key = alice
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(network, 2, alice_wallet).await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
@@ -1106,10 +1148,18 @@ mod tests {
         let tx_receiver_data =
             TxOutput::onchain_native_currency(NeptuneCoins::new(1), rng.gen(), bob_address.into());
 
-        let genesis_block = alice.chain.archival_state().genesis_block().to_owned();
+        let genesis_block = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .genesis_block()
+            .to_owned();
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_years = now + Timestamp::months(7 * 12);
         let (unmined_tx, _maybe_change_output) = alice
+            .lock_guard()
+            .await
             .create_transaction_with_prover_capability(
                 vec![tx_receiver_data].into(),
                 alice_key.into(),
@@ -1117,11 +1167,12 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_years,
                 TxProvingCapability::SingleProof,
+                &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
-        alice.mempool.insert(&unmined_tx);
+        alice.lock_guard_mut().await.mempool.insert(&unmined_tx);
 
         // Add some blocks. The transaction must stay in the mempool, since it
         // is not being mined.
@@ -1131,7 +1182,11 @@ mod tests {
                 make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
-            let mempool_txs = alice.mempool.get_transactions_for_block(usize::MAX, None);
+            let mempool_txs = alice
+                .lock_guard()
+                .await
+                .mempool
+                .get_transactions_for_block(usize::MAX, None);
             assert_eq!(
                 1,
                 mempool_txs.len(),
@@ -1145,7 +1200,7 @@ mod tests {
             assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
             assert_eq!(
                 next_block.hash(),
-                alice.mempool.tip_digest,
+                alice.lock_guard().await.mempool.tip_digest,
                 "Mempool's sync digest must be set correctly"
             );
 
@@ -1165,6 +1220,8 @@ mod tests {
         // the new tip.
         assert!(
             alice
+                .lock_guard()
+                .await
                 .mempool
                 .get_transactions_for_block(usize::MAX, None)
                 .iter()
@@ -1212,6 +1269,7 @@ mod tests {
                         fee,
                         in_seven_months,
                         TxProvingCapability::ProofCollection,
+                        &TritonProverSync::dummy(),
                     )
                     .await
                     .expect("producing proof collection should succeed");

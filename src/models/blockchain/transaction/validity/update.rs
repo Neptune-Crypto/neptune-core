@@ -718,6 +718,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -763,10 +764,11 @@ pub(crate) mod test {
             old_pw.clone(),
             mined.kernel.outputs,
             mined.kernel.inputs,
-        )
-        .unwrap();
+        );
 
-        let old_proof = SingleProof::produce(&old_pw).await;
+        let old_proof = SingleProof::produce(&old_pw, &TritonProverSync::dummy())
+            .await
+            .unwrap();
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
         updated.kernel.timestamp = updated.kernel.timestamp + Timestamp::seconds(num_seconds);
 
@@ -819,7 +821,9 @@ pub(crate) mod test {
             &primitive_witness.mutator_set_accumulator.aocl,
             &newly_confirmed_records,
         );
-        let old_proof = SingleProof::produce(&primitive_witness).await;
+        let old_proof = SingleProof::produce(&primitive_witness, &TritonProverSync::dummy())
+            .await
+            .unwrap();
 
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,

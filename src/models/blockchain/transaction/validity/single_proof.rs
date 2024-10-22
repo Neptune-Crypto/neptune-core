@@ -11,6 +11,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 use tracing::info;
 
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -26,6 +27,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::merge::Merge;
@@ -275,17 +277,22 @@ impl SingleProof {
     /// witness.
     ///
     /// This involves generating a [ProofCollection] as an intermediate step.
-    pub(crate) async fn produce(primitive_witness: &PrimitiveWitness) -> Proof {
-        let proof_collection = ProofCollection::produce(primitive_witness).await;
+    pub(crate) async fn produce(
+        primitive_witness: &PrimitiveWitness,
+        sync_device: &TritonProverSync,
+    ) -> Result<Proof, TryLockError> {
+        let proof_collection = ProofCollection::produce(primitive_witness, sync_device).await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
-        let single_proof = SingleProof.prove(&claim, nondeterminism).await;
+        let single_proof = SingleProof
+            .prove(&claim, nondeterminism, sync_device)
+            .await?;
         info!("Done");
 
-        single_proof
+        Ok(single_proof)
     }
 }
 
@@ -801,7 +808,10 @@ mod test {
             .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection = ProofCollection::produce(&primitive_witness).await;
+        let proof_collection =
+            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
+                .await
+                .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
 
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
@@ -838,7 +848,10 @@ mod test {
                 .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection = ProofCollection::produce(&primitive_witness).await;
+        let proof_collection =
+            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
+                .await
+                .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
 
         println!("Have proof collection. \\o/");
@@ -870,8 +883,13 @@ mod test {
         let claim_for_update = witness_for_update.claim();
         let nondeterminism_for_update = witness_for_update.nondeterminism();
         let proof = Update
-            .prove(&claim_for_update, nondeterminism_for_update)
-            .await;
+            .prove(
+                &claim_for_update,
+                nondeterminism_for_update,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         Stark::default().verify(&claim_for_update, &proof).unwrap();
 
         let witness_of_update = WitnessOfUpdate {
@@ -900,8 +918,13 @@ mod test {
         let claim_for_merge = witness_for_merge.claim();
         let nondeterminism_for_witness = witness_for_merge.nondeterminism();
         let proof = Merge
-            .prove(&claim_for_merge, nondeterminism_for_witness)
-            .await;
+            .prove(
+                &claim_for_merge,
+                nondeterminism_for_witness,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
         Stark::default().verify(&claim_for_merge, &proof).unwrap();
 
         let witness_of_merge = WitnessOfMerge {

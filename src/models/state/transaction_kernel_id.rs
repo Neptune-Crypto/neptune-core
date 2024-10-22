@@ -125,8 +125,7 @@ mod tests {
         let updated = Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
             to_be_updated,
             &block,
-        )
-        .unwrap();
+        );
 
         assert_eq!(tx_id_original, updated.kernel.txid());
     }

@@ -1078,6 +1078,7 @@ mod tests {
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
 
+        let alice_proving_lock = alice.proving_lock.clone();
         let mut alice = alice.global_state_lock.lock_guard_mut().await;
         let launch_timestamp = alice.chain.light_state().header().timestamp;
         let released_timestamp = launch_timestamp + Timestamp::months(12);
@@ -1138,6 +1139,7 @@ mod tests {
                     alice_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 ),
+                &alice_proving_lock,
             )
             .await
             .unwrap();
@@ -1175,58 +1177,47 @@ mod tests {
 
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let own_wallet_secret = WalletSecret::new_random();
-        let own_spending_key = own_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut own_global_state_lock =
-            mock_genesis_global_state(network, 0, own_wallet_secret).await;
-        let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut bob = mock_genesis_global_state(network, 0, bob_wallet_secret).await;
+        let bob_proving_lock = bob.proving_lock.clone();
+        let mut bob = bob.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
-        let monitored_utxos_count_init = own_global_state
-            .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .len()
-            .await;
+        let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
         let mut mutator_set_accumulator = genesis_block.kernel.body.mutator_set_accumulator.clone();
         assert!(
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"
         );
         assert!(
-            own_global_state.get_latest_balance_height().await.is_none(),
+            bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at init"
         );
 
         // Add two blocks with no UTXOs for us
-        let other_recipient_address = WalletSecret::new_random()
+        let alice_address = WalletSecret::new_random()
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
-            own_global_state
-                .wallet_state
+                make_mock_block(&latest_block, None, alice_address, rng.gen());
+            bob.wallet_state
                 .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
                 .await
                 .unwrap();
-            own_global_state
-                .chain
+            bob.chain
                 .archival_state_mut()
                 .write_block_as_tip(&new_block)
                 .await
                 .unwrap();
-            own_global_state
-                .chain
-                .light_state_mut()
-                .set_block(new_block.clone());
+            bob.chain.light_state_mut().set_block(new_block.clone());
 
             latest_block = new_block;
             mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
         assert!(
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .len()
@@ -1235,12 +1226,12 @@ mod tests {
             "Monitored UTXO list must be empty at height 2"
         );
         assert!(
-            own_global_state.get_latest_balance_height().await.is_none(),
+            bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at height 2"
         );
 
         // Add block 3a with a coinbase UTXO for us
-        let own_recipient_address = own_spending_key.to_address();
+        let own_recipient_address = bob_spending_key.to_address();
         let (block_3a, block_3a_coinbase_utxo, block_3a_coinbase_sender_randomness) =
             make_mock_block(
                 &latest_block.clone(),
@@ -1248,22 +1239,21 @@ mod tests {
                 own_recipient_address,
                 rng.gen(),
             );
-        own_global_state
-            .set_new_self_mined_tip(
-                block_3a,
-                ExpectedUtxo::new(
-                    block_3a_coinbase_utxo,
-                    block_3a_coinbase_sender_randomness,
-                    own_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
-                ),
-            )
-            .await
-            .unwrap();
+        bob.set_new_self_mined_tip(
+            block_3a,
+            ExpectedUtxo::new(
+                block_3a_coinbase_utxo,
+                block_3a_coinbase_sender_randomness,
+                bob_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            ),
+            &bob_proving_lock,
+        )
+        .await
+        .unwrap();
 
         assert!(
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .len()
@@ -1272,8 +1262,7 @@ mod tests {
             "Monitored UTXO list must have length 1 at block 3a"
         );
         assert!(
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .get(0)
@@ -1284,20 +1273,19 @@ mod tests {
         );
         assert_eq!(
             Some(3.into()),
-            own_global_state.get_latest_balance_height().await,
+            bob.get_latest_balance_height().await,
             "Latest balance height 3 at block 3a"
         );
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
-            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
-        own_global_state
-            .set_new_tip(block_3b.clone())
+            make_mock_block(&latest_block, None, alice_address, rng.gen());
+        bob.set_new_tip(block_3b.clone(), &bob_proving_lock)
             .await
             .unwrap();
 
         assert!(
-            own_global_state
+            bob
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
@@ -1308,36 +1296,28 @@ mod tests {
             "MUTXO may not be marked as abandoned at block 3b, as the abandoned chain is not yet old enough and has not been pruned"
         );
         assert!(
-            own_global_state.get_latest_balance_height().await.is_none(),
+            bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at block 3b"
         );
-        let prune_count_3b = own_global_state
-            .prune_abandoned_monitored_utxos(10)
-            .await
-            .unwrap();
+        let prune_count_3b = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
         assert!(prune_count_3b.is_zero());
 
         // Mine nine blocks on top of 3b, update states
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
-            own_global_state
-                .set_new_tip(new_block.clone())
+                make_mock_block(&latest_block, None, alice_address, rng.gen());
+            bob.set_new_tip(new_block.clone(), &bob_proving_lock)
                 .await
                 .unwrap();
 
             latest_block = new_block;
         }
 
-        let prune_count_11 = own_global_state
-            .prune_abandoned_monitored_utxos(10)
-            .await
-            .unwrap();
+        let prune_count_11 = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
         assert!(prune_count_11.is_zero());
         assert!(
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .get(0)
@@ -1347,21 +1327,18 @@ mod tests {
             "MUTXO must not be abandoned at height 11"
         );
         assert!(
-            own_global_state.get_latest_balance_height().await.is_none(),
+            bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at height 11"
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _, _) =
-            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
-        own_global_state
-            .set_new_tip(block_12.clone())
+        let (block_12, _, _) = make_mock_block(&latest_block, None, alice_address, rng.gen());
+        bob.set_new_tip(block_12.clone(), &bob_proving_lock)
             .await
             .unwrap();
 
         assert!(
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .get(0)
@@ -1370,10 +1347,7 @@ mod tests {
                 .is_none(),
             "MUTXO must *not* be marked as abandoned at height 12, prior to pruning"
         );
-        let prune_count_12 = own_global_state
-            .prune_abandoned_monitored_utxos(10)
-            .await
-            .unwrap();
+        let prune_count_12 = bob.prune_abandoned_monitored_utxos(10).await.unwrap();
         assert!(prune_count_12.is_one());
         assert_eq!(
             (
@@ -1381,8 +1355,7 @@ mod tests {
                 block_12.kernel.header.timestamp,
                 12u64.into()
             ),
-            own_global_state
-                .wallet_state
+            bob.wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .get(0)
@@ -1392,7 +1365,7 @@ mod tests {
             "MUTXO must be marked as abandoned at height 12, after pruning"
         );
         assert!(
-            own_global_state.get_latest_balance_height().await.is_none(),
+            bob.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at height 12"
         );
     }
