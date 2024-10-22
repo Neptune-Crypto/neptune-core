@@ -693,6 +693,44 @@ mod tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn most_dense_proof_collection_test() {
+        let network = Network::Main;
+        let mut mempool = setup_mock_mempool(0, network).await;
+        let genesis_block = Block::genesis_block(network);
+        let bob_wallet_secret = WalletSecret::devnet_wallet();
+        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let bob = mock_genesis_global_state(network, 2, bob_wallet_secret.clone()).await;
+        let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let high_fee = NeptuneCoins::new(15);
+        let (tx_by_bob, _maybe_change_output) = bob
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![].into(),
+                bob_spending_key.into(),
+                UtxoNotificationMedium::OnChain,
+                high_fee,
+                in_seven_months,
+                TxProvingCapability::ProofCollection,
+            )
+            .await
+            .unwrap();
+
+        // No candidate when mempool is empty
+        assert!(
+            mempool.most_dense_proof_collection().is_none(),
+            "No proof collection when mempool is empty"
+        );
+
+        mempool.insert(&tx_by_bob);
+        assert_eq!(
+            mempool.most_dense_proof_collection().unwrap().0.txid(),
+            tx_by_bob.kernel.txid()
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
         let mempool = setup_mock_mempool(10, Network::Main).await;
