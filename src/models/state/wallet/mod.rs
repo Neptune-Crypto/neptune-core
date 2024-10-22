@@ -434,6 +434,7 @@ mod wallet_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::mine_loop::make_coinbase_transaction;
+    use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
@@ -985,11 +986,11 @@ mod wallet_tests {
         let num_blocks_mined_by_alice = 4;
         // verify that all membership proofs are still valid
         let mut next_block = block_1.clone();
-        for _ in 0..num_blocks_mined_by_alice {
+        for i in 0..num_blocks_mined_by_alice {
             let previous_block = next_block;
             let (block, cb_utxo, cb_sender_randomness) = make_mock_block(
                 &previous_block,
-                Some(in_seven_months),
+                Some(in_seven_months + MINIMUM_BLOCK_TIME * i),
                 alice_address,
                 rng.gen(),
             );
@@ -1174,23 +1175,26 @@ mod wallet_tests {
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(4),
-                in_seven_months,
+                block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
                 TxProvingCapability::SingleProof,
                 &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
-        let (coinbase_tx, cb_expected) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_seven_months)
-                .await
-                .unwrap();
+        let (coinbase_tx, cb_expected) = make_coinbase_transaction(
+            &alice,
+            NeptuneCoins::zero(),
+            block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
+        )
+        .await
+        .unwrap();
         let merged_tx = coinbase_tx
             .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
             .await
             .unwrap();
-        let block_3_b =
-            Block::new_block_from_template(&block_2_b, merged_tx, in_seven_months, None);
+        let timestamp = merged_tx.kernel.timestamp;
+        let block_3_b = Block::new_block_from_template(&block_2_b, merged_tx, timestamp, None);
         assert!(
             block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"

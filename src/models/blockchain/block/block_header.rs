@@ -23,7 +23,7 @@ pub(crate) const TARGET_BLOCK_INTERVAL: Timestamp = Timestamp::millis(588000);
 
 /// Minimum time between blocks.
 ///
-/// Blocks spaced apart by less than this amount of time are not confirmable.
+/// Blocks spaced apart by less than this amount of time are not valid.
 pub(crate) const MINIMUM_BLOCK_TIME: Timestamp = Timestamp::seconds(60);
 
 /// Controls how long to wait before the difficulty for the *next* block is

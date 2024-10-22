@@ -902,6 +902,7 @@ mod tests {
         let now = genesis_block.kernel.header.timestamp;
         let in_seven_months = now + Timestamp::months(7);
         let in_eight_months = now + Timestamp::months(8);
+        let in_nine_months = now + Timestamp::months(9);
         let (tx_by_bob, maybe_change_output) = bob
             .lock_guard()
             .await
@@ -1024,7 +1025,7 @@ mod tests {
             .await
             .unwrap();
         let block_3_orphaned =
-            Block::new_block_from_template(&block_2, block_transaction2, in_eight_months, None);
+            Block::new_block_from_template(&block_2, block_transaction2, in_nine_months, None);
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
@@ -1032,7 +1033,7 @@ mod tests {
         );
 
         assert!(
-            block_3_orphaned.is_valid(&block_2, in_eight_months),
+            block_3_orphaned.is_valid(&block_2, in_nine_months),
             "Block with tx with updated mutator set data must be valid"
         );
 
@@ -1058,7 +1059,7 @@ mod tests {
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
         let (coinbase_transaction3, _expected_utxo3) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_eight_months)
+            make_coinbase_transaction(&alice, NeptuneCoins::zero(), in_nine_months)
                 .await
                 .unwrap();
         let block_transaction3 = coinbase_transaction3
