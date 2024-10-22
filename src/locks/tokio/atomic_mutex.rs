@@ -221,6 +221,18 @@ impl<T> AtomicMutex<T> {
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Read)
     }
 
+    /// Attempt to return a read lock and return an `AtomicMutextGuard`. Returns
+    /// an error if the lock is already held, otherwise returns Ok(lock).
+    pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<T>, tokio::sync::TryLockError> {
+        self.try_acquire_try_acquire();
+        let guard = self.inner.try_lock()?;
+        Ok(AtomicMutexGuard::new(
+            guard,
+            &self.lock_callback_info,
+            LockAcquisition::TryAcquire,
+        ))
+    }
+
     /// Acquire write lock and return an `AtomicMutexGuard`
     ///
     /// # Examples
@@ -350,6 +362,15 @@ impl<T> AtomicMutex<T> {
         f(&mut guard).await
     }
 
+    fn try_acquire_try_acquire(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::TryAcquire,
+            });
+        }
+    }
+
     fn try_acquire_read_cb(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
@@ -449,6 +470,7 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 #[cfg(test)]
 mod tests {
     use futures::future::FutureExt;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -461,6 +483,60 @@ mod tests {
         let mut new_name: String = Default::default();
         atomic_name.lock_mut(|n| *n = "Sally".to_string()).await;
         atomic_name.lock_mut(|n| new_name = n.to_string()).await;
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn try_acquire_no_log() {
+        let unit = ();
+        let atomic_unit = AtomicMutex::<()>::from(unit);
+        assert!(
+            atomic_unit.try_lock_guard().is_ok(),
+            "Must succeed when no lock is held"
+        );
+
+        let _held_lock = atomic_unit.try_lock_guard().unwrap();
+        assert!(
+            atomic_unit.try_lock_guard().is_err(),
+            "Must fail when lock is held"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn try_acquire_with_log() {
+        pub fn log_lock_event(lock_event: LockEvent) {
+            let (event, info, acquisition) = match lock_event {
+                LockEvent::TryAcquire { info, acquisition } => ("TryAcquire", info, acquisition),
+                LockEvent::Acquire { info, acquisition } => ("Acquire", info, acquisition),
+                LockEvent::Release { info, acquisition } => ("Release", info, acquisition),
+            };
+
+            println!(
+                "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, `{:?}`",
+                event,
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquisition,
+                std::thread::current().name().unwrap_or("?"),
+                std::thread::current().id(),
+            );
+        }
+
+        const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+        let name = "Jim".to_string();
+        let atomic_name =
+            AtomicMutex::<String>::from((name, Some("name"), Some(LOG_LOCK_EVENT_CB)));
+        assert!(
+            atomic_name.try_lock_guard().is_ok(),
+            "Must succeed when no lock is held"
+        );
+
+        let _held_lock = atomic_name.lock_guard().await;
+        assert!(
+            atomic_name.try_lock_guard().is_err(),
+            "Must fail when lock is held"
+        );
     }
 
     #[tokio::test]

@@ -20,6 +20,7 @@ impl std::fmt::Display for LockType {
 pub enum LockAcquisition {
     Read,
     Write,
+    TryAcquire,
 }
 
 impl std::fmt::Display for LockAcquisition {
@@ -28,6 +29,7 @@ impl std::fmt::Display for LockAcquisition {
         match self {
             Self::Read => write!(f, "Read"),
             Self::Write => write!(f, "Write"),
+            Self::TryAcquire => write!(f, "TryAcquire"),
         }
     }
 }
