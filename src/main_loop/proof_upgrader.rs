@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -5,6 +7,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use tokio::sync::TryLockError;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -17,6 +20,8 @@ use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::GlobalState;
+use crate::models::state::GlobalStateLock;
+use crate::MainToPeerTask;
 
 pub(super) enum UpgradeDecision {
     ProduceSingleProof {
@@ -48,9 +53,68 @@ impl UpgradeDecision {
         }
     }
 
+    pub(super) async fn handle_upgrade(
+        self,
+        priority: TritonProverSync,
+        mut global_state_lock: GlobalStateLock,
+        mut main_to_peer_channel: crate::broadcast::Sender<MainToPeerTask>,
+    ) {
+        // Record that we're attempting an upgrade.
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .last_tx_proof_upgrade = SystemTime::now();
+
+        let upgraded = match self.upgrade(priority, &global_state_lock).await {
+            Ok(upgraded_tx) => {
+                info!(
+                    "Successfully upgraded transaction {}",
+                    upgraded_tx.kernel.txid()
+                );
+                upgraded_tx
+            }
+            Err(err) => {
+                info!("Failed to upgrade mempool transaction because prover was occupied:\n{err}");
+                return;
+            }
+        };
+
+        // Insert the upgraded transactions into the mempool
+        {
+            let mut global_state = global_state_lock.lock_guard_mut().await;
+            // Did we receive a new block while proving? If so, throw away the
+            // result, as it is wasted (it would need an update).
+
+            if upgraded.kernel.mutator_set_hash
+                != global_state
+                    .chain
+                    .light_state()
+                    .body()
+                    .mutator_set_accumulator
+                    .hash()
+            {
+                warn!("Got new block while proving. Discarding result.");
+                return;
+            }
+
+            global_state.mempool.insert(&upgraded);
+        }
+
+        // Inform all peers about our hard work
+        main_to_peer_channel
+            .send(MainToPeerTask::TransactionNotification(
+                (&upgraded).try_into().unwrap(),
+            ))
+            .unwrap();
+
+        info!("Successfully handled proof upgrade.");
+    }
+
     pub(super) async fn upgrade(
-        &self,
-        priority: &TritonProverSync,
+        self,
+        priority: TritonProverSync,
+        global_state_lock: &GlobalStateLock,
     ) -> Result<Transaction, TryLockError> {
         match self {
             UpgradeDecision::ProduceSingleProof { kernel, proof } => {
@@ -58,7 +122,7 @@ impl UpgradeDecision {
                 let claim = single_proof_witness.claim();
                 let nondeterminism = single_proof_witness.nondeterminism();
                 info!("Proof-upgrader: Start generate single proof");
-                let single_proof = SingleProof.prove(&claim, nondeterminism, priority).await?;
+                let single_proof = SingleProof.prove(&claim, nondeterminism, &priority).await?;
                 info!("Proof-upgrader: Done");
 
                 Ok(Transaction {
@@ -82,8 +146,8 @@ impl UpgradeDecision {
                     proof: TransactionProof::SingleProof(single_proof_right.to_owned()),
                 };
                 info!("Proof-upgrader: Start merging");
-                let ret =
-                    Transaction::merge_with(left, right, shuffle_seed.to_owned(), priority).await?;
+                let ret = Transaction::merge_with(left, right, shuffle_seed.to_owned(), &priority)
+                    .await?;
                 info!("Proof-upgrader: Done");
 
                 Ok(ret)

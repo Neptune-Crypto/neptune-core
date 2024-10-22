@@ -76,6 +76,7 @@ struct MutableMainLoopState {
     sync_state: SyncState,
     potential_peers: PotentialPeersState,
     task_handles: Vec<JoinHandle<()>>,
+    proof_upgrader_task: Option<JoinHandle<()>>,
 }
 
 impl MutableMainLoopState {
@@ -84,6 +85,7 @@ impl MutableMainLoopState {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
             task_handles,
+            proof_upgrader_task: None,
         }
     }
 }
@@ -833,16 +835,29 @@ impl MainLoopHandler {
     /// Will either perform a merge of two transactions supported with single
     /// proofs, or will upgrade a transaction proof of the type
     /// `ProofCollection` to `SingleProof`.
-    pub(crate) async fn proof_upgrader(&mut self) -> Result<()> {
+    ///
+    /// All proving takes place in a spawned task such that it doesn't block
+    /// the main loop. The MutableMainLoopState gets the JoinHandle of the
+    /// spawned upgrade task such that its status can be expected.
+    pub(crate) async fn proof_upgrader(
+        &mut self,
+        main_loop_state: &mut MutableMainLoopState,
+    ) -> Result<()> {
         fn attempt_upgrade(
             global_state_lock: &GlobalState,
             now: SystemTime,
             tx_upgrade_interval: Option<Duration>,
+            main_loop_state: &MutableMainLoopState,
         ) -> Result<bool> {
             let duration_since_last_upgrade =
                 now.duration_since(global_state_lock.net.last_tx_proof_upgrade)?;
+            let previous_upgrade_task_is_still_running = main_loop_state
+                .proof_upgrader_task
+                .as_ref()
+                .is_some_and(|x| !x.is_finished());
             Ok(!global_state_lock.net.syncing
                 && global_state_lock.net.tx_proving_capability == TxProvingCapability::SingleProof
+                && !previous_upgrade_task_is_still_running
                 && tx_upgrade_interval
                     .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
         }
@@ -851,10 +866,10 @@ impl MainLoopHandler {
         // of upgrading a transaction proof.
         let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
 
-        let new_tx = {
+        let upgrade_candidate = {
             let global_state = self.global_state_lock.lock_guard().await;
             let now = SystemTime::now();
-            if !attempt_upgrade(&global_state, now, tx_upgrade_interval)? {
+            if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
                 return Ok(());
             }
 
@@ -866,58 +881,37 @@ impl MainLoopHandler {
                 return Ok(());
             };
 
-            let affected_txids = upgrade_candidate.affected_txids();
-            info!(
-                "Attempting to upgrade transaction proofs of: {}",
-                affected_txids.iter().join("; ")
-            );
-
-            // Perform the upgrade (expensive), if we're not using the prover
-            // for anything else, like mining, or proving our own transaction.
-            let skip_if_busy = self.global_state_lock.skip_if_busy();
-            match upgrade_candidate.upgrade(&skip_if_busy).await {
-                Ok(upgraded_tx) => {
-                    info!(
-                        "Successfully upgraded transaction {}",
-                        upgraded_tx.kernel.txid()
-                    );
-                    upgraded_tx
-                }
-                Err(err) => {
-                    info!(
-                        "Failed to upgrade mempool transaction because prover was occupied:\n{err}"
-                    );
-                    return Ok(());
-                }
-            }
+            upgrade_candidate
         };
 
-        // Insert the upgraded transactions into the mempool
-        {
-            let mut global_state = self.global_state_lock.lock_guard_mut().await;
-            // Did we receive a new block while proving? If so, throw away the
-            // result, as it is wasted (it would need an update).
+        let affected_txids = upgrade_candidate.affected_txids();
+        info!(
+            "Attempting to upgrade transaction proofs of: {}",
+            affected_txids.iter().join("; ")
+        );
 
-            if new_tx.kernel.mutator_set_hash
-                != global_state
-                    .chain
-                    .light_state()
-                    .body()
-                    .mutator_set_accumulator
-                    .hash()
-            {
-                warn!("Got new block while proving. Discarding result.");
-                return Ok(());
-            }
+        // Perform the upgrade (expensive), if we're not using the prover
+        // for anything else, like mining, or proving our own transaction.
+        // But spawn a task to do this since we don't want to block the main
+        // loop with this work.
+        let skip_if_busy = self.global_state_lock.skip_if_busy();
 
-            global_state.mempool.insert(&new_tx);
-        }
+        let global_state_lock_clone = self.global_state_lock.clone();
+        let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
+        let proof_upgrader_task =
+            tokio::task::Builder::new()
+                .name("proof_upgrader")
+                .spawn(async move {
+                    upgrade_candidate
+                        .handle_upgrade(
+                            skip_if_busy,
+                            global_state_lock_clone,
+                            main_to_peer_broadcast_tx_clone,
+                        )
+                        .await
+                })?;
 
-        // Inform all peers about our hard work
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerTask::TransactionNotification(
-                (&new_tx).try_into().unwrap(),
-            ))?;
+        main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
 
         Ok(())
     }
@@ -1145,7 +1139,7 @@ impl MainLoopHandler {
                 // Check if it's time to run the proof upgrader
                 _ = &mut tx_proof_upgrade_timer => {
                     trace!("Timer: tx-proof-upgrader");
-                    self.proof_upgrader().await?;
+                    self.proof_upgrader(&mut main_loop_state).await?;
 
                     tx_proof_upgrade_timer.as_mut().reset(tokio::time::Instant::now() + tx_proof_upgrade_interval);
                 }

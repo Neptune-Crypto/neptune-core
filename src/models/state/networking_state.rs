@@ -44,7 +44,9 @@ pub struct NetworkingState {
     /// The capabilities of this machine to produce STARK proofs
     pub tx_proving_capability: TxProvingCapability,
 
-    /// Timestamp for when the last tx-proof upgrade was attempted.
+    /// Timestamp for when the last tx-proof upgrade was attempted. Does not
+    /// record latest successful attempt, merely latest attempt. This is to
+    /// prevent excessive runs of the proof-upgrade functionality.
     pub last_tx_proof_upgrade: std::time::SystemTime,
 }
 
