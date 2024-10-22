@@ -46,10 +46,6 @@ pub struct BlockBody {
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
     pub(crate) block_mmr_accumulator: MmrAccumulator,
-
-    /// The block proof establishes that all these claims are correct. The list of claims
-    /// can be extended through soft fork.
-    claims: Vec<Claim>,
 }
 
 impl BlockBody {
@@ -59,14 +55,11 @@ impl BlockBody {
         lock_free_mmr_accumulator: MmrAccumulator,
         block_mmr_accumulator: MmrAccumulator,
     ) -> Self {
-        // TODO: determine block validity claims here
-        let claims = vec![];
         Self {
             transaction_kernel,
             mutator_set_accumulator,
             lock_free_mmr_accumulator,
             block_mmr_accumulator,
-            claims,
         }
     }
 }
@@ -80,7 +73,6 @@ impl MastHash for BlockBody {
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),
-            self.claims.encode(),
         ]
     }
 }

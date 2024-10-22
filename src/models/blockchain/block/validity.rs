@@ -11,27 +11,23 @@ use self::correct_mmr_update::CorrectMmrUpdate;
 use self::correct_mutator_set_update::CorrectMutatorSetUpdate;
 use self::mmr_membership::MmrMembership;
 use self::predecessor_is_valid::PredecessorIsValid;
-use self::transaction_is_valid::TransactionIsValid;
 use super::Block;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
+pub mod block_witness;
 pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
 pub mod correct_mutator_set_update;
 pub mod mmr_membership;
 pub mod predecessor_is_valid;
-pub mod transaction_is_valid;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PrincipalBlockValidationLogic {
     // program: recursive-verify-or-is-genesis, input: block kernel, output: []
     pub predecessor_is_valid: PredecessorIsValid,
-
-    // program: verify-transaction, input: block kernel, output: []
-    pub transaction_is_valid: TransactionIsValid,
 
     // program: verify-coinbase, input: block kernel, output: []
     pub coinbase_is_valid: CoinbaseIsValid,
