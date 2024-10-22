@@ -149,13 +149,22 @@ impl PeerLoopHandler {
     /// list is the `i`th block. The parent of element zero in this list is
     /// `parent_of_first_block`.
     ///
-    /// Locking:
+    /// Returns Err when the connection should be closed; returns Ok(None) if
+    /// some block is invalid or if the last block is not canonical; returns
+    /// Ok(Some(block_height)) otherwise, referring to the largest block height
+    /// in the batch.
+    ///
+    /// # Locking
     ///   * acquires `global_state_lock` for write via Self::punish()
+    ///
+    /// # Panics
+    ///
+    ///  - Panics if called with the empty list.
     async fn handle_blocks(
         &mut self,
         received_blocks: Vec<Block>,
         parent_of_first_block: Block,
-    ) -> Result<BlockHeight> {
+    ) -> Result<Option<BlockHeight>> {
         debug!(
             "attempting to validate {} {}",
             received_blocks.len(),
@@ -184,7 +193,8 @@ impl PeerLoopHandler {
                     new_block.hash(),
                 )))
                 .await?;
-                bail!("Failed to validate block due to insufficient PoW");
+                warn!("Failed to validate block due to insufficient PoW");
+                return Ok(None);
             } else if !new_block.is_valid(previous_block, now) {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
@@ -195,7 +205,8 @@ impl PeerLoopHandler {
                     new_block.hash(),
                 )))
                 .await?;
-                bail!("Failed to validate block: invalid block");
+                warn!("Failed to validate block: invalid block");
+                return Ok(None);
             } else {
                 info!(
                     "Block with height {} is valid. mined: {}",
@@ -207,9 +218,24 @@ impl PeerLoopHandler {
             previous_block = new_block;
         }
 
+        // evaluate the fork choice rule
+        if !self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .incoming_block_is_more_canonical(received_blocks.last().unwrap())
+        {
+            warn!(
+                "Received {} blocks from peer but incoming blocks are less \
+            canonical than current tip.",
+                received_blocks.len()
+            );
+            return Ok(None);
+        }
+
         // Send the new blocks to the main task which handles the state update
         // and storage to the database.
-        let new_block_height = received_blocks.last().unwrap().kernel.header.height;
+        let new_block_height = received_blocks.last().unwrap().header().height;
         self.to_main_tx
             .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
@@ -218,14 +244,25 @@ impl PeerLoopHandler {
             new_block_height
         );
 
-        Ok(new_block_height)
+        Ok(Some(new_block_height))
     }
 
-    /// Function for handling the receiving of single new block from a peer
+    /// Takes a single block received from a peer and (attempts to) find a path
+    /// from some known stored block to the received block.
+    ///
+    /// This function attempts to find the parent of a new block, either by
+    /// searching the database or, if necessary, by requesting it from a peer.
+    ///  - If the parent is stored in the database, block handling continues.
+    ///  - If the parent is not stored, it is requested from the peer and the
+    ///    received block is pushed to the fork reconciliation list for later
+    ///    handling by this function.
+    ///
+    /// If the parent is stored, the block and any fork reconciliation blocks
+    /// are passed down the pipeline.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for write via Self::punish()
-    async fn receive_new_block<S>(
+    async fn try_ensure_path<S>(
         &mut self,
         received_block: Box<Block>,
         peer: &mut S,
@@ -256,7 +293,8 @@ impl PeerLoopHandler {
         );
         let parent_height = received_block.kernel.header.height.previous();
 
-        // If parent is not known, request the parent, and add the current to the peer fork resolution list
+        // If parent is not known, request the parent, and add the current to
+        // the peer fork resolution list
         if parent_block.is_none() && parent_height > BlockHeight::genesis() {
             info!(
                 "Parent not known: Requesting previous block with height {} from peer",
@@ -311,7 +349,9 @@ impl PeerLoopHandler {
             return Ok(());
         }
 
-        // We want to treat the received blocks in reverse order, from oldest to newest
+        // We want to treat the received fork reconciliation blocks (plus the
+        // received block) in reverse order, from oldest to newest, because
+        // they were requested from high to low block height.
         let mut new_blocks = peer_state.fork_reconciliation_blocks.clone();
         new_blocks.push(*received_block);
         new_blocks.reverse();
@@ -339,18 +379,21 @@ impl PeerLoopHandler {
 
         // Parent block is guaranteed to be set here. Because: either it was fetched from the
         // database, or it's the genesis block.
-        let new_block_height = self
+        if let Some(new_block_height) = self
             .handle_blocks(new_blocks, parent_block.unwrap())
-            .await?;
-
-        // If `BlockNotification` was received during a block reconciliation
-        // event, then the peer might have one (or more (unlikely)) blocks
-        // that we do not have. We should thus request those blocks.
-        if fork_reconciliation_event && peer_state.highest_shared_block_height > new_block_height {
-            peer.send(PeerMessage::BlockRequestByHeight(
-                peer_state.highest_shared_block_height,
-            ))
-            .await?;
+            .await?
+        {
+            // If `BlockNotification` was received during a block reconciliation
+            // event, then the peer might have one (or more (unlikely)) blocks
+            // that we do not have. We should thus request those blocks.
+            if fork_reconciliation_event
+                && peer_state.highest_shared_block_height > new_block_height
+            {
+                peer.send(PeerMessage::BlockRequestByHeight(
+                    peer_state.highest_shared_block_height,
+                ))
+                .await?;
+            }
         }
 
         Ok(())
@@ -447,40 +490,8 @@ impl PeerLoopHandler {
                     peer_state_info.highest_shared_block_height = new_block_height;
                 }
 
-                let current_tip = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .header()
-                    .clone();
-                let incoming_block_has_more_pow =
-                    current_tip.cumulative_proof_of_work < block.header().cumulative_proof_of_work;
-                let incoming_block_has_different_height =
-                    current_tip.height != block.header().height;
-                let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
-                {
-                    Some(last_block) => last_block.kernel.header.prev_block_digest == block.hash(),
-                    None => false,
-                };
+                self.try_ensure_path(block, peer, peer_state_info).await?;
 
-                // Determine whether
-                //  a) both
-                //    i)) the incoming block's accumulated POW is larger than what we have, and
-                //    ii)) the incoming block's height is different from; or
-                //  b) we are populating a fork reconciliation blocks list.
-                if (incoming_block_has_more_pow && incoming_block_has_different_height)
-                    || reconciliation_ongoing
-                {
-                    debug!("block is new");
-                    self.receive_new_block(block, peer, peer_state_info).await?;
-                } else {
-                    info!(
-                        "Got non-canonical block from peer, height: {}, PoW family: {:?}",
-                        new_block_height, block.kernel.header.cumulative_proof_of_work,
-                    );
-                }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestBatch(BlockRequestBatch {
@@ -1496,13 +1507,10 @@ mod peer_loop_tests {
             true,
             1,
         );
-        let res = peer_loop_handler
+        peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await;
-        assert!(
-            res.is_err(),
-            "run_wrapper must return error when peer sends back block and is banned"
-        );
+            .await
+            .expect("sending (one) invalid block should not result in closed connection");
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
@@ -1593,7 +1601,7 @@ mod peer_loop_tests {
         }
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive remove of peer block max height"),
+            other => bail!("Must receive remove of peer block max height. Got:\n {other:?}"),
         }
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),

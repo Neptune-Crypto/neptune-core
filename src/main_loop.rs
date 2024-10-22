@@ -363,23 +363,7 @@ impl MainLoopHandler {
                 let prover_lock = self.global_state_lock.proving_lock.clone();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                let (tip_hash, tip_cumulative_proof_of_work) = (
-                    global_state_mut.chain.light_state().hash(),
-                    global_state_mut
-                        .chain
-                        .light_state()
-                        .kernel
-                        .header
-                        .cumulative_proof_of_work,
-                );
-
-                // If we received a new block from a peer and updated the global state before this message from the miner was handled,
-                // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
-                // node considered the most canonical block.
-                let block_is_new = tip_cumulative_proof_of_work
-                    < new_block.kernel.header.cumulative_proof_of_work
-                    && new_block.kernel.header.prev_block_digest == tip_hash;
-                if !block_is_new {
+                if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     return Ok(());
                 }
@@ -423,7 +407,7 @@ impl MainLoopHandler {
                 {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
-                    // through a message from another peer.
+                    // through a message from another peer (or from own miner).
                     // TODO: Is this check right? We might still want to store the blocks even though
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
@@ -431,14 +415,7 @@ impl MainLoopHandler {
                     let prover_lock = self.global_state_lock.proving_lock.clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                    let current_tip = global_state_mut.chain.light_state().header();
-
-                    let incoming_block_has_different_height =
-                        last_block.header().height != current_tip.height;
-                    let incoming_block_has_more_pow = current_tip.cumulative_proof_of_work
-                        < last_block.kernel.header.cumulative_proof_of_work;
-
-                    if !incoming_block_has_more_pow || !incoming_block_has_different_height {
+                    if !global_state_mut.incoming_block_is_more_canonical(&last_block) {
                         warn!("Blocks were not new. Not storing blocks.");
 
                         // TODO: Consider fixing deep reorganization problem described above.

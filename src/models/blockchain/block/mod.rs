@@ -742,9 +742,47 @@ impl Block {
             return true;
         }
 
-        warn!("Invalid proof of work for block. Got: {hash}\nThreshold: {threshold}");
-
         false
+    }
+
+    /// Evaluate the fork choice rule.
+    ///
+    /// Given two blocks, determine which one is more canonical. This function
+    /// evaluates the following logic:
+    ///  - if the height is different, prefer the block with more accumulated
+    ///    proof-of-work;
+    ///  - otherwise, if exactly one of the blocks' transactions has no inputs,
+    ///    reject that one;
+    ///  - otherwise, prefer the current tip.
+    ///
+    /// This function assumes the blocks are valid and have the self-declared
+    /// accumulated proof-of-work.
+    ///
+    /// This function is called exclusively in
+    /// [`GlobalState::incoming_block_is_more_canonical`], which is in turn
+    /// called in two places:
+    ///  1. In `peer_loop`, when a peer sends a block. The `peer_loop` task only
+    ///     sends the incoming block to the `main_loop` if it is more canonical.
+    ///  2. In `main_loop`, when it receives a block from a `peer_loop` or from
+    ///     the `mine_loop`. It is possible that despite (1), race conditions
+    ///     arise and they must be solved here.
+    pub(crate) fn fork_choice_rule<'a>(
+        current_tip: &'a Self,
+        incoming_block: &'a Self,
+    ) -> &'a Self {
+        if current_tip.header().height != incoming_block.header().height {
+            if current_tip.header().cumulative_proof_of_work
+                >= incoming_block.header().cumulative_proof_of_work
+            {
+                current_tip
+            } else {
+                incoming_block
+            }
+        } else if current_tip.body().transaction_kernel.inputs.is_empty() {
+            incoming_block
+        } else {
+            current_tip
+        }
     }
 }
 

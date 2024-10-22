@@ -331,6 +331,16 @@ impl GlobalState {
         height
     }
 
+    /// Determine whether the incoming block is more canonical than the current
+    /// tip, *i.e.*, wins the fork choice rule.
+    ///
+    /// If the incoming block equals the current tip, this function returns
+    /// false.
+    pub fn incoming_block_is_more_canonical(&self, incoming_block: &Block) -> bool {
+        let winner = Block::fork_choice_rule(self.chain.light_state(), incoming_block);
+        winner.hash() != self.chain.light_state().hash()
+    }
+
     /// Retrieve block height of last change to wallet balance.
     ///
     /// note: this fn could be implemented as:
