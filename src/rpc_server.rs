@@ -36,6 +36,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
@@ -169,7 +170,7 @@ pub trait RPC {
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<Digest>;
+    ) -> Option<TransactionKernelId>;
 
     /// Send coins to multiple recipients
     ///
@@ -204,7 +205,7 @@ pub trait RPC {
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<Digest>;
+    ) -> Option<TransactionKernelId>;
 
     /// Stop miner if running
     async fn pause_miner();
@@ -273,7 +274,7 @@ impl NeptuneRPCServer {
         fee: NeptuneCoins,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
-    ) -> Option<Digest> {
+    ) -> Option<TransactionKernelId> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
 
@@ -369,7 +370,7 @@ impl NeptuneRPCServer {
         self.state.flush_databases().await.expect("flushed DBs");
 
         match response {
-            Ok(_) => Some(Hash::hash(&transaction)),
+            Ok(_) => Some(transaction.kernel.txid()),
             Err(e) => {
                 tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
                 None
@@ -741,7 +742,7 @@ impl RPC for NeptuneRPCServer {
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<Digest> {
+    ) -> Option<TransactionKernelId> {
         self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
             .await
     }
@@ -758,7 +759,7 @@ impl RPC for NeptuneRPCServer {
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<Digest> {
+    ) -> Option<TransactionKernelId> {
         let tx_proving_capability = self.state.lock_guard().await.net.tx_proving_capability;
         self.send_to_many_inner(
             ctx,

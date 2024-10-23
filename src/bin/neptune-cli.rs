@@ -456,7 +456,7 @@ async fn main() -> Result<()> {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
 
-            client
+            let txid = client
                 .send(
                     ctx,
                     amount,
@@ -465,7 +465,11 @@ async fn main() -> Result<()> {
                     fee,
                 )
                 .await?;
-            println!("Send completed.");
+
+            match txid {
+                Some(txid) => println!("Successfully created transaction: {txid}"),
+                None => println!("Failed to create transaction. Please check the log."),
+            }
         }
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
@@ -473,10 +477,13 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            client
+            let txid = client
                 .send_to_many(ctx, parsed_outputs, UtxoNotificationMedium::OnChain, fee)
                 .await?;
-            println!("Send completed.");
+            match txid {
+                Some(txid) => println!("Successfully created transaction: {txid}"),
+                None => println!("Failed to create transaction. Please check the log."),
+            }
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
