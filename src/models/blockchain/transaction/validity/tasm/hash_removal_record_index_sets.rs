@@ -102,12 +102,18 @@ mod tests {
         }
 
         fn pseudorandom_rrs_pointers(rng: &mut TestRng) -> [BFieldElement; N] {
+            const ESTIMATED_MAX_NUMBER_OF_REMOVAL_RECORDS: u64 = 20;
+            const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORD: u64 = 10_000;
+            const ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST: u64 =
+                ESTIMATED_MAX_NUMBER_OF_REMOVAL_RECORDS * ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORD;
             let mut rrs_ptrs = [BFieldElement::ZERO; N];
             let mut previous_ptr = BFieldElement::ZERO;
             for ptr in &mut rrs_ptrs {
-                *ptr = previous_ptr + bfe!(rng.gen_range(1..(1 << 26)));
+                *ptr = previous_ptr
+                    + bfe!(rng.gen_range(ESTIMATED_MAX_SIZE_OF_REMOVAL_RECORDS_LIST..(1 << 26)));
                 previous_ptr = *ptr;
             }
+
             rrs_ptrs
         }
     }
