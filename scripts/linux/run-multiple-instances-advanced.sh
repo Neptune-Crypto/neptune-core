@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Run eight instances where instance 0 and instance 2 are mining but the rest are not. The nodes are connected like this:
+# Run eight instances where instance 2 is mining but the rest are not. The nodes are connected like this:
 # (0)--(1)-- (2)--(3)
 #   \    |   /    |
 #    \   |  /     |
@@ -14,7 +14,7 @@
 #        |
 #        7
 #
-# So whenever a block is found by 0 or by 2, it should be propagated to all participants.
+# So whenever a block is found by 2, it should be propagated to all participants.
 
 if ! command -v cpulimit &> /dev/null
 then
@@ -28,7 +28,11 @@ set -e # Exit on first error.
 
 export RUST_LOG=debug;
 
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --mine 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g' &
+# Build before spinning up multiple instances, as you'll otherwise get multiple processes trying
+# to build at the same time.
+cargo build
+
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790  2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g' &
 pid[0]=$!
 sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 18 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g' &
