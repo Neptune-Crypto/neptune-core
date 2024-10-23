@@ -1385,11 +1385,19 @@ mod tests {
                 mut main_to_peer_rx,
             } = test_setup;
 
+            // Force instance to create SingleProofs, otherwise CI and other
+            // weak machines fail.
             let mocked_cli = cli_args::Args {
                 tx_proving_capability: Some(TxProvingCapability::SingleProof),
                 tx_proof_upgrade_interval: 100, // seconds
                 ..Default::default()
             };
+            main_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .tx_proving_capability = TxProvingCapability::SingleProof;
 
             main_loop_handler
                 .global_state_lock
