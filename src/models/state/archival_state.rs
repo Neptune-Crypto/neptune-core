@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
@@ -20,6 +21,7 @@ use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::database::BlockFileLocation;
 use crate::models::database::BlockIndexKey;
@@ -29,6 +31,7 @@ use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -707,6 +710,60 @@ impl ArchivalState {
         ret
     }
 
+    /// Returns Some(MutatorSetUpdate) if a path could be found from tip to a
+    /// block with the indicated mutator set.
+    ///
+    /// # Warning
+    ///
+    /// This can be a very expensive function to run if it's called with a high
+    /// max search depth, as it loads all the blocks in the search path into
+    /// memory. A max search depth of 0 means that only the tip is checked.
+    pub(crate) async fn get_mutator_set_update_to_tip(
+        &self,
+        mutator_set: &MutatorSetAccumulator,
+        max_search_depth: usize,
+    ) -> Option<MutatorSetUpdate> {
+        let mut search_depth = 0;
+        let mut addition_records = vec![];
+        let mut removal_records = vec![];
+
+        let mut haystack = self.get_tip().await;
+        loop {
+            if haystack.body().mutator_set_accumulator.hash() == mutator_set.hash() {
+                break;
+            }
+
+            search_depth += 1;
+
+            // Notice that comparing the whole mutator set accumulator and not
+            // just its hash allows us to do early return here. Haystack == None
+            // indicates that we've gone all the way back to genesis, with no
+            // match.
+            if mutator_set.aocl.num_leafs()
+                > haystack.body().mutator_set_accumulator.aocl.num_leafs()
+                || search_depth > max_search_depth
+            {
+                return None;
+            }
+
+            addition_records.push(haystack.body().transaction_kernel.outputs.clone());
+            removal_records.push(haystack.body().transaction_kernel.inputs.clone());
+
+            haystack = self
+                .get_block(haystack.header().prev_block_digest)
+                .await
+                .expect("Must succeed in reading block")?;
+        }
+
+        addition_records.reverse();
+        removal_records.reverse();
+
+        Some(MutatorSetUpdate::new(
+            removal_records.concat(),
+            addition_records.concat(),
+        ))
+    }
+
     /// Update the mutator set with a block after this block has been stored to the database.
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
@@ -893,6 +950,7 @@ mod archival_state_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
+    use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_archival_state;
@@ -1296,6 +1354,14 @@ mod archival_state_tests {
 
             previous_block = next_block;
         }
+
+        // Verify that MS-update finder works for this many blocks.
+        positive_prop_ms_update_to_tip(
+            &genesis_block.body().mutator_set_accumulator,
+            state_lock.lock_guard().await.chain.archival_state(),
+            10,
+        )
+        .await;
 
         {
             // 3. Create competing block 1 and treat it as new tip
@@ -1754,6 +1820,21 @@ mod archival_state_tests {
                 state.chain.archival_state().get_tip_parent().await.unwrap()
             );
         }
+
+        // Test that the MS-update to tip functions works for blocks with inputs
+        // and outputs.
+        positive_prop_ms_update_to_tip(
+            &genesis_block.body().mutator_set_accumulator,
+            genesis.lock_guard().await.chain.archival_state(),
+            2,
+        )
+        .await;
+        positive_prop_ms_update_to_tip(
+            &block_1.body().mutator_set_accumulator,
+            genesis.lock_guard().await.chain.archival_state(),
+            2,
+        )
+        .await;
     }
 
     #[traced_test]
@@ -1916,6 +1997,209 @@ mod archival_state_tests {
         }
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn ms_update_to_tip_genesis() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network).await;
+        let current_msa = archival_state
+            .archival_mutator_set
+            .ams()
+            .accumulator()
+            .await;
+
+        for i in 0..10 {
+            assert!(archival_state
+                .get_mutator_set_update_to_tip(&current_msa, i)
+                .await
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    /// Verify that `get_mutator_set_update_to_tip` returns Some(ms_update), and
+    /// that the returned MS update produces the current MSA tip.
+    async fn positive_prop_ms_update_to_tip(
+        past_msa: &MutatorSetAccumulator,
+        archival_state: &ArchivalState,
+        search_depth: usize,
+    ) {
+        let tip_msa = archival_state
+            .archival_mutator_set
+            .ams()
+            .accumulator()
+            .await;
+        let mut new_msa = past_msa.to_owned();
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(&new_msa, search_depth)
+            .await
+            .unwrap()
+            .apply_to_accumulator(&mut new_msa)
+            .is_ok());
+        assert_eq!(tip_msa, new_msa);
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn ms_update_to_tip_five_blocks() {
+        let network = Network::Main;
+        let wallet = WalletSecret::new_random();
+        let mut rng = thread_rng();
+        let mut archival_state = make_test_archival_state(network).await;
+        let mut current_block = Block::genesis_block(network);
+        let genesis_msa = current_block.body().mutator_set_accumulator.clone();
+        let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
+        for _block_height in 1..=5 {
+            let next_block = make_mock_block(&current_block, None, cb_beneficiary, rng.gen()).0;
+            add_block_to_archival_state(&mut archival_state, next_block.clone())
+                .await
+                .unwrap();
+            current_block = next_block;
+        }
+
+        let current_msa = current_block.body().mutator_set_accumulator.clone();
+        for search_depth in 0..10 {
+            println!("{search_depth}");
+            if search_depth < 5 {
+                assert!(archival_state
+                    .get_mutator_set_update_to_tip(&genesis_msa, search_depth)
+                    .await
+                    .is_none());
+            } else {
+                positive_prop_ms_update_to_tip(&genesis_msa, &archival_state, search_depth).await;
+            }
+        }
+
+        // Walking the opposite way returns None, and does not crash.
+        let genesis_archival_state = make_test_archival_state(network).await;
+        for i in 0..10 {
+            assert!(genesis_archival_state
+                .get_mutator_set_update_to_tip(&current_msa, i)
+                .await
+                .is_none());
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn ms_update_to_tip_fork_depth_1() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let wallet = WalletSecret::new_random();
+        let mut archival_state = make_test_archival_state(network).await;
+        let genesis_block = Block::genesis_block(network);
+        let genesis_msa = &genesis_block.body().mutator_set_accumulator;
+        let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
+
+        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
+        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
+        let block_1a_msa = &block_1a.body().mutator_set_accumulator;
+        let block_1b_msa = &block_1b.body().mutator_set_accumulator;
+
+        // 1a is tip
+        let search_depth = 1;
+        add_block_to_archival_state(&mut archival_state, block_1a.clone())
+            .await
+            .unwrap();
+        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1a_msa, &archival_state, search_depth).await;
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_1b_msa, 1)
+            .await
+            .is_none());
+
+        // 1b is tip
+        add_block_to_archival_state(&mut archival_state, block_1b.clone())
+            .await
+            .unwrap();
+        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_1a_msa, 1)
+            .await
+            .is_none());
+        positive_prop_ms_update_to_tip(block_1b_msa, &archival_state, search_depth).await;
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn ms_update_to_tip_fork_depth_2() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let wallet = WalletSecret::new_random();
+        let mut archival_state = make_test_archival_state(network).await;
+        let genesis_block = Block::genesis_block(network);
+        let genesis_msa = &genesis_block.body().mutator_set_accumulator;
+        let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
+
+        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
+        let block_2a = make_mock_block(&block_1a, None, cb_beneficiary, rng.gen()).0;
+        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
+        let block_2b = make_mock_block(&block_1b, None, cb_beneficiary, rng.gen()).0;
+        let block_1a_msa = &block_1a.body().mutator_set_accumulator;
+        let block_2a_msa = &block_2a.body().mutator_set_accumulator;
+        let block_1b_msa = &block_1b.body().mutator_set_accumulator;
+        let block_2b_msa = &block_2b.body().mutator_set_accumulator;
+
+        // 1a is tip
+        let search_depth = 10;
+        add_block_to_archival_state(&mut archival_state, block_1a.clone())
+            .await
+            .unwrap();
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+            .await
+            .is_none());
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+            .await
+            .is_none());
+
+        // 1b is tip
+        add_block_to_archival_state(&mut archival_state, block_1b.clone())
+            .await
+            .unwrap();
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+            .await
+            .is_none());
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+            .await
+            .is_none());
+
+        // 2a is tip
+        add_block_to_archival_state(&mut archival_state, block_2a.clone())
+            .await
+            .unwrap();
+        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1a_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_2a_msa, &archival_state, search_depth).await;
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_1b_msa, search_depth)
+            .await
+            .is_none());
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+            .await
+            .is_none());
+
+        // 2b is tip
+        add_block_to_archival_state(&mut archival_state, block_2b.clone())
+            .await
+            .unwrap();
+        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1b_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_2b_msa, &archival_state, search_depth).await;
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_1a_msa, search_depth)
+            .await
+            .is_none());
+        assert!(archival_state
+            .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+            .await
+            .is_none());
     }
 
     #[traced_test]
