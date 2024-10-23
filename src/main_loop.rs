@@ -69,6 +69,9 @@ pub struct MainLoopHandler {
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_miner_tx: watch::Sender<MainToMiner>,
+
+    #[cfg(test)]
+    mock_now: Option<SystemTime>,
 }
 
 /// The mutable part of the main loop function
@@ -104,8 +107,13 @@ impl SyncState {
         }
     }
 
-    fn record_request(&mut self, requested_block_height: BlockHeight, peer: SocketAddr) {
-        self.last_sync_request = Some((SystemTime::now(), requested_block_height, peer));
+    fn record_request(
+        &mut self,
+        requested_block_height: BlockHeight,
+        peer: SocketAddr,
+        now: SystemTime,
+    ) {
+        self.last_sync_request = Some((now, requested_block_height, peer));
     }
 
     /// Return a list of peers that have reported to be in possession of blocks with a PoW family
@@ -127,6 +135,7 @@ impl SyncState {
     fn get_status_of_last_request(
         &self,
         current_block_height: BlockHeight,
+        now: SystemTime,
     ) -> (Option<SocketAddr>, bool) {
         // A peer is sanctioned if no answer has been received after N times the sync request
         // interval.
@@ -143,7 +152,7 @@ impl SyncState {
                     + Duration::from_secs(
                         SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS,
                     )
-                    < SystemTime::now()
+                    < now
                 {
                     // The last sync request was not answered, sanction peer
                     // and make a new sync request.
@@ -167,9 +176,9 @@ struct PotentialPeerInfo {
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8) -> Self {
+    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8, now: SystemTime) -> Self {
         Self {
-            _reported: SystemTime::now(),
+            _reported: now,
             _reported_by: reported_by,
             instance_id,
             distance,
@@ -195,6 +204,7 @@ impl PotentialPeersState {
         potential_peer: (SocketAddr, u128),
         max_peers: usize,
         distance: u8,
+        now: SystemTime,
     ) {
         let potential_peer_socket_address = potential_peer.0;
         let potential_peer_instance_id = potential_peer.1;
@@ -223,7 +233,7 @@ impl PotentialPeersState {
         }
 
         let insert_value =
-            PotentialPeerInfo::new(reported_by, potential_peer_instance_id, distance);
+            PotentialPeerInfo::new(reported_by, potential_peer_instance_id, distance, now);
         self.potential_peers
             .insert(potential_peer_socket_address, insert_value);
     }
@@ -317,6 +327,26 @@ impl MainLoopHandler {
             main_to_miner_tx,
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
+            #[cfg(test)]
+            mock_now: None,
+        }
+    }
+
+    /// Allows for mocked timestamps such that time dependencies may be tested.
+    #[cfg(test)]
+    fn with_mocked_time(mut self, mocked_time: SystemTime) -> Self {
+        self.mock_now = Some(mocked_time);
+        self
+    }
+
+    fn now(&self) -> SystemTime {
+        #[cfg(not(test))]
+        {
+            SystemTime::now()
+        }
+        #[cfg(test)]
+        {
+            self.mock_now.unwrap_or(SystemTime::now())
         }
     }
 
@@ -533,6 +563,7 @@ impl MainLoopHandler {
                         pot_peer,
                         max_peers as usize,
                         distance,
+                        self.now(),
                     );
                 }
             }
@@ -767,7 +798,7 @@ impl MainLoopHandler {
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block_height);
+            .get_status_of_last_request(current_block_height, self.now());
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -825,7 +856,7 @@ impl MainLoopHandler {
         let requested_block_height = current_block_height.next();
         main_loop_state
             .sync_state
-            .record_request(requested_block_height, *chosen_peer);
+            .record_request(requested_block_height, *chosen_peer, self.now());
 
         Ok(())
     }
@@ -859,14 +890,16 @@ impl MainLoopHandler {
                     .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
         }
 
+        trace!("Running proof upgrader scheduled task");
+
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
         let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
-
         let upgrade_candidate = {
             let global_state = self.global_state_lock.lock_guard().await;
-            let now = SystemTime::now();
+            let now = self.now();
             if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
+                trace!("Not attempting upgrade.");
                 return Ok(());
             }
 
@@ -1293,119 +1326,290 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    #[traced_test]
-    async fn no_warning_on_peer_exceeding_limit_if_connections_are_outgoing() {
-        let num_init_peers_outgoing = 2;
-        let test_setup = setup(num_init_peers_outgoing).await;
-        let TestSetup {
-            peer_to_main_rx,
-            miner_to_main_rx,
-            rpc_server_to_main_rx,
-            task_join_handles,
-            mut main_loop_handler,
-            main_to_peer_rx,
-        } = test_setup;
+    mod proof_upgrader {
+        use super::*;
+        use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
+        use crate::models::blockchain::transaction::Transaction;
+        use crate::models::blockchain::transaction::TransactionProof;
+        use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+        use crate::models::peer::transfer_transaction::TransactionProofQuality;
+        use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+        use crate::models::proof_abstractions::timestamp::Timestamp;
 
-        // Set CLI to ban incoming connections and all outgoing peer-discovery-
-        // initiated connections.
-        let mocked_cli = cli_args::Args {
-            max_peers: 0,
-            ..Default::default()
-        };
-        main_loop_handler
-            .global_state_lock
-            .set_cli(mocked_cli)
+        async fn a_transaction(
+            global_state_lock: &GlobalStateLock,
+            tx_proof_type: TxProvingCapability,
+        ) -> Transaction {
+            let change_key = global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key_for_tests(0);
+            let fee = NeptuneCoins::new(1);
+            let in_seven_months = global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header()
+                .timestamp
+                + Timestamp::months(7);
+
+            let global_state = global_state_lock.lock_guard().await;
+            global_state
+                .create_transaction_with_prover_capability(
+                    vec![].into(),
+                    change_key.into(),
+                    UtxoNotificationMedium::OffChain,
+                    fee,
+                    in_seven_months,
+                    tx_proof_type,
+                    &TritonProverSync::dummy(),
+                )
+                .await
+                .unwrap()
+                .0
+        }
+
+        #[tokio::test]
+        #[traced_test]
+        async fn upgrade_proof_collection_to_single_proof() {
+            let test_setup = setup(0).await;
+            let TestSetup {
+                peer_to_main_rx,
+                miner_to_main_rx,
+                rpc_server_to_main_rx,
+                task_join_handles,
+                mut main_loop_handler,
+                mut main_to_peer_rx,
+            } = test_setup;
+
+            let mocked_cli = cli_args::Args {
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                tx_proof_upgrade_interval: 100, // seconds
+                ..Default::default()
+            };
+
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
+            let mut main_loop_handler = main_loop_handler.with_mocked_time(SystemTime::now());
+            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+            assert!(
+                main_loop_handler
+                    .proof_upgrader(&mut mutable_main_loop_state)
+                    .await
+                    .is_ok(),
+                "Scheduled task returns OK when run on empty mempool"
+            );
+
+            let proof_collection_tx = a_transaction(
+                &main_loop_handler.global_state_lock,
+                TxProvingCapability::ProofCollection,
+            )
             .await;
 
-        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            main_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool
+                .insert(&proof_collection_tx);
 
-        main_loop_handler
-            .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
-            .await
-            .unwrap();
+            assert!(
+                main_loop_handler
+                    .proof_upgrader(&mut mutable_main_loop_state)
+                    .await
+                    .is_ok(),
+                "Scheduled task returns OK when it's not yet time to upgrade"
+            );
 
-        logs_assert(|lines: &[&str]| {
-            if lines.iter().any(|line| line.contains("WARN"))
-                || lines.iter().any(|line| line.contains("Max peer"))
-            {
-                Err(format!(
+            assert!(
+                matches!(
+                    main_loop_handler
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .mempool
+                        .get(proof_collection_tx.kernel.txid())
+                        .unwrap()
+                        .proof,
+                    TransactionProof::ProofCollection(_)
+                ),
+                "Proof in mempool must still be of type proof collection"
+            );
+
+            // Mock that enough time has passed to perform the upgrade. Then
+            // perform the upgrade.
+            let mut main_loop_handler =
+                main_loop_handler.with_mocked_time(SystemTime::now() + Duration::from_secs(300));
+            assert!(
+                main_loop_handler
+                    .proof_upgrader(&mut mutable_main_loop_state)
+                    .await
+                    .is_ok(),
+                "Scheduled task must return OK when it's time to upgrade"
+            );
+
+            // Wait for upgrade task to finish.
+            let handle = mutable_main_loop_state.proof_upgrader_task.unwrap().await;
+            assert!(
+                handle.is_ok(),
+                "Proof-upgrade task must finish successfully."
+            );
+
+            assert!(
+                matches!(
+                    main_loop_handler
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .mempool
+                        .get(proof_collection_tx.kernel.txid())
+                        .unwrap()
+                        .proof,
+                    TransactionProof::SingleProof(_)
+                ),
+                "Proof in mempool must now be of type single proof"
+            );
+
+            match main_to_peer_rx.recv().await {
+                Ok(MainToPeerTask::TransactionNotification(tx_noti)) => {
+                    assert_eq!(proof_collection_tx.kernel.txid(), tx_noti.txid);
+                    assert_eq!(TransactionProofQuality::SingleProof, tx_noti.proof_quality);
+                },
+                other => panic!("Must have sent transaction notification to peer loop after successful proof upgrade. Got:\n{other:?}"),
+            }
+
+            // These values are kept alive as the transmission-counterpart will
+            // otherwise fail on `send`.
+            drop(peer_to_main_rx);
+            drop(miner_to_main_rx);
+            drop(rpc_server_to_main_rx);
+            drop(main_to_peer_rx);
+        }
+    }
+
+    mod peer_discovery {
+        use super::*;
+
+        #[tokio::test]
+        #[traced_test]
+        async fn no_warning_on_peer_exceeding_limit_if_connections_are_outgoing() {
+            let num_init_peers_outgoing = 2;
+            let test_setup = setup(num_init_peers_outgoing).await;
+            let TestSetup {
+                peer_to_main_rx,
+                miner_to_main_rx,
+                rpc_server_to_main_rx,
+                task_join_handles,
+                mut main_loop_handler,
+                main_to_peer_rx,
+            } = test_setup;
+
+            // Set CLI to ban incoming connections and all outgoing peer-discovery-
+            // initiated connections.
+            let mocked_cli = cli_args::Args {
+                max_peers: 0,
+                ..Default::default()
+            };
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
+
+            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+            main_loop_handler
+                .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+                .await
+                .unwrap();
+
+            logs_assert(|lines: &[&str]| {
+                if lines.iter().any(|line| line.contains("WARN"))
+                    || lines.iter().any(|line| line.contains("Max peer"))
+                {
+                    Err(format!(
                         "No warnings allowed in situation where incoming connections are banned. Got:\n{}",
                         lines.join("\n"),
                     ))
-            } else if lines
-                .iter()
-                .any(|line| line.contains("Performing peer discovery"))
-            {
-                Err("May not perform peer discovery when `max_peers` = 0.".to_owned())
-            } else {
-                Ok(())
-            }
-        });
+                } else if lines
+                    .iter()
+                    .any(|line| line.contains("Performing peer discovery"))
+                {
+                    Err("May not perform peer discovery when `max_peers` = 0.".to_owned())
+                } else {
+                    Ok(())
+                }
+            });
 
-        // These values are kept alive as the transmission-counterpart will
-        // otherwise fail on `send`.
-        drop(peer_to_main_rx);
-        drop(miner_to_main_rx);
-        drop(rpc_server_to_main_rx);
-        drop(main_to_peer_rx);
-    }
+            // These values are kept alive as the transmission-counterpart will
+            // otherwise fail on `send`.
+            drop(peer_to_main_rx);
+            drop(miner_to_main_rx);
+            drop(rpc_server_to_main_rx);
+            drop(main_to_peer_rx);
+        }
 
-    #[tokio::test]
-    #[traced_test]
-    async fn performs_peer_discovery_on_few_connections() {
-        let num_init_peers_outgoing = 2;
-        let test_setup = setup(num_init_peers_outgoing).await;
-        let TestSetup {
-            peer_to_main_rx,
-            miner_to_main_rx,
-            rpc_server_to_main_rx,
-            task_join_handles,
-            mut main_loop_handler,
-            mut main_to_peer_rx,
-        } = test_setup;
+        #[tokio::test]
+        #[traced_test]
+        async fn performs_peer_discovery_on_few_connections() {
+            let num_init_peers_outgoing = 2;
+            let test_setup = setup(num_init_peers_outgoing).await;
+            let TestSetup {
+                peer_to_main_rx,
+                miner_to_main_rx,
+                rpc_server_to_main_rx,
+                task_join_handles,
+                mut main_loop_handler,
+                mut main_to_peer_rx,
+            } = test_setup;
 
-        // Set CLI to attempt to make more connections
-        let mocked_cli = cli_args::Args {
-            max_peers: 10,
-            ..Default::default()
-        };
-        main_loop_handler
-            .global_state_lock
-            .set_cli(mocked_cli)
-            .await;
+            // Set CLI to attempt to make more connections
+            let mocked_cli = cli_args::Args {
+                max_peers: 10,
+                ..Default::default()
+            };
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
 
-        let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
 
-        main_loop_handler
-            .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
-            .await
-            .unwrap();
+            main_loop_handler
+                .peer_discovery_and_reconnector(&mut mutable_main_loop_state)
+                .await
+                .unwrap();
 
-        logs_assert(|lines: &[&str]| {
-            if lines
-                .iter()
-                .any(|line| line.contains("Performing peer discovery"))
-            {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Must log that peer discovery is being performed. Got logs:\n{}",
-                    lines.join("\n"),
-                ))
-            }
-        });
+            logs_assert(|lines: &[&str]| {
+                if lines
+                    .iter()
+                    .any(|line| line.contains("Performing peer discovery"))
+                {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Must log that peer discovery is being performed. Got logs:\n{}",
+                        lines.join("\n"),
+                    ))
+                }
+            });
 
-        assert!(
-            main_to_peer_rx.try_recv().is_ok(),
-            "Peer channel must have received message as part of peer discovery process"
-        );
+            assert!(
+                main_to_peer_rx.try_recv().is_ok(),
+                "Peer channel must have received message as part of peer discovery process"
+            );
 
-        // These values are kept alive as the transmission-counterpart will
-        // otherwise fail on `send`.
-        drop(peer_to_main_rx);
-        drop(miner_to_main_rx);
-        drop(rpc_server_to_main_rx);
-        drop(main_to_peer_rx);
+            // These values are kept alive as the transmission-counterpart will
+            // otherwise fail on `send`.
+            drop(peer_to_main_rx);
+            drop(miner_to_main_rx);
+            drop(rpc_server_to_main_rx);
+            drop(main_to_peer_rx);
+        }
     }
 }
