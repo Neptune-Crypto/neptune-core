@@ -754,7 +754,6 @@ mod wallet_tests {
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
         {
-            let alice_proving_lock = alice.proving_lock.clone();
             let mut alice = alice.lock_guard_mut().await;
             for _ in 0..21 {
                 let previous_block = next_block;
@@ -946,7 +945,6 @@ mod wallet_tests {
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
-        let alice_proving_lock = alice.proving_lock.clone();
         let expected_utxos_alice = alice
             .lock_guard()
             .await

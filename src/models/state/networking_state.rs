@@ -45,9 +45,9 @@ pub struct NetworkingState {
     pub tx_proving_capability: TxProvingCapability,
 
     /// Timestamp for when the last tx-proof upgrade was attempted. Does not
-    /// record latest successful attempt, merely latest attempt. This is to
+    /// record latest successful upgrade, merely latest attempt. This is to
     /// prevent excessive runs of the proof-upgrade functionality.
-    pub last_tx_proof_upgrade: std::time::SystemTime,
+    pub last_tx_proof_upgrade_attempt: std::time::SystemTime,
 }
 
 impl NetworkingState {
@@ -69,7 +69,7 @@ impl NetworkingState {
 
             // Initialize to now to prevent tx proof upgrade to run immediately
             // after startup of the client.
-            last_tx_proof_upgrade: SystemTime::now(),
+            last_tx_proof_upgrade_attempt: SystemTime::now(),
         }
     }
 

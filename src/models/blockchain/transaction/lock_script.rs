@@ -131,7 +131,7 @@ impl LockScriptAndWitness {
     }
 
     /// Assuming the lock script halts gracefully, prove it.
-    pub async fn prove(
+    pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
         sync_device: &TritonProverSync,

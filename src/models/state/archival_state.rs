@@ -1103,12 +1103,6 @@ mod archival_state_tests {
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await?;
 
-        let ams_ref = &alice
-            .lock_guard()
-            .await
-            .chain
-            .archival_state()
-            .archival_mutator_set;
         let swbf_active_sbf_len = alice
             .lock_guard()
             .await

@@ -680,7 +680,8 @@ impl GlobalState {
     ///         .await?;
     /// }
     /// ```
-    pub async fn create_transaction(
+    #[allow(dead_code)]
+    pub(crate) async fn create_transaction(
         &self,
         tx_outputs: TxOutputList,
         change_key: SpendingKey,
@@ -689,6 +690,9 @@ impl GlobalState {
         timestamp: Timestamp,
         sync_device: &TritonProverSync,
     ) -> Result<(Transaction, Option<TxOutput>)> {
+        // TODO: function not used because all callers got through its
+        // equivalent method `create_transaction_with_prover_capability`,
+        // for testing purposes. Consider deleting or fixing this somehow.
         self.create_transaction_with_prover_capability(
             tx_outputs,
             change_key,
@@ -704,6 +708,7 @@ impl GlobalState {
     /// Variant of [Self::create_transaction] that allows caller to specify
     /// prover capability. [Self::create_transaction] is the preferred interface
     /// for anything but tests.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_transaction_with_prover_capability(
         &self,
         mut tx_outputs: TxOutputList,
@@ -714,6 +719,8 @@ impl GlobalState {
         prover_capability: TxProvingCapability,
         sync_device: &TritonProverSync,
     ) -> Result<(Transaction, Option<TxOutput>)> {
+        // TODO: Attempt to simplify method interface somehow, maybe by moving
+        // it to GlobalStateLock?
         let tip = self.chain.light_state();
         let tip_mutator_set_accumulator = tip.kernel.body.mutator_set_accumulator.clone();
         let tip_digest = tip.hash();

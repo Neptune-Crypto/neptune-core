@@ -24,12 +24,12 @@ pub enum ConsensusError {
 /// Holds a lock ensuring that maximum one instance of the Triton VM STARK
 /// prover is running at a time, and the policy of what to do if an instance is
 /// already waiting: Wait or return an error.
-pub(crate) struct TritonProverSync {
+pub struct TritonProverSync {
     wait_if_busy: bool,
     proving_lock: ProvingLock,
 }
 
-impl<'a> TritonProverSync {
+impl TritonProverSync {
     /// Block execution until prover is free.
     pub(crate) fn wait_if_busy(lock: ProvingLock) -> Self {
         Self {
@@ -161,7 +161,7 @@ where
 /// implement trait [`ConsensusProgram`].
 ///
 /// Holds a mutex lock to ensure no two tasks run the prover simultaneously.
-pub async fn prove_consensus_program(
+pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,

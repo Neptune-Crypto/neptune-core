@@ -16,7 +16,6 @@ use tracing::info;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
-use crate::locks::tokio::AtomicMutex;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -136,7 +135,7 @@ impl ProofCollection {
             || all_type_scripts_halt
     }
 
-    pub async fn produce(
+    pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
         sync_device: &TritonProverSync,
     ) -> Result<Self, TryLockError> {

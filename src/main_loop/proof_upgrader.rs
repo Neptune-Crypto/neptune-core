@@ -38,8 +38,12 @@ pub(super) enum UpgradeDecision {
 }
 
 impl UpgradeDecision {
-    /// Retrun a list of the transaction IDs that will have their proofs
+    /// Return a list of the transaction IDs that will have their proofs
     /// upgraded with this decision.
+    ///
+    /// Will return a list of length one in case of a
+    /// ProofCollection -> SingleProof upgrade and a list of length two in case
+    /// of a (SingleProof, SingleProof) -> SingleProof merge upgrade.
     pub(super) fn affected_txids(&self) -> Vec<TransactionKernelId> {
         match self {
             UpgradeDecision::ProduceSingleProof { kernel, proof: _ } => vec![kernel.txid()],
@@ -53,20 +57,22 @@ impl UpgradeDecision {
         }
     }
 
+    /// Upgrade transaction proofs, inserts upgraded tx into the mempool and
+    /// informs peers of this new transaction.
     pub(super) async fn handle_upgrade(
         self,
         priority: TritonProverSync,
         mut global_state_lock: GlobalStateLock,
-        mut main_to_peer_channel: crate::broadcast::Sender<MainToPeerTask>,
+        main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
     ) {
         // Record that we're attempting an upgrade.
         global_state_lock
             .lock_guard_mut()
             .await
             .net
-            .last_tx_proof_upgrade = SystemTime::now();
+            .last_tx_proof_upgrade_attempt = SystemTime::now();
 
-        let upgraded = match self.upgrade(priority, &global_state_lock).await {
+        let upgraded = match self.upgrade(priority).await {
             Ok(upgraded_tx) => {
                 info!(
                     "Successfully upgraded transaction {}",
@@ -111,11 +117,13 @@ impl UpgradeDecision {
         info!("Successfully handled proof upgrade.");
     }
 
-    pub(super) async fn upgrade(
-        self,
-        priority: TritonProverSync,
-        global_state_lock: &GlobalStateLock,
-    ) -> Result<Transaction, TryLockError> {
+    /// Perform the proof upgrade.
+    ///
+    /// Upgrades transactions to a proof of higher quality that is more likely
+    /// to be picked up by a miner. Returns the upgraded proof, or an error if
+    /// the prover is already in use and the priority is set to not wait if
+    /// prover is busy.
+    async fn upgrade(self, priority: TritonProverSync) -> Result<Transaction, TryLockError> {
         match self {
             UpgradeDecision::ProduceSingleProof { kernel, proof } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());

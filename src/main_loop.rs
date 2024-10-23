@@ -839,10 +839,7 @@ impl MainLoopHandler {
     /// All proving takes place in a spawned task such that it doesn't block
     /// the main loop. The MutableMainLoopState gets the JoinHandle of the
     /// spawned upgrade task such that its status can be expected.
-    pub(crate) async fn proof_upgrader(
-        &mut self,
-        main_loop_state: &mut MutableMainLoopState,
-    ) -> Result<()> {
+    async fn proof_upgrader(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         fn attempt_upgrade(
             global_state_lock: &GlobalState,
             now: SystemTime,
@@ -850,7 +847,7 @@ impl MainLoopHandler {
             main_loop_state: &MutableMainLoopState,
         ) -> Result<bool> {
             let duration_since_last_upgrade =
-                now.duration_since(global_state_lock.net.last_tx_proof_upgrade)?;
+                now.duration_since(global_state_lock.net.last_tx_proof_upgrade_attempt)?;
             let previous_upgrade_task_is_still_running = main_loop_state
                 .proof_upgrader_task
                 .as_ref()
@@ -884,16 +881,15 @@ impl MainLoopHandler {
             upgrade_candidate
         };
 
-        let affected_txids = upgrade_candidate.affected_txids();
         info!(
             "Attempting to upgrade transaction proofs of: {}",
-            affected_txids.iter().join("; ")
+            upgrade_candidate.affected_txids().iter().join("; ")
         );
 
-        // Perform the upgrade (expensive), if we're not using the prover
-        // for anything else, like mining, or proving our own transaction.
-        // But spawn a task to do this since we don't want to block the main
-        // loop with this work.
+        // Perform the upgrade, if we're not using the prover for anything else,
+        // like mining, or proving our own transaction. Running the prover takes
+        // a long time (minutes), so we spawn a task for this such that we do
+        // not block the main loop.
         let skip_if_busy = self.global_state_lock.skip_if_busy();
 
         let global_state_lock_clone = self.global_state_lock.clone();

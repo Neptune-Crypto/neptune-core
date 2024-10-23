@@ -479,7 +479,7 @@ impl Mempool {
         // But kick out those transactions that we were unable to update.
         // TODO: Always upgrade *own* transaction proofs. So on
         // `TritonProverSync` value if tx is own.
-        let skip_if_prover_is_busy = &TritonProverSync::skip_if_busy(prover_lock.to_owned());
+        let skip_if_prover_is_busy = TritonProverSync::skip_if_busy(prover_lock.to_owned());
         let mut kick_outs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if let Ok(new_tx) = tx
