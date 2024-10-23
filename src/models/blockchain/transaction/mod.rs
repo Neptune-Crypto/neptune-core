@@ -302,47 +302,43 @@ impl Transaction {
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
     ///  4. Use resulting proof as new witness.
-    async fn new_with_updated_mutator_set_records_given_proof(
+    pub(crate) async fn new_with_updated_mutator_set_records_given_proof(
         old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        block: &Block,
+        mutator_set_update: MutatorSetUpdate,
+        new_mutator_set: MutatorSetAccumulator,
         old_single_proof: Proof,
         sync_device: &TritonProverSync,
     ) -> Result<Transaction, TryLockError> {
-        let block_addition_records = block.kernel.body.transaction_kernel.outputs.clone();
-        let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
-        let mutator_set_update =
-            MutatorSetUpdate::new(block_removal_records, block_addition_records.clone());
-
         // apply mutator set update to get new mutator set accumulator
-        let mut new_mutator_set_accumulator = previous_mutator_set_accumulator.clone();
+        let addition_records = mutator_set_update.additions.clone();
+        let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
         let mut new_inputs = old_transaction_kernel.inputs.clone();
         mutator_set_update
             .apply_to_accumulator_and_records(
-                &mut new_mutator_set_accumulator,
+                &mut calculated_new_mutator_set,
                 &mut new_inputs.iter_mut().collect_vec(),
             )
             .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
+
+        // Sanity check of input validity
+        assert_eq!(
+            new_mutator_set, calculated_new_mutator_set,
+            "Internal MSA state must match that which was expected, from block"
+        );
+
         let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
             &previous_mutator_set_accumulator.aocl,
-            &block_addition_records
+            &addition_records
                 .iter()
                 .map(|addition_record| addition_record.canonical_commitment)
                 .collect_vec(),
         );
 
-        // Sanity check of block validity
-        let msa_hash = new_mutator_set_accumulator.hash();
-        assert_eq!(
-            block.kernel.body.mutator_set_accumulator.hash(),
-            msa_hash,
-            "Internal MSA state must match that from block"
-        );
-
         // compute new kernel
         let mut new_kernel = old_transaction_kernel.clone();
         new_kernel.inputs = new_inputs;
-        new_kernel.mutator_set_hash = msa_hash;
+        new_kernel.mutator_set_hash = calculated_new_mutator_set.hash();
 
         // compute updated proof through recursion
         let update_witness = UpdateWitness::from_old_transaction(
@@ -350,7 +346,7 @@ impl Transaction {
             old_single_proof.clone(),
             previous_mutator_set_accumulator.clone(),
             new_kernel.clone(),
-            block.kernel.body.mutator_set_accumulator.clone(),
+            calculated_new_mutator_set,
             aocl_successor_proof,
         );
         let update_claim = update_witness.claim();
@@ -397,10 +393,15 @@ impl Transaction {
                 ),
             ),
             TransactionProof::SingleProof(proof) => {
+                let block_body = block.body();
+                let new_msa = block_body.mutator_set_accumulator.clone();
+                let tx_kernel = block_body.transaction_kernel.clone();
+                let ms_update = MutatorSetUpdate::new(tx_kernel.inputs, tx_kernel.outputs);
                 Self::new_with_updated_mutator_set_records_given_proof(
                     self.kernel,
                     previous_mutator_set_accumulator,
-                    block,
+                    ms_update,
+                    new_msa,
                     proof,
                     sync_device,
                 )
@@ -596,6 +597,42 @@ mod transaction_tests {
         let encoded = empty_tx.encode();
         let decoded = *Transaction::decode(&encoded).unwrap();
         assert_eq!(empty_tx, decoded);
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn update_single_proof_works() {
+        let mut test_runner = TestRunner::deterministic();
+        let [to_be_updated, mined] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(4, 4, 4), (3, 3, 3)])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+
+        let as_single_proof = SingleProof::produce(&to_be_updated, &TritonProverSync::dummy())
+            .await
+            .unwrap();
+        let original_tx = Transaction {
+            kernel: to_be_updated.kernel,
+            proof: TransactionProof::SingleProof(as_single_proof),
+        };
+        assert!(original_tx.is_valid().await);
+
+        let block = mock_block_from_transaction_and_msa(
+            mined.kernel,
+            mined.mutator_set_accumulator,
+            Network::Main,
+        );
+        let updated_tx = original_tx
+            .new_with_updated_mutator_set_records(
+                &to_be_updated.mutator_set_accumulator,
+                &block,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+
+        assert!(updated_tx.is_valid().await)
     }
 
     #[traced_test]
