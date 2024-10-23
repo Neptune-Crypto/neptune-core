@@ -251,18 +251,26 @@ pub(crate) async fn make_coinbase_transaction(
     //     we actually win the mining lottery.
     //  3. also this way we do not have to modify global/wallet state.
 
-    let global_state = global_state_lock.lock_guard().await;
-    let coinbase_recipient_spending_key = global_state
+    let coinbase_recipient_spending_key = global_state_lock
+        .lock_guard()
+        .await
         .wallet_state
         .wallet_secret
         .nth_generation_spending_key(0);
     let receiving_address = coinbase_recipient_spending_key.to_address();
-    let latest_block = global_state.chain.light_state();
+    let latest_block = global_state_lock
+        .lock_guard()
+        .await
+        .chain
+        .light_state()
+        .clone();
     let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
-    let sender_randomness: Digest = global_state
+    let sender_randomness: Digest = global_state_lock
+        .lock_guard()
+        .await
         .wallet_state
         .wallet_secret
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
@@ -292,6 +300,8 @@ pub(crate) async fn make_coinbase_transaction(
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
 
+    // It's important to not hold any locks (not even read-locks), as
+    // that prevents peers from connecting to this node.
     info!("Start: generate single proof for coinbase transaction");
     let wait_if_busy = global_state_lock.wait_if_busy();
     let transaction = GlobalState::create_raw_transaction(
@@ -385,8 +395,8 @@ pub async fn mine(
     let mut pause_mine = false;
     loop {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-        let miner_task: Option<JoinHandle<()>> = if global_state_lock.lock(|s| s.net.syncing).await
-        {
+        let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
+        let miner_task: Option<JoinHandle<()>> = if is_syncing {
             info!("Not mining because we are syncing");
             global_state_lock.set_mining(false).await;
             None
@@ -397,6 +407,9 @@ pub async fn mine(
         } else {
             // Build the block template and spawn the worker task to mine on it
             let now = Timestamp::now();
+
+            // TODO: Spawn a task for generating this transaction, such that it
+            // can be aborted on shutdown.
             let (transaction, coinbase_utxo_info) =
                 create_block_transaction(&latest_block, &global_state_lock, now).await?;
             let (block_header, block_body, block_proof) =
@@ -437,6 +450,7 @@ pub async fn mine(
 
                         if let Some(mt) = miner_task {
                             mt.abort();
+                            debug!("Abort-signal sent to mining worker.");
                         }
 
                         break;
@@ -455,6 +469,7 @@ pub async fn mine(
 
                         if let Some(mt) = miner_task {
                             mt.abort();
+                            debug!("Abort-signal sent to mining worker.");
                         }
                     }
                     MainToMiner::StartMining => {
