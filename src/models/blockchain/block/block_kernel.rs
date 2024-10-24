@@ -2,10 +2,10 @@ use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
-use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::block_appendix::BlockAppendix;
 use super::block_body::BlockBody;
 use super::block_header::BlockHeader;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
@@ -17,13 +17,13 @@ pub struct BlockKernel {
     pub header: BlockHeader,
     pub body: BlockBody,
 
-    pub(crate) appendix: Vec<Claim>,
+    pub(crate) appendix: BlockAppendix,
 }
 
 impl BlockKernel {
     pub(crate) fn new(header: BlockHeader, body: BlockBody) -> Self {
         // todo: populate appendix properly
-        let appendix = vec![];
+        let appendix = BlockAppendix::from(&body);
         Self {
             header,
             body,

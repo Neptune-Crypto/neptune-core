@@ -2,7 +2,6 @@ use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
-use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -19,7 +18,6 @@ pub enum BlockBodyField {
     MutatorSetAccumulator,
     LockFreeMmrAccumulator,
     BlockMmrAccumulator,
-    Claims,
 }
 
 impl HasDiscriminant for BlockBodyField {
