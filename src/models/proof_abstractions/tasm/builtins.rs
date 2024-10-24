@@ -153,6 +153,11 @@ pub fn tasmlib_io_write_to_stdout___u128(x: u128) {
 }
 
 #[allow(non_snake_case)]
+pub fn tasmlib_io_write_to_stdout___encoding<T: BFieldCodec>(t: T) {
+    PUB_OUTPUT.with(|v| v.borrow_mut().extend(t.encode()));
+}
+
+#[allow(non_snake_case)]
 pub fn tasmlib_io_read_secin___bfe() -> BFieldElement {
     #[allow(clippy::unwrap_used)]
     ND_INDIVIDUAL_TOKEN.with(|v| v.borrow_mut().pop_front().unwrap())
@@ -202,8 +207,9 @@ pub fn tasmlib_io_read_secin___digest() -> Digest {
     Digest::new([e0, e1, e2, e3, e4])
 }
 
-/// Verify a Merkle tree membership claim using the nondeterministically supplied digests
-/// as authentication path.
+/// Verify a Merkle tree membership claim using the nondeterministically
+/// supplied digests as authentication path. Crashes the VM if verification
+/// fails.
 pub fn tasmlib_hashing_merkle_verify(
     root: Digest,
     leaf_index: u32,
