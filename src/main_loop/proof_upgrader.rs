@@ -181,7 +181,7 @@ impl UpgradeJob {
             }
         };
 
-        let _new_update_job: UpdateMutatorSetDataJob = {
+        let new_update_job: UpdateMutatorSetDataJob = {
             let mut global_state = global_state_lock.lock_guard_mut().await;
             // Did we receive a new block while proving? If so, perform an
             // update also, if this was requested (and we have a single proof)
@@ -245,8 +245,10 @@ impl UpgradeJob {
             }
         };
 
+        let _new_update_job = UpgradeJob::UpdateMutatorSetData(new_update_job);
+
         warn!("We should perform an upgrade now. But that isn't implemented yet");
-        // TODO: Make recursive call here.
+        // TODO: Make recursive call here. Or use a proof queue.
     }
 
     /// Execute the proof upgrade.
