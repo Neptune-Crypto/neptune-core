@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use itertools::Itertools;
 use proof_upgrader::get_upgrade_task_from_mempool;
+use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
@@ -1196,17 +1197,50 @@ impl MainLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
+                // insert transaction into mempool
+                self.global_state_lock
+                    .lock_mut(|s| s.mempool.insert(&transaction))
+                    .await;
+
                 // Is this a transaction we can share with peers? If so, share
                 // it immediately.
                 if let Ok(notification) = transaction.as_ref().try_into() {
                     self.main_to_peer_broadcast_tx
                         .send(MainToPeerTask::TransactionNotification(notification))?;
-
-                    // insert transaction into mempool
-                    self.global_state_lock
-                        .lock_mut(|s| s.mempool.insert(&transaction))
-                        .await;
                 } else {
+                    // Otherwise upgrade its proof quality, and share it by
+                    // spinning up the proof upgrader.
+                    let TransactionProof::Witness(primitive_witness) = transaction.proof else {
+                        panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
+                    };
+
+                    let proving_capability = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .net
+                        .tx_proving_capability;
+                    let upgrade_job =
+                        UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
+
+                    // TODO: Replace this logic with a proof queue
+                    let wait_if_busy = self.global_state_lock.wait_if_busy();
+                    let global_state_lock_clone = self.global_state_lock.clone();
+                    let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
+                    let _proof_upgrader_task = tokio::task::Builder::new()
+                        .name("proof_upgrader")
+                        .spawn(async move {
+                        upgrade_job
+                            .handle_upgrade(
+                                wait_if_busy,
+                                true,
+                                global_state_lock_clone,
+                                main_to_peer_broadcast_tx_clone,
+                            )
+                            .await
+                    })?;
+
+                    // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
                     // If transaction could not be shared immediately because
                     // it contains secret data, upgrade its proof-type.
                 }

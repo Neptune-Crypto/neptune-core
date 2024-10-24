@@ -389,13 +389,14 @@ pub async fn mine(
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
-    const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 10;
+    const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
 
     let mut pause_mine = false;
     loop {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
+
         let miner_task: Option<JoinHandle<()>> = if is_syncing {
             info!("Not mining because we are syncing");
             global_state_lock.set_mining(false).await;

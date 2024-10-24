@@ -74,7 +74,7 @@ impl UpgradeJob {
     ///
     /// Since [PrimitiveWitness] contains secret data, this upgrade job can only
     /// be used for transactions that originate locally.
-    pub(super) async fn from_primitive_witness(
+    pub(super) fn from_primitive_witness(
         tx_proving_capability: TxProvingCapability,
         primitive_witness: PrimitiveWitness,
     ) -> UpgradeJob {
