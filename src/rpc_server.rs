@@ -37,6 +37,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_proving_capability;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
@@ -760,7 +761,10 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<TransactionKernelId> {
-        let tx_proving_capability = self.state.lock_guard().await.net.tx_proving_capability;
+        // The proving capability is set to the lowest possible value here,
+        // since we don't want the client (CLI or dashboard) to hang. Instead,
+        // we let (a task started by) main loop handle the proving.
+        let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
         self.send_to_many_inner(
             ctx,
             outputs,

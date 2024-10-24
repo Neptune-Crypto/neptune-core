@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use itertools::Itertools;
-use proof_upgrader::get_transaction_upgrade_task;
+use proof_upgrader::get_upgrade_task_from_mempool;
 use rand::prelude::IteratorRandom;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
@@ -32,6 +32,7 @@ use crate::connect_to_peers::call_peer_wrapper;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::MainToPeerTaskBatchBlockRequest;
@@ -906,7 +907,7 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some(upgrade_candidate) = get_transaction_upgrade_task(&global_state) else {
+            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&global_state) else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
@@ -924,6 +925,7 @@ impl MainLoopHandler {
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
         let skip_if_busy = self.global_state_lock.skip_if_busy();
+        let perform_ms_update_if_needed = false;
 
         let global_state_lock_clone = self.global_state_lock.clone();
         let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
@@ -934,6 +936,7 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             skip_if_busy,
+                            perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
                         )
@@ -1193,15 +1196,20 @@ impl MainLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
-                // send notification to peers
-                let notification: TransactionNotification = transaction.as_ref().try_into()?;
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::TransactionNotification(notification))?;
+                // Is this a transaction we can share with peers? If so, share
+                // it immediately.
+                if let Ok(notification) = transaction.as_ref().try_into() {
+                    self.main_to_peer_broadcast_tx
+                        .send(MainToPeerTask::TransactionNotification(notification))?;
 
-                // insert transaction into mempool
-                self.global_state_lock
-                    .lock_mut(|s| s.mempool.insert(&transaction))
-                    .await;
+                    // insert transaction into mempool
+                    self.global_state_lock
+                        .lock_mut(|s| s.mempool.insert(&transaction))
+                        .await;
+                } else {
+                    // If transaction could not be shared immediately because
+                    // it contains secret data, upgrade its proof-type.
+                }
 
                 // do not shut down
                 Ok(false)

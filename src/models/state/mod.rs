@@ -863,6 +863,7 @@ impl GlobalState {
             primitive_witness.output_utxos.utxos.len()
         );
         let proof = match proving_power {
+            TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
                 ProofCollection::produce(&primitive_witness, sync_device).await?,

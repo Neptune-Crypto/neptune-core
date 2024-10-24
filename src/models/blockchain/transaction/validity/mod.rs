@@ -6,5 +6,4 @@ pub mod proof_collection;
 pub mod removal_records_integrity;
 pub mod single_proof;
 pub mod tasm;
-pub mod transaction_validity;
 pub mod update;

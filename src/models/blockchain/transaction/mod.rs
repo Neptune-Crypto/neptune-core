@@ -306,7 +306,6 @@ impl Transaction {
         old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
-        new_mutator_set: MutatorSetAccumulator,
         old_single_proof: Proof,
         sync_device: &TritonProverSync,
     ) -> Result<Transaction, TryLockError> {
@@ -320,12 +319,6 @@ impl Transaction {
                 &mut new_inputs.iter_mut().collect_vec(),
             )
             .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
-
-        // Sanity check of input validity
-        assert_eq!(
-            new_mutator_set, calculated_new_mutator_set,
-            "Internal MSA state must match that which was expected, from block"
-        );
 
         let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
             &previous_mutator_set_accumulator.aocl,
@@ -394,14 +387,12 @@ impl Transaction {
             ),
             TransactionProof::SingleProof(proof) => {
                 let block_body = block.body();
-                let new_msa = block_body.mutator_set_accumulator.clone();
                 let tx_kernel = block_body.transaction_kernel.clone();
                 let ms_update = MutatorSetUpdate::new(tx_kernel.inputs, tx_kernel.outputs);
                 Self::new_with_updated_mutator_set_records_given_proof(
                     self.kernel,
                     previous_mutator_set_accumulator,
                     ms_update,
-                    new_msa,
                     proof,
                     sync_device,
                 )

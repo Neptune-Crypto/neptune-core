@@ -24,6 +24,7 @@ pub enum ConsensusError {
 /// Holds a lock ensuring that maximum one instance of the Triton VM STARK
 /// prover is running at a time, and the policy of what to do if an instance is
 /// already waiting: Wait or return an error.
+#[derive(Debug, Clone)]
 pub struct TritonProverSync {
     wait_if_busy: bool,
     proving_lock: ProvingLock,

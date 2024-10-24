@@ -9,7 +9,8 @@ use crate::models::blockchain::transaction::validity::proof_collection::ProofCol
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 
-/// Enumerates the kind of proof associated with a transaction.
+/// Enumerates the kind of transaction proof that can be shared without the risk
+/// of loss of funds.
 ///
 /// SingleProof is the highest quality, as they can be merged with the miner's
 /// coinbase transaction, which also is supported by a SingleProof.
@@ -23,7 +24,7 @@ pub(crate) enum TransactionProofQuality {
 }
 
 /// Enumerates the kind of proofs that can be transferred to peers without
-/// lose of funds.
+/// loss of funds.
 ///
 /// Specifically disallows `[TransactionProof::PrimitiveWitness]` to be sent to
 /// peers, as this would leak secret key material.
@@ -35,6 +36,10 @@ pub(crate) enum TransferTransactionProof {
 }
 
 /// For transferring proved transactions between peers.
+///
+/// This type exists to ensure that a transaction supported by
+/// [TransactionProof::Witness] is never shared betwen peers, as this would
+/// leak secret keys and lead to loss of funds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct TransferTransaction {
     pub(crate) kernel: TransactionKernel,

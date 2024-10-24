@@ -1,5 +1,6 @@
 use anyhow::bail;
 use anyhow::Result;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -21,6 +22,20 @@ impl MutatorSetUpdate {
             additions,
             removals,
         }
+    }
+
+    /// Return the number of removal records
+    pub(crate) fn num_removals(&self) -> usize {
+        self.removals.len()
+    }
+
+    /// Return the number of removal records
+    pub(crate) fn num_additions(&self) -> usize {
+        self.additions.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.num_removals().is_zero() && self.num_additions().is_zero()
     }
 
     /// Apply a mutator-set-update to a mutator-set-accumulator. Changes the mutator
