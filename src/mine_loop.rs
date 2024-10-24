@@ -42,7 +42,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
 /// Prepare a Block for mining
-fn make_block_template(
+pub(crate) fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
     mut block_timestamp: Timestamp,
@@ -325,7 +325,7 @@ pub(crate) async fn make_coinbase_transaction(
 /// Create the transaction that goes into the block template. The transaction is
 /// built from the mempool and from the coinbase transaction. Also returns the
 /// "sender randomness" used in the coinbase transaction.
-async fn create_block_transaction(
+pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
@@ -560,7 +560,7 @@ mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_template_is_valid_test() {
+    async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -650,8 +650,11 @@ mod mine_loop_tests {
         // no need to inform wallet of expected utxos; block template validity
         // is what is being tested
 
-        alice.lock_guard_mut().await.mempool.insert(&tx_by_preminer);
-        assert_eq!(1, alice.lock_guard().await.mempool.len());
+        {
+            let mut alice_gsm = alice.lock_guard_mut().await;
+            alice_gsm.mempool_insert(tx_by_preminer).await;
+            assert_eq!(1, alice_gsm.mempool.len());
+        }
 
         // Build transaction for block
         let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
@@ -680,6 +683,8 @@ mod mine_loop_tests {
                 .is_valid(&genesis_block, in_seven_months + Timestamp::seconds(2)),
             "Block template created by miner with non-empty mempool must be valid"
         );
+
+        Ok(())
     }
 
     /// This test mines a single block at height 1 on the regtest network

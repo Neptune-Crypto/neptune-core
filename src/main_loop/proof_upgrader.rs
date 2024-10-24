@@ -198,13 +198,15 @@ impl UpgradeJob {
 
             if !transaction_is_deprecated {
                 // Happy path
-                global_state.mempool.insert(&upgraded);
+
                 // Inform all peers about our hard work
                 main_to_peer_channel
                     .send(MainToPeerTask::TransactionNotification(
                         (&upgraded).try_into().unwrap(),
                     ))
                     .unwrap();
+
+                global_state.mempool_insert(upgraded).await;
 
                 info!("Successfully handled proof upgrade.");
                 return;

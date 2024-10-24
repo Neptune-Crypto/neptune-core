@@ -587,8 +587,8 @@ impl MainLoopHandler {
 
                 // Insert into mempool
                 global_state_mut
-                    .mempool
-                    .insert(&pt2m_transaction.transaction);
+                    .mempool_insert(pt2m_transaction.transaction.to_owned())
+                    .await;
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
@@ -1139,7 +1139,7 @@ impl MainLoopHandler {
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
                     debug!("Timer: mempool-cleaner job");
-                    self.global_state_lock.lock_mut(|s| s.mempool.prune_stale_transactions()).await;
+                    self.global_state_lock.lock_guard_mut().await.mempool_prune_stale_transactions().await;
 
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_interval);
@@ -1199,7 +1199,9 @@ impl MainLoopHandler {
 
                 // insert transaction into mempool
                 self.global_state_lock
-                    .lock_mut(|s| s.mempool.insert(&transaction))
+                    .lock_guard_mut()
+                    .await
+                    .mempool_insert(*transaction.clone())
                     .await;
 
                 // Is this a transaction we can share with peers? If so, share
@@ -1466,8 +1468,8 @@ mod tests {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool
-                .insert(&proof_collection_tx);
+                .mempool_insert(proof_collection_tx.clone())
+                .await;
 
             assert!(
                 main_loop_handler
