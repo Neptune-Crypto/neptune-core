@@ -26,7 +26,7 @@ use crate::models::blockchain::transaction::Transaction;
 /// prove                                                                         |
 ///  | prove                                                                      |
 ///  |  | prove                                                                   |
-///  |  |  |       ...           ...                  ...                         |  
+///  |  |  |       ...           ...                  ...                         |
 ///  v  v  v                                                                      |
 /// SoftClaimsWitness --------------- produce ----------------------> BlockProof -|
 ///                                                                               |
@@ -79,6 +79,7 @@ pub(crate) mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
 
+    use super::BlockPrimitiveWitness;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
@@ -90,8 +91,6 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-
-    use super::BlockPrimitiveWitness;
 
     fn arbitrary_block_transaction_with_mutator_set(
         num_inputs: usize,

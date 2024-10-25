@@ -15,7 +15,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 
 #[derive(Debug, Clone, EnumCount)]
 pub enum BlockBodyField {
-    Transaction,
+    TransactionKernel,
     MutatorSetAccumulator,
     LockFreeMmrAccumulator,
     BlockMmrAccumulator,
@@ -68,7 +68,7 @@ impl MastHash for BlockBody {
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         vec![
-            self.transaction_kernel.encode(),
+            self.transaction_kernel.mast_hash().encode(),
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),
