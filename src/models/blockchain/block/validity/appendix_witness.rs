@@ -5,6 +5,7 @@ use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
@@ -17,13 +18,14 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::block::block_body::BlockBody;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::Transaction;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
+use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
+use super::transaction_is_valid::TransactionIsValid;
+use super::transaction_is_valid::TransactionIsValidWitness;
 
 /// All information necessary to efficiently produce a proof for a block.
 ///
@@ -36,24 +38,52 @@ pub(crate) struct AppendixWitness {
 }
 
 impl AppendixWitness {
-    pub(crate) fn new(block_body: &BlockBody, claims: Vec<Claim>, proofs: Vec<Proof>) -> Self {
+    fn new(block_body: &BlockBody) -> Self {
         Self {
             block_body_hash: block_body.mast_hash(),
-            claims,
-            proofs,
+            claims: Vec::default(),
+            proofs: Vec::default(),
         }
+    }
+
+    fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
+        assert!(triton_vm::verify(Stark::default(), &claim, &proof));
+        self.claims.push(claim);
+        self.proofs.push(proof);
+
+        self
     }
 
     pub(crate) fn claims(&self) -> Vec<Claim> {
         self.claims.clone()
     }
 
-    pub(crate) fn produce(
-        block_body: BlockBody,
-        predecessor_block: &Block,
-        transaction: &Transaction,
-    ) -> AppendixWitness {
-        todo!()
+    pub(crate) fn produce(mut block_primitive_witness: BlockPrimitiveWitness) -> AppendixWitness {
+        let input = PublicInput::new(
+            block_primitive_witness
+                .body()
+                .mast_hash()
+                .reversed()
+                .values()
+                .to_vec(),
+        );
+
+        // transaction is valid
+        let transaction_is_valid_claim =
+            Claim::new(TransactionIsValid.hash()).with_input(input.to_vec());
+        let transaction_is_valid_witness =
+            TransactionIsValidWitness::from(block_primitive_witness.clone());
+        let transaction_is_valid_nondeterminism = transaction_is_valid_witness.nondeterminism();
+        let transaction_is_valid_proof = TransactionIsValid.prove(
+            &transaction_is_valid_claim,
+            transaction_is_valid_nondeterminism,
+        );
+
+        // todo: add other claims and proofs
+
+        // construct `AppendixWitness` object
+        Self::new(&block_primitive_witness.body())
+            .with_claim(transaction_is_valid_claim, transaction_is_valid_proof)
     }
 }
 

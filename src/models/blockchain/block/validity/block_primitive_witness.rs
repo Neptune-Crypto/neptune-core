@@ -129,11 +129,11 @@ pub(crate) mod test {
 
     pub(crate) fn deterministic_block_primitive_witness() -> BlockPrimitiveWitness {
         let mut test_runner = TestRunner::deterministic();
-        let bpw = BlockPrimitiveWitness::arbitrary()
+
+        BlockPrimitiveWitness::arbitrary()
             .new_tree(&mut test_runner)
             .unwrap()
-            .current();
-        bpw
+            .current()
     }
 
     impl BlockPrimitiveWitness {
