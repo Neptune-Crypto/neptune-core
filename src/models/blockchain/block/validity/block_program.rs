@@ -132,7 +132,7 @@ pub(crate) mod test {
 
     #[test]
     fn block_program_halts_gracefully() {
-        let mut block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness = deterministic_block_primitive_witness();
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()

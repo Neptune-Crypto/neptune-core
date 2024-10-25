@@ -58,7 +58,7 @@ impl AppendixWitness {
         self.claims.clone()
     }
 
-    pub(crate) fn produce(mut block_primitive_witness: BlockPrimitiveWitness) -> AppendixWitness {
+    pub(crate) fn produce(block_primitive_witness: BlockPrimitiveWitness) -> AppendixWitness {
         let input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -82,7 +82,7 @@ impl AppendixWitness {
         // todo: add other claims and proofs
 
         // construct `AppendixWitness` object
-        Self::new(&block_primitive_witness.body())
+        Self::new(block_primitive_witness.body())
             .with_claim(transaction_is_valid_claim, transaction_is_valid_proof)
     }
 }

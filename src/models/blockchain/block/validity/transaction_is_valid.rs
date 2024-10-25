@@ -38,16 +38,17 @@ pub(crate) struct TransactionIsValidWitness {
 }
 
 impl From<BlockPrimitiveWitness> for TransactionIsValidWitness {
-    fn from(mut block_primitive_witness: BlockPrimitiveWitness) -> Self {
+    fn from(block_primitive_witness: BlockPrimitiveWitness) -> Self {
         let block_body = block_primitive_witness.body();
         let mast_path_txk = block_body.mast_path(BlockBodyField::TransactionKernel);
-        let TransactionProof::SingleProof(single_proof) = block_primitive_witness.transaction.proof
+        let TransactionProof::SingleProof(single_proof) =
+            &block_primitive_witness.transaction.proof
         else {
             panic!("cannot make a block whose transaction is not supported by a single proof");
         };
         let txk_mast_hash = block_body.transaction_kernel.mast_hash();
         Self {
-            single_proof,
+            single_proof: single_proof.to_owned(),
             mast_path_txk,
             txk_mast_hash,
         }
@@ -196,7 +197,7 @@ mod test {
 
     #[test]
     fn transaction_is_valid_halts_gracefully() {
-        let mut block_primitive_witness = deterministic_block_primitive_witness();
+        let block_primitive_witness = deterministic_block_primitive_witness();
         let block_body_mast_hash = block_primitive_witness.body().mast_hash();
         let transaction_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness);
 
