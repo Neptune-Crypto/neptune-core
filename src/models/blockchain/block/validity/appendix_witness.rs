@@ -16,10 +16,12 @@ use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
+use tokio::sync::TryLockError;
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
@@ -58,7 +60,10 @@ impl AppendixWitness {
         self.claims.clone()
     }
 
-    pub(crate) fn produce(block_primitive_witness: BlockPrimitiveWitness) -> AppendixWitness {
+    pub(crate) async fn produce(
+        block_primitive_witness: BlockPrimitiveWitness,
+        sync_device: &TritonProverSync,
+    ) -> Result<AppendixWitness, TryLockError> {
         let input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -74,16 +79,19 @@ impl AppendixWitness {
         let transaction_is_valid_witness =
             TransactionIsValidWitness::from(block_primitive_witness.clone());
         let transaction_is_valid_nondeterminism = transaction_is_valid_witness.nondeterminism();
-        let transaction_is_valid_proof = TransactionIsValid.prove(
-            &transaction_is_valid_claim,
-            transaction_is_valid_nondeterminism,
-        );
+        let transaction_is_valid_proof = TransactionIsValid
+            .prove(
+                &transaction_is_valid_claim,
+                transaction_is_valid_nondeterminism,
+                sync_device,
+            )
+            .await?;
 
         // todo: add other claims and proofs
 
         // construct `AppendixWitness` object
-        Self::new(block_primitive_witness.body())
-            .with_claim(transaction_is_valid_claim, transaction_is_valid_proof)
+        Ok(Self::new(block_primitive_witness.body())
+            .with_claim(transaction_is_valid_claim, transaction_is_valid_proof))
     }
 }
 

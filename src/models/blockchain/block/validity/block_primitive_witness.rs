@@ -85,6 +85,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
     fn arbitrary_block_transaction_with_mutator_set(
@@ -102,19 +103,33 @@ pub(crate) mod test {
         )
             .prop_map(|((primwit_inputs, primwit_coinbase), shuffle_seed)| {
                 let mutator_set_accumulator = primwit_inputs.mutator_set_accumulator.clone();
-                let single_proof_inputs = SingleProof::produce(&primwit_inputs);
+                let single_proof_inputs = futures::executor::block_on(SingleProof::produce(
+                    &primwit_inputs,
+                    &TritonProverSync::dummy(),
+                ))
+                .unwrap();
+
                 let tx_inputs = Transaction {
                     kernel: primwit_inputs.kernel,
                     proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
-                let single_proof_coinbase = SingleProof::produce(&primwit_coinbase);
+                let single_proof_coinbase = futures::executor::block_on(SingleProof::produce(
+                    &primwit_coinbase,
+                    &TritonProverSync::dummy(),
+                ))
+                .unwrap();
                 let tx_coinbase = Transaction {
                     kernel: primwit_coinbase.kernel,
                     proof: TransactionProof::SingleProof(single_proof_coinbase),
                 };
 
                 (
-                    tx_inputs.merge_with(tx_coinbase, shuffle_seed),
+                    futures::executor::block_on(tx_inputs.merge_with(
+                        tx_coinbase,
+                        shuffle_seed,
+                        &TritonProverSync::dummy(),
+                    ))
+                    .unwrap(),
                     mutator_set_accumulator,
                 )
             })

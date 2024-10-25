@@ -123,15 +123,18 @@ impl ConsensusProgram for BlockProgram {
 #[cfg(test)]
 pub(crate) mod test {
     use tasm_lib::triton_vm::vm::PublicInput;
+    use tracing_test::traced_test;
 
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::SecretWitness;
 
     use super::*;
 
-    #[test]
-    fn block_program_halts_gracefully() {
+    #[traced_test]
+    #[tokio::test]
+    async fn block_program_halts_gracefully() {
         let block_primitive_witness = deterministic_block_primitive_witness();
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
@@ -142,7 +145,10 @@ pub(crate) mod test {
                 .to_vec(),
         );
 
-        let appendix_witness = AppendixWitness::produce(block_primitive_witness);
+        let appendix_witness =
+            AppendixWitness::produce(block_primitive_witness, &TritonProverSync::dummy())
+                .await
+                .unwrap();
         let block_program_nondeterminism = appendix_witness.nondeterminism();
         let rust_result = BlockProgram
             .run_rust(
