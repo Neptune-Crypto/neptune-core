@@ -35,11 +35,6 @@ pub(crate) struct AppendixWitness {
     proofs: Vec<Proof>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum BlockWitnessToBodyConversionError {
-    MutatorSetUpdateFailure,
-}
-
 impl AppendixWitness {
     pub(crate) fn new(block_body: &BlockBody, claims: Vec<Claim>, proofs: Vec<Proof>) -> Self {
         Self {

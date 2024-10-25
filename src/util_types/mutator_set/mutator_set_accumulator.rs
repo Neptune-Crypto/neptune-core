@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
@@ -28,7 +29,7 @@ use super::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary)]
 pub struct MutatorSetAccumulator {
     pub aocl: MmrAccumulator,
     pub swbf_inactive: MmrAccumulator,

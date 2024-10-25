@@ -4,6 +4,7 @@ use std::ops::Add;
 use std::ops::Shr;
 use std::ops::ShrAssign;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
@@ -34,7 +35,9 @@ const DIFFICULTY_NUM_LIMBS: usize = 5;
 ///
 /// The `Difficulty` is set by the `difficulty_control` mechanism such that the
 /// target block interval is by actual block times.
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize, Arbitrary,
+)]
 pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
 
 impl Difficulty {
@@ -208,7 +211,9 @@ const POW_NUM_LIMBS: usize = 6;
 /// Proof-of-work is used in the fork choice rule: when presented with
 /// two forks of different height, a node will choose the one with the greater
 /// amount of proof-of-work.
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize, Arbitrary,
+)]
 pub struct ProofOfWork([u32; POW_NUM_LIMBS]);
 
 impl ProofOfWork {

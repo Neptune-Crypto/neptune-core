@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -56,7 +57,7 @@ pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_WAIT: usize = 128;
 /// This parameter must be a power of two.
 pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize, Arbitrary)]
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,

@@ -1,3 +1,4 @@
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -21,7 +22,7 @@ use crate::prelude::twenty_first;
 /// The appendix is the keystone of soft-fork-friendly upgrades to the protocol.
 /// The block proof establishes that all claims in the appendix are valid.
 /// The appendix can softly be extended with new claims.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Arbitrary)]
 pub(crate) struct BlockAppendix {
     claims: Vec<Claim>,
 }

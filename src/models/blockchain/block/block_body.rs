@@ -1,3 +1,4 @@
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,7 +27,7 @@ impl HasDiscriminant for BlockBodyField {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Arbitrary)]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
@@ -72,5 +73,44 @@ impl MastHash for BlockBody {
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),
         ]
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::BoxedStrategy;
+    use proptest::strategy::Strategy;
+    use proptest_arbitrary_interop::arb;
+
+    use super::*;
+
+    impl BlockBody {
+        pub(crate) fn arbitrary_with_mutator_set_accumulator(
+            mutator_set_accumulator: MutatorSetAccumulator,
+        ) -> BoxedStrategy<BlockBody> {
+            let transaction_kernel = arb::<TransactionKernel>();
+            let lock_free_mmr_accumulator = arb::<MmrAccumulator>();
+            let block_mmr_accumulator = arb::<MmrAccumulator>();
+            (
+                transaction_kernel,
+                lock_free_mmr_accumulator,
+                block_mmr_accumulator,
+            )
+                .prop_map(
+                    move |(
+                        transaction_kernel,
+                        lock_free_mmr_accumulator,
+                        block_mmr_accumulator,
+                    )| {
+                        BlockBody {
+                            transaction_kernel,
+                            mutator_set_accumulator: mutator_set_accumulator.clone(),
+                            lock_free_mmr_accumulator,
+                            block_mmr_accumulator,
+                        }
+                    },
+                )
+                .boxed()
+        }
     }
 }

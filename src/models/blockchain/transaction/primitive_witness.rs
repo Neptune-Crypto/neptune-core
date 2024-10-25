@@ -931,7 +931,7 @@ mod test {
                 .boxed()
         }
 
-        fn arbitrary_pair_with_inputs_and_coinbase_respectively(
+        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively(
             num_inputs: usize,
             total_num_outputs: usize,
             total_num_announcements: usize,

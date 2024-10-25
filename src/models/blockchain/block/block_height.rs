@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::ops::Add;
 use std::ops::Sub;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_traits::One;
 use num_traits::Zero;
@@ -14,7 +15,18 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use crate::prelude::twenty_first;
 
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Hash,
+    BFieldCodec,
+    GetSize,
+    Arbitrary,
 )]
 pub struct BlockHeight(BFieldElement);
 
