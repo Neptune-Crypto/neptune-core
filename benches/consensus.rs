@@ -86,7 +86,7 @@ mod transaction {
             .expect("cannot write to file");
     }
 
-    fn bench_and_profile_consensus_program<CP: ConsensusProgram>(
+    fn bench_and_profile_consensus_program<CP: ConsensusProgram + Clone>(
         cp: CP,
         input: &PublicInput,
         nondeterminism: NonDeterminism,

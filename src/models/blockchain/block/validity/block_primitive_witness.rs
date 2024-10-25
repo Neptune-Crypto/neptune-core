@@ -40,14 +40,6 @@ pub(crate) struct BlockPrimitiveWitness {
 }
 
 impl BlockPrimitiveWitness {
-    pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
-        Self {
-            predecessor_block,
-            transaction,
-            maybe_body: None,
-        }
-    }
-
     pub(crate) fn body(&mut self) -> BlockBody {
         if let Some(body) = &self.maybe_body {
             return body.to_owned();
@@ -135,7 +127,15 @@ mod test {
     }
 
     impl BlockPrimitiveWitness {
-        fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
+        pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
+            Self {
+                predecessor_block,
+                transaction,
+                maybe_body: None,
+            }
+        }
+
+        pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             let parent_header = arb::<BlockHeader>();
             let parent_appendix = arb::<BlockAppendix>();
             let block_transaction_with_mutator_set =

@@ -430,14 +430,12 @@ pub(crate) fn difficulty_control(
 
 #[cfg(test)]
 mod test {
-    use arbitrary::Arbitrary;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_bigint::BigUint;
     use num_rational::BigRational;
     use num_traits::One;
     use num_traits::ToPrimitive;
-    use num_traits::Zero;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
@@ -456,24 +454,6 @@ mod test {
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     use super::difficulty_control;
-
-    impl<'a> Arbitrary<'a> for Difficulty {
-        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-            let mut array = [0u32; Self::NUM_LIMBS];
-
-            array.iter_mut().skip(1).for_each(|a| {
-                *a = u32::arbitrary(u).unwrap();
-            });
-            if array.iter().skip(1).all(|limb| limb.is_zero()) {
-                array[0] = Self::MINIMUM.0[0].wrapping_mul(u32::arbitrary(u).unwrap());
-            } else {
-                array[0] = u32::arbitrary(u).unwrap();
-            }
-
-            let difficulty = Self::new(array);
-            Ok(difficulty)
-        }
-    }
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {

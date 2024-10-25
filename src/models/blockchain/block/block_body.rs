@@ -88,13 +88,13 @@ mod test {
         pub(crate) fn arbitrary_with_mutator_set_accumulator(
             mutator_set_accumulator: MutatorSetAccumulator,
         ) -> BoxedStrategy<BlockBody> {
-            let transaction_kernel = arb::<TransactionKernel>();
-            let lock_free_mmr_accumulator = arb::<MmrAccumulator>();
-            let block_mmr_accumulator = arb::<MmrAccumulator>();
+            let transaction_kernel_strategy = arb::<TransactionKernel>();
+            let lock_free_mmr_accumulator_strategy = arb::<MmrAccumulator>();
+            let block_mmr_accumulator_strategy = arb::<MmrAccumulator>();
             (
-                transaction_kernel,
-                lock_free_mmr_accumulator,
-                block_mmr_accumulator,
+                transaction_kernel_strategy,
+                lock_free_mmr_accumulator_strategy,
+                block_mmr_accumulator_strategy,
             )
                 .prop_map(
                     move |(

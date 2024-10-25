@@ -116,17 +116,9 @@ impl Display for BlockHeight {
 
 #[cfg(test)]
 mod test {
-    use arbitrary::Arbitrary;
     use tracing_test::traced_test;
 
     use super::*;
-
-    impl<'a> Arbitrary<'a> for BlockHeight {
-        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-            let height = BFieldElement::arbitrary(u).unwrap();
-            Ok(Self(height))
-        }
-    }
 
     #[traced_test]
     #[tokio::test]
