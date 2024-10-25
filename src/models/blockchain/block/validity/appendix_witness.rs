@@ -1,14 +1,19 @@
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -66,6 +71,16 @@ impl SecretWitness for AppendixWitness {
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        todo!()
+        let mut nondeterminism = NonDeterminism::new([]);
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            self,
+        );
+        let stark_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
+        for (claim, proof) in self.claims.iter().zip_eq(&self.proofs) {
+            stark_snippet.update_nondeterminism(&mut nondeterminism, proof, claim);
+        }
+        nondeterminism
     }
 }

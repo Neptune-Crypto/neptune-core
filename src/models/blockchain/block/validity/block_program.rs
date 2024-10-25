@@ -119,3 +119,12 @@ impl ConsensusProgram for BlockProgram {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+
+    use super::*;
+
+    fn block_program_halts_gracefully(bpw: BlockPrimitiveWitness) {}
+}

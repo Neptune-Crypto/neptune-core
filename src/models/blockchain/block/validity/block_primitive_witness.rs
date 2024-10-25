@@ -71,11 +71,12 @@ impl BlockPrimitiveWitness {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::sync::OnceLock;
 
     use proptest::prelude::BoxedStrategy;
     use proptest::strategy::Strategy;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
 
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -124,6 +125,15 @@ mod test {
                 )
             })
             .boxed()
+    }
+
+    pub(crate) fn deterministic_block_primitive_witness() -> BlockPrimitiveWitness {
+        let mut test_runner = TestRunner::deterministic();
+        let bpw = BlockPrimitiveWitness::arbitrary()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        bpw
     }
 
     impl BlockPrimitiveWitness {
