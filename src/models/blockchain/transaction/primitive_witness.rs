@@ -728,6 +728,26 @@ mod test {
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
             param_sets: [(usize, usize, usize); N],
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
+            (arb::<Option<NeptuneCoins>>(), 0..N)
+                .prop_flat_map(move |(maybe_coinbase, coinbase_index)| {
+                    Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                        param_sets,
+                        maybe_coinbase.map(|coinbase| (coinbase, coinbase_index)),
+                    )
+                })
+                .boxed()
+        }
+
+        pub(crate) fn arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase<
+            const N: usize,
+        >(
+            param_sets: [(usize, usize, usize); N],
+            coinbase_and_index: Option<(NeptuneCoins, usize)>,
+        ) -> BoxedStrategy<[PrimitiveWitness; N]> {
+            if let Some((_, index)) = coinbase_and_index {
+                // assert that index lies in the range [0;N)
+                assert!(index < N);
+            }
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -747,9 +767,7 @@ mod test {
                     nested_vec_strategy_digests(input_counts),
                     nested_vec_strategy_utxos(output_counts),
                     nested_vec_strategy_pubann(announcement_counts),
-                    arb::<Option<NeptuneCoins>>(),
                     [arb::<NeptuneCoins>(); N],
-                    0..N,
                     vec(arb::<Digest>(), total_num_inputs),
                     vec(arb::<Digest>(), total_num_inputs),
                 ),
@@ -771,9 +789,7 @@ mod test {
                             input_address_seedss,
                             mut output_utxos,
                             public_announcements_nested,
-                            maybe_coinbase,
                             mut fees,
-                            coinbase_transaction_index,
                             mut input_sender_randomnesses,
                             mut input_receiver_preimages,
                         ),
@@ -797,11 +813,14 @@ mod test {
                         });
 
                         for i in 0..N {
-                            let maybe_coinbase = if coinbase_transaction_index == i {
-                                maybe_coinbase
-                            } else {
-                                None
-                            };
+                            let maybe_coinbase =
+                                coinbase_and_index.and_then(|(coinbase, index)| {
+                                    if index == i {
+                                        Some(coinbase)
+                                    } else {
+                                        None
+                                    }
+                                });
                             Self::find_balanced_output_amounts_and_fee(
                                 input_amounts_per_tx[i],
                                 maybe_coinbase,
@@ -878,12 +897,14 @@ mod test {
                                         input_lock_scripts_and_witnesses_,
                                         output_utxos_,
                                     )| {
-                                        let maybe_coinbase = if index == coinbase_transaction_index
-                                        {
-                                            maybe_coinbase
-                                        } else {
-                                            None
-                                        };
+                                        let maybe_coinbase =
+                                            coinbase_and_index.and_then(|(coinbase, i)| {
+                                                if index == i {
+                                                    Some(coinbase)
+                                                } else {
+                                                    None
+                                                }
+                                            });
                                         Self::from_msa_and_records(
                                             msaar,
                                             input_utxos,
@@ -907,6 +928,34 @@ mod test {
                             .boxed()
                     },
                 )
+                .boxed()
+        }
+
+        fn arbitrary_pair_with_inputs_and_coinbase_respectively(
+            num_inputs: usize,
+            total_num_outputs: usize,
+            total_num_announcements: usize,
+        ) -> BoxedStrategy<(Self, Self)> {
+            (
+                (0..total_num_outputs),
+                (0..total_num_announcements),
+                arb::<NeptuneCoins>(),
+            )
+                .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
+                    let parameter_sets = [
+                        (num_inputs, num_outputs, num_announcements),
+                        (
+                            0,
+                            total_num_outputs - num_outputs,
+                            total_num_announcements - num_announcements,
+                        ),
+                    ];
+                    Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                        parameter_sets,
+                        Some((coinbase_amount, 1)),
+                    )
+                    .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
+                })
                 .boxed()
         }
     }
