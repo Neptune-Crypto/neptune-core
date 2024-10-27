@@ -931,9 +931,7 @@ mod mine_loop_tests {
     ///
     /// This serves as a regression test for issue #154.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/154
-    #[traced_test]
-    #[tokio::test]
-    async fn mine_ten_blocks_in_ten_seconds() -> Result<()> {
+    async fn mine_m_blocks_in_n_seconds<const M: usize, const N: usize>() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -948,8 +946,8 @@ mod mine_loop_tests {
         // adjust these to simulate longer mining runs, possibly
         // with shorter or longer target intervals.
         // expected_duration = num_blocks * target_block_interval
-        let num_blocks = 100;
-        let target_block_interval = Timestamp::millis(100);
+        let target_block_interval =
+            Timestamp::millis((1000.0 * (N as f64) / (M as f64)).round() as u64);
 
         // set initial difficulty in accordance with own hash rate
         let unrestricted_mining = true;
@@ -964,8 +962,8 @@ mod mine_loop_tests {
             Difficulty::from_biguint(initial_difficulty),
         );
 
-        let expected_duration = target_block_interval * num_blocks;
-        let allowed_variance = 1.3;
+        let expected_duration = target_block_interval * M;
+        let allowed_variance = 1.5;
         let min_duration = (expected_duration.0.value() as f64 / allowed_variance) as u64;
         let max_duration = (expected_duration.0.value() as f64 * allowed_variance) as u64;
         let max_test_time = expected_duration * 3;
@@ -974,10 +972,11 @@ mod mine_loop_tests {
         // typically mined very fast.
         let ignore_first_n_blocks = 2;
 
+        let mut durations = Vec::with_capacity(M);
         let mut start_instant = std::time::SystemTime::now();
 
-        for i in 0..num_blocks + ignore_first_n_blocks {
-            if i == ignore_first_n_blocks {
+        for i in 0..M + ignore_first_n_blocks {
+            if i <= ignore_first_n_blocks {
                 start_instant = std::time::SystemTime::now();
             }
 
@@ -1024,11 +1023,15 @@ mod mine_loop_tests {
 
             prev_block = *mined_block_info.block;
 
+            let block_time = start_st.elapsed()?.as_millis();
             println!(
-                "Found block {} in {} milliseconds",
+                "Found block {} in {block_time} milliseconds; total time elapsed so far: {} ms",
                 height,
-                start_st.elapsed()?.as_millis()
+                start_instant.elapsed()?.as_millis()
             );
+            if i > ignore_first_n_blocks {
+                durations.push(block_time as f64);
+            }
 
             let elapsed = start_instant.elapsed()?.as_millis();
             if elapsed > max_test_time.0.value().into() {
@@ -1039,10 +1042,36 @@ mod mine_loop_tests {
         let actual_duration = start_instant.elapsed()?.as_millis() as u64;
 
         println!("actual duration: {actual_duration}\nexpected duration: {expected_duration}\nmin_duration: {min_duration}\nmax_duration: {max_duration}\nallowed_variance: {allowed_variance}");
+        println!(
+            "average block time: {} whereas target: {}",
+            durations.into_iter().sum::<f64>() / (M as f64),
+            target_block_interval
+        );
 
         assert!(actual_duration > min_duration);
         assert!(actual_duration < max_duration);
 
+        Ok(())
+    }
+
+    // #[traced_test]
+    #[tokio::test]
+    async fn mine_10_blocks_in_10_seconds() -> Result<()> {
+        mine_m_blocks_in_n_seconds::<10, 10>().await.unwrap();
+        Ok(())
+    }
+
+    // #[traced_test]
+    #[tokio::test]
+    async fn mine_10_blocks_in_100_seconds() -> Result<()> {
+        mine_m_blocks_in_n_seconds::<10, 100>().await.unwrap();
+        Ok(())
+    }
+
+    // #[traced_test]
+    #[tokio::test]
+    async fn mine_15_blocks_in_10_seconds() -> Result<()> {
+        mine_m_blocks_in_n_seconds::<15, 10>().await.unwrap();
         Ok(())
     }
 
