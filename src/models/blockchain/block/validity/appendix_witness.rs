@@ -18,16 +18,15 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 use tokio::sync::TryLockError;
 
+use super::block_primitive_witness::BlockPrimitiveWitness;
+use super::block_program::BlockProgram;
+use super::transaction_is_valid::TransactionIsValid;
+use super::transaction_is_valid::TransactionIsValidWitness;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
-
-use super::block_primitive_witness::BlockPrimitiveWitness;
-use super::block_program::BlockProgram;
-use super::transaction_is_valid::TransactionIsValid;
-use super::transaction_is_valid::TransactionIsValidWitness;
 
 /// All information necessary to efficiently produce a proof for a block.
 ///
@@ -64,34 +63,20 @@ impl AppendixWitness {
         block_primitive_witness: BlockPrimitiveWitness,
         sync_device: &TritonProverSync,
     ) -> Result<AppendixWitness, TryLockError> {
-        let input = PublicInput::new(
-            block_primitive_witness
-                .body()
-                .mast_hash()
-                .reversed()
-                .values()
-                .to_vec(),
-        );
+        let block_mast_hash = block_primitive_witness.body().mast_hash();
 
-        // transaction is valid
-        let transaction_is_valid_claim =
-            Claim::new(TransactionIsValid.hash()).with_input(input.to_vec());
-        let transaction_is_valid_witness =
-            TransactionIsValidWitness::from(block_primitive_witness.clone());
-        let transaction_is_valid_nondeterminism = transaction_is_valid_witness.nondeterminism();
-        let transaction_is_valid_proof = TransactionIsValid
-            .prove(
-                &transaction_is_valid_claim,
-                transaction_is_valid_nondeterminism,
-                sync_device,
-            )
+        let tx_is_valid_claim = TransactionIsValid::claim(block_mast_hash);
+        let tx_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness.clone());
+        let tx_is_valid_nondeterminism = tx_is_valid_witness.nondeterminism();
+        let tx_is_valid_proof = TransactionIsValid
+            .prove(&tx_is_valid_claim, tx_is_valid_nondeterminism, sync_device)
             .await?;
 
         // todo: add other claims and proofs
 
         // construct `AppendixWitness` object
         Ok(Self::new(block_primitive_witness.body())
-            .with_claim(transaction_is_valid_claim, transaction_is_valid_proof))
+            .with_claim(tx_is_valid_claim, tx_is_valid_proof))
     }
 }
 

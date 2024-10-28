@@ -12,6 +12,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
@@ -89,6 +90,14 @@ impl SecretWitness for TransactionIsValidWitness {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionIsValid;
+
+impl TransactionIsValid {
+    pub(crate) fn claim(block_mast_hash: Digest) -> Claim {
+        let input = block_mast_hash.reversed().values().to_vec();
+
+        Claim::new(Self.hash()).with_input(input)
+    }
+}
 
 impl ConsensusProgram for TransactionIsValid {
     fn source(&self) {
