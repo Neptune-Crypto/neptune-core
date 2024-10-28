@@ -2359,8 +2359,8 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
 
+        let network = Network::Main;
         let mut rng = thread_rng();
-        let network = Network::RegTest;
         let (
             _peer_broadcast_tx,
             from_main_rx_clone,

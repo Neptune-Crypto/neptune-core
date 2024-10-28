@@ -580,7 +580,7 @@ pub async fn mine(
 }
 
 #[cfg(test)]
-mod mine_loop_tests {
+pub(crate) mod mine_loop_tests {
     use block_header::block_header_tests::random_block_header;
     use num_bigint::BigUint;
     use tracing_test::traced_test;
@@ -598,6 +598,20 @@ mod mine_loop_tests {
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
+
+    /// Similar to [mine_iteration] function but intended for tests.
+    ///
+    /// Does *not* update the timestamp of the block and therefore also does not
+    /// update the difficulty field, as this applies to the next block and only
+    /// changes as a result of the timestamp of this block.
+    pub(crate) fn mine_iteration_for_tests(
+        block: &mut Block,
+        threshold: Digest,
+        rng: &mut StdRng,
+    ) -> bool {
+        block.set_header_nonce(rng.gen());
+        block.hash() <= threshold
+    }
 
     /// Estimates the hash rate in number of hashes per milliseconds
     async fn estimate_own_hash_rate(

@@ -48,6 +48,7 @@ use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
+use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -628,7 +629,7 @@ pub(crate) fn mock_block_with_transaction(
 /// of a coinbase output.
 ///
 /// Returns (block, coinbase UTXO, Coinbase output randomness)
-pub fn make_mock_block(
+pub(crate) fn make_mock_block(
     previous_block: &Block,
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<Timestamp>,
@@ -706,34 +707,27 @@ pub fn make_mock_block(
     )
 }
 
-pub fn make_mock_block_with_valid_pow(
+pub(crate) fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let (mut block, mut utxo, mut digest) = make_mock_block(
+    let (mut block, utxo, mut _digest) = make_mock_block(
         previous_block,
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
     );
-    while !block.has_proof_of_work(previous_block) {
-        let (block_new, utxo_new, digest_new) = make_mock_block(
-            previous_block,
-            block_timestamp,
-            coinbase_beneficiary,
-            rng.gen(),
-        );
-        block = block_new;
-        utxo = utxo_new;
-        digest = digest_new;
-    }
-    (block, utxo, digest)
+    let threshold = previous_block.header().difficulty.target();
+    while !mine_iteration_for_tests(&mut block, threshold, &mut rng) {}
+
+    let block_digest = block.hash();
+    (block, utxo, block_digest)
 }
 
-pub fn make_mock_block_with_invalid_pow(
+pub(crate) fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
