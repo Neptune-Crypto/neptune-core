@@ -1474,7 +1474,6 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
-    use num_traits::One;
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;

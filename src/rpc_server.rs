@@ -879,7 +879,7 @@ mod rpc_server_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
@@ -895,7 +895,7 @@ mod rpc_server_tests {
 
         tokio::spawn(async move {
             while let Some(i) = dummy_rx.recv().await {
-                tracing::debug!("mock Main got message = {:?}", i);
+                tracing::trace!("mock Main got message = {:?}", i);
             }
         });
 
@@ -1482,12 +1482,21 @@ mod rpc_server_tests {
 
         // --- Init.  generate a block, with coinbase going to our wallet ---
         let timestamp = network.launch_date() + Timestamp::days(1);
-        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
+        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             Some(timestamp),
             wallet_spending_key.to_address().try_into()?,
             rng.gen(),
         );
+
+        {
+            let state_lock = state_lock.lock_guard().await;
+            let original_balance = state_lock
+                .wallet_state
+                .confirmed_balance(genesis_block.hash(), timestamp)
+                .await;
+            assert!(original_balance.is_zero(), "Original balance assumed zero");
+        };
 
         // --- Init.  append the block to blockchain ---
         let prover_lock = state_lock.proving_lock.clone();
@@ -1495,7 +1504,7 @@ mod rpc_server_tests {
             .lock_guard_mut()
             .await
             .set_new_self_mined_tip(
-                block_1,
+                block_1.clone(),
                 ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
@@ -1505,6 +1514,19 @@ mod rpc_server_tests {
                 &prover_lock,
             )
             .await?;
+
+        {
+            let state_lock = state_lock.lock_guard().await;
+            let new_balance = state_lock
+                .wallet_state
+                .confirmed_balance(block_1.hash(), timestamp)
+                .await;
+            assert_eq!(
+                Block::get_mining_reward(block_1.header().height),
+                new_balance,
+                "New balance must be exactly 1 mining reward"
+            );
+        };
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (

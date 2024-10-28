@@ -707,6 +707,7 @@ pub(crate) fn make_mock_block(
     )
 }
 
+/// Like [make_mock_block] but returns a block with a valid PoW.
 pub(crate) fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
@@ -714,7 +715,7 @@ pub(crate) fn make_mock_block_with_valid_pow(
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let (mut block, utxo, mut _digest) = make_mock_block(
+    let (mut block, cb_utxo, cb_sender_randomness) = make_mock_block(
         previous_block,
         block_timestamp,
         coinbase_beneficiary,
@@ -723,8 +724,7 @@ pub(crate) fn make_mock_block_with_valid_pow(
     let threshold = previous_block.header().difficulty.target();
     while !mine_iteration_for_tests(&mut block, threshold, &mut rng) {}
 
-    let block_digest = block.hash();
-    (block, utxo, block_digest)
+    (block, cb_utxo, cb_sender_randomness)
 }
 
 pub(crate) fn make_mock_block_with_invalid_pow(
