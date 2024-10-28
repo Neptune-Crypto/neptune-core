@@ -39,7 +39,8 @@ pub(crate) struct AppendixWitness {
 }
 
 impl AppendixWitness {
-    fn new(block_body: &BlockBody) -> Self {
+    // TODO: Rename when used
+    fn _new(block_body: &BlockBody) -> Self {
         Self {
             block_body_hash: block_body.mast_hash(),
             claims: Vec::default(),
@@ -47,7 +48,8 @@ impl AppendixWitness {
         }
     }
 
-    fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
+    // TODO: Rename when used
+    fn _with_claim(mut self, claim: Claim, proof: Proof) -> Self {
         assert!(triton_vm::verify(Stark::default(), &claim, &proof));
         self.claims.push(claim);
         self.proofs.push(proof);
@@ -59,13 +61,14 @@ impl AppendixWitness {
         self.claims.clone()
     }
 
-    pub(crate) async fn produce(
+    // TODO: Rename when used
+    pub(crate) async fn _produce(
         block_primitive_witness: BlockPrimitiveWitness,
         sync_device: &TritonProverSync,
     ) -> Result<AppendixWitness, TryLockError> {
         let block_mast_hash = block_primitive_witness.body().mast_hash();
 
-        let tx_is_valid_claim = TransactionIsValid::claim(block_mast_hash);
+        let tx_is_valid_claim = TransactionIsValid::_claim(block_mast_hash);
         let tx_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness.clone());
         let tx_is_valid_nondeterminism = tx_is_valid_witness.nondeterminism();
         let tx_is_valid_proof = TransactionIsValid
@@ -75,8 +78,8 @@ impl AppendixWitness {
         // todo: add other claims and proofs
 
         // construct `AppendixWitness` object
-        Ok(Self::new(block_primitive_witness.body())
-            .with_claim(tx_is_valid_claim, tx_is_valid_proof))
+        Ok(Self::_new(block_primitive_witness.body())
+            ._with_claim(tx_is_valid_claim, tx_is_valid_proof))
     }
 }
 

@@ -92,7 +92,8 @@ impl SecretWitness for TransactionIsValidWitness {
 pub(crate) struct TransactionIsValid;
 
 impl TransactionIsValid {
-    pub(crate) fn claim(block_mast_hash: Digest) -> Claim {
+    // TODO: Rename when used
+    pub(crate) fn _claim(block_mast_hash: Digest) -> Claim {
         let input = block_mast_hash.reversed().values().to_vec();
 
         Claim::new(Self.hash()).with_input(input)

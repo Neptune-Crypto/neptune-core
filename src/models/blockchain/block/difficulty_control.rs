@@ -18,12 +18,11 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
+use super::block_height::BlockHeight;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-
-use super::block_height::BlockHeight;
 
 const DIFFICULTY_NUM_LIMBS: usize = 5;
 
@@ -447,13 +446,12 @@ mod test {
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
+    use super::difficulty_control;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::difficulty_control::Difficulty;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-
-    use super::difficulty_control;
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {

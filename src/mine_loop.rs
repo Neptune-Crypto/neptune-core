@@ -581,10 +581,11 @@ pub async fn mine(
 
 #[cfg(test)]
 pub(crate) mod mine_loop_tests {
+    use std::hint::black_box;
+
     use block_header::block_header_tests::random_block_header;
     use num_bigint::BigUint;
     use num_traits::Pow;
-    use std::hint::black_box;
     use tracing_test::traced_test;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;

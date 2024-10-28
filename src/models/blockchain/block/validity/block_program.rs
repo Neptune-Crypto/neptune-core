@@ -173,7 +173,7 @@ pub(crate) mod test {
         );
 
         let appendix_witness =
-            AppendixWitness::produce(block_primitive_witness, &TritonProverSync::dummy())
+            AppendixWitness::_produce(block_primitive_witness, &TritonProverSync::dummy())
                 .await
                 .unwrap();
         let block_program_nondeterminism = appendix_witness.nondeterminism();

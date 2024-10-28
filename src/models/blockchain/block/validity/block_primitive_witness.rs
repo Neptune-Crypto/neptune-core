@@ -1,4 +1,5 @@
 use std::sync::OnceLock;
+
 use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::models::blockchain::block::block_body::BlockBody;
