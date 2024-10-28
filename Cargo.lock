@@ -1849,6 +1849,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "ratatui",
+ "rayon",
  "readonly",
  "regex",
  "reqwest",

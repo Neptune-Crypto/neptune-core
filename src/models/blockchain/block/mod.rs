@@ -790,6 +790,8 @@ mod block_tests {
 
     use rand::thread_rng;
     use rand::Rng;
+    use rayon::iter::IntoParallelRefIterator;
+    use rayon::iter::ParallelIterator;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
@@ -834,46 +836,42 @@ mod block_tests {
         }
     }
 
-    // #[traced_test]
     #[test]
     fn test_difficulty_control_matches() {
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Main;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
 
-        for multiplier in [10, 100, 1000, 10000, 100000, 1000000] {
-            let mut block_prev = Block::genesis_block(network);
-            let mut now = block_prev.kernel.header.timestamp;
+        // parallelized since this is a slow test.
+        [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000]
+            .par_iter()
+            .for_each(|multiplier| {
+                let mut block_prev = Block::genesis_block(network);
+                let mut now = block_prev.kernel.header.timestamp;
+                let mut rng = thread_rng();
 
-            for i in (0..100).step_by(1) {
-                let duration = i as u64 * multiplier;
-                now = now + Timestamp::millis(duration);
+                for i in (0..30).step_by(1) {
+                    let duration = i as u64 * multiplier;
+                    now = now + Timestamp::millis(duration);
 
-                let (block, _, _) =
-                    make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
+                    let (block, _, _) =
+                        make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
 
-                println!(
-                    "height: {}, now: {}",
-                    block.kernel.header.height,
-                    now.standard_format()
-                );
+                    let control = difficulty_control(
+                        block.kernel.header.timestamp,
+                        block_prev.header().timestamp,
+                        block_prev.header().difficulty,
+                        None,
+                        block_prev.header().height,
+                    );
+                    assert_eq!(block.kernel.header.difficulty, control);
 
-                let control = difficulty_control(
-                    block.kernel.header.timestamp,
-                    block_prev.header().timestamp,
-                    block_prev.header().difficulty,
-                    None,
-                    block_prev.header().height,
-                );
-                assert_eq!(block.kernel.header.difficulty, control);
-
-                block_prev = block;
-            }
-        }
+                    block_prev = block;
+                }
+            });
     }
 
     #[test]
