@@ -109,7 +109,7 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
             .collect_vec();
         let fee: NeptuneCoins = u.arbitrary()?;
         let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
-        let timestamp = Timestamp::now();
+        let timestamp: Timestamp = u.arbitrary()?;
         let mutator_set_hash: Digest = u.arbitrary()?;
 
         let transaction_kernel = TransactionKernel {
@@ -176,6 +176,28 @@ pub mod transaction_kernel_tests {
             timestamp,
             mutator_set_hash,
         }
+    }
+
+    #[test]
+    pub fn arbitrary_tx_kernel_is_deterministic() {
+        use proptest::prelude::Strategy;
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+        use proptest_arbitrary_interop::arb;
+
+        let mut test_runner = TestRunner::deterministic();
+        let a = arb::<TransactionKernel>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        test_runner = TestRunner::deterministic();
+        let b = arb::<TransactionKernel>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        assert_eq!(a, b);
     }
 
     #[test]
