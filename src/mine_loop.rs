@@ -1171,13 +1171,13 @@ pub(crate) mod mine_loop_tests {
 
         let mut rng = thread_rng();
         let mut counter = 0;
+        let mut successor_block = Block::new(
+            successor_header.clone(),
+            successor_body.clone(),
+            BlockProof::Invalid,
+        );
         loop {
-            successor_header.nonce = rng.gen();
-            let successor_block = Block::new(
-                successor_header.clone(),
-                successor_body.clone(),
-                BlockProof::Invalid,
-            );
+            successor_block.set_header_nonce(rng.gen());
 
             if successor_block.has_proof_of_work(&predecessor_block) {
                 break;
