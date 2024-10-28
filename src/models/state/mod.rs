@@ -1480,7 +1480,11 @@ mod global_state_tests {
     use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
+    use rayon::iter::IndexedParallelIterator;
+    use rayon::iter::IntoParallelIterator;
+    use rayon::iter::ParallelIterator;
     use tracing_test::traced_test;
+    use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::KeyType;
     use wallet::WalletSecret;
 
@@ -1902,11 +1906,48 @@ mod global_state_tests {
         Ok(())
     }
 
-    #[traced_test]
     #[tokio::test]
-    async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
+    async fn resync_ms_membership_proofs_across_stale_fork() {
+        /// Create 3 branches and return them in an array.
+        ///
+        /// First two branches share common ancestor `first_for_0_1`, last
+        /// branch starts from `first_for_2`. All branches have the same length.
+        ///
+        /// Factored out to parallel function to make this test run faster.
+        fn make_3_branches(
+            first_for_0_1: &Block,
+            first_for_2: &Block,
+            num_blocks_per_branch: usize,
+            cb_recipient: &GenerationReceivingAddress,
+        ) -> [Vec<Block>; 3] {
+            let mut final_ret = Vec::with_capacity(3);
+            (0..3)
+                .into_par_iter()
+                .map(|i| {
+                    let mut rng = thread_rng();
+                    let mut ret = Vec::with_capacity(num_blocks_per_branch);
+
+                    let mut block = if i < 2 {
+                        first_for_0_1.to_owned()
+                    } else {
+                        first_for_2.to_owned()
+                    };
+                    for _ in 0..num_blocks_per_branch {
+                        let (next_block, _, _) =
+                            make_mock_block(&block, None, cb_recipient.to_owned(), rng.gen());
+                        ret.push(next_block.clone());
+                        block = next_block;
+                    }
+
+                    ret
+                })
+                .collect_into_vec(&mut final_ret);
+
+            final_ret.try_into().unwrap()
+        }
+
+        let network = Network::Main;
         let mut rng = thread_rng();
-        let network = Network::RegTest;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let proving_lock = alice.proving_lock.clone();
         let mut alice = alice.lock_guard_mut().await;
@@ -1918,17 +1959,17 @@ mod global_state_tests {
         let bob_secret = WalletSecret::new_random();
         let bob_address = bob_secret.nth_generation_spending_key(0).to_address();
 
-        // 1. Create new block 1a where Alice receives a coinbase UTXO, store it
+        // 1. Create new block 1 where Alice receives a coinbase UTXO, store it
         let genesis_block = alice.chain.archival_state().get_tip().await;
-        let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
+        let (block_1, coinbase_utxo_1, cb_utxo_output_randomness_1) =
             make_mock_block(&genesis_block, None, alice_address, rng.gen());
         {
             alice
                 .set_new_self_mined_tip(
-                    mock_block_1a.clone(),
+                    block_1.clone(),
                     ExpectedUtxo::new(
-                        coinbase_utxo_1a,
-                        cb_utxo_output_randomness_1a,
+                        coinbase_utxo_1,
+                        cb_utxo_output_randomness_1,
                         alice_spending_key.privacy_preimage,
                         UtxoNotifier::OwnMiner,
                     ),
@@ -1942,22 +1983,23 @@ mod global_state_tests {
                 2,
                 alice
                     .wallet_state
-                    .get_wallet_status_from_lock(mock_block_1a.hash())
+                    .get_wallet_status_from_lock(block_1.hash())
                     .await
                     .synced_unspent
                     .len()
             );
         }
 
-        // Add 100 blocks on top of 1a, *not* mined by Alice
-        let mut fork_a_block = mock_block_1a.clone();
-        for _ in 0..100 {
-            let (next_a_block, _, _) = make_mock_block(&fork_a_block, None, bob_address, rng.gen());
+        let [a_blocks, b_blocks, c_blocks] =
+            make_3_branches(&block_1, &genesis_block, 60, &bob_address);
+
+        // Add 60 blocks on top of 1, *not* mined by Alice
+        let fork_a_block = a_blocks.last().unwrap().to_owned();
+        for branch_block in a_blocks.into_iter() {
             alice
-                .set_new_tip(next_a_block.clone(), &proving_lock)
+                .set_new_tip(branch_block, &proving_lock)
                 .await
                 .unwrap();
-            fork_a_block = next_a_block;
         }
 
         // Verify that all both MUTXOs have synced MPs
@@ -1968,15 +2010,13 @@ mod global_state_tests {
 
         assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
 
-        // Fork away from the "a" chain to the "b" chain, with block 1a as LUCA
-        let mut fork_b_block = mock_block_1a.clone();
-        for _ in 0..100 {
-            let (next_b_block, _, _) = make_mock_block(&fork_b_block, None, bob_address, rng.gen());
+        // Fork away from the "a" chain to the "b" chain, with block 1 as LUCA
+        let fork_b_block = b_blocks.last().unwrap().to_owned();
+        for branch_block in b_blocks.into_iter() {
             alice
-                .set_new_tip(next_b_block.clone(), &proving_lock)
+                .set_new_tip(branch_block, &proving_lock)
                 .await
                 .unwrap();
-            fork_b_block = next_b_block;
         }
 
         // Verify that there are zero MUTXOs with synced MPs
@@ -2012,17 +2052,14 @@ mod global_state_tests {
             wallet_status_on_b_fork_after_resync.unsynced_unspent.len()
         );
 
-        // `wallet_state_has_all_valid_mps_for`
         // Make a new chain c with genesis block as LUCA. Verify that the genesis UTXO can be synced
         // to this new chain
-        let mut fork_c_block = genesis_block.clone();
-        for _ in 0..100 {
-            let (next_c_block, _, _) = make_mock_block(&fork_c_block, None, bob_address, rng.gen());
+        let fork_c_block = c_blocks.last().unwrap().to_owned();
+        for branch_block in c_blocks.into_iter() {
             alice
-                .set_new_tip(next_c_block.clone(), &proving_lock)
+                .set_new_tip(branch_block, &proving_lock)
                 .await
                 .unwrap();
-            fork_c_block = next_c_block;
         }
 
         // Verify that there are zero MUTXOs with synced MPs
@@ -2072,8 +2109,6 @@ mod global_state_tests {
                 .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
                 .await
         );
-
-        Ok(())
     }
 
     #[traced_test]
