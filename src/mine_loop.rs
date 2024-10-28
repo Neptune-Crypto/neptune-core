@@ -583,6 +583,8 @@ pub async fn mine(
 pub(crate) mod mine_loop_tests {
     use block_header::block_header_tests::random_block_header;
     use num_bigint::BigUint;
+    use num_traits::Pow;
+    use std::hint::black_box;
     use tracing_test::traced_test;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
@@ -660,6 +662,32 @@ pub(crate) mod mine_loop_tests {
         let time_spent_mining = tick.elapsed().unwrap();
 
         (num_iterations as f64) / (time_spent_mining.as_millis() as f64)
+    }
+
+    /// Estimate the time it takes to prepare a block so we can start guessing
+    /// nonces.
+    async fn estimate_block_preparation_time() -> f64 {
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction(
+            &global_state_lock,
+            NeptuneCoins::zero(),
+            network.launch_date(),
+        )
+        .await
+        .unwrap();
+
+        let in_seven_months = network.launch_date() + Timestamp::months(7);
+        let (block_header, block_body, block_proof) =
+            Block::make_block_template(&genesis_block, transaction, in_seven_months, None);
+        let tick = std::time::SystemTime::now();
+        let block = Block::new(block_header, block_body, block_proof);
+        let tock = tick.elapsed().unwrap().as_millis() as f64;
+        black_box(block);
+        tock
     }
 
     #[traced_test]
@@ -945,7 +973,8 @@ pub(crate) mod mine_loop_tests {
     ///
     /// This serves as a regression test for issue #154.
     /// https://github.com/Neptune-Crypto/neptune-core/issues/154
-    async fn mine_m_blocks_in_n_seconds<const M: usize, const N: usize>() -> Result<()> {
+    async fn mine_m_blocks_in_n_seconds<const NUM_BLOCKS: usize, const NUM_SECONDS: usize>(
+    ) -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -961,35 +990,52 @@ pub(crate) mod mine_loop_tests {
         // with shorter or longer target intervals.
         // expected_duration = num_blocks * target_block_interval
         let target_block_interval =
-            Timestamp::millis((1000.0 * (N as f64) / (M as f64)).round() as u64);
+            Timestamp::millis((1000.0 * (NUM_SECONDS as f64) / (NUM_BLOCKS as f64)).round() as u64);
+        println!(
+            "target block interval: {} ms",
+            target_block_interval.0.value()
+        );
 
         // set initial difficulty in accordance with own hash rate
         let unrestricted_mining = true;
         let hash_rate =
             estimate_own_hash_rate(Some(target_block_interval), unrestricted_mining).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
-        let initial_difficulty =
-            BigUint::from((hash_rate * (target_block_interval.to_millis() as f64)) as u128);
+        let prepare_time = estimate_block_preparation_time().await;
+        println!("estimating block preparation time at {prepare_time} ms");
+        if 1.5 * prepare_time > target_block_interval.0.value() as f64 {
+            println!(
+                "Cannot perform meaningful test! Block preparation time \
+            too large for target block interval."
+            );
+            return Ok(());
+        }
+
+        let guessing_time = (target_block_interval.to_millis() as f64) - prepare_time;
+        let initial_difficulty = BigUint::from((hash_rate * guessing_time) as u128);
         println!("initial difficulty: {}", initial_difficulty);
         prev_block.set_header_timestamp_and_difficulty(
             prev_block.header().timestamp,
             Difficulty::from_biguint(initial_difficulty),
         );
 
-        let expected_duration = target_block_interval * M;
-        let allowed_variance = 1.5;
-        let min_duration = (expected_duration.0.value() as f64 / allowed_variance) as u64;
-        let max_duration = (expected_duration.0.value() as f64 * allowed_variance) as u64;
+        let expected_duration = target_block_interval * NUM_BLOCKS;
+        let stddev = (guessing_time.pow(2.0_f64) / (NUM_BLOCKS as f64)).sqrt();
+        let allowed_standard_deviations = 4;
+        let min_duration = (expected_duration.0.value() as f64)
+            - (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
+        let max_duration = (expected_duration.0.value() as f64)
+            + (allowed_standard_deviations as f64) * stddev * (NUM_BLOCKS as f64);
         let max_test_time = expected_duration * 3;
 
         // we ignore the first 2 blocks after genesis because they are
         // typically mined very fast.
         let ignore_first_n_blocks = 2;
 
-        let mut durations = Vec::with_capacity(M);
+        let mut durations = Vec::with_capacity(NUM_BLOCKS);
         let mut start_instant = std::time::SystemTime::now();
 
-        for i in 0..M + ignore_first_n_blocks {
+        for i in 0..NUM_BLOCKS + ignore_first_n_blocks {
             if i <= ignore_first_n_blocks {
                 start_instant = std::time::SystemTime::now();
             }
@@ -1039,8 +1085,10 @@ pub(crate) mod mine_loop_tests {
 
             let block_time = start_st.elapsed()?.as_millis();
             println!(
-                "Found block {} in {block_time} milliseconds; total time elapsed so far: {} ms",
+                "Found block {} in {block_time} milliseconds; \
+                difficulty was {}; total time elapsed so far: {} ms",
                 height,
+                BigUint::from(prev_block.header().difficulty),
                 start_instant.elapsed()?.as_millis()
             );
             if i > ignore_first_n_blocks {
@@ -1049,43 +1097,39 @@ pub(crate) mod mine_loop_tests {
 
             let elapsed = start_instant.elapsed()?.as_millis();
             if elapsed > max_test_time.0.value().into() {
-                panic!("test time limit exceeded.  expected_duration: {expected_duration}, limit: {max_test_time}, actual: {elapsed}");
+                panic!(
+                    "test time limit exceeded.  \
+                expected_duration: {expected_duration}, \
+                limit: {max_test_time}, actual: {elapsed}"
+                );
             }
         }
 
         let actual_duration = start_instant.elapsed()?.as_millis() as u64;
 
-        println!("actual duration: {actual_duration}\nexpected duration: {expected_duration}\nmin_duration: {min_duration}\nmax_duration: {max_duration}\nallowed_variance: {allowed_variance}");
+        println!(
+            "actual duration: {actual_duration}\n\
+        expected duration: {expected_duration}\n\
+        min_duration: {min_duration}\n\
+        max_duration: {max_duration}\n\
+        allowed deviation: {allowed_standard_deviations}"
+        );
         println!(
             "average block time: {} whereas target: {}",
-            durations.into_iter().sum::<f64>() / (M as f64),
+            durations.into_iter().sum::<f64>() / (NUM_BLOCKS as f64),
             target_block_interval
         );
 
-        assert!(actual_duration > min_duration);
-        assert!(actual_duration < max_duration);
+        assert!((actual_duration as f64) > min_duration);
+        assert!((actual_duration as f64) < max_duration);
 
         Ok(())
     }
 
-    // #[traced_test]
+    #[traced_test]
     #[tokio::test]
-    async fn mine_10_blocks_in_10_seconds() -> Result<()> {
-        mine_m_blocks_in_n_seconds::<10, 10>().await.unwrap();
-        Ok(())
-    }
-
-    // #[traced_test]
-    #[tokio::test]
-    async fn mine_10_blocks_in_100_seconds() -> Result<()> {
-        mine_m_blocks_in_n_seconds::<10, 100>().await.unwrap();
-        Ok(())
-    }
-
-    // #[traced_test]
-    #[tokio::test]
-    async fn mine_15_blocks_in_10_seconds() -> Result<()> {
-        mine_m_blocks_in_n_seconds::<15, 10>().await.unwrap();
+    async fn mine_20_blocks_in_40_seconds() -> Result<()> {
+        mine_m_blocks_in_n_seconds::<20, 40>().await.unwrap();
         Ok(())
     }
 
