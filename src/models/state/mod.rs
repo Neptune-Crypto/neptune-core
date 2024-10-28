@@ -905,14 +905,19 @@ impl GlobalState {
     /// a wallet state, if the monitored UTXOs have been deleted. Not merely if they
     /// are not synced with a valid mutator set membership proof. And this corruption
     /// can only happen if the wallet database is deleted or corrupted.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mutator set is not synced to current tip.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
         let tip_hash = self.chain.light_state().hash();
         let ams_ref = &self.chain.archival_state().archival_mutator_set;
 
+        let asm_sync_label = ams_ref.get_sync_label().await;
         assert_eq!(
-            tip_hash,
-            ams_ref.get_sync_label().await,
-            "Archival mutator set must be synced to tip for successful MUTXO recovery"
+            tip_hash, asm_sync_label,
+            "Archival mutator set must be synced to tip for successful MUTXO recovery.\
+            Tip was:\n{tip_hash};\n but mutator set was synced to:\n{asm_sync_label}"
         );
 
         // Fetch all incoming UTXOs from recovery data
@@ -1484,7 +1489,6 @@ mod global_state_tests {
     use crate::config_models::network::Network;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::Block;
-    use crate::tests::shared::add_block_to_light_state;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
@@ -1675,39 +1679,46 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
+        let network = Network::Main;
         let mut rng = thread_rng();
-        let network = Network::RegTest;
-        let devnet_wallet = WalletSecret::devnet_wallet();
-        let mut global_state_lock = mock_genesis_global_state(network, 2, devnet_wallet).await;
-        let mut global_state = global_state_lock.lock_guard_mut().await;
-        let other_receiver_address = WalletSecret::new_random()
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
+        let wallet = WalletSecret::devnet_wallet();
+        let own_key = wallet.nth_generation_spending_key_for_tests(0);
+        let own_address = own_key.to_address();
+        let mut global_state_lock = mock_genesis_global_state(network, 2, wallet).await;
         let genesis_block = Block::genesis_block(network);
-        let (mock_block_1, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
-        crate::tests::shared::add_block_to_archival_state(
-            global_state.chain.archival_state_mut(),
-            mock_block_1.clone(),
-        )
-        .await
-        .unwrap();
-        add_block_to_light_state(global_state.chain.light_state_mut(), mock_block_1.clone())
+        let (mock_block_1, cb_utxo, cb_sender_randomness) =
+            make_mock_block(&genesis_block, None, own_address, rng.gen());
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .add_expected_utxo(ExpectedUtxo::new(
+                cb_utxo,
+                cb_sender_randomness,
+                own_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            ))
+            .await;
+        global_state_lock
+            .set_new_tip(mock_block_1.clone())
             .await
             .unwrap();
 
-        // Delete everything from monitored UTXO (the premined UTXO)
+        // Delete everything from monitored UTXO (premined UTXO and block-1 coinbase)
+        let mut global_state = global_state_lock.lock_guard_mut().await;
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
-            assert!(
-                monitored_utxos.len().await.is_one(),
-                "MUTXO must have genesis element before emptying it"
+            assert_eq!(
+                2,
+                monitored_utxos.len().await,
+                "MUTXO must have genesis element and premine prior to clearing"
             );
+            monitored_utxos.pop().await;
             monitored_utxos.pop().await;
 
             assert!(
                 monitored_utxos.is_empty().await,
-                "MUTXO must be empty after emptying it"
+                "MUTXO must be empty after clearing"
             );
         }
 
@@ -1718,34 +1729,30 @@ mod global_state_tests {
             .unwrap();
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
-            assert!(
-                monitored_utxos.len().await.is_one(),
-                "MUTXO must have genesis element after recovering it"
+            assert_eq!(
+                2,
+                monitored_utxos.len().await,
+                "MUTXO must have genesis element and premine after recovery"
             );
 
-            // Verify that the restored MUTXO has a valid MSMP
-            let own_premine_mutxo = monitored_utxos.get(0).await;
-            let ms_item = Hash::hash(&own_premine_mutxo.utxo);
-            assert!(global_state
-                .chain
-                .light_state()
-                .body()
-                .mutator_set_accumulator
-                .verify(
-                    ms_item,
-                    &own_premine_mutxo
-                        .get_latest_membership_proof_entry()
-                        .unwrap()
-                        .1,
-                ));
-            assert_eq!(
-                mock_block_1.hash(),
-                own_premine_mutxo
-                    .get_latest_membership_proof_entry()
-                    .unwrap()
-                    .0,
-                "MUTXO must have the correct latest block digest value"
-            );
+            // Verify that the restored MUTXOs have MSMPs
+            for mutxo in monitored_utxos.get_all().await {
+                let ms_item = Hash::hash(&mutxo.utxo);
+                assert!(global_state
+                    .chain
+                    .light_state()
+                    .body()
+                    .mutator_set_accumulator
+                    .verify(
+                        ms_item,
+                        &mutxo.get_latest_membership_proof_entry().unwrap().1,
+                    ));
+                assert_eq!(
+                    mock_block_1.hash(),
+                    mutxo.get_latest_membership_proof_entry().unwrap().0,
+                    "MUTXO must have the correct latest block digest value"
+                );
+            }
         }
     }
 

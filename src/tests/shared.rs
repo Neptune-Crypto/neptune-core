@@ -261,21 +261,7 @@ pub(crate) async fn get_test_genesis_setup(
     ))
 }
 
-pub async fn add_block_to_light_state(
-    light_state: &mut LightState,
-    new_block: Block,
-) -> Result<()> {
-    let previous_pow_family = light_state.kernel.header.cumulative_proof_of_work;
-    if previous_pow_family < new_block.kernel.header.cumulative_proof_of_work {
-        light_state.set_block(new_block);
-    } else {
-        panic!("Attempted to add to light state an older block than the current light state block");
-    }
-
-    Ok(())
-}
-
-pub async fn add_block_to_archival_state(
+pub(crate) async fn add_block_to_archival_state(
     archival_state: &mut ArchivalState,
     new_block: Block,
 ) -> Result<()> {
@@ -291,7 +277,7 @@ pub async fn add_block_to_archival_state(
 /// fail as they each hold a lock on the database.
 ///
 /// For now we use databases on disk. In-memory databases would be nicer.
-pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
+pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
     let mut rng = rand::thread_rng();
     let tmp_root: PathBuf = env::temp_dir()
         .join("neptune-unit-tests")

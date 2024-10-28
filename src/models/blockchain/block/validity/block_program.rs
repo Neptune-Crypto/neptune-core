@@ -10,11 +10,10 @@ use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
+use super::appendix_witness::AppendixWitness;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
 use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-
-use super::appendix_witness::AppendixWitness;
 
 /// Verifies that all claims listed in the appendix are true.
 ///
@@ -125,12 +124,11 @@ pub(crate) mod test {
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
 
+    use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::SecretWitness;
-
-    use super::*;
 
     #[traced_test]
     #[tokio::test]
