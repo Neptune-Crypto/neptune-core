@@ -41,8 +41,6 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-
 /// Prepare a Block for mining
 pub(crate) fn make_block_template(
     previous_block: &Block,
@@ -94,7 +92,6 @@ pub(crate) fn make_block_template(
         prev_block_digest: previous_block.hash(),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
-        max_block_size: MOCK_MAX_BLOCK_SIZE,
         cumulative_proof_of_work: new_pow,
         difficulty,
     };
@@ -200,6 +197,13 @@ fn mine_block_worker(
         "Found valid block with nonce: ({}, {}, {}).",
         nonce[0], nonce[1], nonce[2]
     );
+
+    if !block.is_valid(&previous_block, Timestamp::now()) {
+        // Block could be invalid if for instance the proof and proof-of-work
+        // took less time than the minimum block time.
+        error!("Found block with valid proof-of-work but block is invalid.");
+        return;
+    }
 
     let new_block_found = NewBlockFound {
         block: Box::new(block),

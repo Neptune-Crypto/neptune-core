@@ -2,6 +2,7 @@ use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::Library;
+use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
@@ -14,6 +15,9 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 
 use super::appendix_witness::AppendixWitness;
+use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::BlockAppendix;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -23,6 +27,19 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// The witness for this program is [`AppendixWitness`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BlockProgram;
+
+impl BlockProgram {
+    fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
+        Claim::new(Self.hash())
+            .with_input(block_body.mast_hash().reversed().values().to_vec())
+            .with_output(appendix.claims_as_output())
+    }
+
+    pub(crate) fn verify(block_body: &BlockBody, appendix: &BlockAppendix, proof: &Proof) -> bool {
+        let claim = Self::claim(block_body, appendix);
+        triton_vm::verify(Stark::default(), &claim, proof)
+    }
+}
 
 impl ConsensusProgram for BlockProgram {
     fn source(&self) {

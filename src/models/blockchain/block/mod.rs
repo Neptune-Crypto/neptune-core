@@ -12,6 +12,7 @@ pub mod validity;
 
 use std::sync::OnceLock;
 
+use block_appendix::BlockAppendix;
 use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
@@ -39,6 +40,7 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use validity::block_program::BlockProgram;
 
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
@@ -56,7 +58,8 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-const MAX_BLOCK_SIZE: u32 = 1_000_000;
+/// Maximum block size in number of `BFieldElement`.
+pub(crate) const MAX_BLOCK_SIZE: usize = 250_000;
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
@@ -183,6 +186,7 @@ impl From<Block> for TransferBlock {
             header: block.kernel.header,
             body: block.kernel.body,
             proof,
+            appendix: block.kernel.appendix,
         }
     }
 }
@@ -242,7 +246,6 @@ impl Block {
             prev_block_digest: previous_block.hash(),
             timestamp: block_timestamp,
             nonce: [zero, zero, zero],
-            max_block_size: MAX_BLOCK_SIZE,
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
         };
@@ -305,6 +308,11 @@ impl Block {
     #[inline]
     pub fn body(&self) -> &BlockBody {
         &self.kernel.body
+    }
+
+    #[inline]
+    pub(crate) fn appendix(&self) -> &BlockAppendix {
+        &self.kernel.appendix
     }
 
     /// note: this causes block digest to change to that of the new block.
@@ -380,7 +388,6 @@ impl Block {
 
             // TODO: to be set to something difficult to predict ahead of time
             nonce: [bfe!(0), bfe!(0), bfe!(0)],
-            max_block_size: 10_000,
             cumulative_proof_of_work: ProofOfWork::zero(),
             difficulty: Difficulty::MINIMUM,
         };
@@ -524,19 +531,21 @@ impl Block {
         // 0. `previous_block` is consistent with current block
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
+        //   c) block mmr updated correctly
         //   d) Block timestamp is greater than previous block timestamp
-        //   e) Target difficulty, and other control parameters, were adjusted correctly
+        //   e) Target difficulty and cumulative proof-of-work were updated correctly
         //   f) Block timestamp is less than host-time (utc) + 2 hours.
-        // 1. The transaction is valid.
-        // 1'. All transactions are valid.
-        //   a) verify that MS membership proof is valid, done against previous `mutator_set_accumulator`,
-        //   b) Verify that MS removal record is valid, done against previous `mutator_set_accumulator`,
-        //   c) Verify that all removal records have unique index sets
-        //   d) verify that adding `mutator_set_update` to previous `mutator_set_accumulator`
-        //      gives `next_mutator_set_accumulator`,
-        //   e) transaction timestamp <= block timestamp
-        //   f) transaction coinbase <= miner reward
-        //   g) transaction is valid (internally consistent)
+        // 1. Block is valid
+        //   a) block proof is valid
+        //   b) max block size is not exceeded
+        // 2. The transaction is valid.
+        //   a) Verify that MS removal records are valid, done against previous `mutator_set_accumulator`,
+        //   b) Verify that all removal records have unique index sets
+        //   c) verify that we can add `mutator_set_update` to previous `mutator_set_accumulator`,
+        //      and that it results in new block's `mutator_set_accumulator`
+        //   d) transaction timestamp <= block timestamp
+        //   e) transaction coinbase <= miner reward
+        //   f) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
         if previous_block.kernel.header.height.next() != block_copy.kernel.header.height {
@@ -578,32 +587,31 @@ impl Block {
             return false;
         }
 
-        // 0.e) Target difficulty was updated correctly
-        if block_copy.kernel.header.difficulty
-            != difficulty_control(
-                block_copy.header().timestamp,
-                previous_block.header().timestamp,
-                previous_block.header().difficulty,
-                target_block_interval,
-                previous_block.header().height,
-            )
-        {
+        // 0.e) Target difficulty and cumulative proof-of-work were updated correctly
+        let expected_difficulty = difficulty_control(
+            block_copy.header().timestamp,
+            previous_block.header().timestamp,
+            previous_block.header().difficulty,
+            target_block_interval,
+            previous_block.header().height,
+        );
+        if block_copy.kernel.header.difficulty != expected_difficulty {
             warn!(
-                "Value for new difficulty is incorrect.  actual: {},  expected: {}",
+                "Value for new difficulty is incorrect.  actual: {},  expected: {expected_difficulty}",
                 block_copy.kernel.header.difficulty,
-                difficulty_control(
-                    block_copy.header().timestamp,
-                    previous_block.header().timestamp,
-                    previous_block.header().difficulty,
-                    target_block_interval,
-                    previous_block.header().height,
-                )
             );
+            return false;
+        }
+        let expected_cumulative_proof_of_work =
+            previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
+        if block_copy.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
+            warn!("Block's cumulative proof-of-work number does not match with expectation.\n\nBlock's pow: {}\nexpectation: {}", block_copy.header().cumulative_proof_of_work, expected_cumulative_proof_of_work);
             return false;
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
-        let future_limit = now + Timestamp::hours(2);
+        const FUTUREDATING_LIMIT: Timestamp = Timestamp::hours(2);
+        let future_limit = now + FUTUREDATING_LIMIT;
         if block_copy.kernel.header.timestamp >= future_limit {
             warn!(
                 "block time is too far in the future.\n\nBlock timestamp: {}\nThreshold is: {}",
@@ -612,7 +620,27 @@ impl Block {
             return false;
         }
 
-        // 1.b) Verify validity of removal records: That their MMR MPs match the SWBF, and
+        // 1.a) Check block proof
+        let BlockProof::SingleProof(block_proof) = &self.proof else {
+            warn!("Can only verify block proofs, got {:?}", self.proof);
+            return false;
+        };
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof) {
+            warn!("Block proof invalid.");
+            return false;
+        }
+
+        // 1.b) Check block size
+        if self.size() > MAX_BLOCK_SIZE {
+            warn!(
+                "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
+                self.size(),
+                MAX_BLOCK_SIZE
+            );
+            return false;
+        }
+
+        // 2.a) Verify validity of removal records: That their MMR MPs match the SWBF, and
         // that at least one of their listed indices is absent.
         for removal_record in block_copy.kernel.body.transaction_kernel.inputs.iter() {
             if !previous_block
@@ -626,7 +654,7 @@ impl Block {
             }
         }
 
-        // 1.c) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
+        // 2.b) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
         let mut absolute_index_sets = block_copy
             .kernel
             .body
@@ -642,7 +670,7 @@ impl Block {
             return false;
         }
 
-        // 1.d) Verify that the two mutator sets, the one from the current block and the
+        // 2.c) Verify that the two mutator sets, the one from the current block and the
         // one from the previous, are consistent with the transactions.
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
@@ -671,7 +699,7 @@ impl Block {
             return false;
         }
 
-        // 1.e) verify that the transaction timestamp is less than or equal to the block's timestamp.
+        // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp.
         if block_copy.kernel.body.transaction_kernel.timestamp > block_copy.kernel.header.timestamp
         {
             warn!(
@@ -682,12 +710,13 @@ impl Block {
             return false;
         }
 
-        // 1.f) Verify that the coinbase claimed by the transaction does not exceed
+        // 2.e) Verify that the coinbase claimed by the transaction does not exceed
         // the allowed coinbase based on block height, epoch, etc., and fee
-        let miner_reward: NeptuneCoins = Self::get_mining_reward(block_copy.kernel.header.height)
-            + self.kernel.body.transaction_kernel.fee;
+        let expected_reward: NeptuneCoins =
+            Self::get_mining_reward(block_copy.kernel.header.height)
+                + self.kernel.body.transaction_kernel.fee;
         if let Some(claimed_reward) = block_copy.kernel.body.transaction_kernel.coinbase {
-            if claimed_reward > miner_reward {
+            if claimed_reward > expected_reward {
                 warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters.");
                 return false;
             }
@@ -781,6 +810,15 @@ impl Block {
         } else {
             current_tip
         }
+    }
+
+    /// Size in number of BFieldElements of the block
+    // Why defined in terms of BFieldElements and not bytes? Anticipates
+    // recursive block validation, where we need to test a block's size against
+    // the limit. The size is easier to calculate if it relates to a block's
+    // encoding on the VM, rather than its serialization as a vector of bytes.
+    pub(crate) fn size(&self) -> usize {
+        self.encode().len()
     }
 }
 

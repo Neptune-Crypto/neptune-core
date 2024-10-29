@@ -2,9 +2,12 @@ use arbitrary::Arbitrary;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::block::Claim;
+use crate::models::blockchain::block::Tip5;
 use crate::prelude::twenty_first;
 
 /// Encapsulates the claims proven by the block proof.
@@ -23,5 +26,13 @@ pub(crate) struct BlockAppendix {
 impl BlockAppendix {
     pub(crate) fn new(claims: Vec<Claim>) -> Self {
         Self { claims }
+    }
+
+    pub(crate) fn claims_as_output(&self) -> Vec<BFieldElement> {
+        self.claims
+            .iter()
+            .map(Tip5::hash)
+            .flat_map(|d| d.values().to_vec())
+            .collect()
     }
 }

@@ -63,13 +63,11 @@ pub struct BlockHeader {
     pub height: BlockHeight,
     pub prev_block_digest: Digest,
 
-    // TODO: Reject blocks that are more than 10 seconds into the future
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
     // TODO: Consider making a type for `nonce`
     pub nonce: [BFieldElement; 3],
-    pub max_block_size: u32,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
@@ -102,7 +100,6 @@ pub enum BlockHeaderField {
     PrevBlockDigest,
     Timestamp,
     Nonce,
-    MaxBlockSize,
     CumulativeProofOfWork,
     Difficulty,
 }
@@ -123,7 +120,6 @@ impl MastHash for BlockHeader {
             self.prev_block_digest.encode(),
             self.timestamp.encode(),
             self.nonce.encode(),
-            self.max_block_size.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
         ]
@@ -145,7 +141,6 @@ pub(crate) mod block_header_tests {
             prev_block_digest: rng.gen(),
             timestamp: rng.gen(),
             nonce: rng.gen(),
-            max_block_size: rng.gen(),
             cumulative_proof_of_work: rng.gen(),
             difficulty: rng.gen(),
         }

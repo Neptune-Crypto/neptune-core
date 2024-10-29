@@ -422,10 +422,6 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.block_header.as_ref().map(|bh| bh.height)),
         ));
         lines.push(format!(
-            "block size limit: {}",
-            dashifnotset!(data.block_header.as_ref().map(|bh| bh.max_block_size)),
-        ));
-        lines.push(format!(
             "block interval: {}",
             dashifnotset!(data.block_interval)
         ));

@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
 
+use super::block_appendix::BlockAppendix;
 use super::block_body::BlockBody;
 use super::block_header::BlockHeader;
 
@@ -11,5 +12,6 @@ use super::block_header::BlockHeader;
 pub struct TransferBlock {
     pub header: BlockHeader,
     pub body: BlockBody,
+    pub(crate) appendix: BlockAppendix,
     pub proof: Proof,
 }

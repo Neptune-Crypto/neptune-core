@@ -567,7 +567,6 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         prev_block_digest: genesis_block.hash().hash(),
         timestamp: tx_kernel.timestamp,
         nonce: [bfe!(0), bfe!(0), bfe!(0)],
-        max_block_size: 1_000_000,
         cumulative_proof_of_work: genesis_block.header().cumulative_proof_of_work,
         difficulty: genesis_block.header().difficulty,
     };
@@ -598,7 +597,6 @@ pub(crate) fn mock_block_with_transaction(
         prev_block_digest: previous_block.hash(),
         timestamp: transaction.kernel.timestamp,
         nonce: [bfe!(0), bfe!(0), bfe!(0)],
-        max_block_size: 1_000_000,
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
     };
@@ -695,7 +693,6 @@ pub(crate) fn make_mock_block(
         prev_block_digest: previous_block.hash(),
         timestamp: block_body.transaction_kernel.timestamp,
         nonce: [zero, zero, zero],
-        max_block_size: 1_000_000,
         cumulative_proof_of_work: new_cumulative_proof_of_work,
         difficulty: target_difficulty,
     };
