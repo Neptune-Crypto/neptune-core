@@ -48,6 +48,7 @@ use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
+use crate::mine_loop::make_coinbase_transaction;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -75,6 +76,7 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
@@ -794,7 +796,7 @@ pub async fn mock_genesis_archival_state(
 ///
 /// the stored block does NOT have valid proof-of-work, nor does it have a valid
 /// block proof.
-pub async fn mine_block_to_wallet(
+pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     global_state_lock: &mut GlobalStateLock,
     timestamp: Timestamp,
 ) -> Result<Block> {
@@ -816,4 +818,37 @@ pub async fn mine_block_to_wallet(
         .await?;
 
     Ok(block)
+}
+
+/// Function for generating a valid block for testing purposes.
+///
+/// The block will be valid both in terms of PoW and block proof and will pass
+/// the Block::is_valid() function.
+pub(crate) async fn valid_block(
+    state_lock: &GlobalStateLock,
+    fee: NeptuneCoins,
+    timestamp: Timestamp,
+    seed: [u8; 32],
+) -> Block {
+    let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
+    let (cb, _) = make_coinbase_transaction(&state_lock, fee, timestamp)
+        .await
+        .unwrap();
+    let mut block_1 = Block::make_block_template(
+        &current_tip,
+        cb,
+        timestamp,
+        None,
+        &TritonProverSync::dummy(),
+    )
+    .await
+    .unwrap();
+
+    let threshold = current_tip.header().difficulty.target();
+    let mut rng = StdRng::from_seed(seed);
+    while !block_1.has_proof_of_work(&current_tip) {
+        mine_iteration_for_tests(&mut block_1, threshold, &mut rng);
+    }
+
+    block_1
 }

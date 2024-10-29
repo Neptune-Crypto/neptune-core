@@ -2440,6 +2440,8 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn mock_global_state_is_valid() {
+        // Verify that the states, not just the blocks, are valid.
+
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(555);
         let mut global_state_lock =
