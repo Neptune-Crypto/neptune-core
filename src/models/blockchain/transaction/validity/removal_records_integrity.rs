@@ -41,6 +41,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PrimitiveWitness;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -70,12 +71,14 @@ pub struct RemovalRecordsIntegrityWitness {
     input_utxos: SaltedUtxos,
     membership_proofs: Vec<MsMembershipProof>,
     aocl_auth_paths: Vec<MmrMembershipProof>,
+    coinbase: Option<NeptuneCoins>,
     removal_records: Vec<RemovalRecord>,
     aocl: MmrAccumulator,
     swbfi: MmrAccumulator,
     swbfa_hash: Digest,
     mast_path_mutator_set: Vec<Digest>,
     mast_path_inputs: Vec<Digest>,
+    mast_path_coinbase: Vec<Digest>,
     mast_root: Digest,
 }
 
@@ -89,6 +92,7 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
                 .iter()
                 .map(|x| x.auth_path_aocl.to_owned())
                 .collect(),
+            coinbase: primitive_witness.kernel.coinbase,
             removal_records: primitive_witness.kernel.inputs.clone(),
             aocl: primitive_witness.mutator_set_accumulator.aocl.clone(),
             swbfi: primitive_witness
@@ -102,6 +106,9 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
             mast_path_inputs: primitive_witness
                 .kernel
                 .mast_path(TransactionKernelField::Inputs),
+            mast_path_coinbase: primitive_witness
+                .kernel
+                .mast_path(TransactionKernelField::Coinbase),
             mast_root: primitive_witness.kernel.mast_hash(),
         }
     }
@@ -112,6 +119,7 @@ impl From<&PrimitiveWitness> for RemovalRecordsIntegrityWitness {
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]
 struct RemovalRecordsIntegrityWitnessMemory {
     input_utxos: SaltedUtxos,
+    coinbase: Option<NeptuneCoins>,
     removal_records: Vec<RemovalRecord>,
     aocl: MmrAccumulator,
     swbfi: MmrAccumulator,
@@ -121,6 +129,7 @@ impl From<&RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrityWitnessMem
     fn from(value: &RemovalRecordsIntegrityWitness) -> Self {
         Self {
             input_utxos: value.input_utxos.to_owned(),
+            coinbase: value.coinbase,
             removal_records: value.removal_records.to_owned(),
             aocl: value.aocl.to_owned(),
             swbfi: value.swbfi.to_owned(),
@@ -154,6 +163,7 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         let digests = [
             self.mast_path_mutator_set.clone(),
             self.mast_path_inputs.clone(),
+            self.mast_path_coinbase.clone(),
             self.aocl_auth_paths
                 .iter()
                 .flat_map(|x| x.authentication_path.clone())
@@ -302,15 +312,6 @@ impl RemovalRecordsIntegrityWitness {
                         .collect_vec(),
                 );
 
-            // sanity check
-            // for ((leaf, mt_index, _original_index), auth_path) in
-            //     leafs_and_mt_indices.iter().zip(authentication_paths.iter())
-            // {
-            //     assert!(merkle_verify_tester_helper::<H>(
-            //         root, *mt_index, auth_path, *leaf
-            //     ));
-            // }
-
             // update peaks list
             peaks.push(root);
 
@@ -403,6 +404,25 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             TransactionKernelField::COUNT.next_power_of_two().ilog2(),
         );
 
+        // authenticate coinbase against kernel mast hash
+        let coinbase: Option<NeptuneCoins> = rriw.coinbase;
+        let coinbase_leaf: Digest = Hash::hash(&coinbase);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            txk_digest,
+            TransactionKernelField::Coinbase as u32,
+            coinbase_leaf,
+            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+        );
+
+        // Assert that a coinbase transaction has no inputs. This, combined with
+        // a potential future softfork requiring each block to have at least one
+        // input in its transaction, forces the miner to prove at least one
+        // execution of a `Merge` which removes any incentive to mine empty
+        // blocks. Mining empty blocks could otherwise be beneficial since it
+        // allows the miner to complete the proofs faster and get to the
+        // guessing part as soon as possible, to the detriment of the network.
+        assert!(coinbase.is_none() || input_utxos.is_empty());
+
         // iterate over all input UTXOs
         let mut input_index: usize = 0;
         while input_index < input_utxos.len() {
@@ -472,6 +492,9 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         let field_with_size_input_utxos =
             field_with_size!(RemovalRecordsIntegrityWitnessMemory::input_utxos);
         let field_removal_records = field!(RemovalRecordsIntegrityWitnessMemory::removal_records);
+        let field_with_size_coinbase =
+            field_with_size!(RemovalRecordsIntegrityWitnessMemory::coinbase);
+        let field_coinbase = field!(RemovalRecordsIntegrityWitnessMemory::coinbase);
 
         let for_all_utxos = "for_all_utxos".to_string();
 
@@ -574,6 +597,64 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
             // _ [txk_mast_hash] *witness
         );
 
+        let authenticate_coinbase_against_txkmh = triton_asm!(
+            // _ [txk_mast_hash] *witness
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            dup 5
+            // _ [txk_mast_hash] *witness [txk_mast_hash]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            push {TransactionKernelField::Coinbase as u32}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i
+
+            dup 7 {&field_with_size_coinbase}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i *coinbase size
+
+            call {hash_varlen}
+            // _ [txk_mast_hash] *witness [txk_mast_hash] h i [coinbase_leaf]
+
+            call {merkle_verify}
+            // _ [txk_mast_hash] *witness
+        );
+
+        let assert_that_coinbase_transaction_does_not_have_inputs = triton_asm!(
+            // _ [txk_mast_hash] *witness
+
+            dup 0
+            {&field_coinbase}
+            // _ [txk_mast_hash] *witness *coinbase
+
+            read_mem 1
+            pop 1
+            push 0
+            eq
+            // _ [txk_mast_hash] *witness (coinbase == None)
+
+            dup 1 {&field_input_utxos} {&field_utxos}
+            // _ [txk_mast_hash] *witness (coinbase == None) *utxos
+
+            read_mem 1
+            pop 1
+            // _ [txk_mast_hash] *witness (coinbase == None) num_utxos
+
+            push 0
+            eq
+            // _ [txk_mast_hash] *witness (coinbase == None) (num_utxos == 0)
+
+            add
+            // _ [txk_mast_hash] *witness ((coinbase == None) + (num_utxos == 0))
+
+            /* Allowed result of st[0] is 1 or 2, 0 is not allowed. Possible
+               results are {0, 1, 2} */
+
+            pop_count
+            assert
+            // _ [txk_mast_hash] *witness
+        );
+
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
             RemovalRecordsIntegrityWitnessMemory,
         >::default()));
@@ -602,6 +683,14 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
 
             /* authenticate divined removal records against txk mast hash */
             {&authenticate_removal_records_against_txkmh}
+            // _ [txk_mast_hash] *witness
+
+            /* authenticate divined coinbase against txk mast hash */
+            {&authenticate_coinbase_against_txkmh}
+            // _ [txk_mast_hash] *witness
+
+            {&assert_that_coinbase_transaction_does_not_have_inputs}
+            // _ [txk_mast_hash] *witness
 
             /* Prepare for main loop */
             dup 0 {&field_aocl}
@@ -946,11 +1035,13 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             input_utxos: salted_utxos,
             membership_proofs,
             aocl_auth_paths,
+            coinbase: kernel.coinbase,
             aocl,
             swbfi,
             swbfa_hash,
             mast_path_mutator_set: kernel.mast_path(TransactionKernelField::MutatorSetHash),
             mast_path_inputs: kernel.mast_path(TransactionKernelField::Inputs),
+            mast_path_coinbase: kernel.mast_path(TransactionKernelField::Coinbase),
             mast_root: kernel.mast_hash(),
             removal_records: kernel.inputs,
         })
@@ -971,6 +1062,7 @@ mod tests {
     use super::RemovalRecordsIntegrity;
     use super::RemovalRecordsIntegrityWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
@@ -1104,6 +1196,28 @@ mod tests {
         let property = prop_negative(
             bad_removal_records_integrity_witness,
             &[InstructionError::VectorAssertionFailed(0)],
+        );
+        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
+    }
+
+    #[test]
+    fn removal_records_coinbase_tx_cannot_have_inputs() {
+        let mut test_runner = TestRunner::deterministic();
+
+        // Illegal transaction bc it has inputs *and* coinbase.
+        let [bad_primitive_witness] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                [(1, 1, 1)],
+                Some((NeptuneCoins::new(1), 0)),
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let bad_removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::from(&bad_primitive_witness);
+        let property = prop_negative(
+            bad_removal_records_integrity_witness,
+            &[InstructionError::AssertionFailed],
         );
         assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
     }
