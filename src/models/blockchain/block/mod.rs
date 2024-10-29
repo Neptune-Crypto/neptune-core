@@ -17,6 +17,7 @@ use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
+use block_header::BLOCK_HEADER_VERSION;
 use block_header::MINIMUM_BLOCK_TIME;
 use block_header::TARGET_BLOCK_INTERVAL;
 use block_height::BlockHeight;
@@ -26,12 +27,14 @@ use difficulty_control::ProofOfWork;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
+use num_traits::ConstZero;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::error;
 use tracing::warn;
@@ -40,6 +43,8 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use validity::appendix_witness::AppendixWitness;
+use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 
 use super::transaction::transaction_kernel::TransactionKernel;
@@ -51,7 +56,10 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
@@ -69,6 +77,16 @@ pub enum BlockProof {
     Invalid,
     SingleProof(Proof),
     DummyProof, // TODO: remove me
+}
+
+/// Enumerates the types of proof for a block. Use `Invalid` for tests when you
+/// don't care about proof validity.
+pub(crate) enum BlockProofType {
+    /// Represents an invalid proof type, only to be used for tests
+    Invalid,
+
+    /// The only valid type for consensus
+    SingleProof,
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -174,6 +192,7 @@ impl From<Block> for TransferBlock {
             BlockProof::SingleProof(sp) => sp,
             BlockProof::Genesis => {
                 error!("The Genesis block cannot be transferred");
+                // TODO: Don't panic in `From` imlementations! Fix!
                 panic!()
             }
             BlockProof::Invalid => {
@@ -192,68 +211,99 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
-    /// Prepare a Block for mining
-    pub fn make_block_template(
-        previous_block: &Block,
+    async fn make_block_template_inner(
+        predecessor: &Block,
         transaction: Transaction,
-        mut block_timestamp: Timestamp,
+        block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-    ) -> (BlockHeader, BlockBody, BlockProof) {
-        let additions = transaction.kernel.outputs.clone();
-        let removals = transaction.kernel.inputs.clone();
-        let mut next_mutator_set_accumulator: MutatorSetAccumulator =
-            previous_block.kernel.body.mutator_set_accumulator.clone();
+        sync_device: &TritonProverSync,
+        proof_type: BlockProofType,
+    ) -> Result<Block, TryLockError> {
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
+        let body = primitive_witness.body().to_owned();
 
-        // Apply the mutator set update to the mutator set accumulator
-        // This function mutates the MS accumulator that is given as argument to
-        // the function such that the next mutator set accumulator is calculated.
-        let mutator_set_update = MutatorSetUpdate::new(removals, additions);
-        mutator_set_update
-            .apply_to_accumulator(&mut next_mutator_set_accumulator)
-            .expect("Mutator set mutation must work");
+        let proof = match proof_type {
+            BlockProofType::Invalid => BlockProof::Invalid,
+            BlockProofType::SingleProof => {
+                let appendix_witness =
+                    AppendixWitness::produce(primitive_witness, sync_device).await?;
+                let appendix = appendix_witness.appendix();
+                let claim = BlockProgram::claim(&body, &appendix);
+                let proof = BlockProgram
+                    .prove(&claim, appendix_witness.nondeterminism(), sync_device)
+                    .await?;
+                BlockProof::SingleProof(proof)
+            }
+        };
 
-        let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-        block_mmra.append(previous_block.hash());
-        let block_body: BlockBody = BlockBody::new(
-            transaction.kernel,
-            next_mutator_set_accumulator.clone(),
-            MmrAccumulator::new_from_leafs(vec![]),
-            block_mmra,
-        );
-
-        let zero = BFieldElement::zero();
-        let new_cumulative_proof_of_work: ProofOfWork =
-            previous_block.kernel.header.cumulative_proof_of_work
-                + previous_block.kernel.header.difficulty;
-        let next_block_height = previous_block.kernel.header.height.next();
-        if block_timestamp < previous_block.kernel.header.timestamp {
-            warn!(
-                "Received block is timestamped in the future; mining on future-timestamped block."
-            );
-            block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
-        }
         let difficulty = difficulty_control(
             block_timestamp,
-            previous_block.header().timestamp,
-            previous_block.header().difficulty,
+            predecessor.header().timestamp,
+            predecessor.header().difficulty,
             target_block_interval,
-            previous_block.header().height,
+            predecessor.header().height,
         );
 
-        let block_header = BlockHeader {
-            version: zero,
+        let next_block_height = predecessor.kernel.header.height.next();
+        let new_cumulative_proof_of_work: ProofOfWork =
+            predecessor.kernel.header.cumulative_proof_of_work
+                + predecessor.kernel.header.difficulty;
+        let header = BlockHeader {
+            version: BLOCK_HEADER_VERSION,
             height: next_block_height,
-            prev_block_digest: previous_block.hash(),
+            prev_block_digest: predecessor.hash(),
             timestamp: block_timestamp,
-            nonce: [zero, zero, zero],
+            nonce: [
+                BFieldElement::ZERO,
+                BFieldElement::ZERO,
+                BFieldElement::ZERO,
+            ],
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
         };
 
-        // TODO: Produce a proof of block correctness.
-        let block_proof = BlockProof::DummyProof;
+        Ok(Block::new(header, body, proof))
+    }
 
-        (block_header, block_body, block_proof)
+    /// Prepare a Block for mining
+    pub(crate) async fn make_block_template(
+        predecessor: &Block,
+        transaction: Transaction,
+        block_timestamp: Timestamp,
+        target_block_interval: Option<Timestamp>,
+        sync_device: &TritonProverSync,
+    ) -> Result<Block, TryLockError> {
+        Self::make_block_template_inner(
+            predecessor,
+            transaction,
+            block_timestamp,
+            target_block_interval,
+            sync_device,
+            BlockProofType::SingleProof,
+        )
+        .await
+    }
+
+    /// Create a block template with an invalid block proof.
+    ///
+    /// To be used in tests where you don't care about block validity.
+    #[cfg(test)]
+    pub(crate) async fn block_template_invalid_proof(
+        predecessor: &Block,
+        transaction: Transaction,
+        block_timestamp: Timestamp,
+        target_block_interval: Option<Timestamp>,
+    ) -> Block {
+        Self::make_block_template_inner(
+            predecessor,
+            transaction,
+            block_timestamp,
+            target_block_interval,
+            &TritonProverSync::dummy(),
+            BlockProofType::Invalid,
+        )
+        .await
+        .unwrap()
     }
 
     /// Returns the block Digest
@@ -842,23 +892,6 @@ mod block_tests {
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
-
-    impl Block {
-        pub fn new_block_from_template(
-            previous_block: &Block,
-            transaction: Transaction,
-            block_timestamp: Timestamp,
-            target_block_interval: Option<Timestamp>,
-        ) -> Self {
-            let (header, body, proof) = Block::make_block_template(
-                previous_block,
-                transaction,
-                block_timestamp,
-                target_block_interval,
-            );
-            Self::new(header, body, proof)
-        }
-    }
 
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {

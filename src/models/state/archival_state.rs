@@ -1157,7 +1157,8 @@ mod archival_state_tests {
             .unwrap();
 
         let mock_block_2 =
-            Block::new_block_from_template(&mock_block_1, sender_tx, in_seven_months, None);
+            Block::block_template_invalid_proof(&mock_block_1, sender_tx, in_seven_months, None)
+                .await;
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await?;
@@ -1265,9 +1266,11 @@ mod archival_state_tests {
         let addition_records_1b = ars(5);
 
         let tx_1a = make_mock_transaction(removal_records_1a, addition_records_1a);
-        let block_1a = Block::new_block_from_template(&genesis_block, tx_1a, in_seven_months, None);
+        let block_1a =
+            Block::block_template_invalid_proof(&genesis_block, tx_1a, in_seven_months, None).await;
         let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
-        let block_1b = Block::new_block_from_template(&genesis_block, tx_1b, in_seven_months, None);
+        let block_1b =
+            Block::block_template_invalid_proof(&genesis_block, tx_1b, in_seven_months, None).await;
 
         global_state_lock
             .set_new_tip(block_1a.clone())
@@ -1348,7 +1351,8 @@ mod archival_state_tests {
 
             let tx = make_mock_transaction(removal_records, addition_records);
             let next_block =
-                Block::new_block_from_template(&previous_block, tx, in_seven_months, None);
+                Block::block_template_invalid_proof(&previous_block, tx, in_seven_months, None)
+                    .await;
 
             // 2. Update archival-mutator set with produced block
             state_lock.set_new_tip(next_block.clone()).await.unwrap();
@@ -1535,8 +1539,15 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated block transaction");
 
-        let block_1 =
-            Block::new_block_from_template(&genesis_block, block_tx, in_seven_months, None);
+        let block_1 = Block::make_block_template(
+            &genesis_block,
+            block_tx,
+            in_seven_months,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
@@ -1744,12 +1755,15 @@ mod archival_state_tests {
             .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
             .await
             .unwrap();
-        let block_2 = Block::new_block_from_template(
+        let block_2 = Block::make_block_template(
             &block_1,
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-        );
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
 
         println!("Generated new block");
 

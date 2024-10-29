@@ -4,8 +4,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
+use crate::models::blockchain::block::validity::transaction_is_valid::TransactionIsValid;
 use crate::models::blockchain::block::Claim;
 use crate::models::blockchain::block::Tip5;
 use crate::prelude::twenty_first;
@@ -34,5 +36,14 @@ impl BlockAppendix {
             .map(Tip5::hash)
             .flat_map(|d| d.values().to_vec())
             .collect()
+    }
+
+    /// Return the list of claims that this node requires for a block to be
+    /// considered valid.
+    pub(crate) fn consensus_claims(block_body_mast_hash: Digest) -> Vec<Claim> {
+        // Add more claims here when softforking.
+        let tx_is_valid = TransactionIsValid::claim(block_body_mast_hash);
+
+        vec![tx_is_valid]
     }
 }

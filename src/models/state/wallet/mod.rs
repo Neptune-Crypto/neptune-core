@@ -834,7 +834,15 @@ mod wallet_tests {
         let addition_records = tx_outputs.addition_records();
         let tx = make_mock_transaction(removal_records, addition_records);
 
-        let next_block = Block::new_block_from_template(&next_block.clone(), tx, now, None);
+        let next_block = Block::make_block_template(
+            &next_block.clone(),
+            tx,
+            now,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
@@ -1194,7 +1202,15 @@ mod wallet_tests {
             .await
             .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
-        let block_3_b = Block::new_block_from_template(&block_2_b, merged_tx, timestamp, None);
+        let block_3_b = Block::make_block_template(
+            &block_2_b,
+            merged_tx,
+            timestamp,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
         assert!(
             block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"
@@ -1360,8 +1376,15 @@ mod wallet_tests {
             .merge_with(cbtx, Default::default(), &TritonProverSync::dummy())
             .await
             .unwrap();
-        let block_1 =
-            Block::new_block_from_template(&genesis_block, tx_for_block, in_seven_months, None);
+        let block_1 = Block::make_block_template(
+            &genesis_block,
+            tx_for_block,
+            in_seven_months,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
 
         // The entire block must be valid, i.e., have a valid block proof, and
         // be valid in other respects. We don't care about PoW, though.

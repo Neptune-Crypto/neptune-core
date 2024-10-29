@@ -789,10 +789,11 @@ pub async fn mock_genesis_archival_state(
     (archival_state, peer_db, data_dir)
 }
 
-// this will create and store the next block including any transactions
-// presently in the mempool.  The coinbase will go to our own wallet.
-//
-// the stored block does NOT have valid proof-of-work.
+/// Create and store the next block including any transactions presently in the
+/// mempool.  The coinbase will go to our own wallet.
+///
+/// the stored block does NOT have valid proof-of-work, nor does it have a valid
+/// block proof.
 pub async fn mine_block_to_wallet(
     global_state_lock: &mut GlobalStateLock,
     timestamp: Timestamp,
@@ -808,9 +809,7 @@ pub async fn mine_block_to_wallet(
         crate::mine_loop::create_block_transaction(&tip_block, global_state_lock, timestamp)
             .await?;
 
-    let (header, body, proof) =
-        crate::mine_loop::make_block_template(&tip_block, transaction, timestamp, None);
-    let block = Block::new(header, body, proof);
+    let block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None).await;
 
     global_state_lock
         .set_new_self_mined_tip(block.clone(), coinbase_expected_utxo)

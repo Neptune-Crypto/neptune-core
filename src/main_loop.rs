@@ -352,10 +352,8 @@ impl MainLoopHandler {
     async fn handle_miner_task_message(&mut self, msg: MinerToMain) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
-                // When receiving a block from the miner task, we assume it is valid
-                // and we assume it is the longest chain even though we could have received
-                // a block from a peer task before this event is triggered.
                 let new_block = new_block_info.block;
+
                 info!("Miner found new block: {}", new_block.kernel.header.height);
 
                 // Store block in database

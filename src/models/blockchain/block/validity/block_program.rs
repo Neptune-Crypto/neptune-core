@@ -29,7 +29,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 pub(crate) struct BlockProgram;
 
 impl BlockProgram {
-    fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
+    pub(crate) fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
         Claim::new(Self.hash())
             .with_input(block_body.mast_hash().reversed().values().to_vec())
             .with_output(appendix.claims_as_output())
@@ -190,7 +190,7 @@ pub(crate) mod test {
         );
 
         let appendix_witness =
-            AppendixWitness::_produce(block_primitive_witness, &TritonProverSync::dummy())
+            AppendixWitness::produce(block_primitive_witness, &TritonProverSync::dummy())
                 .await
                 .unwrap();
         let block_program_nondeterminism = appendix_witness.nondeterminism();

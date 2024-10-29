@@ -57,6 +57,8 @@ pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_WAIT: usize = 128;
 /// This parameter must be a power of two.
 pub(crate) const ADVANCE_DIFFICULTY_CORRECTION_FACTOR: usize = 4;
 
+pub(crate) const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize, Arbitrary)]
 pub struct BlockHeader {
     pub version: BFieldElement,

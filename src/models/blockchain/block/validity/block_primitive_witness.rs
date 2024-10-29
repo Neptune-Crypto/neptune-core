@@ -27,7 +27,7 @@ use crate::models::blockchain::transaction::Transaction;
 ///  |  | prove                                                                   |
 ///  |  |  |       ...           ...                  ...                         |
 ///  v  v  v                                                                      |
-/// SoftClaimsWitness --------------- produce ----------------------> BlockProof -|
+/// AppendixWitness ---------------  produce  ----------------------> BlockProof -|
 ///                                                                               |
 ///                                                 Block <---------- mining -----'
 /// ```
@@ -39,6 +39,14 @@ pub(crate) struct BlockPrimitiveWitness {
 }
 
 impl BlockPrimitiveWitness {
+    pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
+        Self {
+            predecessor_block,
+            transaction,
+            maybe_body: OnceLock::new(),
+        }
+    }
+
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(||{
 
@@ -147,14 +155,6 @@ pub(crate) mod test {
     }
 
     impl BlockPrimitiveWitness {
-        pub(crate) fn new(predecessor_block: Block, transaction: Transaction) -> Self {
-            Self {
-                predecessor_block,
-                transaction,
-                maybe_body: OnceLock::new(),
-            }
-        }
-
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             let parent_header = arb::<BlockHeader>();
             let parent_appendix = arb::<BlockAppendix>();

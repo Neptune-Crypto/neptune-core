@@ -2224,12 +2224,15 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        let block_1 = Block::new_block_from_template(
+        let block_1 = Block::make_block_template(
             &genesis_block,
             block_transaction,
             in_seven_months,
             None,
-        );
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
 
         assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
@@ -2418,8 +2421,16 @@ mod global_state_tests {
             .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
             .await
             .unwrap();
-        let block_2 =
-            Block::new_block_from_template(&block_1, block_transaction2, in_seven_months, None);
+        let block_2 = Block::make_block_template(
+            &block_1,
+            block_transaction2,
+            in_seven_months,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
+        assert!(block_2.is_valid(&block_1, in_seven_months));
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -2982,15 +2993,15 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
-                let block_1 = {
-                    let (header, body, proof) = Block::make_block_template(
-                        &genesis_block,
-                        alice_to_bob_tx,
-                        seven_months_post_launch,
-                        None,
-                    );
-                    Block::new(header, body, proof)
-                };
+                let block_1 = Block::make_block_template(
+                    &genesis_block,
+                    alice_to_bob_tx,
+                    seven_months_post_launch,
+                    None,
+                    &TritonProverSync::dummy(),
+                )
+                .await
+                .unwrap();
 
                 // alice's node learns of the new block.
                 alice_state_mut

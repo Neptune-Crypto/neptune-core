@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use difficulty_control::Difficulty;
@@ -39,74 +40,11 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-
-/// Prepare a Block for mining
-pub(crate) fn make_block_template(
-    previous_block: &Block,
-    transaction: Transaction,
-    mut block_timestamp: Timestamp,
-    target_block_interval: Option<Timestamp>,
-) -> (BlockHeader, BlockBody, BlockProof) {
-    let additions = transaction.kernel.outputs.clone();
-    let removals = transaction.kernel.inputs.clone();
-    let mut next_mutator_set_accumulator: MutatorSetAccumulator =
-        previous_block.kernel.body.mutator_set_accumulator.clone();
-
-    // Apply the mutator set update to the mutator set accumulator
-    // This function mutates the MS accumulator that is given as argument to
-    // the function such that the next mutator set accumulator is calculated.
-    let mutator_set_update = MutatorSetUpdate::new(removals, additions);
-    mutator_set_update
-        .apply_to_accumulator(&mut next_mutator_set_accumulator)
-        .expect("Mutator set mutation must work");
-
-    let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmra.append(previous_block.hash());
-    let block_body: BlockBody = BlockBody::new(
-        transaction.kernel,
-        next_mutator_set_accumulator.clone(),
-        MmrAccumulator::new_from_leafs(vec![]),
-        block_mmra,
-    );
-
-    let zero = BFieldElement::zero();
-    let new_pow: ProofOfWork = previous_block.kernel.header.cumulative_proof_of_work
-        + previous_block.kernel.header.difficulty;
-    let next_block_height = previous_block.kernel.header.height.next();
-    if block_timestamp < previous_block.kernel.header.timestamp {
-        warn!("Received block is timestamped in the future; mining on future-timestamped block.");
-        block_timestamp = previous_block.kernel.header.timestamp + Timestamp::seconds(1);
-    }
-    let difficulty: Difficulty = difficulty_control(
-        block_timestamp,
-        previous_block.header().timestamp,
-        previous_block.header().difficulty,
-        target_block_interval,
-        previous_block.header().height,
-    );
-
-    let block_header = BlockHeader {
-        version: zero,
-        height: next_block_height,
-        prev_block_digest: previous_block.hash(),
-        timestamp: block_timestamp,
-        nonce: [zero, zero, zero],
-        cumulative_proof_of_work: new_pow,
-        difficulty,
-    };
-
-    let block_proof = BlockProof::DummyProof; // TODO: produce SingleProof
-
-    (block_header, block_body, block_proof)
-}
 
 /// Attempt to mine a valid block for the network
 #[allow(clippy::too_many_arguments)]
 async fn mine_block(
-    block_header: BlockHeader,
-    block_body: BlockBody,
-    block_proof: BlockProof,
+    block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
@@ -127,9 +65,7 @@ async fn mine_block(
     // note: there is no async code inside the mining loop.
     tokio::task::spawn_blocking(move || {
         mine_block_worker(
-            block_header,
-            block_body,
-            block_proof,
+            block,
             previous_block,
             sender,
             coinbase_utxo_info,
@@ -141,11 +77,8 @@ async fn mine_block(
     .unwrap()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn mine_block_worker(
-    block_header: BlockHeader,
-    block_body: BlockBody,
-    block_proof: BlockProof,
+    mut block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     coinbase_utxo_info: ExpectedUtxo,
@@ -157,9 +90,9 @@ fn mine_block_worker(
     let threshold = prev_difficulty.target();
     info!(
         "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
-        block_body.transaction_kernel.outputs.len(),
+        block.body().transaction_kernel.outputs.len(),
         previous_block.header().difficulty,
-        block_header.height,
+        block.header().height,
         threshold
     );
 
@@ -167,8 +100,6 @@ fn mine_block_worker(
     // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
     // seeded with that seed. The `thread_rng()` object is dropped immediately.
     let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
-
-    let mut block = Block::new(block_header, block_body, block_proof);
 
     // Mining loop
     while !mine_iteration(
@@ -198,23 +129,11 @@ fn mine_block_worker(
         nonce[0], nonce[1], nonce[2]
     );
 
-    if !block.is_valid(&previous_block, Timestamp::now()) {
-        // Block could be invalid if for instance the proof and proof-of-work
-        // took less time than the minimum block time.
-        error!("Found block with valid proof-of-work but block is invalid.");
-        return;
-    }
-
-    let new_block_found = NewBlockFound {
-        block: Box::new(block),
-        coinbase_utxo_info: Box::new(coinbase_utxo_info),
-    };
-
-    let timestamp = new_block_found.block.kernel.header.timestamp;
+    let timestamp = block.kernel.header.timestamp;
     let timestamp_standard = timestamp.standard_format();
-    let hash = new_block_found.block.hash();
+    let hash = block.hash();
     let hex = hash.to_hex();
-    let height = new_block_found.block.kernel.header.height;
+    let height = block.kernel.header.height;
     info!(
         r#"Newly mined block details:
               Height: {height}
@@ -225,6 +144,11 @@ Difficulty threshold: {threshold}
           Difficulty: {prev_difficulty}
 "#
     );
+
+    let new_block_found = NewBlockFound {
+        block: Box::new(block),
+        coinbase_utxo_info: Box::new(coinbase_utxo_info),
+    };
 
     sender
         .send(new_block_found)
@@ -454,12 +378,16 @@ pub async fn mine(
             // can be aborted on shutdown.
             let (transaction, coinbase_utxo_info) =
                 create_block_transaction(&latest_block, &global_state_lock, now).await?;
-            let (block_header, block_body, block_proof) =
-                make_block_template(&latest_block, transaction, now, None);
+            let proof_sync = global_state_lock.wait_if_busy();
+            let block_template =
+                Block::make_block_template(&latest_block, transaction, now, None, &proof_sync)
+                    .await;
+            let block_template = match block_template {
+                Ok(template) => template,
+                Err(_) => bail!("Miner failed to generate block template"),
+            };
             let miner_task = mine_block(
-                block_header,
-                block_body,
-                block_proof,
+                block_template,
                 latest_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,
@@ -549,12 +477,15 @@ pub async fn mine(
                 // we only ignore what the worker task sent us.
                 if !new_block_found.block.has_proof_of_work(&latest_block) {
                     error!("Own mined block did not have valid PoW Discarding.");
+                    continue;
                 }
 
-                // The block, however, *must* be valid on other parameters. So here, we should panic
-                // if it is not.
-                let now = Timestamp::now();
-                assert!(new_block_found.block.is_valid(&latest_block, now), "Own mined block must be valid. Failed validity check after successful PoW check.");
+                if !new_block_found.block.is_valid(&latest_block, Timestamp::now()) {
+                    // Block could be invalid if for instance the proof and proof-of-work
+                    // took less time than the minimum block time.
+                    error!("Found block with valid proof-of-work but block is invalid.");
+                    continue;
+                }
 
                 info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
 
@@ -640,13 +571,13 @@ pub(crate) mod mine_loop_tests {
         let (transaction, _coinbase_utxo_info) =
             { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
         let start_time = Timestamp::now();
-        let (block_header, block_body, block_proof) = Block::make_block_template(
+        let mut block = Block::block_template_invalid_proof(
             &previous_block,
             transaction,
             start_time,
             target_block_interval,
-        );
-        let mut block = Block::new(block_header, block_body, block_proof);
+        )
+        .await;
         let threshold = previous_block.header().difficulty.target();
 
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -671,12 +602,13 @@ pub(crate) mod mine_loop_tests {
 
     /// Estimate the time it takes to prepare a block so we can start guessing
     /// nonces.
-    async fn estimate_block_preparation_time() -> f64 {
+    async fn estimate_block_preparation_time_invalid_proof() -> f64 {
         let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
 
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let tick = std::time::SystemTime::now();
         let (transaction, _coinbase_utxo_info) = make_coinbase_transaction(
             &global_state_lock,
             NeptuneCoins::zero(),
@@ -686,10 +618,9 @@ pub(crate) mod mine_loop_tests {
         .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
-        let (block_header, block_body, block_proof) =
-            Block::make_block_template(&genesis_block, transaction, in_seven_months, None);
-        let tick = std::time::SystemTime::now();
-        let block = Block::new(block_header, block_body, block_proof);
+        let block =
+            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None)
+                .await;
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
         tock
@@ -697,7 +628,7 @@ pub(crate) mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_template_is_valid_test() -> Result<()> {
+    async fn block_template_is_valid_test() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -737,18 +668,15 @@ pub(crate) mod mine_loop_tests {
             transaction_empty_mempool.kernel.inputs.is_empty(),
             "Coinbase transaction with empty mempool must have zero inputs"
         );
-        let (block_header_template_empty_mempool, block_body_empty_mempool, block_proof) =
-            Block::make_block_template(
-                &genesis_block,
-                transaction_empty_mempool,
-                in_seven_months,
-                None,
-            );
-        let block_template_empty_mempool = Block::new(
-            block_header_template_empty_mempool,
-            block_body_empty_mempool,
-            block_proof,
-        );
+        let block_template_empty_mempool = Block::make_block_template(
+            &genesis_block,
+            transaction_empty_mempool,
+            in_seven_months,
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
         assert!(
             block_template_empty_mempool.is_valid(&genesis_block, in_seven_months),
             "Block template created by miner with empty mempool must be valid"
@@ -807,24 +735,23 @@ pub(crate) mod mine_loop_tests {
         assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
         // Build and verify block template
-        let (block_header_template, block_body, new_block_proof) = Block::make_block_template(
+        let block_template_non_empty_mempool = Block::make_block_template(
             &genesis_block,
             transaction_non_empty_mempool,
             in_seven_months,
             None,
-        );
-        let block_template_non_empty_mempool =
-            Block::new(block_header_template, block_body, new_block_proof);
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
         assert!(
             block_template_non_empty_mempool
                 .is_valid(&genesis_block, in_seven_months + Timestamp::seconds(2)),
             "Block template created by miner with non-empty mempool must be valid"
         );
-
-        Ok(())
     }
 
-    /// This test mines a single block at height 1 on the regtest network
+    /// This test mines a single block at height 1 on the main network
     /// and then validates it with `Block::is_valid()` and
     /// `Block::has_proof_of_work()`.
     ///
@@ -855,15 +782,14 @@ pub(crate) mod mine_loop_tests {
                 .await
                 .unwrap();
 
-        let (block_header, block_body, block_proof) =
-            Block::make_block_template(&tip_block_orig, transaction, launch_date, None);
+        let block =
+            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None)
+                .await;
 
         let unrestricted_mining = true;
 
         mine_block_worker(
-            block_header,
-            block_body,
-            block_proof,
+            block,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
@@ -873,9 +799,6 @@ pub(crate) mod mine_loop_tests {
 
         let mined_block_info = worker_task_rx.await.unwrap();
 
-        assert!(mined_block_info
-            .block
-            .is_valid(&tip_block_orig, Timestamp::now()));
         assert!(mined_block_info.block.has_proof_of_work(&tip_block_orig));
     }
 
@@ -913,19 +836,22 @@ pub(crate) mod mine_loop_tests {
                 .await
                 .unwrap();
 
-        let (block_header, block_body, block_proof) =
-            Block::make_block_template(&tip_block_orig, transaction, ten_seconds_ago, None);
+        let template = Block::block_template_invalid_proof(
+            &tip_block_orig,
+            transaction,
+            ten_seconds_ago,
+            None,
+        )
+        .await;
 
         // sanity check that our initial state is correct.
-        assert_eq!(block_header.timestamp, ten_seconds_ago);
+        let initial_header_timestamp = template.header().timestamp;
+        assert_eq!(ten_seconds_ago, initial_header_timestamp);
 
-        let initial_header_timestamp = block_header.timestamp;
         let unrestricted_mining = true;
 
         mine_block_worker(
-            block_header,
-            block_body,
-            block_proof,
+            template,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
@@ -1006,7 +932,7 @@ pub(crate) mod mine_loop_tests {
         let hash_rate =
             estimate_own_hash_rate(Some(target_block_interval), unrestricted_mining).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
-        let prepare_time = estimate_block_preparation_time().await;
+        let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
         if 1.5 * prepare_time > target_block_interval.0.value() as f64 {
             println!(
@@ -1051,20 +977,19 @@ pub(crate) mod mine_loop_tests {
             let (transaction, coinbase_utxo_info) =
                 { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
 
-            let (block_header, block_body, block_proof) = Block::make_block_template(
+            let block = Block::block_template_invalid_proof(
                 &prev_block,
                 transaction,
                 start_time,
                 Some(target_block_interval),
-            );
+            )
+            .await;
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
-            let height = block_header.height;
+            let height = block.header().height;
 
             mine_block_worker(
-                block_header,
-                block_body,
-                block_proof,
+                block,
                 prev_block.clone(),
                 worker_task_tx,
                 coinbase_utxo_info,
@@ -1079,12 +1004,7 @@ pub(crate) mod mine_loop_tests {
             // which is the method we need here because it allows us to override
             // default values for the target block interval and the minimum
             // block interval.
-            assert!(mined_block_info.block.is_valid_extended(
-                &prev_block,
-                Timestamp::now(),
-                Some(target_block_interval),
-                Some(Timestamp::millis(0))
-            ));
+            assert!(mined_block_info.block.has_proof_of_work(&prev_block,));
 
             prev_block = *mined_block_info.block;
 
