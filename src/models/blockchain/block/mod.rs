@@ -621,26 +621,9 @@ impl Block {
         }
 
         // 1.a) Verify appendix contains required claims
-        let block_body_mast_hash = self.body().mast_hash();
-        let consensus_claims = BlockAppendix::consensus_claims(block_body_mast_hash);
-        if consensus_claims.len() > self.appendix().claims().len() {
-            warn!(
-                "Missing claim in block appendix. Expected {} claims but block contains only {}.",
-                consensus_claims.len(),
-                self.appendix().claims().len()
-            );
-            return false;
-        }
-
-        for (i, (contained_claim, required_claim)) in self
-            .appendix()
-            .claims()
-            .iter()
-            .zip(consensus_claims.iter())
-            .enumerate()
-        {
-            if required_claim != contained_claim {
-                warn!("Bad claim number {i}.\n\nExpected:\n{required_claim:?} claim in block but got:\n{contained_claim:?}",);
+        for required_claim in BlockAppendix::consensus_claims(self.body()) {
+            if !self.appendix().contains(&required_claim) {
+                warn!("Block appendix does not contain required claim.\nRequired claim: {required_claim:?}");
                 return false;
             }
         }

@@ -43,7 +43,7 @@ impl BlockProgram {
 
 impl ConsensusProgram for BlockProgram {
     fn source(&self) {
-        let block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
+        let _block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let block_witness: AppendixWitness = tasmlib::decode_from_memory(start_address);
         let claims: Vec<Claim> = block_witness.claims;
@@ -51,10 +51,6 @@ impl ConsensusProgram for BlockProgram {
 
         let mut i = 0;
         while i < claims.len() {
-            assert_eq!(
-                claims[i].input,
-                block_body_digest.reversed().values().to_vec()
-            );
             tasmlib::tasmlib_io_write_to_stdout___digest(Tip5::hash(&claims[i]));
             verify_stark(Stark::default(), &claims[i], &proofs[i]);
 
@@ -207,7 +203,7 @@ pub(crate) mod test {
         assert_eq!(rust_output, tasm_output);
 
         let expected_output = appendix_witness
-            .claims
+            .claims()
             .iter()
             .flat_map(|appendix_claim| Tip5::hash(appendix_claim).values().to_vec())
             .collect_vec();

@@ -20,10 +20,10 @@ use tokio::sync::TryLockError;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
-use super::transaction_is_valid::TransactionIsValid;
-use super::transaction_is_valid::TransactionIsValidWitness;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::BlockAppendix;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonProverSync;
@@ -66,23 +66,30 @@ impl AppendixWitness {
 
     pub(crate) async fn produce(
         block_primitive_witness: BlockPrimitiveWitness,
-        sync_device: &TritonProverSync,
+        _sync_device: &TritonProverSync,
     ) -> Result<AppendixWitness, TryLockError> {
-        let block_body_mast_hash = block_primitive_witness.body().mast_hash();
+        let txk_mast_hash = block_primitive_witness
+            .body()
+            .transaction_kernel
+            .mast_hash();
 
-        let tx_is_valid_claim = TransactionIsValid::claim(block_body_mast_hash);
-        let tx_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness.clone());
-        let tx_is_valid_nondeterminism = tx_is_valid_witness.nondeterminism();
-        let tx_is_valid_proof = TransactionIsValid
-            .prove(&tx_is_valid_claim, tx_is_valid_nondeterminism, sync_device)
-            .await?;
+        let tx_is_valid_claim = SingleProof::claim(txk_mast_hash);
+        let tx_is_valid_proof = match &block_primitive_witness.transaction.proof {
+            TransactionProof::SingleProof(proof) => proof.clone(),
+            _ => {
+                panic!(
+                    "can only produce appendix witness from single-proof transaction; got {:?}",
+                    block_primitive_witness.transaction.proof
+                );
+            }
+        };
 
         // Add more claim/proof pairs here, when softforking.
         let ret = Self::new(block_primitive_witness.body())
             .with_claim(tx_is_valid_claim, tx_is_valid_proof);
 
         assert_eq!(
-            BlockAppendix::consensus_claims(block_body_mast_hash),
+            BlockAppendix::consensus_claims(block_primitive_witness.body()),
             ret.claims,
             "appendix witness must attest to expected claims"
         );
