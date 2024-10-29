@@ -265,10 +265,10 @@ pub struct SingleProof;
 
 impl SingleProof {
     /// Not to be confused with SingleProofWitness::claim
-    pub(crate) fn claim(kernel_mast_hash: Digest) -> Claim {
+    pub(crate) fn claim(tx_kernel_mast_hash: Digest) -> Claim {
         Claim {
             program_digest: Self.hash(),
-            input: kernel_mast_hash.reversed().values().to_vec(),
+            input: tx_kernel_mast_hash.reversed().values().to_vec(),
             output: vec![],
         }
     }

@@ -809,7 +809,7 @@ pub async fn mine_block_to_wallet(
         crate::mine_loop::create_block_transaction(&tip_block, global_state_lock, timestamp)
             .await?;
 
-    let block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None).await;
+    let block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
 
     global_state_lock
         .set_new_self_mined_tip(block.clone(), coinbase_expected_utxo)

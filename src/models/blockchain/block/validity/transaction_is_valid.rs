@@ -36,6 +36,7 @@ pub(crate) struct TransactionIsValidWitness {
     single_proof: Proof,
     mast_path_txk: Vec<Digest>,
     txk_mast_hash: Digest,
+    block_body_mast_hash: Digest,
 }
 
 impl From<BlockPrimitiveWitness> for TransactionIsValidWitness {
@@ -48,17 +49,23 @@ impl From<BlockPrimitiveWitness> for TransactionIsValidWitness {
             panic!("cannot make a block whose transaction is not supported by a single proof");
         };
         let txk_mast_hash = block_body.transaction_kernel.mast_hash();
+        let block_body_mast_hash = block_body.mast_hash();
         Self {
             single_proof: single_proof.to_owned(),
             mast_path_txk,
             txk_mast_hash,
+            block_body_mast_hash,
         }
     }
 }
 
 impl SecretWitness for TransactionIsValidWitness {
     fn standard_input(&self) -> PublicInput {
-        self.txk_mast_hash.reversed().values().to_vec().into()
+        self.block_body_mast_hash
+            .reversed()
+            .values()
+            .to_vec()
+            .into()
     }
 
     fn program(&self) -> Program {
@@ -209,8 +216,7 @@ mod test {
         let block_primitive_witness = deterministic_block_primitive_witness();
         let block_body_mast_hash = block_primitive_witness.body().mast_hash();
         let transaction_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness);
-
-        let input = block_body_mast_hash.reversed().values().to_vec().into();
+        let input = transaction_is_valid_witness.standard_input();
         let nondeterminism = transaction_is_valid_witness.nondeterminism();
         let rust_result = TransactionIsValid
             .run_rust(&input, nondeterminism.clone())

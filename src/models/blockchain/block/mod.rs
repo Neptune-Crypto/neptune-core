@@ -211,48 +211,27 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
-    async fn make_block_template_inner(
+    fn template_header(
         predecessor: &Block,
-        transaction: Transaction,
-        block_timestamp: Timestamp,
+        timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        sync_device: &TritonProverSync,
-        proof_type: BlockProofType,
-    ) -> Result<Block, TryLockError> {
-        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
-        let body = primitive_witness.body().to_owned();
-
-        let proof = match proof_type {
-            BlockProofType::Invalid => BlockProof::Invalid,
-            BlockProofType::SingleProof => {
-                let appendix_witness =
-                    AppendixWitness::produce(primitive_witness, sync_device).await?;
-                let appendix = appendix_witness.appendix();
-                let claim = BlockProgram::claim(&body, &appendix);
-                let proof = BlockProgram
-                    .prove(&claim, appendix_witness.nondeterminism(), sync_device)
-                    .await?;
-                BlockProof::SingleProof(proof)
-            }
-        };
-
+    ) -> BlockHeader {
         let difficulty = difficulty_control(
-            block_timestamp,
+            timestamp,
             predecessor.header().timestamp,
             predecessor.header().difficulty,
             target_block_interval,
             predecessor.header().height,
         );
 
-        let next_block_height = predecessor.kernel.header.height.next();
         let new_cumulative_proof_of_work: ProofOfWork =
             predecessor.kernel.header.cumulative_proof_of_work
                 + predecessor.kernel.header.difficulty;
-        let header = BlockHeader {
+        BlockHeader {
             version: BLOCK_HEADER_VERSION,
-            height: next_block_height,
+            height: predecessor.kernel.header.height.next(),
             prev_block_digest: predecessor.hash(),
-            timestamp: block_timestamp,
+            timestamp,
             nonce: [
                 BFieldElement::ZERO,
                 BFieldElement::ZERO,
@@ -260,6 +239,44 @@ impl Block {
             ],
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
+        }
+    }
+
+    /// Create a block template with an invalid block proof.
+    ///
+    /// To be used in tests where you don't care about block validity.
+    #[cfg(test)]
+    pub(crate) fn block_template_invalid_proof(
+        predecessor: &Block,
+        transaction: Transaction,
+        block_timestamp: Timestamp,
+        target_block_interval: Option<Timestamp>,
+    ) -> Block {
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
+        let body = primitive_witness.body().to_owned();
+        let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
+        let proof = BlockProof::Invalid;
+        Block::new(header, body, proof)
+    }
+
+    async fn make_block_template_with_valid_proof(
+        predecessor: &Block,
+        transaction: Transaction,
+        block_timestamp: Timestamp,
+        target_block_interval: Option<Timestamp>,
+        sync_device: &TritonProverSync,
+    ) -> Result<Block, TryLockError> {
+        let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
+        let body = primitive_witness.body().to_owned();
+        let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
+        let proof = {
+            let appendix_witness = AppendixWitness::produce(primitive_witness, sync_device).await?;
+            let appendix = appendix_witness.appendix();
+            let claim = BlockProgram::claim(&body, &appendix);
+            let proof = BlockProgram
+                .prove(&claim, appendix_witness.nondeterminism(), sync_device)
+                .await?;
+            BlockProof::SingleProof(proof)
         };
 
         Ok(Block::new(header, body, proof))
@@ -273,37 +290,14 @@ impl Block {
         target_block_interval: Option<Timestamp>,
         sync_device: &TritonProverSync,
     ) -> Result<Block, TryLockError> {
-        Self::make_block_template_inner(
+        Self::make_block_template_with_valid_proof(
             predecessor,
             transaction,
             block_timestamp,
             target_block_interval,
             sync_device,
-            BlockProofType::SingleProof,
         )
         .await
-    }
-
-    /// Create a block template with an invalid block proof.
-    ///
-    /// To be used in tests where you don't care about block validity.
-    #[cfg(test)]
-    pub(crate) async fn block_template_invalid_proof(
-        predecessor: &Block,
-        transaction: Transaction,
-        block_timestamp: Timestamp,
-        target_block_interval: Option<Timestamp>,
-    ) -> Block {
-        Self::make_block_template_inner(
-            predecessor,
-            transaction,
-            block_timestamp,
-            target_block_interval,
-            &TritonProverSync::dummy(),
-            BlockProofType::Invalid,
-        )
-        .await
-        .unwrap()
     }
 
     /// Returns the block Digest
@@ -368,9 +362,7 @@ impl Block {
     /// note: this causes block digest to change to that of the new block.
     #[inline]
     pub fn set_block(&mut self, block: Block) {
-        self.kernel.header = block.kernel.header;
-        self.kernel.body = block.kernel.body;
-        self.digest = block.digest;
+        *self = block;
     }
 
     pub fn get_mining_reward(block_height: BlockHeight) -> NeptuneCoins {
@@ -572,9 +564,6 @@ impl Block {
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
     ) -> bool {
-        // The block value doesn't actually change. Some function calls just require
-        // mutable references because that's how the interface was defined for them.
-        let block_copy = self.to_owned();
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
 
@@ -586,8 +575,9 @@ impl Block {
         //   e) Target difficulty and cumulative proof-of-work were updated correctly
         //   f) Block timestamp is less than host-time (utc) + 2 hours.
         // 1. Block is valid
-        //   a) block proof is valid
-        //   b) max block size is not exceeded
+        //   a) Verify appendix contains required claims
+        //   b) block proof is valid
+        //   c) max block size is not exceeded
         // 2. The transaction is valid.
         //   a) Verify that MS removal records are valid, done against previous `mutator_set_accumulator`,
         //   b) Verify that all removal records have unique index sets
@@ -598,17 +588,17 @@ impl Block {
         //   f) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
-        if previous_block.kernel.header.height.next() != block_copy.kernel.header.height {
+        if previous_block.kernel.header.height.next() != self.kernel.header.height {
             warn!(
                 "Block height ({}) does not match previous height plus one ({})",
-                block_copy.kernel.header.height,
+                self.kernel.header.height,
                 previous_block.kernel.header.height.next()
             );
             return false;
         }
 
         // 0.b) Block header points to previous block
-        if previous_block.hash() != block_copy.kernel.header.prev_block_digest {
+        if previous_block.hash() != self.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
@@ -625,52 +615,77 @@ impl Block {
         //      previous block plus minimum block time
         let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
         if previous_block.kernel.header.timestamp + minimum_block_time
-            > block_copy.kernel.header.timestamp
+            > self.kernel.header.timestamp
         {
             warn!(
                 "Block's timestamp ({}) should be greater than or equal to that of previous block ({}) plus minimum block time ({}) \nprevious <= current ?? {}",
-                block_copy.kernel.header.timestamp,
+                self.kernel.header.timestamp,
                 previous_block.kernel.header.timestamp,
                 minimum_block_time,
-                previous_block.kernel.header.timestamp + minimum_block_time <= block_copy.kernel.header.timestamp
+                previous_block.kernel.header.timestamp + minimum_block_time <= self.kernel.header.timestamp
             );
             return false;
         }
 
         // 0.e) Target difficulty and cumulative proof-of-work were updated correctly
         let expected_difficulty = difficulty_control(
-            block_copy.header().timestamp,
+            self.header().timestamp,
             previous_block.header().timestamp,
             previous_block.header().difficulty,
             target_block_interval,
             previous_block.header().height,
         );
-        if block_copy.kernel.header.difficulty != expected_difficulty {
+        if self.kernel.header.difficulty != expected_difficulty {
             warn!(
                 "Value for new difficulty is incorrect.  actual: {},  expected: {expected_difficulty}",
-                block_copy.kernel.header.difficulty,
+                self.kernel.header.difficulty,
             );
             return false;
         }
         let expected_cumulative_proof_of_work =
             previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
-        if block_copy.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
-            warn!("Block's cumulative proof-of-work number does not match with expectation.\n\nBlock's pow: {}\nexpectation: {}", block_copy.header().cumulative_proof_of_work, expected_cumulative_proof_of_work);
+        if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
+            warn!("Block's cumulative proof-of-work number does not match with expectation.\n\nBlock's pow: {}\nexpectation: {}", self.header().cumulative_proof_of_work, expected_cumulative_proof_of_work);
             return false;
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::hours(2);
         let future_limit = now + FUTUREDATING_LIMIT;
-        if block_copy.kernel.header.timestamp >= future_limit {
+        if self.kernel.header.timestamp >= future_limit {
             warn!(
                 "block time is too far in the future.\n\nBlock timestamp: {}\nThreshold is: {}",
-                block_copy.kernel.header.timestamp, future_limit
+                self.kernel.header.timestamp, future_limit
             );
             return false;
         }
 
-        // 1.a) Check block proof
+        // 1.a) Verify appendix contains required claims
+        let block_body_mast_hash = self.body().mast_hash();
+        let consensus_claims = BlockAppendix::consensus_claims(block_body_mast_hash);
+        if consensus_claims.len() > self.appendix().claims().len() {
+            warn!(
+                "Missing claim in block appendix. Expected {} claims but block contains only {}.",
+                consensus_claims.len(),
+                self.appendix().claims().len()
+            );
+            return false;
+        }
+
+        for (i, (contained_claim, required_claim)) in self
+            .appendix()
+            .claims()
+            .iter()
+            .zip(consensus_claims.iter())
+            .enumerate()
+        {
+            if required_claim != contained_claim {
+                warn!("Bad claim number {i}.\n\nExpected:\n{required_claim:?} claim in block but got:\n{contained_claim:?}",);
+                return false;
+            }
+        }
+
+        // 1.b) Check block proof
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             warn!("Can only verify block proofs, got {:?}", self.proof);
             return false;
@@ -680,7 +695,7 @@ impl Block {
             return false;
         }
 
-        // 1.b) Check block size
+        // 1.c) Check block size
         if self.size() > MAX_BLOCK_SIZE {
             warn!(
                 "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
@@ -692,7 +707,7 @@ impl Block {
 
         // 2.a) Verify validity of removal records: That their MMR MPs match the SWBF, and
         // that at least one of their listed indices is absent.
-        for removal_record in block_copy.kernel.body.transaction_kernel.inputs.iter() {
+        for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
             if !previous_block
                 .kernel
                 .body
@@ -705,7 +720,7 @@ impl Block {
         }
 
         // 2.b) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
-        let mut absolute_index_sets = block_copy
+        let mut absolute_index_sets = self
             .kernel
             .body
             .transaction_kernel
@@ -715,7 +730,7 @@ impl Block {
             .collect_vec();
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
-        if absolute_index_sets.len() != block_copy.kernel.body.transaction_kernel.inputs.len() {
+        if absolute_index_sets.len() != self.kernel.body.transaction_kernel.inputs.len() {
             warn!("Removal records contain duplicates");
             return false;
         }
@@ -725,8 +740,8 @@ impl Block {
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
         let mutator_set_update = MutatorSetUpdate::new(
-            block_copy.kernel.body.transaction_kernel.inputs.clone(),
-            block_copy.kernel.body.transaction_kernel.outputs.clone(),
+            self.kernel.body.transaction_kernel.inputs.clone(),
+            self.kernel.body.transaction_kernel.outputs.clone(),
         );
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
@@ -740,32 +755,29 @@ impl Block {
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.hash() != block_copy.kernel.body.mutator_set_accumulator.hash() {
+        if ms.hash() != self.kernel.body.mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
-                block_copy.kernel.body.mutator_set_accumulator, ms
+                self.kernel.body.mutator_set_accumulator, ms
             );
             return false;
         }
 
         // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp.
-        if block_copy.kernel.body.transaction_kernel.timestamp > block_copy.kernel.header.timestamp
-        {
+        if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             warn!(
                 "Transaction timestamp ({}) is is larger than that of block ({})",
-                block_copy.kernel.body.transaction_kernel.timestamp,
-                block_copy.kernel.header.timestamp
+                self.kernel.body.transaction_kernel.timestamp, self.kernel.header.timestamp
             );
             return false;
         }
 
         // 2.e) Verify that the coinbase claimed by the transaction does not exceed
         // the allowed coinbase based on block height, epoch, etc., and fee
-        let expected_reward: NeptuneCoins =
-            Self::get_mining_reward(block_copy.kernel.header.height)
-                + self.kernel.body.transaction_kernel.fee;
-        if let Some(claimed_reward) = block_copy.kernel.body.transaction_kernel.coinbase {
+        let expected_reward: NeptuneCoins = Self::get_mining_reward(self.kernel.header.height)
+            + self.kernel.body.transaction_kernel.fee;
+        if let Some(claimed_reward) = self.kernel.body.transaction_kernel.coinbase {
             if claimed_reward > expected_reward {
                 warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters.");
                 return false;
@@ -887,6 +899,7 @@ mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
+    use crate::mine_loop::make_coinbase_transaction;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
@@ -993,44 +1006,6 @@ mod block_tests {
         assert!(!block_1.is_valid(&genesis_block, timestamp));
     }
 
-    #[traced_test]
-    #[test]
-    fn block_with_far_future_timestamp_is_invalid() {
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
-        let genesis_block = Block::genesis_block(network);
-        let mut now = genesis_block.kernel.header.timestamp;
-
-        let a_wallet_secret = WalletSecret::new_random();
-        let a_recipient_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
-
-        // Set block timestamp 1 hour in the future.  (is valid)
-        let future_time1 = now + Timestamp::hours(1);
-        block_1.kernel.header.timestamp = future_time1;
-        assert!(block_1.is_valid(&genesis_block, now));
-
-        now = block_1.kernel.header.timestamp;
-
-        // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
-        let future_time2 = now + Timestamp::hours(2) - Timestamp::seconds(1);
-        block_1.kernel.header.timestamp = future_time2;
-        assert!(block_1.is_valid(&genesis_block, now));
-
-        // Set block timestamp 2 hours + 10 secs in the future. (not valid)
-        let future_time3 = now + Timestamp::hours(2) + Timestamp::seconds(10);
-        block_1.kernel.header.timestamp = future_time3;
-        assert!(!block_1.is_valid(&genesis_block, now));
-
-        // Set block timestamp 2 days in the future. (not valid)
-        let future_time4 = now + Timestamp::seconds(86400 * 2);
-        block_1.kernel.header.timestamp = future_time4;
-        assert!(!block_1.is_valid(&genesis_block, now));
-    }
-
     #[tokio::test]
     async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
@@ -1104,6 +1079,61 @@ mod block_tests {
             .sum::<NeptuneCoins>();
 
         assert!(total_premine <= premine_max_size);
+    }
+
+    mod block_is_valid {
+        use super::*;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn block_with_far_future_timestamp_is_invalid() {
+            let network = Network::Main;
+            let genesis_block = Block::genesis_block(network);
+            let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
+            let wallet = WalletSecret::devnet_wallet();
+            let genesis_state = mock_genesis_global_state(network, 0, wallet).await;
+            let a_recipient_address = genesis_state
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key(0);
+            let (block_tx, expected_utxo) =
+                make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), now)
+                    .await
+                    .unwrap();
+            let mut block1 = Block::make_block_template_with_valid_proof(
+                &genesis_block,
+                block_tx,
+                now,
+                None,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+
+            // Set block timestamp 1 hour in the future.  (is valid)
+            let future_time1 = now + Timestamp::hours(1);
+            block1.kernel.header.timestamp = future_time1;
+            assert!(block1.is_valid(&genesis_block, now));
+
+            now = block1.kernel.header.timestamp;
+
+            // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
+            let future_time2 = now + Timestamp::hours(2) - Timestamp::seconds(1);
+            block1.kernel.header.timestamp = future_time2;
+            assert!(block1.is_valid(&genesis_block, now));
+
+            // Set block timestamp 2 hours + 10 secs in the future. (not valid)
+            let future_time3 = now + Timestamp::hours(2) + Timestamp::seconds(10);
+            block1.kernel.header.timestamp = future_time3;
+            assert!(!block1.is_valid(&genesis_block, now));
+
+            // Set block timestamp 2 days in the future. (not valid)
+            let future_time4 = now + Timestamp::seconds(86400 * 2);
+            block1.kernel.header.timestamp = future_time4;
+            assert!(!block1.is_valid(&genesis_block, now));
+        }
     }
 
     /// This module has tests that verify a block's digest

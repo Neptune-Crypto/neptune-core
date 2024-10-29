@@ -2140,6 +2140,7 @@ mod global_state_tests {
 
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        let in_eight_months = in_seven_months + Timestamp::months(1);
 
         let (coinbase_transaction, coinbase_expected_utxo) =
             make_coinbase_transaction(&premine_receiver, NeptuneCoins::zero(), in_seven_months)
@@ -2424,13 +2425,13 @@ mod global_state_tests {
         let block_2 = Block::make_block_template(
             &block_1,
             block_transaction2,
-            in_seven_months,
+            in_eight_months,
             None,
             &TritonProverSync::dummy(),
         )
         .await
         .unwrap();
-        assert!(block_2.is_valid(&block_1, in_seven_months));
+        assert!(block_2.is_valid(&block_1, in_eight_months));
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -2439,28 +2440,47 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn mock_global_state_is_valid() {
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(555);
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
+        let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let wallet_secret = WalletSecret::new_random();
+        let wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let receiving_address = wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let (block_1, _cb_utxo, _cb_output_randomness) =
-            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen());
+        let (cb, _) = make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), now)
+            .await
+            .unwrap();
+        let block_1 =
+            Block::make_block_template(&genesis_block, cb, now, None, &TritonProverSync::dummy())
+                .await
+                .unwrap();
 
         global_state_lock.set_new_tip(block_1).await.unwrap();
 
-        assert!(global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .light_state()
-            .is_valid(&genesis_block, now));
+        assert!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .is_valid(&genesis_block, now),
+            "light state tip must be a valid block"
+        );
+        assert!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .get_tip()
+                .await
+                .is_valid(&genesis_block, now),
+            "archival state tip must be a valid block"
+        );
     }
 
     mod state_update_on_reorganizations {

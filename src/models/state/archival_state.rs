@@ -1157,8 +1157,7 @@ mod archival_state_tests {
             .unwrap();
 
         let mock_block_2 =
-            Block::block_template_invalid_proof(&mock_block_1, sender_tx, in_seven_months, None)
-                .await;
+            Block::block_template_invalid_proof(&mock_block_1, sender_tx, in_seven_months, None);
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await?;
@@ -1267,10 +1266,10 @@ mod archival_state_tests {
 
         let tx_1a = make_mock_transaction(removal_records_1a, addition_records_1a);
         let block_1a =
-            Block::block_template_invalid_proof(&genesis_block, tx_1a, in_seven_months, None).await;
+            Block::block_template_invalid_proof(&genesis_block, tx_1a, in_seven_months, None);
         let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
         let block_1b =
-            Block::block_template_invalid_proof(&genesis_block, tx_1b, in_seven_months, None).await;
+            Block::block_template_invalid_proof(&genesis_block, tx_1b, in_seven_months, None);
 
         global_state_lock
             .set_new_tip(block_1a.clone())
@@ -1351,8 +1350,7 @@ mod archival_state_tests {
 
             let tx = make_mock_transaction(removal_records, addition_records);
             let next_block =
-                Block::block_template_invalid_proof(&previous_block, tx, in_seven_months, None)
-                    .await;
+                Block::block_template_invalid_proof(&previous_block, tx, in_seven_months, None);
 
             // 2. Update archival-mutator set with produced block
             state_lock.set_new_tip(next_block.clone()).await.unwrap();

@@ -46,4 +46,8 @@ impl BlockAppendix {
 
         vec![tx_is_valid]
     }
+
+    pub(crate) fn claims(&self) -> &Vec<Claim> {
+        &self.claims
+    }
 }

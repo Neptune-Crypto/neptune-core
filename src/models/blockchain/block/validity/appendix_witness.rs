@@ -40,7 +40,6 @@ pub(crate) struct AppendixWitness {
 }
 
 impl AppendixWitness {
-    // TODO: Rename when used
     fn new(block_body: &BlockBody) -> Self {
         Self {
             block_body_hash: block_body.mast_hash(),
@@ -49,7 +48,6 @@ impl AppendixWitness {
         }
     }
 
-    // TODO: Rename when used
     fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
         assert!(triton_vm::verify(Stark::default(), &claim, &proof));
         self.claims.push(claim);

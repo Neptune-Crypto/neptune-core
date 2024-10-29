@@ -576,8 +576,7 @@ pub(crate) mod mine_loop_tests {
             transaction,
             start_time,
             target_block_interval,
-        )
-        .await;
+        );
         let threshold = previous_block.header().difficulty.target();
 
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -619,8 +618,7 @@ pub(crate) mod mine_loop_tests {
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
         let block =
-            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None)
-                .await;
+            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None);
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
         tock
@@ -783,8 +781,7 @@ pub(crate) mod mine_loop_tests {
                 .unwrap();
 
         let block =
-            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None)
-                .await;
+            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
 
         let unrestricted_mining = true;
 
@@ -841,8 +838,7 @@ pub(crate) mod mine_loop_tests {
             transaction,
             ten_seconds_ago,
             None,
-        )
-        .await;
+        );
 
         // sanity check that our initial state is correct.
         let initial_header_timestamp = template.header().timestamp;
@@ -982,8 +978,7 @@ pub(crate) mod mine_loop_tests {
                 transaction,
                 start_time,
                 Some(target_block_interval),
-            )
-            .await;
+            );
 
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
             let height = block.header().height;
