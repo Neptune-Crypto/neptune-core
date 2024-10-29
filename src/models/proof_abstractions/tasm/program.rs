@@ -116,16 +116,27 @@ where
         nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
         let program = self.program();
-        let init_vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
-        maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
-        let result = VM::run(&program, input.clone(), nondeterminism);
+        let mut vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
+        maybe_write_debuggable_program_to_disk(&program, &vm_state);
+        let result = vm_state.run();
         match result {
-            Ok(output) => Ok(output),
+            Ok(_) => {
+                // Do some sanity checks that are likely to catch programming
+                // errors in the consensus program. This doesn't catch
+                // soundness errors, though, since a valid proof could still be
+                // generated even though one of these checks fail.
+                assert!(
+                    vm_state.secret_digests.is_empty(),
+                    "Secret digest list must be empty after executing consensus program"
+                );
+
+                Ok(vm_state.public_output)
+            }
             Err(error) => {
                 debug!("VM State:\n{}\n\n", error);
                 Err(ConsensusError::TritonVMPanic(
-                    format!("Triton VM failed.\nVMState:\n{}", error),
-                    error.source,
+                    format!("Triton VM failed.\nVMState:\n{}", vm_state),
+                    error,
                 ))
             }
         }
