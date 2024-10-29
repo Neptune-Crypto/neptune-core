@@ -902,6 +902,12 @@ fn arbitrary_primitive_witness_with_timelocks(
                 fee_dist,
                 maybe_coinbase_dist,
             )| {
+                let maybe_coinbase_dist = if num_inputs.is_zero() {
+                    maybe_coinbase_dist
+                } else {
+                    None
+                };
+
                 // distribute total amount across inputs (+ coinbase)
                 let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
                 if let Some(d) = maybe_coinbase_dist {

@@ -593,37 +593,53 @@ mod transaction_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_single_proof_works() {
-        let mut test_runner = TestRunner::deterministic();
-        let [to_be_updated, mined] =
-            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(4, 4, 4), (3, 3, 3)])
+        async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
+            let as_single_proof = SingleProof::produce(&to_be_updated, &TritonProverSync::dummy())
+                .await
+                .unwrap();
+            let original_tx = Transaction {
+                kernel: to_be_updated.kernel,
+                proof: TransactionProof::SingleProof(as_single_proof),
+            };
+            assert!(original_tx.is_valid().await);
+
+            let block = mock_block_from_transaction_and_msa(
+                mined.kernel,
+                mined.mutator_set_accumulator,
+                Network::Main,
+            );
+            let updated_tx = original_tx
+                .new_with_updated_mutator_set_records(
+                    &to_be_updated.mutator_set_accumulator,
+                    &block,
+                    &TritonProverSync::dummy(),
+                )
+                .await
+                .unwrap();
+
+            assert!(updated_tx.is_valid().await)
+        }
+
+        for (to_be_updated_params, mined_params) in [
+            ((4, 4, 4), (3, 3, 3)),
+            ((0, 1, 0), (1, 1, 0)),
+            ((1, 1, 0), (0, 1, 0)),
+            ((0, 2, 1), (1, 1, 1)),
+            ((2, 2, 2), (2, 2, 2)),
+        ] {
+            println!("to_be_updated_params: {to_be_updated_params:?}");
+            println!("mined_params: {mined_params:?}");
+            let mut test_runner = TestRunner::deterministic();
+            let [to_be_updated, mined] =
+                PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                    to_be_updated_params,
+                    mined_params,
+                ])
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-
-        let as_single_proof = SingleProof::produce(&to_be_updated, &TritonProverSync::dummy())
-            .await
-            .unwrap();
-        let original_tx = Transaction {
-            kernel: to_be_updated.kernel,
-            proof: TransactionProof::SingleProof(as_single_proof),
-        };
-        assert!(original_tx.is_valid().await);
-
-        let block = mock_block_from_transaction_and_msa(
-            mined.kernel,
-            mined.mutator_set_accumulator,
-            Network::Main,
-        );
-        let updated_tx = original_tx
-            .new_with_updated_mutator_set_records(
-                &to_be_updated.mutator_set_accumulator,
-                &block,
-                &TritonProverSync::dummy(),
-            )
-            .await
-            .unwrap();
-
-        assert!(updated_tx.is_valid().await)
+            prop(to_be_updated, mined).await;
+        }
     }
 
     #[traced_test]

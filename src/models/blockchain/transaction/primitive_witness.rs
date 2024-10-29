@@ -4,6 +4,7 @@ use std::fmt::Display;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
+use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
@@ -401,7 +402,7 @@ impl Arbitrary for PrimitiveWitness {
             arb::<Option<u64>>(),
         )
             .prop_flat_map(
-                |(
+                move |(
                     total_amount,
                     input_address_seeds,
                     input_dist,
@@ -411,6 +412,13 @@ impl Arbitrary for PrimitiveWitness {
                     fee_dist,
                     maybe_coinbase_dist,
                 )| {
+                    // Coinbase transactions may not take inputs. This is done
+                    // to force miners to pick up at least one transaction.
+                    let maybe_coinbase_dist = if num_inputs.is_zero() {
+                        maybe_coinbase_dist
+                    } else {
+                        None
+                    };
                     // distribute total amount across inputs (+ coinbase)
                     let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
                     if let Some(d) = maybe_coinbase_dist {
@@ -738,6 +746,9 @@ mod test {
                 .boxed()
         }
 
+        /// Arbitrary with:
+        /// (num inputs, num outputs, num pub announcements) and optional
+        /// coinbase.
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase<
             const N: usize,
         >(
