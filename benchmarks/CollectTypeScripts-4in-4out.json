@@ -2,10 +2,10 @@
   {
     "name": "CollectTypeScripts-4in-4out",
     "benchmark_result": {
-      "clock_cycle_count": 4125,
+      "clock_cycle_count": 4126,
       "hash_table_height": 812,
       "u32_table_height": 295,
-      "op_stack_table_height": 3375,
+      "op_stack_table_height": 3378,
       "ram_table_height": 821
     },
     "case": "CommonCase"

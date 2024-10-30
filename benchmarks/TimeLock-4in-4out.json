@@ -1,0 +1,13 @@
+[
+  {
+    "name": "TimeLock-4in-4out",
+    "benchmark_result": {
+      "clock_cycle_count": 2476,
+      "hash_table_height": 728,
+      "u32_table_height": 920,
+      "op_stack_table_height": 1910,
+      "ram_table_height": 320
+    },
+    "case": "CommonCase"
+  }
+]

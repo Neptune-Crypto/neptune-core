@@ -14,10 +14,10 @@ CollectTypeScripts-4in-4out:
 | ····tasmlib_hashing_absorb_multiple_read_remainder                                |          30 (  0.7%) |          18 (  0.5%) |           2 (  0.2%) |           0 (  0.0%) |           0 (  0.0%) |
 | tasmlib_hashing_eq_digest                                                         |          32 (  0.8%) |          18 (  0.5%) |           0 (  0.0%) |           0 (  0.0%) |           0 (  0.0%) |
 | neptune_consensus_transaction_collect_type_script_hashes_from_utxo                |        1990 ( 48.2%) |        1878 ( 55.6%) |         480 ( 58.5%) |           0 (  0.0%) |           0 (  0.0%) |
-| ··neptune_consensus_transaction_collect_type_script_hashes_from_coin              |        1714 ( 41.6%) |        1646 ( 48.8%) |         456 ( 55.5%) |           0 (  0.0%) |           0 (  0.0%) |
+| ··neptune_consensus_transaction_collect_type_script_hashes_from_coin              |        1714 ( 41.5%) |        1646 ( 48.7%) |         456 ( 55.5%) |           0 (  0.0%) |           0 (  0.0%) |
 | ····tasmlib_list_contains___digest                                                |        1026 ( 24.9%) |        1010 ( 29.9%) |         316 ( 38.5%) |           0 (  0.0%) |           0 (  0.0%) |
-| ······tasmlib_list_contains___digest_loop                                         |         770 ( 18.7%) |         738 ( 21.9%) |         220 ( 26.8%) |           0 (  0.0%) |           0 (  0.0%) |
-| ····neptune_consensus_transaction_push_digest_to_list                             |          80 (  1.9%) |          76 (  2.3%) |          28 (  3.4%) |           0 (  0.0%) |           0 (  0.0%) |
+| ······tasmlib_list_contains___digest_loop                                         |         770 ( 18.7%) |         738 ( 21.8%) |         220 ( 26.8%) |           0 (  0.0%) |           0 (  0.0%) |
+| ····neptune_consensus_transaction_push_digest_to_list                             |          80 (  1.9%) |          76 (  2.2%) |          28 (  3.4%) |           0 (  0.0%) |           0 (  0.0%) |
 | ······tasmlib_list_push___digest                                                  |          42 (  1.0%) |          40 (  1.2%) |          16 (  1.9%) |           0 (  0.0%) |           0 (  0.0%) |
 | netpune_consensus_transaction_write_all_digests                                   |          34 (  0.8%) |          44 (  1.3%) |          10 (  1.2%) |           0 (  0.0%) |           0 (  0.0%) |
-| Total                                                                             |        4125 (100.0%) |        3375 (100.0%) |         821 (100.0%) |         812 (100.0%) |         295 (100.0%) |
+| Total                                                                             |        4126 (100.0%) |        3378 (100.0%) |         821 (100.0%) |         812 (100.0%) |         295 (100.0%) |

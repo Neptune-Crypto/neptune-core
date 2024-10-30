@@ -1,0 +1,13 @@
+[
+  {
+    "name": "TimeLock-2in-2out",
+    "benchmark_result": {
+      "clock_cycle_count": 1505,
+      "hash_table_height": 692,
+      "u32_table_height": 730,
+      "op_stack_table_height": 1188,
+      "ram_table_height": 179
+    },
+    "case": "CommonCase"
+  }
+]

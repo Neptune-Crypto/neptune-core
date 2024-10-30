@@ -21,6 +21,9 @@ mod transaction {
     use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use neptune_core::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use neptune_core::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use neptune_core::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use neptune_core::models::blockchain::type_scripts::time_lock::TimeLock;
+    use neptune_core::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use neptune_core::models::proof_abstractions::tasm::program::ConsensusProgram;
     use neptune_core::models::proof_abstractions::timestamp::Timestamp;
     use neptune_core::models::proof_abstractions::SecretWitness;
@@ -113,6 +116,34 @@ mod transaction {
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),
             &format!("RemovalRecordsIntegrity-{num_inputs}in-{num_outputs}out"),
+            BenchmarkCase::CommonCase,
+        );
+    }
+
+    #[divan::bench(sample_count = 1, args = [COMMON, LARGEISH])]
+    fn time_lock(args: (usize, usize)) {
+        let (num_inputs, num_outputs) = args;
+        let mut test_runner = TestRunner::deterministic();
+        let deterministic_now = arb::<Timestamp>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let primitive_witness = arbitrary_primitive_witness_with_expired_timelocks(
+            num_inputs,
+            num_outputs,
+            2,
+            deterministic_now,
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+        let tl_witness: TimeLockWitness = primitive_witness.into();
+
+        bench_and_profile_consensus_program(
+            TimeLock,
+            &tl_witness.standard_input(),
+            tl_witness.nondeterminism(),
+            &format!("TimeLock-{num_inputs}in-{num_outputs}out"),
             BenchmarkCase::CommonCase,
         );
     }
