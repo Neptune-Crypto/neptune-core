@@ -731,20 +731,47 @@ impl ConsensusProgram for SingleProof {
                 return
         };
 
+        let verify_discriminant_has_legal_value = triton_asm!(
+            // _ discr
+
+            dup 0
+            push {DISCRIMINANT_FOR_PROOF_COLLECTION}
+            eq
+
+            dup 1
+            push {DISCRIMINANT_FOR_UPDATE}
+            eq
+
+            dup 2
+            push {DISCRIMINANT_FOR_MERGE}
+            eq
+            // _ discr (discr == proof_coll) (discr == update) (discr == merge)
+
+            add
+            add
+            // _ discr (discr == proof_coll || discr == update || discr == merge)
+
+            assert
+            // _ discr
+        );
+
         let main = triton_asm! {
-            //
+            // _
 
             dup 15 dup 15 dup 15 dup 15 dup 15
-            // [own_digest; 5]
+            // _ [own_digest; 5]
 
             read_io 5
-            // [own_digest; 5] [txk_digest]
+            // _ [own_digest; 5] [txk_digest]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // [own_digest; 5] [txk_digest] *single_proof_witness
+            // _ [own_digest; 5] [txk_digest] *single_proof_witness
 
-            read_mem 1 push 1 add swap 1
-            // [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            read_mem 1 addi 1 swap 1
+            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+
+            {&verify_discriminant_has_legal_value}
+            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
 
             /* match discriminant */
             dup 0 push {DISCRIMINANT_FOR_PROOF_COLLECTION} eq
@@ -756,7 +783,7 @@ impl ConsensusProgram for SingleProof {
             dup 0 push {DISCRIMINANT_FOR_MERGE} eq
             skiz call {merge_case_label}
 
-            // [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
             push -1
@@ -764,6 +791,8 @@ impl ConsensusProgram for SingleProof {
             assert
 
             pop 1 pop 5 pop 5
+            // _
+
             halt
         };
 
@@ -796,8 +825,26 @@ mod test {
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+
+    #[tokio::test]
+    async fn invalid_discriminant_crashes_execution() {
+        let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
+        for illegal_discriminant_value in [bfe!(-1), bfe!(3), bfe!(4), bfe!(1u64 << 40)] {
+            let init_ram: HashMap<_, _> = [(bfe!(0), illegal_discriminant_value)]
+                .into_iter()
+                .collect();
+            let nondeterminism = NonDeterminism::default().with_ram(init_ram);
+            let err = SingleProof.run_tasm(&pub_input, nondeterminism);
+            let triton_vm_error_code = match err.unwrap_err() {
+                ConsensusError::TritonVMPanic(_string, instruction_error) => instruction_error,
+                _ => panic!("TVM execution must fail on illegal witness discriminant"),
+            };
+            assert_eq!(InstructionError::AssertionFailed, triton_vm_error_code);
+        }
+    }
 
     #[tokio::test]
     async fn can_verify_via_valid_proof_collection() {
