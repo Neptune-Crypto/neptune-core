@@ -853,6 +853,15 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn remove_transactions_with_block_test() {
+        // Check that the mempool removes transactions that were incorporated or
+        // made unconfirmable by the new block.
+
+        // Do not check whether blocks are valid: that would require
+        // producing (expensive) proofs and moreover block validity is not
+        // what is being tested here. What is being tested here is the correct
+        // mempool update and for that purpose we can do with an invalid block
+        // proof.
+
         // Bob is premine receiver, Alice is not
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
 
@@ -1024,17 +1033,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let block_3_orphaned =
+        let _block_3_orphaned =
             Block::block_template_invalid_proof(&block_2, block_transaction2, in_nine_months, None);
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
             tx_by_alice_updated.kernel.mutator_set_hash
-        );
-
-        assert!(
-            block_3_orphaned.is_valid(&block_2, in_nine_months),
-            "Block with tx with updated mutator set data must be valid"
         );
 
         // Mine 2 blocks without including the transaction but while still keeping the
@@ -1078,10 +1082,6 @@ mod tests {
             None,
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
-        assert!(
-            block_5.is_valid(&previous_block, in_eight_months),
-            "Block with tx with updated mutator set data must be valid"
-        );
 
         mempool
             .update_with_block(
