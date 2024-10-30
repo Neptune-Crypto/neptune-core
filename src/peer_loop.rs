@@ -1406,7 +1406,7 @@ mod peer_loop_tests {
         let mut nonce = different_genesis_block.kernel.header.nonce;
         nonce[2].increment();
         different_genesis_block.set_header_nonce(nonce);
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let a_recipient_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
@@ -1491,7 +1491,7 @@ mod peer_loop_tests {
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let a_recipient_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
@@ -1575,12 +1575,17 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = Block::genesis_block(network);
 
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let an_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, an_address, rng.gen());
+        let fee = NeptuneCoins::zero();
+        let now = genesis_block.header().timestamp + Timestamp::hours(1);
+        let block_1 = valid_block(&alice, fee, now, rng.gen()).await;
+        assert!(
+            block_1.is_valid(&genesis_block, now),
+            "Block must be valid for this test to make sense"
+        );
         alice.set_new_tip(block_1.clone()).await?;
 
         let mock_peer_messages = Mock::new(vec![
@@ -1637,7 +1642,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let genesis_block: Block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let an_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
@@ -1728,7 +1733,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let an_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
@@ -1794,7 +1799,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let an_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
@@ -1926,7 +1931,7 @@ mod peer_loop_tests {
             .archival_state()
             .get_tip()
             .await;
-        let a_wallet_secret = WalletSecret::new_random();
+        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
         let a_recipient_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
