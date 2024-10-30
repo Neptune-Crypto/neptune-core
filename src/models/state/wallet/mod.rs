@@ -433,6 +433,8 @@ mod wallet_tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -444,7 +446,6 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -682,7 +683,7 @@ mod wallet_tests {
         let network = Network::Main;
         let alice_wallet_secret = WalletSecret::new_random();
         let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
-        let alice_proving_lock = alice.proving_lock.clone();
+        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let alice_spending_key = alice
             .lock_guard()
             .await
@@ -721,8 +722,8 @@ mod wallet_tests {
 
         // Add block 1 to wallet state
         {
-            let mut alice = alice.lock_guard_mut().await;
-            alice
+            let mut alice_mut = alice.lock_guard_mut().await;
+            alice_mut
                 .wallet_state
                 .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
@@ -731,8 +732,8 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 ))
                 .await;
-            alice
-                .set_new_tip(block_1.clone(), &alice_proving_lock)
+            alice_mut
+                .set_new_tip(block_1.clone(), &alice_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -775,7 +776,7 @@ mod wallet_tests {
                     ))
                     .await;
                 alice
-                    .set_new_tip(next_block_prime.clone(), &alice_proving_lock)
+                    .set_new_tip(next_block_prime.clone(), &alice_vm_job_queue)
                     .await
                     .unwrap();
                 next_block = next_block_prime;
@@ -877,9 +878,9 @@ mod wallet_tests {
         let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let mut bob = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
-        let bob_proving_lock = bob.proving_lock.clone();
-        let mut bob = bob.lock_guard_mut().await;
+        let mut bob_global_lock = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
+        let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
+        let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
         let bobs_original_balance = bob
@@ -916,7 +917,7 @@ mod wallet_tests {
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -933,7 +934,7 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_1.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
 
@@ -1009,7 +1010,7 @@ mod wallet_tests {
                 .add_expected_utxo(expected_utxo)
                 .await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
-            bob.set_new_tip(next_block.clone(), &bob_proving_lock)
+            bob.set_new_tip(next_block.clone(), &bob_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -1084,7 +1085,7 @@ mod wallet_tests {
             rng.gen(),
         );
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
-        bob.set_new_tip(block_2_b.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_2_b.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
@@ -1178,7 +1179,7 @@ mod wallet_tests {
                 NeptuneCoins::new(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1191,7 +1192,12 @@ mod wallet_tests {
         .await
         .unwrap();
         let merged_tx = coinbase_tx
-            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
@@ -1200,7 +1206,8 @@ mod wallet_tests {
             merged_tx,
             timestamp,
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();
@@ -1361,12 +1368,17 @@ mod wallet_tests {
                 one_money,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
         let tx_for_block = sender_tx
-            .merge_with(cbtx, Default::default(), &TritonProverSync::dummy())
+            .merge_with(
+                cbtx,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_1 = Block::make_block_template(
@@ -1374,7 +1386,8 @@ mod wallet_tests {
             tx_for_block,
             in_seven_months,
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();

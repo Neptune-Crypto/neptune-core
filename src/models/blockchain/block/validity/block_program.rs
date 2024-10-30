@@ -172,9 +172,9 @@ pub(crate) mod test {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::SecretWitness;
 
     #[traced_test]
@@ -191,7 +191,7 @@ pub(crate) mod test {
         );
 
         let appendix_witness =
-            AppendixWitness::produce(block_primitive_witness, &TritonProverSync::dummy())
+            AppendixWitness::produce(block_primitive_witness, &TritonVmJobQueue::dummy())
                 .await
                 .unwrap();
         let block_program_nondeterminism = appendix_witness.nondeterminism();

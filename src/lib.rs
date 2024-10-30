@@ -7,6 +7,7 @@
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
+pub mod job_queue;
 pub mod locks;
 pub mod macros;
 pub mod main_loop;

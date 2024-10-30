@@ -12,7 +12,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::info;
 
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -28,7 +27,8 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::merge::Merge;
@@ -280,16 +280,18 @@ impl SingleProof {
     /// This involves generating a [ProofCollection] as an intermediate step.
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        sync_device: &TritonProverSync,
-    ) -> Result<Proof, TryLockError> {
-        let proof_collection = ProofCollection::produce(primitive_witness, sync_device).await?;
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Proof> {
+        let proof_collection =
+            ProofCollection::produce(primitive_witness, triton_vm_job_queue, priority).await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
         let single_proof = SingleProof
-            .prove(&claim, nondeterminism, sync_device)
+            .prove(&claim, nondeterminism, triton_vm_job_queue, priority)
             .await?;
         info!("Done");
 
@@ -888,10 +890,13 @@ mod test {
             .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection =
-            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
-                .await
-                .unwrap();
+        let proof_collection = ProofCollection::produce(
+            &primitive_witness,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
 
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
@@ -928,10 +933,13 @@ mod test {
                 .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection =
-            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
-                .await
-                .unwrap();
+        let proof_collection = ProofCollection::produce(
+            &primitive_witness,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
 
         println!("Have proof collection. \\o/");
@@ -966,7 +974,8 @@ mod test {
             .prove(
                 &claim_for_update,
                 nondeterminism_for_update,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1001,7 +1010,8 @@ mod test {
             .prove(
                 &claim_for_merge,
                 nondeterminism_for_witness,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();

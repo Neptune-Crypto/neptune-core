@@ -16,17 +16,16 @@ use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::BlockAppendix;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 
 /// All information necessary to efficiently produce a proof for a block.
@@ -66,8 +65,8 @@ impl AppendixWitness {
 
     pub(crate) async fn produce(
         block_primitive_witness: BlockPrimitiveWitness,
-        _sync_device: &TritonProverSync,
-    ) -> Result<AppendixWitness, TryLockError> {
+        _triton_vm_job_queue: &TritonVmJobQueue,
+    ) -> anyhow::Result<AppendixWitness> {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel

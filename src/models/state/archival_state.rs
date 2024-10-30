@@ -936,6 +936,8 @@ mod archival_state_tests {
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -944,7 +946,6 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1151,7 +1152,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1516,7 +1517,7 @@ mod archival_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1531,7 +1532,8 @@ mod archival_state_tests {
             .merge_with(
                 tx_to_alice_and_bob,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1542,7 +1544,8 @@ mod archival_state_tests {
             block_tx,
             in_seven_months,
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();
@@ -1681,7 +1684,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1724,7 +1727,7 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1746,11 +1749,17 @@ mod archival_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap()
-            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_2 = Block::make_block_template(
@@ -1758,7 +1767,8 @@ mod archival_state_tests {
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();

@@ -33,7 +33,6 @@ use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -50,11 +49,12 @@ use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
 use crate::config_models::network::Network;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
@@ -216,17 +216,24 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        sync_device: &TritonProverSync,
-    ) -> Result<Block, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Block> {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
         let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
         let (appendix, proof) = {
-            let appendix_witness = AppendixWitness::produce(primitive_witness, sync_device).await?;
+            let appendix_witness =
+                AppendixWitness::produce(primitive_witness, triton_vm_job_queue).await?;
             let appendix = appendix_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
-                .prove(&claim, appendix_witness.nondeterminism(), sync_device)
+                .prove(
+                    &claim,
+                    appendix_witness.nondeterminism(),
+                    triton_vm_job_queue,
+                    priority,
+                )
                 .await?;
             (appendix, BlockProof::SingleProof(proof))
         };
@@ -240,14 +247,16 @@ impl Block {
         transaction: Transaction,
         block_timestamp: Timestamp,
         target_block_interval: Option<Timestamp>,
-        sync_device: &TritonProverSync,
-    ) -> Result<Block, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Block> {
         Self::make_block_template_with_valid_proof(
             predecessor,
             transaction,
             block_timestamp,
             target_block_interval,
-            sync_device,
+            triton_vm_job_queue,
+            priority,
         )
         .await
     }
@@ -1021,7 +1030,8 @@ mod block_tests {
                 block_tx,
                 now,
                 None,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();

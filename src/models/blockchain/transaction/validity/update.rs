@@ -712,13 +712,14 @@ pub(crate) mod test {
     use tasm_lib::Digest;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -766,9 +767,13 @@ pub(crate) mod test {
             mined.kernel.inputs,
         );
 
-        let old_proof = SingleProof::produce(&old_pw, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+        let old_proof = SingleProof::produce(
+            &old_pw,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
         updated.kernel.timestamp = updated.kernel.timestamp + Timestamp::seconds(num_seconds);
 
@@ -821,9 +826,13 @@ pub(crate) mod test {
             &primitive_witness.mutator_set_accumulator.aocl,
             &newly_confirmed_records,
         );
-        let old_proof = SingleProof::produce(&primitive_witness, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+        let old_proof = SingleProof::produce(
+            &primitive_witness,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
 
         UpdateWitness::from_old_transaction(
             primitive_witness.kernel,

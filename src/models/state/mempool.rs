@@ -43,7 +43,8 @@ use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use super::ProvingLock;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -51,7 +52,6 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -473,7 +473,8 @@ impl Mempool {
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
-        prover_lock: &ProvingLock,
+        vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> Vec<MempoolEvent> {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
@@ -526,7 +527,6 @@ impl Mempool {
 
         // Update the remaining transactions so their mutator set data is still valid
         // But kick out those transactions that we were unable to update.
-        let skip_if_prover_is_busy = TritonProverSync::skip_if_busy(prover_lock.to_owned());
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if let Ok(new_tx) = tx
@@ -534,7 +534,8 @@ impl Mempool {
                 .new_with_updated_mutator_set_records(
                     &previous_mutator_set_accumulator,
                     block,
-                    &skip_if_prover_is_busy,
+                    vm_job_queue,
+                    priority,
                 )
                 .await
             {
@@ -640,7 +641,6 @@ mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::locks::tokio::AtomicMutex;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -656,6 +656,7 @@ mod tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::GlobalStateLock;
+    use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
@@ -770,7 +771,7 @@ mod tests {
                 high_fee,
                 in_seven_months,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -922,7 +923,7 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -962,7 +963,7 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -991,7 +992,8 @@ mod tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1004,7 +1006,8 @@ mod tests {
             .update_with_block(
                 block_1.kernel.body.mutator_set_accumulator.clone(),
                 &block_2,
-                &AtomicMutex::from(()),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await;
         assert_eq!(1, mempool.len());
@@ -1029,7 +1032,8 @@ mod tests {
             .merge_with(
                 coinbase_transaction2,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1055,7 +1059,8 @@ mod tests {
                 .update_with_block(
                     previous_block.kernel.body.mutator_set_accumulator.clone(),
                     &next_block,
-                    &AtomicMutex::from(()),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 )
                 .await;
             previous_block = next_block;
@@ -1071,7 +1076,8 @@ mod tests {
             .merge_with(
                 tx_by_alice_updated,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1087,7 +1093,8 @@ mod tests {
             .update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
                 &block_5,
-                &AtomicMutex::from(()),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await;
 
@@ -1112,12 +1119,20 @@ mod tests {
             .unwrap()
             .current();
 
-            let left_single_proof = SingleProof::produce(&left, &TritonProverSync::dummy())
-                .await
-                .unwrap();
-            let right_single_proof = SingleProof::produce(&right, &TritonProverSync::dummy())
-                .await
-                .unwrap();
+            let left_single_proof = SingleProof::produce(
+                &left,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
+            let right_single_proof = SingleProof::produce(
+                &right,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
 
             let left = Transaction {
                 kernel: left.kernel,
@@ -1136,7 +1151,8 @@ mod tests {
                 left.clone(),
                 right.clone(),
                 shuffle_seed,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1217,7 +1233,7 @@ mod tests {
                 NeptuneCoins::new(1),
                 in_seven_years,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1319,7 +1335,7 @@ mod tests {
                         fee,
                         in_seven_months,
                         TxProvingCapability::ProofCollection,
-                        &TritonProverSync::dummy(),
+                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .expect("producing proof collection should succeed");

@@ -48,6 +48,8 @@ use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::make_coinbase_transaction;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -78,7 +80,6 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
@@ -287,8 +288,9 @@ pub(crate) async fn add_block_to_archival_state(
 /// For now we use databases on disk. In-memory databases would be nicer.
 pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
     let mut rng = rand::thread_rng();
+    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
-        .join("neptune-unit-tests")
+        .join(format!("neptune-unit-tests-{}", user))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
@@ -813,10 +815,16 @@ pub(crate) async fn valid_block_from_tx_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
-    let mut block =
-        Block::make_block_template(predecessor, tx, timestamp, None, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+    let mut block = Block::make_block_template(
+        predecessor,
+        tx,
+        timestamp,
+        None,
+        &TritonVmJobQueue::dummy(),
+        TritonVmJobPriority::default(),
+    )
+    .await
+    .unwrap();
 
     let threshold = predecessor.header().difficulty.target();
     let mut rng = StdRng::from_seed(seed);
@@ -843,7 +851,8 @@ pub(crate) async fn valid_successor_for_tests(
     let tx = GlobalState::create_raw_transaction(
         tx_details,
         TxProvingCapability::SingleProof,
-        &TritonProverSync::dummy(),
+        &TritonVmJobQueue::dummy(),
+        TritonVmJobPriority::default(),
     )
     .await
     .unwrap();
