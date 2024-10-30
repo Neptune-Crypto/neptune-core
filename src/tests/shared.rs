@@ -734,33 +734,6 @@ pub(crate) fn make_mock_block_with_valid_pow(
     (block, cb_utxo, cb_sender_randomness)
 }
 
-pub(crate) fn make_mock_block_with_invalid_pow(
-    previous_block: &Block,
-    block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
-    seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let (mut block, mut utxo, mut digest) = make_mock_block(
-        previous_block,
-        block_timestamp,
-        coinbase_beneficiary,
-        rng.gen(),
-    );
-    while block.has_proof_of_work(previous_block) {
-        let (block_new, utxo_new, digest_new) = make_mock_block(
-            previous_block,
-            block_timestamp,
-            coinbase_beneficiary,
-            rng.gen(),
-        );
-        block = block_new;
-        utxo = utxo_new;
-        digest = digest_new;
-    }
-    (block, utxo, digest)
-}
-
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
 pub async fn mock_genesis_wallet_state(
@@ -826,6 +799,12 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .await?;
 
     Ok(block)
+}
+
+pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
+    let tx = make_mock_transaction(vec![], vec![]);
+    let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
 }
 
 pub(crate) async fn valid_block_from_tx_for_tests(

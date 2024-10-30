@@ -1,7 +1,8 @@
+use anyhow::bail;
+use anyhow::Result;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
-use tracing::error;
 
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -31,65 +32,79 @@ impl From<TransferBlock> for Block {
     }
 }
 
-// todo: change to try_from
-impl From<Block> for TransferBlock {
-    fn from(block: Block) -> Self {
+impl TryFrom<Block> for TransferBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Block) -> Result<Self> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&Block> for TransferBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(block: &Block) -> Result<Self> {
         let proof = match &block.proof {
             BlockProof::SingleProof(sp) => sp.clone(),
             BlockProof::Genesis => {
-                error!("The Genesis block cannot be transferred");
-                // TODO: Don't panic in `From` imlementations! Fix!
-                panic!()
+                bail!("The Genesis block cannot be transferred")
             }
             BlockProof::Invalid => {
-                error!("Invalid blocks cannot be transferred");
-                panic!()
+                bail!("Invalid blocks cannot be transferred");
             }
         };
-        Self {
+        Ok(Self {
             header: block.kernel.header.clone(),
             body: block.kernel.body.clone(),
             proof,
             appendix: block.kernel.appendix.clone(),
-        }
+        })
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::models::peer::Network;
-    use crate::models::state::wallet::WalletSecret;
-    use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::mock_genesis_global_state;
-    use rand::thread_rng;
+    use rand::rngs::StdRng;
     use rand::Rng;
+    use rand::SeedableRng;
 
     use super::*;
+    use crate::models::peer::Network;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::invalid_empty_block;
+    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
+
+    #[test]
+    fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
+        let genesis = Block::genesis_block(Network::Main);
+        let tblock_genesis: Result<TransferBlock> = (&genesis).try_into();
+        assert!(
+            tblock_genesis.is_err(),
+            "Transfering genesis block is disallowed"
+        );
+        let invalid_block_1 = invalid_empty_block(&genesis);
+        let tblock_1 = TransferBlock::try_from(invalid_block_1);
+        assert!(tblock_1.is_err(), "Transfering invalid block is disallowed");
+    }
 
     // test: verify digest is the same after conversion from
     //       TransferBlock and back.
     #[tokio::test]
     async fn from_transfer_block() {
+        let network = Network::Main;
         // note: we have to generate a block because
         // TransferBlock::into() will panic if it
         // encounters the genesis block.
-        let global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
-        let spending_key = global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
-        let address = spending_key.to_address();
-        let mut rng = thread_rng();
+        let genesis = Block::genesis_block(network);
+        let [block1] = valid_sequence_of_blocks_for_tests(
+            &genesis,
+            Timestamp::hours(1),
+            StdRng::seed_from_u64(5550001).gen(),
+        )
+        .await;
 
-        let gblock = Block::genesis_block(Network::RegTest);
-
-        let (source_block, _, _) = make_mock_block(&gblock, None, address, rng.gen());
-
-        let transfer_block = TransferBlock::from(source_block.clone());
+        let transfer_block = TransferBlock::try_from(block1.clone()).unwrap();
         let new_block = Block::from(transfer_block);
-        assert_eq!(source_block.hash(), new_block.hash());
+        assert_eq!(block1.hash(), new_block.hash());
     }
 }

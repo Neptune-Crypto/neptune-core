@@ -603,7 +603,7 @@ impl PeerLoopHandler {
                         .get_block(canonical_child_digest)
                         .await?
                         .unwrap();
-                    returned_blocks.push(canonical_child.into());
+                    returned_blocks.push(canonical_child.try_into().unwrap());
 
                     // prepare for next iteration
                     current_digest = canonical_child_digest;
@@ -768,7 +768,8 @@ impl PeerLoopHandler {
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                     Some(b) => {
-                        peer.send(PeerMessage::Block(Box::new(b.into()))).await?;
+                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
+                            .await?;
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                 }
@@ -820,7 +821,7 @@ impl PeerLoopHandler {
                     .await?
                     .unwrap();
                 let block_response: PeerMessage =
-                    PeerMessage::Block(Box::new(canonical_chain_block.into()));
+                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
 
                 debug!("Sending block");
                 peer.send(block_response).await?;
@@ -1285,6 +1286,7 @@ mod peer_loop_tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::twenty_first::bfe;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
@@ -1299,12 +1301,11 @@ mod peer_loop_tests {
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
-    use crate::tests::shared::make_mock_block_with_invalid_pow;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::valid_block_for_tests;
     use crate::tests::shared::valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
+    use crate::BFieldElement;
 
     #[traced_test]
     #[tokio::test]
@@ -1387,14 +1388,13 @@ mod peer_loop_tests {
         // and a ban.
 
         let network = Network::Main;
-        let mut rng = StdRng::seed_from_u64(5550001);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
-        let mut different_genesis_block: Block = state_lock
+        let mut different_genesis_block = state_lock
             .lock_guard()
             .await
             .chain
@@ -1404,18 +1404,14 @@ mod peer_loop_tests {
         let mut nonce = different_genesis_block.kernel.header.nonce;
         nonce[2].increment();
         different_genesis_block.set_header_nonce(nonce);
-        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let a_recipient_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let (block_1_with_different_genesis, _, _) = make_mock_block_with_valid_pow(
+        let [block_1_with_different_genesis] = valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
-            None,
-            a_recipient_address,
-            rng.gen(),
-        );
+            Timestamp::hours(1),
+            StdRng::seed_from_u64(5550001).gen(),
+        )
+        .await;
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
-            block_1_with_different_genesis.into(),
+            block_1_with_different_genesis.try_into().unwrap(),
         )))]);
 
         let mut peer_loop_handler = PeerLoopHandler::new(
@@ -1474,8 +1470,7 @@ mod peer_loop_tests {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
 
-        let network = Network::Testnet;
-        let mut rng = StdRng::seed_from_u64(5550001);
+        let network = Network::Main;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
@@ -1488,19 +1483,22 @@ mod peer_loop_tests {
             .await;
 
         // Make a with hash above what the implied threshold from
-        // `target_difficulty` requires
-        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let a_recipient_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let (block_without_valid_pow, _, _) =
-            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let [mut block_without_valid_pow] = valid_sequence_of_blocks_for_tests(
+            &genesis_block,
+            Timestamp::hours(1),
+            StdRng::seed_from_u64(5550001).gen(),
+        )
+        .await;
+
+        // This *probably* is invalid PoW -- and needs to be for this test to
+        // work.
+        block_without_valid_pow.set_header_nonce([bfe!(1), bfe!(2), bfe!(3)]);
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
-                block_without_valid_pow.clone().into(),
+                block_without_valid_pow.clone().try_into().unwrap(),
             ))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1569,7 +1567,6 @@ mod peer_loop_tests {
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main task.
 
-        let mut rng = StdRng::seed_from_u64(5550001);
         let network = Network::Main;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, mut alice, hsd) =
             get_test_genesis_setup(network, 0).await?;
@@ -1578,7 +1575,8 @@ mod peer_loop_tests {
 
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = valid_block_for_tests(&alice, fee, now, rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&alice, fee, now, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block must be valid for this test to make sense"
@@ -1586,7 +1584,9 @@ mod peer_loop_tests {
         alice.set_new_tip(block_1.clone()).await?;
 
         let mock_peer_messages = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_1.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -1665,9 +1665,9 @@ mod peer_loop_tests {
                 max_response_len: 14,
             })),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_1.clone().into(),
-                block_2_a.clone().into(),
-                block_3_a.clone().into(),
+                block_1.clone().try_into().unwrap(),
+                block_2_a.clone().try_into().unwrap(),
+                block_3_a.clone().try_into().unwrap(),
             ])),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1693,8 +1693,8 @@ mod peer_loop_tests {
                 max_response_len: 14,
             })),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_2_a.into(),
-                block_3_a.clone().into(),
+                block_2_a.try_into().unwrap(),
+                block_3_a.clone().try_into().unwrap(),
             ])),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1726,25 +1726,23 @@ mod peer_loop_tests {
         // the list that is known and canonical.
 
         let network = Network::Main;
-        let mut rng = StdRng::seed_from_u64(5550001);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let an_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, an_address, rng.gen());
-        let (block_2_a, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, an_address, rng.gen());
-        let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, an_address, rng.gen()); // <--- canonical
-        let (block_2_b, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, an_address, rng.gen());
-        let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, an_address, rng.gen());
+        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+            &genesis_block,
+            Timestamp::hours(1),
+            StdRng::seed_from_u64(5550001).gen(),
+        )
+        .await;
+        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+            &block_1,
+            Timestamp::hours(1),
+            StdRng::seed_from_u64(5550002).gen(),
+        )
+        .await;
+        assert_ne!(block_2_a.hash(), block_2_b.hash());
 
         state_lock.set_new_tip(block_1.clone()).await?;
         state_lock.set_new_tip(block_2_a.clone()).await?;
@@ -1761,9 +1759,9 @@ mod peer_loop_tests {
             // Since genesis block is the 1st known in the list of known blocks,
             // it's immediate descendent, block_1, is the first one returned.
             Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_1.into(),
-                block_2_a.into(),
-                block_3_a.clone().into(),
+                block_1.try_into().unwrap(),
+                block_2_a.try_into().unwrap(),
+                block_3_a.clone().try_into().unwrap(),
             ])),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1820,9 +1818,11 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
-            Action::Write(PeerMessage::Block(Box::new(block_2_a.into()))),
+            Action::Write(PeerMessage::Block(Box::new(block_2_a.try_into().unwrap()))),
             Action::Read(PeerMessage::BlockRequestByHeight(3.into())),
-            Action::Write(PeerMessage::Block(Box::new(block_3_a.clone().into()))),
+            Action::Write(PeerMessage::Block(Box::new(
+                block_3_a.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -1868,7 +1868,9 @@ mod peer_loop_tests {
         let block_1 = valid_block_for_tests(&state_lock, fee, now, rng.gen()).await;
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_1.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -1934,9 +1936,13 @@ mod peer_loop_tests {
         .await;
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_2.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_1.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_1.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2013,9 +2019,13 @@ mod peer_loop_tests {
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_4.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_3.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2089,11 +2099,17 @@ mod peer_loop_tests {
         state_lock.set_new_tip(block_1.clone()).await.unwrap();
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_4.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_3.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_2.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2162,11 +2178,17 @@ mod peer_loop_tests {
         .await;
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_3.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_2.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_1.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_1.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2250,9 +2272,13 @@ mod peer_loop_tests {
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_4.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_3.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             //
             // Now make the interruption of the block reconciliation process
@@ -2260,7 +2286,9 @@ mod peer_loop_tests {
             //
             // Complete the block reconciliation process by requesting the last block
             // in this process, to get back to a mutually known block.
-            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_2.clone().try_into().unwrap(),
+            ))),
             //
             // Then anticipate the request of the block that was announced
             // in the interruption.
@@ -2362,9 +2390,13 @@ mod peer_loop_tests {
             (sa_1, hsd_1.instance_id),
         ];
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_4.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
-            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_3.clone().try_into().unwrap(),
+            ))),
             Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             //
             // Now make the interruption of the block reconciliation process
@@ -2375,7 +2407,9 @@ mod peer_loop_tests {
             //
             // Complete the block reconciliation process by requesting the last block
             // in this process, to get back to a mutually known block.
-            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Block(Box::new(
+                block_2.clone().try_into().unwrap(),
+            ))),
             Action::Read(PeerMessage::Bye),
         ]);
 
