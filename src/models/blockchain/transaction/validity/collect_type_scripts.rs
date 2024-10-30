@@ -256,6 +256,9 @@ impl ConsensusProgram for CollectTypeScripts {
             call {write_all_digests}
             // _ *ctsw *type_script_hashes[N+1] *type_script_hashes[N+1]
 
+            pop 3
+            // _
+
             halt
 
             // INVARIANT: _ *type_script_hashes N i *utxos[i]_si

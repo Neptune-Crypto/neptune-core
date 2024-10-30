@@ -117,6 +117,7 @@ where
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
         let program = self.program();
         let mut vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
+        let init_stack = vm_state.op_stack.clone();
         maybe_write_debuggable_program_to_disk(&program, &vm_state);
         let result = vm_state.run();
         match result {
@@ -129,6 +130,8 @@ where
                     vm_state.secret_digests.is_empty(),
                     "Secret digest list must be empty after executing consensus program"
                 );
+
+                assert_eq!(&init_stack, &vm_state.op_stack);
 
                 Ok(vm_state.public_output)
             }

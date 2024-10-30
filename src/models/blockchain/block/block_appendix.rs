@@ -8,13 +8,12 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::block_body::BlockBody;
 use crate::models::blockchain::block::Claim;
 use crate::models::blockchain::block::Tip5;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::prelude::twenty_first;
-
-use super::block_body::BlockBody;
 
 /// Encapsulates the claims proven by the block proof.
 ///

@@ -426,6 +426,13 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * (total_input == total_output)
 
             assert
+            // _ [txkmh] *ncw *kernel *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * *
+
+            pop 5
+            pop 5
+            pop 5
+            pop 1
+            // _
 
             halt
         };

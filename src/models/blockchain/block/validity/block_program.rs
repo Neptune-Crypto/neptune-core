@@ -145,12 +145,17 @@ impl ConsensusProgram for BlockProgram {
             pick 2 addi 1
             pick 2 addi 1
             pick 2
-            // [bbd] *claim[0] *proof[0] N
+            // _ [bbd] *claim[0] *proof[0] N
 
             push 0
-            // [bbd] *claim[0] *proof[0] N 0
+            // _ [bbd] *claim[0] *proof[0] N 0
 
             call {verify_all_claims_loop}
+            // _ [bbd] *claim[0] *proof[0] N N
+
+            pop 4
+            pop 5
+            // _
 
             halt
 
