@@ -1283,16 +1283,13 @@ impl PeerLoopHandler {
 mod peer_loop_tests {
     use num_traits::Zero;
     use rand::rngs::StdRng;
-    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
-    use rand_distr::Standard;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::transaction_notification::TransactionNotification;
@@ -1304,7 +1301,8 @@ mod peer_loop_tests {
     use crate::tests::shared::get_test_genesis_setup;
     use crate::tests::shared::make_mock_block_with_invalid_pow;
     use crate::tests::shared::make_mock_block_with_valid_pow;
-    use crate::tests::shared::valid_block;
+    use crate::tests::shared::valid_block_for_tests;
+    use crate::tests::shared::valid_successor_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -1581,7 +1579,7 @@ mod peer_loop_tests {
             .to_address();
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = valid_block(&alice, fee, now, rng.gen()).await;
+        let block_1 = valid_block_for_tests(&alice, fee, now, rng.gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block must be valid for this test to make sense"
@@ -1870,7 +1868,7 @@ mod peer_loop_tests {
 
         let now = genesis_block.header().timestamp + Timestamp::hours(2);
         let fee = NeptuneCoins::zero();
-        let block_1 = valid_block(&state_lock, fee, now, rng.gen()).await;
+        let block_1 = valid_block_for_tests(&state_lock, fee, now, rng.gen()).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -1937,8 +1935,10 @@ mod peer_loop_tests {
             .to_address();
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(12), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(23), rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(12), rng.gen()).await;
+        let block_2 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(23), rng.gen()).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -2013,19 +2013,15 @@ mod peer_loop_tests {
         state_lock.set_cli(cli).await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let own_recipient_address = state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 = valid_block(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
-        let block_4 = valid_block(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
+        let block_1 =
+            valid_successor_for_tests(&genesis_block, now + Timestamp::hours(2), rng.gen()).await;
+        let block_2 =
+            valid_successor_for_tests(&block_1, now + Timestamp::hours(3), rng.gen()).await;
+        let block_3 =
+            valid_successor_for_tests(&block_2, now + Timestamp::hours(4), rng.gen()).await;
+        let block_4 =
+            valid_successor_for_tests(&block_3, now + Timestamp::hours(5), rng.gen()).await;
 
         state_lock.set_new_tip(block_1.clone()).await?;
 
@@ -2103,10 +2099,14 @@ mod peer_loop_tests {
             .to_address();
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 = valid_block(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
-        let block_4 = valid_block(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
+        let block_2 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
+        let block_3 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
+        let block_4 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
         state_lock.set_new_tip(block_1.clone()).await.unwrap();
 
         let mock = Mock::new(vec![
@@ -2181,9 +2181,12 @@ mod peer_loop_tests {
             .to_address();
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 = valid_block(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
+        let block_2 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
+        let block_3 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -2271,11 +2274,16 @@ mod peer_loop_tests {
 
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 = valid_block(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
-        let block_4 = valid_block(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
-        let block_5 = valid_block(&state_lock, fee, now + Timestamp::hours(6), rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
+        let block_2 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
+        let block_3 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
+        let block_4 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
+        let block_5 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(6), rng.gen()).await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2381,10 +2389,14 @@ mod peer_loop_tests {
 
         let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp;
-        let block_1 = valid_block(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 = valid_block(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 = valid_block(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
-        let block_4 = valid_block(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
+        let block_1 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(2), rng.gen()).await;
+        let block_2 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(3), rng.gen()).await;
+        let block_3 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(4), rng.gen()).await;
+        let block_4 =
+            valid_block_for_tests(&state_lock, fee, now + Timestamp::hours(5), rng.gen()).await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;

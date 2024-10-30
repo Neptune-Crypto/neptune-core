@@ -61,6 +61,7 @@ use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_output::TxOutputList;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
@@ -84,11 +85,14 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -820,35 +824,63 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     Ok(block)
 }
 
-/// Function for generating a valid block for testing purposes.
+pub(crate) async fn valid_block_from_tx_for_tests(
+    predecessor: &Block,
+    tx: Transaction,
+    seed: [u8; 32],
+) -> Block {
+    let timestamp = tx.kernel.timestamp;
+    let mut block =
+        Block::make_block_template(predecessor, tx, timestamp, None, &TritonProverSync::dummy())
+            .await
+            .unwrap();
+
+    let threshold = predecessor.header().difficulty.target();
+    let mut rng = StdRng::from_seed(seed);
+    while !block.has_proof_of_work(predecessor) {
+        mine_iteration_for_tests(&mut block, threshold, &mut rng);
+    }
+
+    block
+}
+
+pub(crate) async fn valid_successor_for_tests(
+    predecessor: &Block,
+    timestamp: Timestamp,
+    seed: [u8; 32],
+) -> Block {
+    let tx_details = TransactionDetails::new_without_coinbase(
+        vec![],
+        TxOutputList::default(),
+        NeptuneCoins::zero(),
+        timestamp,
+        predecessor.body().mutator_set_accumulator.clone(),
+    )
+    .unwrap();
+    let tx = GlobalState::create_raw_transaction(
+        tx_details,
+        TxProvingCapability::SingleProof,
+        &TritonProverSync::dummy(),
+    )
+    .await
+    .unwrap();
+
+    valid_block_from_tx_for_tests(predecessor, tx, seed).await
+}
+
+/// Create a valid block with coinbase going to self. For testing purposes.
 ///
 /// The block will be valid both in terms of PoW and block proof and will pass
 /// the Block::is_valid() function.
-pub(crate) async fn valid_block(
+pub(crate) async fn valid_block_for_tests(
     state_lock: &GlobalStateLock,
     fee: NeptuneCoins,
     timestamp: Timestamp,
     seed: [u8; 32],
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    let (cb, _) = make_coinbase_transaction(&state_lock, fee, timestamp)
+    let (cb, _) = make_coinbase_transaction(state_lock, fee, timestamp)
         .await
         .unwrap();
-    let mut block_1 = Block::make_block_template(
-        &current_tip,
-        cb,
-        timestamp,
-        None,
-        &TritonProverSync::dummy(),
-    )
-    .await
-    .unwrap();
-
-    let threshold = current_tip.header().difficulty.target();
-    let mut rng = StdRng::from_seed(seed);
-    while !block_1.has_proof_of_work(&current_tip) {
-        mine_iteration_for_tests(&mut block_1, threshold, &mut rng);
-    }
-
-    block_1
+    valid_block_from_tx_for_tests(&current_tip, cb, seed).await
 }
