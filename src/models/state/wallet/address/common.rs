@@ -1,6 +1,5 @@
 use anyhow::bail;
 use anyhow::Result;
-use itertools::Itertools;
 use sha3::digest::ExtendableOutput;
 use sha3::digest::Update;
 use sha3::Shake256;
@@ -141,34 +140,10 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
     result
 }
 
-/// generates a lock script from the spending lock.
-///
-/// Satisfaction of this lock script establishes the UTXO owner's assent to
-/// the transaction.
-pub fn lock_script(spending_lock: Digest) -> LockScript {
-    let push_spending_lock_digest_to_stack = spending_lock
-        .values()
-        .iter()
-        .rev()
-        .map(|elem| triton_instr!(push elem.value()))
-        .collect_vec();
-
-    let instructions = triton_asm!(
-        divine 5
-        hash
-        {&push_spending_lock_digest_to_stack}
-        assert_vector
-        read_io 5
-        halt
-    );
-
-    instructions.into()
-}
-
 /// Generate a lock script and a witness for a simple standard
 /// proof-of-preimage-knowledge lock script.
 pub(crate) fn lock_script_and_witness(unlock_key: Digest) -> LockScriptAndWitness {
-    let lock_script = lock_script(unlock_key.hash());
+    let lock_script = LockScript::hash_lock(unlock_key.hash());
     LockScriptAndWitness::new_with_nondeterminism(
         lock_script.program,
         NonDeterminism::new(unlock_key.reversed().values()),

@@ -180,7 +180,7 @@ impl SymmetricKey {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        common::lock_script(self.spending_lock())
+        LockScript::hash_lock(self.spending_lock())
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
@@ -47,6 +48,30 @@ impl LockScript {
                 halt
             )),
         }
+    }
+
+    /// Generate a lock script that verifies knowledge of a hash preimage.
+    ///
+    /// Satisfaction of this lock script establishes the UTXO owner's assent to
+    /// the transaction.
+    pub fn hash_lock(preimage: Digest) -> Self {
+        let push_spending_lock_digest_to_stack = preimage
+            .values()
+            .iter()
+            .rev()
+            .map(|elem| triton_instr!(push elem.value()))
+            .collect_vec();
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            {&push_spending_lock_digest_to_stack}
+            assert_vector
+            read_io 5
+            halt
+        );
+
+        instructions.into()
     }
 
     pub fn hash(&self) -> Digest {
