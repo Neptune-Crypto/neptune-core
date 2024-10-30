@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
+use rand::thread_rng;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
@@ -14,6 +16,8 @@ use twenty_first::math::tip5::Digest;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::prelude::twenty_first;
+
+use super::utxo::Utxo;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {
@@ -138,10 +142,30 @@ impl LockScriptAndWitness {
         }
     }
 
+    /// Generate a lock script and a witness for a simple standard
+    /// proof-of-preimage-knowledge lock script.
+    pub(crate) fn _hash_lock(unlock_key: Digest) -> Self {
+        let lock_script = LockScript::hash_lock(unlock_key.hash());
+        LockScriptAndWitness::new_with_nondeterminism(
+            lock_script.program,
+            NonDeterminism::new(unlock_key.reversed().values()),
+        )
+    }
+
     pub fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
             .with_digests(self.nd_digests.clone())
             .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>())
+    }
+
+    /// Determine if the given UTXO can be unlocked with this
+    /// lock-script-and-witness pair.
+    pub fn can_unlock(&self, utxo: &Utxo) -> bool {
+        if self.program.hash() != utxo.lock_script_hash {
+            return false;
+        }
+        let any_digest = thread_rng().gen::<Digest>();
+        self.halts_gracefully(any_digest.values().into())
     }
 
     pub fn halts_gracefully(&self, public_input: PublicInput) -> bool {

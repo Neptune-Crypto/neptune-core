@@ -43,6 +43,7 @@ use validity::appendix_witness::AppendixWitness;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 
+use super::transaction::lock_script::LockScript;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::Transaction;
@@ -796,6 +797,18 @@ impl Block {
     pub(crate) fn size(&self) -> usize {
         self.encode().len()
     }
+
+    /// Wrap the transaction's fee into a UTXO
+    pub(crate) fn _wrap_guesser_fee(&self) -> Utxo {
+        let preimage = self.header().nonce;
+        let lock_script = LockScript::hash_lock(preimage);
+        let lock_script_hash = lock_script.hash();
+        let coins = self.body().transaction_kernel.fee.to_native_coins();
+        Utxo {
+            lock_script_hash,
+            coins,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -814,9 +827,12 @@ mod block_tests {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
     use crate::mine_loop::make_coinbase_transaction;
+    use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
+    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
@@ -1137,5 +1153,22 @@ mod block_tests {
             assert_eq!(gblock, decoded);
             assert_eq!(gblock.hash(), decoded.hash());
         }
+    }
+
+    #[test]
+    fn guesser_can_unlock_guesser_fee_utxo() {
+        let genesis_block = Block::genesis_block(Network::Main);
+        let mut transaction = make_mock_transaction(vec![], vec![]);
+        transaction.kernel.fee = NeptuneCoins::from_nau(1337.into())
+            .expect("given number should be valid NeptuneCoins amount");
+        let mut block = mock_block_with_transaction(&genesis_block, transaction);
+
+        let preimage = thread_rng().gen::<Digest>();
+        block.set_header_nonce(preimage.hash());
+
+        let guesser_fee_utxo = block._wrap_guesser_fee();
+
+        let lock_script_and_witness = LockScriptAndWitness::_hash_lock(preimage);
+        assert!(lock_script_and_witness.can_unlock(&guesser_fee_utxo));
     }
 }
