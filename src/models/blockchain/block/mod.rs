@@ -7,7 +7,6 @@ pub mod block_kernel;
 pub mod block_selector;
 pub mod difficulty_control;
 pub mod mutator_set_update;
-pub mod transfer_block;
 pub mod validity;
 
 use std::sync::OnceLock;
@@ -36,9 +35,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::sync::TryLockError;
 use tracing::debug;
-use tracing::error;
 use tracing::warn;
-use transfer_block::TransferBlock;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -67,6 +64,11 @@ use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// Maximum block size in number of `BFieldElement`.
+///
+/// This number limits the number of outputs in a block's transaction to around
+/// 25000. This limit ensures that it remains feasible to run an archival node
+/// even in the event of denial-of-service attack, where the attacker creates
+/// blocks with many outputs.
 pub(crate) const MAX_BLOCK_SIZE: usize = 250_000;
 
 /// All blocks have proofs except the genesis block
@@ -76,17 +78,6 @@ pub enum BlockProof {
     #[default]
     Invalid,
     SingleProof(Proof),
-    DummyProof, // TODO: remove me
-}
-
-/// Enumerates the types of proof for a block. Use `Invalid` for tests when you
-/// don't care about proof validity.
-pub(crate) enum BlockProofType {
-    /// Represents an invalid proof type, only to be used for tests
-    Invalid,
-
-    /// The only valid type for consensus
-    SingleProof,
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -170,46 +161,6 @@ impl PartialEq for Block {
 }
 impl Eq for Block {}
 
-impl From<TransferBlock> for Block {
-    fn from(t_block: TransferBlock) -> Self {
-        let kernel = BlockKernel::new(t_block.header, t_block.body);
-        let proof = if t_block.proof.0.is_empty() {
-            BlockProof::DummyProof
-        } else {
-            BlockProof::SingleProof(t_block.proof)
-        };
-        Self {
-            digest: Default::default(), // calc'd in hash()
-            kernel,
-            proof,
-        }
-    }
-}
-
-impl From<Block> for TransferBlock {
-    fn from(block: Block) -> Self {
-        let proof = match block.proof {
-            BlockProof::SingleProof(sp) => sp,
-            BlockProof::Genesis => {
-                error!("The Genesis block cannot be transferred");
-                // TODO: Don't panic in `From` imlementations! Fix!
-                panic!()
-            }
-            BlockProof::Invalid => {
-                error!("Invalid blocks cannot be transferred");
-                panic!()
-            }
-            BlockProof::DummyProof => Proof(vec![]),
-        };
-        Self {
-            header: block.kernel.header,
-            body: block.kernel.body,
-            proof,
-            appendix: block.kernel.appendix,
-        }
-    }
-}
-
 impl Block {
     fn template_header(
         predecessor: &Block,
@@ -256,7 +207,8 @@ impl Block {
         let body = primitive_witness.body().to_owned();
         let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
         let proof = BlockProof::Invalid;
-        Block::new(header, body, proof)
+        let appendix = BlockAppendix::default();
+        Block::new(header, body, appendix, proof)
     }
 
     async fn make_block_template_with_valid_proof(
@@ -269,17 +221,17 @@ impl Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
         let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
-        let proof = {
+        let (appendix, proof) = {
             let appendix_witness = AppendixWitness::produce(primitive_witness, sync_device).await?;
             let appendix = appendix_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
                 .prove(&claim, appendix_witness.nondeterminism(), sync_device)
                 .await?;
-            BlockProof::SingleProof(proof)
+            (appendix, BlockProof::SingleProof(proof))
         };
 
-        Ok(Block::new(header, body, proof))
+        Ok(Block::new(header, body, appendix, proof))
     }
 
     /// Prepare a Block for mining
@@ -434,7 +386,9 @@ impl Block {
             difficulty: Difficulty::MINIMUM,
         };
 
-        Self::new(header, body, BlockProof::Genesis)
+        let appendix = BlockAppendix::default();
+
+        Self::new(header, body, appendix, BlockProof::Genesis)
     }
 
     /// sender randomness is tailored to the network. This change
@@ -475,10 +429,15 @@ impl Block {
         utxos
     }
 
-    pub fn new(header: BlockHeader, body: BlockBody, block_proof: BlockProof) -> Self {
-        let kernel = BlockKernel::new(header, body);
+    pub(crate) fn new(
+        header: BlockHeader,
+        body: BlockBody,
+        appendix: BlockAppendix,
+        block_proof: BlockProof,
+    ) -> Self {
+        let kernel = BlockKernel::new(header, body, appendix);
         Self {
-            digest: Default::default(), // calc'd in hash()
+            digest: OnceLock::default(), // calc'd in hash()
             kernel,
             proof: block_proof,
         }
@@ -570,14 +529,15 @@ impl Block {
         // 0. `previous_block` is consistent with current block
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
-        //   c) block mmr updated correctly
-        //   d) Block timestamp is greater than previous block timestamp
+        //   c) Block mmr updated correctly
+        //   d) Block timestamp is greater than (or equal to) timestamp of
+        //      previous block plus minimum block time
         //   e) Target difficulty and cumulative proof-of-work were updated correctly
         //   f) Block timestamp is less than host-time (utc) + 2 hours.
-        // 1. Block is valid
+        // 1. Block proof is valid
         //   a) Verify appendix contains required claims
-        //   b) block proof is valid
-        //   c) max block size is not exceeded
+        //   b) Block proof is valid
+        //   c) Max block size is not exceeded
         // 2. The transaction is valid.
         //   a) Verify that MS removal records are valid, done against previous `mutator_set_accumulator`,
         //   b) Verify that all removal records have unique index sets
@@ -603,7 +563,7 @@ impl Block {
             return false;
         }
 
-        // 0.c) Verify correct addition to block MMR
+        // 0.c) Block mmr updated correctly
         let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
         mmra.append(previous_block.hash());
         if mmra != self.kernel.body.block_mmr_accumulator {
@@ -685,7 +645,7 @@ impl Block {
             }
         }
 
-        // 1.b) Check block proof
+        // 1.b) Block proof is valid
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             warn!("Can only verify block proofs, got {:?}", self.proof);
             return false;
@@ -695,7 +655,7 @@ impl Block {
             return false;
         }
 
-        // 1.c) Check block size
+        // 1.c) Max block size is not exceeded
         if self.size() > MAX_BLOCK_SIZE {
             warn!(
                 "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
@@ -737,24 +697,16 @@ impl Block {
 
         // 2.c) Verify that the two mutator sets, the one from the current block and the
         // one from the previous, are consistent with the transactions.
-        // Construct all the addition records for all the transaction outputs. Then
-        // use these addition records to insert into the mutator set.
         let mutator_set_update = MutatorSetUpdate::new(
             self.kernel.body.transaction_kernel.inputs.clone(),
             self.kernel.body.transaction_kernel.outputs.clone(),
         );
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
-        match ms_update_result {
-            Ok(()) => (),
-            Err(err) => {
-                warn!("Failed to apply mutator set update: {}", err);
-                return false;
-            }
+        if let Err(err) = ms_update_result {
+            warn!("Failed to apply mutator set update: {}", err);
+            return false;
         };
-
-        // Verify that the locally constructed mutator set matches that in the received
-        // block's body.
         if ms.hash() != self.kernel.body.mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
@@ -774,7 +726,7 @@ impl Block {
         }
 
         // 2.e) Verify that the coinbase claimed by the transaction does not exceed
-        // the allowed coinbase based on block height, epoch, etc., and fee
+        //      the allowed coinbase based on block height, epoch, etc., and fee
         let expected_reward: NeptuneCoins = Self::get_mining_reward(self.kernel.header.height)
             + self.kernel.body.transaction_kernel.fee;
         if let Some(claimed_reward) = self.kernel.body.transaction_kernel.coinbase {
@@ -783,22 +735,6 @@ impl Block {
                 return false;
             }
         }
-
-        // 2. accumulated proof-of-work was computed correctly
-        //  - look two blocks back, take proof_of_work_line
-        //  - look 1 block back, estimate proof-of-work
-        //  - add -> new proof_of_work_line
-        //  - look two blocks back, take proof_of_work_family
-        //  - look at all uncles, estimate proof-of-work
-        //  - add -> new proof_of_work_family
-
-        // 3. variable network parameters are computed correctly
-        // 3.a) target_difficulty <- pow_line
-        // 3.b) max_block_size <- difference between `pow_family[n-2] - pow_line[n-2] - (pow_family[n] - pow_line[n])`
-
-        // 4. for every uncle
-        //  4.1. verify that uncle's prev_block_digest matches with parent's prev_block_digest
-        //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
         true
     }
@@ -1092,13 +1028,8 @@ mod block_tests {
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let wallet = WalletSecret::devnet_wallet();
             let genesis_state = mock_genesis_global_state(network, 0, wallet).await;
-            let a_recipient_address = genesis_state
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_secret
-                .nth_generation_spending_key(0);
-            let (block_tx, expected_utxo) =
+
+            let (block_tx, _expected_utxo) =
                 make_coinbase_transaction(&genesis_state, NeptuneCoins::zero(), now)
                     .await
                     .unwrap();
@@ -1142,6 +1073,7 @@ mod block_tests {
     /// All operations that create or modify a Block should
     /// have a test here.
     mod digest_encapsulation {
+
         use super::*;
 
         // test: verify clone + modify does not change original.
@@ -1168,7 +1100,12 @@ mod block_tests {
             let gblock = Block::genesis_block(Network::RegTest);
             let g2 = gblock.clone();
 
-            let block = Block::new(g2.kernel.header, g2.kernel.body, g2.proof);
+            let block = Block::new(
+                g2.kernel.header,
+                g2.kernel.body,
+                g2.kernel.appendix,
+                g2.proof,
+            );
             assert_eq!(gblock.hash(), block.hash());
         }
 
@@ -1197,32 +1134,6 @@ mod block_tests {
 
             assert_eq!(unique_block.hash(), block.hash());
             assert_ne!(unique_block.hash(), gblock.hash());
-        }
-
-        // test: verify digest is the same after conversion from
-        //       TransferBlock and back.
-        #[tokio::test]
-        async fn from_transfer_block() {
-            // note: we have to generate a block becau            // TransferBlock::into() will panic if it
-            // encounters the genesis block.
-            let global_state_lock =
-                mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
-            let spending_key = global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_secret
-                .nth_generation_spending_key_for_tests(0);
-            let address = spending_key.to_address();
-            let mut rng = thread_rng();
-
-            let gblock = Block::genesis_block(Network::RegTest);
-
-            let (source_block, _, _) = make_mock_block(&gblock, None, address, rng.gen());
-
-            let transfer_block = TransferBlock::from(source_block.clone());
-            let new_block = Block::from(transfer_block);
-            assert_eq!(source_block.hash(), new_block.hash());
         }
 
         // test: verify digest is correct after deserializing

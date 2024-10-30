@@ -224,7 +224,6 @@ mod test {
     #[test]
     fn transaction_is_valid_halts_gracefully() {
         let block_primitive_witness = deterministic_block_primitive_witness();
-        let block_body_mast_hash = block_primitive_witness.body().mast_hash();
         let transaction_is_valid_witness = TransactionIsValidWitness::from(block_primitive_witness);
         let input = transaction_is_valid_witness.standard_input();
         let nondeterminism = transaction_is_valid_witness.nondeterminism();

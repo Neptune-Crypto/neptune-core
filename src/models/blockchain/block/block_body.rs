@@ -36,6 +36,9 @@ pub struct BlockBody {
     /// The mutator set accumulator represents the UTXO set. It is simultaneously an
     /// accumulator (=> compact representation and membership proofs) and an anonymity
     /// construction (=> outputs from one transaction do not look like inputs to another).
+    ///
+    /// This field represents the state of the MS *after* applying the update
+    /// induced by the transaction.
     pub(crate) mutator_set_accumulator: MutatorSetAccumulator,
 
     /// Lock-free UTXOs do not come with lock scripts and do not live in the mutator set.

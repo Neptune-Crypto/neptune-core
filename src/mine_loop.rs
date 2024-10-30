@@ -3,30 +3,22 @@ use std::time::Duration;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
-use difficulty_control::Difficulty;
-use difficulty_control::ProofOfWork;
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::*;
 use transaction_output::TxOutput;
-use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 
-use crate::models::blockchain::block::block_body::BlockBody;
-use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
-use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -518,7 +510,10 @@ pub async fn mine(
 pub(crate) mod mine_loop_tests {
     use std::hint::black_box;
 
+    use block_appendix::BlockAppendix;
+    use block_body::BlockBody;
     use block_header::block_header_tests::random_block_header;
+    use difficulty_control::Difficulty;
     use num_bigint::BigUint;
     use num_traits::Pow;
     use tracing_test::traced_test;
@@ -1075,8 +1070,13 @@ pub(crate) mod mine_loop_tests {
             random_mmra(),
             random_mmra(),
         );
-        let predecessor_block =
-            Block::new(predecessor_header, predecessor_body, BlockProof::Invalid);
+        let appendix = BlockAppendix::default();
+        let predecessor_block = Block::new(
+            predecessor_header,
+            predecessor_body,
+            appendix.clone(),
+            BlockProof::Invalid,
+        );
 
         let mut successor_header = random_block_header();
         successor_header.prev_block_digest = predecessor_block.hash();
@@ -1093,6 +1093,7 @@ pub(crate) mod mine_loop_tests {
         let mut successor_block = Block::new(
             successor_header.clone(),
             successor_body.clone(),
+            appendix,
             BlockProof::Invalid,
         );
         loop {

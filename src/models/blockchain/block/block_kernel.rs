@@ -8,7 +8,6 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::block_appendix::BlockAppendix;
 use super::block_body::BlockBody;
 use super::block_header::BlockHeader;
-use super::validity::transaction_is_valid::TransactionIsValid;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 
@@ -22,10 +21,7 @@ pub struct BlockKernel {
 }
 
 impl BlockKernel {
-    pub(crate) fn new(header: BlockHeader, body: BlockBody) -> Self {
-        // todo: populate appendix properly
-        let tx_is_valid_claim = TransactionIsValid::claim(body.mast_hash());
-        let appendix = BlockAppendix::new(vec![tx_is_valid_claim]);
+    pub(crate) fn new(header: BlockHeader, body: BlockBody, appendix: BlockAppendix) -> Self {
         Self {
             header,
             body,

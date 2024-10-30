@@ -1,4 +1,5 @@
 pub mod transaction_notification;
+pub mod transfer_block;
 pub mod transfer_transaction;
 
 use std::fmt::Display;
@@ -15,11 +16,11 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
-use super::blockchain::block::transfer_block::TransferBlock;
 use super::blockchain::block::Block;
 use super::blockchain::shared::Hash;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
+use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
 const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;

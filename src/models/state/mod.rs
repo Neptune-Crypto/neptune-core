@@ -1493,7 +1493,6 @@ mod global_state_tests {
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
 
     async fn wallet_state_has_all_valid_mps_for(
@@ -2443,16 +2442,11 @@ mod global_state_tests {
         // Verify that the states, not just the blocks, are valid.
 
         let network = Network::Main;
-        let mut rng = StdRng::seed_from_u64(555);
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let receiving_address = wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
         let (cb, _) = make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), now)
             .await
             .unwrap();

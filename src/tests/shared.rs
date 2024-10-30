@@ -50,6 +50,7 @@ use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
 use crate::mine_loop::make_coinbase_transaction;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
+use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -585,8 +586,9 @@ pub(crate) fn mock_block_from_transaction_and_msa(
 
     let empty_mmr = MmrAccumulator::init(vec![], 0);
     let body = BlockBody::new(tx_kernel, next_mutator_set, empty_mmr.clone(), empty_mmr);
+    let appendix = BlockAppendix::default();
 
-    Block::new(block_header, body, BlockProof::Invalid)
+    Block::new(block_header, body, appendix, BlockProof::Invalid)
 }
 
 /// Create a block containing the supplied transaction.
@@ -625,8 +627,9 @@ pub(crate) fn mock_block_with_transaction(
         previous_block.body().lock_free_mmr_accumulator.clone(),
         block_mmr,
     );
+    let appendix = BlockAppendix::default();
 
-    Block::new(block_header, body, BlockProof::Invalid)
+    Block::new(block_header, body, appendix, BlockProof::Invalid)
 }
 
 /// Build a fake block with a random hash, containing *one* output UTXO in the form
@@ -702,9 +705,10 @@ pub(crate) fn make_mock_block(
         cumulative_proof_of_work: new_cumulative_proof_of_work,
         difficulty: target_difficulty,
     };
+    let appendix = BlockAppendix::default();
 
     (
-        Block::new(block_header, block_body, BlockProof::DummyProof),
+        Block::new(block_header, block_body, appendix, BlockProof::Invalid),
         coinbase_utxo,
         coinbase_sender_randomness,
     )
@@ -885,7 +889,7 @@ pub(crate) async fn valid_block_for_tests(
     valid_block_from_tx_for_tests(&current_tip, cb, seed).await
 }
 
-/// Create a sequence of valid blocks.
+/// Create a deterministic sequence of valid blocks.
 ///
 /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
 /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
