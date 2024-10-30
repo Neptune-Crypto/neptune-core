@@ -26,7 +26,6 @@ use difficulty_control::ProofOfWork;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
-use num_traits::ConstZero;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -183,11 +182,7 @@ impl Block {
             height: predecessor.kernel.header.height.next(),
             prev_block_digest: predecessor.hash(),
             timestamp,
-            nonce: [
-                BFieldElement::ZERO,
-                BFieldElement::ZERO,
-                BFieldElement::ZERO,
-            ],
+            nonce: Digest::default(),
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
         }
@@ -273,7 +268,7 @@ impl Block {
     ///
     /// note: this causes block digest to change.
     #[inline]
-    pub fn set_header_nonce(&mut self, nonce: [BFieldElement; 3]) {
+    pub fn set_header_nonce(&mut self, nonce: Digest) {
         self.kernel.header.nonce = nonce;
         self.unset_digest();
     }
@@ -381,7 +376,7 @@ impl Block {
             timestamp: network.launch_date(),
 
             // TODO: to be set to something difficult to predict ahead of time
-            nonce: [bfe!(0), bfe!(0), bfe!(0)],
+            nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
             cumulative_proof_of_work: ProofOfWork::zero(),
             difficulty: Difficulty::MINIMUM,
         };
@@ -1072,7 +1067,7 @@ mod block_tests {
             assert_eq!(gblock.hash(), g_hash);
             assert_eq!(gblock.hash(), g2.hash());
 
-            g2.set_header_nonce([1u8.into(), 1u8.into(), 1u8.into()]);
+            g2.set_header_nonce(Digest::new(bfe_array![1u64, 1u64, 1u64, 1u64, 1u64]));
             assert_ne!(gblock.hash(), g2.hash());
             assert_eq!(gblock.hash(), g_hash);
         }

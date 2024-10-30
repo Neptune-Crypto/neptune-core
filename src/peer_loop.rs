@@ -1370,7 +1370,6 @@ mod peer_loop_tests {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
-    use tasm_lib::twenty_first::bfe;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
@@ -1389,7 +1388,6 @@ mod peer_loop_tests {
     use crate::tests::shared::valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
-    use crate::BFieldElement;
 
     #[traced_test]
     #[tokio::test]
@@ -1485,9 +1483,8 @@ mod peer_loop_tests {
             .archival_state()
             .get_tip()
             .await;
-        let mut nonce = different_genesis_block.kernel.header.nonce;
-        nonce[2].increment();
-        different_genesis_block.set_header_nonce(nonce);
+
+        different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).gen());
         let [block_1_with_different_genesis] = valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
             Timestamp::hours(1),
@@ -1576,7 +1573,7 @@ mod peer_loop_tests {
 
         // This *probably* is invalid PoW -- and needs to be for this test to
         // work.
-        block_without_valid_pow.set_header_nonce([bfe!(1), bfe!(2), bfe!(3)]);
+        block_without_valid_pow.set_header_nonce(Digest::default());
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.

@@ -116,10 +116,7 @@ fn mine_block_worker(
     }
 
     let nonce = block.kernel.header.nonce;
-    info!(
-        "Found valid block with nonce: ({}, {}, {}).",
-        nonce[0], nonce[1], nonce[2]
-    );
+    info!("Found valid block with nonce: ({nonce}).");
 
     let timestamp = block.kernel.header.timestamp;
     let timestamp_standard = timestamp.standard_format();

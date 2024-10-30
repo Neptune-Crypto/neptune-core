@@ -68,8 +68,7 @@ pub struct BlockHeader {
     /// Time since unix epoch, in milliseconds
     pub timestamp: Timestamp,
 
-    // TODO: Consider making a type for `nonce`
-    pub nonce: [BFieldElement; 3],
+    pub nonce: Digest,
 
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
