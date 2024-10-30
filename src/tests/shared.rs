@@ -884,3 +884,28 @@ pub(crate) async fn valid_block_for_tests(
         .unwrap();
     valid_block_from_tx_for_tests(&current_tip, cb, seed).await
 }
+
+/// Create a sequence of valid blocks.
+///
+/// Sequence is N-long. Every block i with i > 0 has block i-1 as its
+/// predecessor; block 0 has the `predecessor` argument as predecessor. Every
+/// block is valid in terms of both `is_valid` and `has_proof_of_work`.
+pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
+    mut predecessor: &Block,
+    block_interval: Timestamp,
+    seed: [u8; 32],
+) -> [Block; N] {
+    let mut blocks = vec![];
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    for _ in 0..N {
+        let block = valid_successor_for_tests(
+            predecessor,
+            predecessor.header().timestamp + block_interval,
+            rng.gen(),
+        )
+        .await;
+        blocks.push(block);
+        predecessor = blocks.last().unwrap();
+    }
+    blocks.try_into().unwrap()
+}

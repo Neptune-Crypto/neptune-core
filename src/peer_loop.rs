@@ -1302,7 +1302,7 @@ mod peer_loop_tests {
     use crate::tests::shared::make_mock_block_with_invalid_pow;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::valid_block_for_tests;
-    use crate::tests::shared::valid_successor_for_tests;
+    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -2013,16 +2013,9 @@ mod peer_loop_tests {
         state_lock.set_cli(cli).await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
-        let now = genesis_block.header().timestamp;
-        let block_1 =
-            valid_successor_for_tests(&genesis_block, now + Timestamp::hours(2), rng.gen()).await;
-        let block_2 =
-            valid_successor_for_tests(&block_1, now + Timestamp::hours(3), rng.gen()).await;
-        let block_3 =
-            valid_successor_for_tests(&block_2, now + Timestamp::hours(4), rng.gen()).await;
-        let block_4 =
-            valid_successor_for_tests(&block_3, now + Timestamp::hours(5), rng.gen()).await;
-
+        let [block_1, _block_2, block_3, block_4] =
+            valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
+                .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2032,13 +2025,14 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let mut peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address1,
             hsd1,
             true,
             1,
+            block_4.header().timestamp,
         );
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
