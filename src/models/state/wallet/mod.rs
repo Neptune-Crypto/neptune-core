@@ -676,9 +676,10 @@ mod wallet_tests {
         // Alice is not coinbase recipient. She mines many blocks. It is tested
         // that the method [WalletState::allocate_sufficient_input_funds]
         // returns consistent results.
+        // Produces blocks and transactions with invalid proofs, as this is not
+        // a test of block validity logic.
 
         let network = Network::Main;
-
         let alice_wallet_secret = WalletSecret::new_random();
         let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
         let alice_proving_lock = alice.proving_lock.clone();
@@ -834,15 +835,7 @@ mod wallet_tests {
         let addition_records = tx_outputs.addition_records();
         let tx = make_mock_transaction(removal_records, addition_records);
 
-        let next_block = Block::make_block_template(
-            &next_block.clone(),
-            tx,
-            now,
-            None,
-            &TritonProverSync::dummy(),
-        )
-        .await
-        .unwrap();
+        let next_block = Block::block_template_invalid_proof(&next_block.clone(), tx, now, None);
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
