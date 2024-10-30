@@ -7,6 +7,7 @@ use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
@@ -405,6 +406,13 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_field_lock_scripts_halt = field!(ProofCollection::lock_scripts_halt);
         let proof_collection_field_type_scripts_halt = field!(ProofCollection::type_scripts_halt);
 
+        let audit_witness_of_proof_collection =
+            library.import(Box::new(VerifyNdSiIntegrity::<ProofCollection>::default()));
+        let audit_witness_of_update =
+            library.import(Box::new(VerifyNdSiIntegrity::<WitnessOfUpdate>::default()));
+        let audit_witness_of_merge =
+            library.import(Box::new(VerifyNdSiIntegrity::<WitnessOfMerge>::default()));
+
         let claim_field_with_size_output = triton_asm!(read_mem 1 push 1 add swap 1 push -1 add);
 
         let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop".to_string();
@@ -465,11 +473,18 @@ impl ConsensusProgram for SingleProof {
                 hint discriminant = stack[0]
                 hint single_proof_witness = stack[1]
                 hint txk_digest = stack[2..7]
-                // [txk_digest] *single_proof_witness discriminant
+                // _ [txk_digest] *single_proof_witness discriminant
 
                 dup 1 addi 2
                 hint proof_collection_ptr = stack[0]
-                // [txk_digest] *spw disc *proof_collection
+                // _ [txk_digest] *spw disc *proof_collection
+
+                dup 0
+                call {audit_witness_of_proof_collection}
+                // _ [txk_digest] *spw disc *proof_collection proof_collection_size
+
+                pop 1
+                // _ [txk_digest] *spw disc *proof_collection
 
 
                 /* check kernel MAST hash */
@@ -697,6 +712,13 @@ impl ConsensusProgram for SingleProof {
                 addi 2                      hint witness_of_update = stack[0]
                 // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update
 
+                dup 0
+                call {audit_witness_of_update}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update size
+
+                pop 1
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update
+
                 {&field!(WitnessOfUpdate::proof)}
                 // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *proof_of_update
 
@@ -717,6 +739,13 @@ impl ConsensusProgram for SingleProof {
 
                 dup 2
                 addi 2                      hint witness_of_merge = stack[0]
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge
+
+                dup 0
+                call {audit_witness_of_merge}
+                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge size
+
+                pop 1
                 // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge
 
                 {&field!(WitnessOfMerge::proof)}
@@ -833,9 +862,13 @@ mod test {
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
         for illegal_discriminant_value in [bfe!(-1), bfe!(3), bfe!(4), bfe!(1u64 << 40)] {
-            let init_ram: HashMap<_, _> = [(bfe!(0), illegal_discriminant_value)]
-                .into_iter()
-                .collect();
+            let init_ram: HashMap<_, _> = [(
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                illegal_discriminant_value,
+            )]
+            .into_iter()
+            .collect();
+
             let nondeterminism = NonDeterminism::default().with_ram(init_ram);
             let err = SingleProof.run_tasm(&pub_input, nondeterminism);
             let triton_vm_error_code = match err.unwrap_err() {
