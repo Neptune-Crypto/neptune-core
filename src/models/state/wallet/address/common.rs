@@ -9,8 +9,6 @@ use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::lock_script::LockScript;
-use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::prelude::twenty_first;
@@ -138,16 +136,6 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
     let mut result = [0u8; NUM_OUT_BYTES];
     hasher.finalize_xof_into(&mut result);
     result
-}
-
-/// Generate a lock script and a witness for a simple standard
-/// proof-of-preimage-knowledge lock script.
-pub(crate) fn lock_script_and_witness(unlock_key: Digest) -> LockScriptAndWitness {
-    let lock_script = LockScript::hash_lock(unlock_key.hash());
-    LockScriptAndWitness::new_with_nondeterminism(
-        lock_script.program,
-        NonDeterminism::new(unlock_key.reversed().values()),
-    )
 }
 
 #[cfg(test)]

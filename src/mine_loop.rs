@@ -514,8 +514,12 @@ pub(crate) mod mine_loop_tests {
     use num_bigint::BigUint;
     use num_traits::Pow;
     use tracing_test::traced_test;
+    use transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
+    use twenty_first::prelude::Mmr;
+    use twenty_first::prelude::MmrMembershipProof;
+    use utxo::pseudorandom_utxo;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -525,6 +529,8 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
@@ -1107,5 +1113,117 @@ pub(crate) mod mine_loop_tests {
                 "number of hash trials before finding valid pow exceeds statistical limit"
             )
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn guesser_fee_is_added_to_mutator_set() {
+        // Mine two blocks, and then verify that the guesser fee for the first
+        // block was added to the mutator set.
+
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut tip_block_orig = Block::genesis_block(network);
+        tip_block_orig.set_header_timestamp_and_difficulty(
+            tip_block_orig.header().timestamp,
+            Difficulty::from_biguint(BigUint::from(2u32)),
+        );
+        let launch_date = tip_block_orig.header().timestamp;
+        let (worker_task_tx_1, worker_task_rx_1) = oneshot::channel::<NewBlockFound>();
+
+        let transaction_1 = Transaction {
+            kernel: pseudorandom_transaction_kernel(rng.gen(), 0, 5, 2),
+            proof: TransactionProof::Invalid,
+        };
+        let coinbase_utxo_info_1 = ExpectedUtxo::new(
+            pseudorandom_utxo(rng.gen()),
+            rng.gen(),
+            rng.gen(),
+            UtxoNotifier::OwnMiner,
+        );
+
+        let block_1 = Block::block_template_invalid_proof(
+            &tip_block_orig,
+            transaction_1,
+            launch_date,
+            Some(Timestamp::millis(1)),
+        );
+
+        let unrestricted_mining = true;
+
+        mine_block_worker(
+            block_1,
+            tip_block_orig.clone(),
+            worker_task_tx_1,
+            coinbase_utxo_info_1,
+            unrestricted_mining,
+            None,
+        );
+
+        let mined_block_info_1: NewBlockFound = worker_task_rx_1.await.unwrap();
+
+        let transaction_2 = Transaction {
+            kernel: pseudorandom_transaction_kernel(rng.gen(), 0, 5, 2),
+            proof: TransactionProof::Invalid,
+        };
+        let coinbase_utxo_info_2 = ExpectedUtxo::new(
+            pseudorandom_utxo(rng.gen()),
+            rng.gen(),
+            rng.gen(),
+            UtxoNotifier::OwnMiner,
+        );
+
+        let block_2 = Block::block_template_invalid_proof(
+            &mined_block_info_1.block,
+            transaction_2,
+            launch_date,
+            Some(Timestamp::millis(1)),
+        );
+
+        let (worker_task_tx_2, worker_task_rx_2) = oneshot::channel::<NewBlockFound>();
+
+        mine_block_worker(
+            block_2,
+            tip_block_orig.clone(),
+            worker_task_tx_2,
+            coinbase_utxo_info_2,
+            unrestricted_mining,
+            None,
+        );
+
+        let mined_block_info_2 = worker_task_rx_2.await.unwrap();
+
+        let expected_guesser_addition_record =
+            mined_block_info_1.block.guesser_fee_addition_record();
+        let mut mmr = mined_block_info_1
+            .block
+            .body()
+            .mutator_set_accumulator
+            .aocl
+            .clone();
+        let addition_record_index = mmr.num_leafs();
+        let mut mmr_membership_proof =
+            mmr.append(expected_guesser_addition_record.canonical_commitment);
+        for addition_record in &mined_block_info_2.block.body().transaction_kernel.outputs {
+            mmr_membership_proof.update_from_append(
+                addition_record_index,
+                mmr.num_leafs(),
+                addition_record.canonical_commitment,
+                &mmr.peaks(),
+            );
+            mmr.append(addition_record.canonical_commitment);
+        }
+        assert_eq!(
+            mmr,
+            mined_block_info_2.block.body().mutator_set_accumulator.aocl
+        );
+        assert!(mmr_membership_proof.verify(
+            addition_record_index,
+            expected_guesser_addition_record.canonical_commitment,
+            &mmr.peaks(),
+            mmr.num_leafs()
+        ));
     }
 }

@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
+use tracing::debug;
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -52,12 +53,21 @@ impl BlockPrimitiveWitness {
 
             let predecessor_body = self.predecessor_block.body();
 
+
+            // All but one of the addition records stem from the transaction's
+            // outputs. The exception is the guesser fee, which originates from
+            // the transaction fee of the block's predecessor.
+            let predecessor_guesser_fee_addition_record = self.predecessor_block.guesser_fee_addition_record();
+            let all_addition_records = [vec![predecessor_guesser_fee_addition_record], self.transaction.kernel.outputs.clone()].concat();
+
             let mut mutator_set = predecessor_body.mutator_set_accumulator.clone();
             let mutator_set_update = MutatorSetUpdate::new(
                 self.transaction.kernel.inputs.clone(),
-                self.transaction.kernel.outputs.clone(),
+                all_addition_records,
             );
-            mutator_set_update.apply_to_accumulator(&mut mutator_set).unwrap_or_else(|e| {panic!("attempting to produce a block body from a transaction whose mutator set update is incompatible: {e:?}");});
+            mutator_set_update.apply_to_accumulator(&mut mutator_set).unwrap_or_else(|e| {
+                panic!("attempting to produce a block body from a transaction whose mutator set update is incompatible: {e:?}");
+            });
 
             let lock_free_mmr = predecessor_body.lock_free_mmr_accumulator.clone();
 

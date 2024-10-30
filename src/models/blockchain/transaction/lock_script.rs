@@ -144,7 +144,7 @@ impl LockScriptAndWitness {
 
     /// Generate a lock script and a witness for a simple standard
     /// proof-of-preimage-knowledge lock script.
-    pub(crate) fn _hash_lock(unlock_key: Digest) -> Self {
+    pub(crate) fn hash_lock(unlock_key: Digest) -> Self {
         let lock_script = LockScript::hash_lock(unlock_key.hash());
         LockScriptAndWitness::new_with_nondeterminism(
             lock_script.program,

@@ -60,6 +60,7 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -537,8 +538,8 @@ impl Block {
         // 2. The transaction is valid.
         //   a) Verify that MS removal records are valid, done against previous `mutator_set_accumulator`,
         //   b) Verify that all removal records have unique index sets
-        //   c) verify that we can add `mutator_set_update` to previous `mutator_set_accumulator`,
-        //      and that it results in new block's `mutator_set_accumulator`
+        //   c) Verify that the mutator set update induced by the block sends
+        //      the old mutator set accumulator to the new one.
         //   d) transaction timestamp <= block timestamp
         //   e) transaction coinbase <= miner reward
         //   f) transaction is valid (internally consistent)
@@ -674,11 +675,19 @@ impl Block {
             return false;
         }
 
-        // 2.c) Verify that the two mutator sets, the one from the current block and the
-        // one from the previous, are consistent with the transactions.
+        // 2.c) Verify that the previous block's mutator set, updated with i)
+        //      the previous block's guesser fee as removal record ii) the
+        //      current block's set of transaction outputs and iii) the current
+        //      block's set of transaction inputs, gives rise to the current
+        //      block's mutator set
+        let all_addition_records = [
+            vec![previous_block.guesser_fee_addition_record()],
+            self.kernel.body.transaction_kernel.outputs.clone(),
+        ]
+        .concat();
         let mutator_set_update = MutatorSetUpdate::new(
             self.kernel.body.transaction_kernel.inputs.clone(),
-            self.kernel.body.transaction_kernel.outputs.clone(),
+            all_addition_records,
         );
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
@@ -799,7 +808,7 @@ impl Block {
     }
 
     /// Wrap the transaction's fee into a UTXO
-    pub(crate) fn _wrap_guesser_fee(&self) -> Utxo {
+    pub(crate) fn wrap_guesser_fee(&self) -> Utxo {
         let preimage = self.header().nonce;
         let lock_script = LockScript::hash_lock(preimage);
         let lock_script_hash = lock_script.hash();
@@ -808,6 +817,17 @@ impl Block {
             lock_script_hash,
             coins,
         }
+    }
+
+    /// Compute the addition record that corresponds to the UTXO generated for
+    /// the block's guesser and containing the transaction fee.
+    pub(crate) fn guesser_fee_addition_record(&self) -> AdditionRecord {
+        let utxo = self.wrap_guesser_fee();
+        let item = Tip5::hash(&utxo);
+        let sender_randomness = self.hash();
+        let receiver_digest = self.header().nonce;
+
+        commit(item, sender_randomness, receiver_digest)
     }
 }
 
@@ -1166,9 +1186,9 @@ mod block_tests {
         let preimage = thread_rng().gen::<Digest>();
         block.set_header_nonce(preimage.hash());
 
-        let guesser_fee_utxo = block._wrap_guesser_fee();
+        let guesser_fee_utxo = block.wrap_guesser_fee();
 
-        let lock_script_and_witness = LockScriptAndWitness::_hash_lock(preimage);
+        let lock_script_and_witness = LockScriptAndWitness::hash_lock(preimage);
         assert!(lock_script_and_witness.can_unlock(&guesser_fee_utxo));
     }
 }
