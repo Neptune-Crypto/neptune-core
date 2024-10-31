@@ -4,7 +4,6 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use futures::channel::oneshot;
-use num_traits::identities::Zero;
 use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::thread_rng;
@@ -22,7 +21,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -208,7 +206,7 @@ fn mine_iteration(
 
 pub(crate) async fn make_coinbase_transaction(
     global_state_lock: &GlobalStateLock,
-    guesser_fee: NeptuneCoins,
+    guesser_block_subsidy_fraction: f64,
     timestamp: Timestamp,
 ) -> Result<(Transaction, ExpectedUtxo)> {
     // note: it is Ok to always use the same key here because:
@@ -235,10 +233,24 @@ pub(crate) async fn make_coinbase_transaction(
     let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
+    #[allow(clippy::manual_range_contains)]
+    if guesser_block_subsidy_fraction > 1.0 || guesser_block_subsidy_fraction < 0f64 {
+        bail!("Guesser fee fraction must be in [0, 1] interval. Got: {guesser_block_subsidy_fraction}");
+    }
+
+    let block_subsidy = Block::block_subsidy(next_block_height);
+    let Some(guesser_fee) = block_subsidy.lossy_f64_mul(guesser_block_subsidy_fraction) else {
+        bail!("Guesser fee times block subsidy must be valid amount");
+    };
+
+    info!("Setting guesser_fee to {guesser_fee}.");
+
     let Some(coinbase_amount) = Block::block_subsidy(next_block_height).checked_sub(&guesser_fee)
     else {
         bail!("guesser fee cannot exceed block subsidy")
     };
+
+    info!("Setting coinbase amount to {coinbase_amount}.");
 
     let sender_randomness: Digest = global_state_lock
         .lock_guard()
@@ -304,11 +316,10 @@ pub(crate) async fn create_block_transaction(
 ) -> Result<(Transaction, ExpectedUtxo)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    // consider setting this value to some nonzero fraction of the block subsidy
-    // for instance if client shares block templates with peers
-    let guesser_fee = NeptuneCoins::zero();
+    // TODO: Read this value from CLI arguments.
+    let guesser_fee_fraction = 0f64;
     let (coinbase_transaction, coinbase_as_expected_utxo) =
-        make_coinbase_transaction(global_state_lock, guesser_fee, timestamp).await?;
+        make_coinbase_transaction(global_state_lock, guesser_fee_fraction, timestamp).await?;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -537,6 +548,7 @@ pub(crate) mod mine_loop_tests {
     use difficulty_control::Difficulty;
     use num_bigint::BigUint;
     use num_traits::Pow;
+    use num_traits::Zero;
     use tracing_test::traced_test;
     use transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use transaction_output::TxOutput;
@@ -546,6 +558,7 @@ pub(crate) mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
@@ -632,13 +645,10 @@ pub(crate) mod mine_loop_tests {
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let tick = std::time::SystemTime::now();
-        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction(
-            &global_state_lock,
-            NeptuneCoins::zero(),
-            network.launch_date(),
-        )
-        .await
-        .unwrap();
+        let (transaction, _coinbase_utxo_info) =
+            make_coinbase_transaction(&global_state_lock, 0f64, network.launch_date())
+                .await
+                .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
         let block = Block::block_template_invalid_proof(
@@ -680,11 +690,8 @@ pub(crate) mod mine_loop_tests {
         );
 
         // Verify constructed coinbase transaction and block template when mempool is empty
-        let (transaction_empty_mempool, _coinbase_utxo_info) = {
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), now)
-                .await
-                .unwrap()
-        };
+        let (transaction_empty_mempool, _coinbase_utxo_info) =
+            { make_coinbase_transaction(&alice, 0f64, now).await.unwrap() };
 
         assert_eq!(
             1,
@@ -807,7 +814,7 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), launch_date)
+            make_coinbase_transaction(&global_state_lock, 0f64, launch_date)
                 .await
                 .unwrap();
 
@@ -865,7 +872,7 @@ pub(crate) mod mine_loop_tests {
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), ten_seconds_ago)
+            make_coinbase_transaction(&global_state_lock, 0f64, ten_seconds_ago)
                 .await
                 .unwrap();
 

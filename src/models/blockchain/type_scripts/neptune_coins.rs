@@ -10,6 +10,7 @@ use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_bigint::BigInt;
+use num_bigint::ToBigInt;
 use num_rational::BigRational;
 use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
@@ -161,6 +162,13 @@ impl NeptuneCoins {
         } else {
             None
         }
+    }
+
+    pub(crate) fn lossy_f64_mul(&self, rhs: f64) -> Option<NeptuneCoins> {
+        let value_as_f64 = self.0 as f64;
+        let res = rhs * value_as_f64;
+        let as_bigint = res.to_bigint()?;
+        Self::from_nau(as_bigint)
     }
 }
 
@@ -474,6 +482,27 @@ mod amount_tests {
         let fourteen: NeptuneCoins = NeptuneCoins::new(14);
         let fourtytwo: NeptuneCoins = NeptuneCoins::new(42);
         assert_eq!(fourtytwo, fourteen.scalar_mul(3));
+    }
+
+    #[test]
+    fn simple_f64_lossy_mul_half() {
+        let one_hundred = NeptuneCoins::new(100);
+        let half_of_one_hundred = one_hundred.lossy_f64_mul(0.5).unwrap();
+
+        // Assert that the value is in a reasonable range, close enough.
+        assert!(
+            half_of_one_hundred > NeptuneCoins::new(49)
+                && half_of_one_hundred < NeptuneCoins::new(51)
+        );
+    }
+
+    #[test]
+    fn simple_f64_lossy_mul_zero() {
+        let one_hundred = NeptuneCoins::new(100);
+        assert_eq!(
+            NeptuneCoins::zero(),
+            one_hundred.lossy_f64_mul(0f64).unwrap()
+        );
     }
 
     #[test]

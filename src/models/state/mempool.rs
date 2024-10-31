@@ -983,8 +983,9 @@ mod tests {
         }
 
         // Create next block which includes preminer's transaction
+        let guesser_fraction = 0f64;
         let (coinbase_transaction, _expected_utxo) =
-            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
+            make_coinbase_transaction(&bob, guesser_fraction, in_eight_months)
                 .await
                 .unwrap();
         let block_transaction = tx_by_bob
@@ -1026,7 +1027,7 @@ mod tests {
         alice.set_new_tip(block_2.clone()).await.unwrap();
         bob.set_new_tip(block_2.clone()).await.unwrap();
         let (coinbase_transaction2, _expected_utxo2) =
-            make_coinbase_transaction(&bob, NeptuneCoins::zero(), in_eight_months)
+            make_coinbase_transaction(&bob, guesser_fraction, in_eight_months)
                 .await
                 .unwrap();
         let block_transaction2 = tx_by_alice_updated
@@ -1073,10 +1074,9 @@ mod tests {
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let (cbtx, _eutxo) =
-            make_coinbase_transaction(&alice, NeptuneCoins::zero(), block_5_timestamp)
-                .await
-                .unwrap();
+        let (cbtx, _eutxo) = make_coinbase_transaction(&alice, guesser_fraction, block_5_timestamp)
+            .await
+            .unwrap();
         let block_tx_5 = cbtx
             .merge_with(
                 tx_by_alice_updated,

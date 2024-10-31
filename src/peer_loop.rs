@@ -1366,7 +1366,6 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -1654,10 +1653,9 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = Block::genesis_block(network);
 
-        let fee = NeptuneCoins::zero();
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
         let block_1 =
-            valid_block_for_tests(&alice, fee, now, StdRng::seed_from_u64(5550001).gen()).await;
+            valid_block_for_tests(&alice, now, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block must be valid for this test to make sense"
@@ -1945,8 +1943,7 @@ mod peer_loop_tests {
             .await;
 
         let now = genesis_block.header().timestamp + Timestamp::hours(2);
-        let fee = NeptuneCoins::zero();
-        let block_1 = valid_block_for_tests(&state_lock, fee, now, rng.gen()).await;
+        let block_1 = valid_block_for_tests(&state_lock, now, rng.gen()).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(

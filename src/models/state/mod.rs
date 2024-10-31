@@ -2145,8 +2145,9 @@ mod global_state_tests {
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
+        let guesser_fraction = 0f64;
         let (coinbase_transaction, coinbase_expected_utxo) =
-            make_coinbase_transaction(&premine_receiver, NeptuneCoins::zero(), in_seven_months)
+            make_coinbase_transaction(&premine_receiver, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
 
@@ -2411,7 +2412,7 @@ mod global_state_tests {
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase
         let (coinbase_transaction2, _expected_utxo) =
-            make_coinbase_transaction(&premine_receiver, NeptuneCoins::zero(), in_seven_months)
+            make_coinbase_transaction(&premine_receiver, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
 
@@ -2453,7 +2454,8 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let (cb, _) = make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), now)
+        let guesser_fraction = 0f64;
+        let (cb, _) = make_coinbase_transaction(&global_state_lock, guesser_fraction, now)
             .await
             .unwrap();
         let block_1 = Block::make_block_template(

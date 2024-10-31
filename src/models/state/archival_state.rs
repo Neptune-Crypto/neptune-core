@@ -1542,8 +1542,9 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated transaction for Alice and Bob.");
 
+        let guesser_fraction = 0f64;
         let (cbtx, cb_expected) =
-            make_coinbase_transaction(&genesis, NeptuneCoins::zero(), in_seven_months)
+            make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
 
@@ -1760,7 +1761,7 @@ mod archival_state_tests {
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
         let (cbtx2, cb_expected2) =
-            make_coinbase_transaction(&genesis, NeptuneCoins::zero(), in_seven_months)
+            make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
         let block_tx2 = cbtx2
