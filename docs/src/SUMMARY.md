@@ -17,3 +17,4 @@
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)
   - [Git Message](./contributing/git-message.md)
+  - [Sharing Proofs](./contributing/proof-sharing.md)
