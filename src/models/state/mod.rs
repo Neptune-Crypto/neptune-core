@@ -1365,7 +1365,7 @@ impl GlobalState {
                         coinbase_info.utxo,
                         coinbase_info.sender_randomness,
                         coinbase_info.receiver_preimage,
-                        UtxoNotifier::OwnMiner,
+                        UtxoNotifier::OwnMinerPrepareBlock,
                     ))
                     .await;
             }
@@ -1698,7 +1698,7 @@ mod global_state_tests {
                 cb_utxo,
                 cb_sender_randomness,
                 own_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
+                UtxoNotifier::OwnMinerPrepareBlock,
             ))
             .await;
         global_state_lock
@@ -1837,7 +1837,7 @@ mod global_state_tests {
                     coinbase_utxo,
                     coinbase_output_randomness,
                     alice_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
+                    UtxoNotifier::OwnMinerPrepareBlock,
                 ),
                 &proving_lock,
             )
@@ -1970,7 +1970,7 @@ mod global_state_tests {
                         coinbase_utxo_1,
                         cb_utxo_output_randomness_1,
                         alice_spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMiner,
+                        UtxoNotifier::OwnMinerPrepareBlock,
                     ),
                     &proving_lock,
                 )
@@ -2274,7 +2274,7 @@ mod global_state_tests {
                     coinbase_expected_utxo.utxo,
                     coinbase_expected_utxo.sender_randomness,
                     genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
+                    UtxoNotifier::OwnMinerPrepareBlock,
                 ),
             )
             .await
@@ -2592,7 +2592,7 @@ mod global_state_tests {
                         cb_utxo,
                         cb_output_randomness,
                         spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMiner,
+                        UtxoNotifier::OwnMinerPrepareBlock,
                     ),
                 )
             };
@@ -2669,7 +2669,7 @@ mod global_state_tests {
                         cb_utxo,
                         cb_output_randomness,
                         spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMiner,
+                        UtxoNotifier::OwnMinerPrepareBlock,
                     ),
                 )
             };
@@ -2788,7 +2788,7 @@ mod global_state_tests {
                 cb_utxo1,
                 cb_sender_randomness1,
                 spend_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
+                UtxoNotifier::OwnMinerPrepareBlock,
             );
 
             for claim_cb in [false, true] {

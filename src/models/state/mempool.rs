@@ -891,7 +891,7 @@ mod tests {
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
                 alice_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
+                UtxoNotifier::OwnMinerPrepareBlock,
             ))
             .await;
         alice.set_new_tip(block_1.clone()).await.unwrap();

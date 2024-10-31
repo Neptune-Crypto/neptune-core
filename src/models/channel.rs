@@ -32,6 +32,7 @@ pub enum MainToMiner {
 pub struct NewBlockFound {
     pub block: Box<Block>,
     pub coinbase_utxo_info: Box<ExpectedUtxo>,
+    pub guesser_fee_utxo_info: Box<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug)]

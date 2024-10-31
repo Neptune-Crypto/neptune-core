@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
-use tracing::debug;
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;

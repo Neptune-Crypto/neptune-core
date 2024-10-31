@@ -94,12 +94,16 @@ fn mine_block_worker(
     let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
 
     // Mining loop
+    let mut nonce_preimage = Digest::default();
     while !mine_iteration(
         &mut block,
         &previous_block,
         &sender,
-        target_block_interval,
-        threshold,
+        DifficultyInfo {
+            target_block_interval,
+            threshold,
+        },
+        &mut nonce_preimage,
         unrestricted_mining,
         &mut rng,
     ) {}
@@ -134,14 +138,27 @@ Difficulty threshold: {threshold}
 "#
     );
 
+    let guesser_fee_utxo_info = ExpectedUtxo::new(
+        block.wrap_guesser_fee(),
+        block.hash(),
+        nonce_preimage,
+        UtxoNotifier::OwnMinerGuessNonce,
+    );
+
     let new_block_found = NewBlockFound {
         block: Box::new(block),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
+        guesser_fee_utxo_info: Box::new(guesser_fee_utxo_info),
     };
 
     sender
         .send(new_block_found)
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
+}
+
+pub(crate) struct DifficultyInfo {
+    pub(crate) target_block_interval: Option<Timestamp>,
+    pub(crate) threshold: Digest,
 }
 
 /// Run a single iteration of the mining loop.
@@ -152,8 +169,8 @@ fn mine_iteration(
     block: &mut Block,
     previous_block: &Block,
     sender: &oneshot::Sender<NewBlockFound>,
-    target_block_interval: Option<Timestamp>,
-    threshold: Digest,
+    difficulty_info: DifficultyInfo,
+    nonce_preimage: &mut Digest,
     unrestricted_mining: bool,
     rng: &mut StdRng,
 ) -> bool {
@@ -165,9 +182,10 @@ fn mine_iteration(
         return true;
     }
 
-    // mutate nonce in the block's header.
-    // Block::hash() will subsequently return a new digest.
-    block.set_header_nonce(rng.gen());
+    // Modify the nonce in the block header. In order to collect the guesser
+    // fee, this nonce must be the post-image of a known pre-image under Tip5.
+    *nonce_preimage = rng.gen();
+    block.set_header_nonce(nonce_preimage.hash());
 
     // See issue #149 and test block_timestamp_represents_time_block_found()
     // this ensures header timestamp represents the moment block is found.
@@ -178,12 +196,12 @@ fn mine_iteration(
         now,
         previous_block.header().timestamp,
         previous_block.header().difficulty,
-        target_block_interval,
+        difficulty_info.target_block_interval,
         previous_block.header().height,
     );
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
-    let success = block.hash() <= threshold;
+    let success = block.hash() <= difficulty_info.threshold;
 
     if !unrestricted_mining {
         std::thread::sleep(Duration::from_millis(100));
@@ -270,7 +288,7 @@ pub(crate) async fn make_coinbase_transaction(
         coinbase_output.utxo(),
         coinbase_output.sender_randomness(),
         coinbase_recipient_spending_key.privacy_preimage,
-        UtxoNotifier::OwnMiner,
+        UtxoNotifier::OwnMinerPrepareBlock,
     );
 
     Ok((transaction, utxo_info_for_coinbase))
@@ -518,7 +536,6 @@ pub(crate) mod mine_loop_tests {
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
     use twenty_first::prelude::Mmr;
-    use twenty_first::prelude::MmrMembershipProof;
     use utxo::pseudorandom_utxo;
 
     use super::*;
@@ -529,8 +546,6 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
@@ -580,14 +595,18 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let num_iterations = 10000;
+        let mut nonce_preimage = Digest::default();
         let tick = std::time::SystemTime::now();
         for _ in 0..num_iterations {
             mine_iteration(
                 &mut block,
                 &previous_block,
                 &worker_task_tx,
-                target_block_interval,
-                threshold,
+                DifficultyInfo {
+                    target_block_interval,
+                    threshold,
+                },
+                &mut nonce_preimage,
                 unrestricted_mining,
                 &mut rng,
             );
@@ -1123,8 +1142,6 @@ pub(crate) mod mine_loop_tests {
 
         let mut rng = thread_rng();
         let network = Network::Main;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut tip_block_orig = Block::genesis_block(network);
         tip_block_orig.set_header_timestamp_and_difficulty(
             tip_block_orig.header().timestamp,
@@ -1141,7 +1158,7 @@ pub(crate) mod mine_loop_tests {
             pseudorandom_utxo(rng.gen()),
             rng.gen(),
             rng.gen(),
-            UtxoNotifier::OwnMiner,
+            UtxoNotifier::OwnMinerPrepareBlock,
         );
 
         let block_1 = Block::block_template_invalid_proof(
@@ -1172,7 +1189,7 @@ pub(crate) mod mine_loop_tests {
             pseudorandom_utxo(rng.gen()),
             rng.gen(),
             rng.gen(),
-            UtxoNotifier::OwnMiner,
+            UtxoNotifier::OwnMinerPrepareBlock,
         );
 
         let block_2 = Block::block_template_invalid_proof(

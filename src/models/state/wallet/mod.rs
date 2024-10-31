@@ -563,7 +563,7 @@ mod wallet_tests {
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
                 alice_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
+                UtxoNotifier::OwnMinerPrepareBlock,
             ))
             .await;
         assert_eq!(
@@ -728,7 +728,7 @@ mod wallet_tests {
                     cb_utxo,
                     cb_output_randomness,
                     alice_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMiner,
+                    UtxoNotifier::OwnMinerPrepareBlock,
                 ))
                 .await;
             alice
@@ -771,7 +771,7 @@ mod wallet_tests {
                         cb_utxo_prime,
                         cb_output_randomness_prime,
                         alice_spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMiner,
+                        UtxoNotifier::OwnMinerPrepareBlock,
                     ))
                     .await;
                 alice
@@ -1000,7 +1000,7 @@ mod wallet_tests {
                 cb_utxo,
                 cb_sender_randomness,
                 alice_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
+                UtxoNotifier::OwnMinerPrepareBlock,
             );
             alice
                 .lock_guard_mut()
@@ -1212,7 +1212,7 @@ mod wallet_tests {
             cb_expected.utxo,
             cb_expected.sender_randomness,
             alice_spending_key.privacy_preimage,
-            UtxoNotifier::OwnMiner,
+            UtxoNotifier::OwnMinerPrepareBlock,
         );
 
         alice
