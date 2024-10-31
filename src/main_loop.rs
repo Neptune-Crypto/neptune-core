@@ -373,7 +373,10 @@ impl MainLoopHandler {
                 global_state_mut
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
-                        new_block_info.coinbase_utxo_info.as_ref().clone(),
+                        vec![
+                            new_block_info.coinbase_utxo_info.as_ref().clone(),
+                            new_block_info.guesser_fee_utxo_info.as_ref().clone(),
+                        ],
                         &prover_lock,
                     )
                     .await?;

@@ -1583,12 +1583,12 @@ mod rpc_server_tests {
             .await
             .set_new_self_mined_tip(
                 block_1.clone(),
-                ExpectedUtxo::new(
+                vec![ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
                     wallet_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerPrepareBlock,
-                ),
+                )],
                 &prover_lock,
             )
             .await?;
@@ -1600,7 +1600,7 @@ mod rpc_server_tests {
                 .confirmed_balance(block_1.hash(), timestamp)
                 .await;
             assert_eq!(
-                Block::get_mining_reward(block_1.header().height),
+                Block::block_subsidy(block_1.header().height),
                 new_balance,
                 "New balance must be exactly 1 mining reward"
             );

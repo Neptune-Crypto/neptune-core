@@ -5,6 +5,7 @@ use anyhow::Context;
 use anyhow::Result;
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
+use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
@@ -138,12 +139,7 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_info = ExpectedUtxo::new(
-        block.wrap_guesser_fee(),
-        block.hash(),
-        nonce_preimage,
-        UtxoNotifier::OwnMinerGuessNonce,
-    );
+    let guesser_fee_utxo_info = block.guesser_fee_expected_utxo(nonce_preimage);
 
     let new_block_found = NewBlockFound {
         block: Box::new(block),
@@ -212,7 +208,7 @@ fn mine_iteration(
 
 pub(crate) async fn make_coinbase_transaction(
     global_state_lock: &GlobalStateLock,
-    transaction_fees: NeptuneCoins,
+    guesser_fee: NeptuneCoins,
     timestamp: Timestamp,
 ) -> Result<(Transaction, ExpectedUtxo)> {
     // note: it is Ok to always use the same key here because:
@@ -239,7 +235,11 @@ pub(crate) async fn make_coinbase_transaction(
     let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
-    let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
+    let Some(coinbase_amount) = Block::block_subsidy(next_block_height).checked_sub(&guesser_fee)
+    else {
+        bail!("guesser fee cannot exceed block subsidy")
+    };
+
     let sender_randomness: Digest = global_state_lock
         .lock_guard()
         .await
@@ -304,20 +304,11 @@ pub(crate) async fn create_block_transaction(
 ) -> Result<(Transaction, ExpectedUtxo)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    // Get most valuable transactions from mempool
-    let transactions_to_include = global_state_lock
-        .lock_guard()
-        .await
-        .mempool
-        .get_transactions_for_block(block_capacity_for_transactions, None);
-
-    // Build coinbase UTXO
-    let transaction_fees = transactions_to_include
-        .iter()
-        .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
-
+    // consider setting this value to some nonzero fraction of the block subsidy
+    // for instance if client shares block templates with peers
+    let guesser_fee = NeptuneCoins::zero();
     let (coinbase_transaction, coinbase_as_expected_utxo) =
-        make_coinbase_transaction(global_state_lock, transaction_fees, timestamp).await?;
+        make_coinbase_transaction(global_state_lock, guesser_fee, timestamp).await?;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -326,6 +317,15 @@ pub(crate) async fn create_block_transaction(
 
     let mut rng: StdRng =
         SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
+
+    // Get most valuable transactions from mempool.
+    // TODO: Change this const to be defined through CLI arguments.
+    const MAX_NUM_TXS_TO_MERGE: usize = 7;
+    let transactions_to_include = global_state_lock
+        .lock_guard()
+        .await
+        .mempool
+        .get_transactions_for_block(block_capacity_for_transactions, Some(MAX_NUM_TXS_TO_MERGE));
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
@@ -386,9 +386,15 @@ pub async fn mine(
             let (transaction, coinbase_utxo_info) =
                 create_block_transaction(&latest_block, &global_state_lock, now).await?;
             let proof_sync = global_state_lock.wait_if_busy();
-            let block_template =
-                Block::make_block_template(&latest_block, transaction, now, None, &proof_sync)
-                    .await;
+            let block_template = Block::make_block_template(
+                &latest_block,
+                transaction,
+                now,
+                Digest::default(),
+                None,
+                &proof_sync,
+            )
+            .await;
             let block_template = match block_template {
                 Ok(template) => template,
                 Err(_) => bail!("Miner failed to generate block template"),
@@ -588,6 +594,7 @@ pub(crate) mod mine_loop_tests {
             &previous_block,
             transaction,
             start_time,
+            Digest::default(),
             target_block_interval,
         );
         let threshold = previous_block.header().difficulty.target();
@@ -634,8 +641,13 @@ pub(crate) mod mine_loop_tests {
         .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
-        let block =
-            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None);
+        let block = Block::block_template_invalid_proof(
+            &genesis_block,
+            transaction,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
         tock
@@ -687,6 +699,7 @@ pub(crate) mod mine_loop_tests {
             &genesis_block,
             transaction_empty_mempool,
             in_seven_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -754,6 +767,7 @@ pub(crate) mod mine_loop_tests {
             &genesis_block,
             transaction_non_empty_mempool,
             in_seven_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -797,8 +811,13 @@ pub(crate) mod mine_loop_tests {
                 .await
                 .unwrap();
 
-        let block =
-            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
+        let block = Block::block_template_invalid_proof(
+            &tip_block_orig,
+            transaction,
+            launch_date,
+            Digest::default(),
+            None,
+        );
 
         let unrestricted_mining = true;
 
@@ -854,6 +873,7 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             transaction,
             ten_seconds_ago,
+            Digest::default(),
             None,
         );
 
@@ -994,6 +1014,7 @@ pub(crate) mod mine_loop_tests {
                 &prev_block,
                 transaction,
                 start_time,
+                Digest::default(),
                 Some(target_block_interval),
             );
 
@@ -1165,6 +1186,7 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             transaction_1,
             launch_date,
+            Digest::default(),
             Some(Timestamp::millis(1)),
         );
 
@@ -1196,6 +1218,7 @@ pub(crate) mod mine_loop_tests {
             &mined_block_info_1.block,
             transaction_2,
             launch_date,
+            Digest::default(),
             Some(Timestamp::millis(1)),
         );
 

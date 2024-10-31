@@ -26,6 +26,7 @@ use difficulty_control::ProofOfWork;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -58,6 +59,8 @@ use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -166,6 +169,7 @@ impl Block {
     fn template_header(
         predecessor: &Block,
         timestamp: Timestamp,
+        nonce: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> BlockHeader {
         let difficulty = difficulty_control(
@@ -184,7 +188,7 @@ impl Block {
             height: predecessor.kernel.header.height.next(),
             prev_block_digest: predecessor.hash(),
             timestamp,
-            nonce: Digest::default(),
+            nonce,
             cumulative_proof_of_work: new_cumulative_proof_of_work,
             difficulty,
         }
@@ -198,11 +202,17 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
+        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
-        let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
+        let header = Self::template_header(
+            predecessor,
+            block_timestamp,
+            nonce_preimage.hash(),
+            target_block_interval,
+        );
         let proof = BlockProof::Invalid;
         let appendix = BlockAppendix::default();
         Block::new(header, body, appendix, proof)
@@ -212,12 +222,18 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
+        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         sync_device: &TritonProverSync,
     ) -> Result<Block, TryLockError> {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
-        let header = Self::template_header(predecessor, block_timestamp, target_block_interval);
+        let header = Self::template_header(
+            predecessor,
+            block_timestamp,
+            nonce_preimage.hash(),
+            target_block_interval,
+        );
         let (appendix, proof) = {
             let appendix_witness = AppendixWitness::produce(primitive_witness, sync_device).await?;
             let appendix = appendix_witness.appendix();
@@ -236,6 +252,7 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
+        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         sync_device: &TritonProverSync,
     ) -> Result<Block, TryLockError> {
@@ -243,6 +260,7 @@ impl Block {
             predecessor,
             transaction,
             block_timestamp,
+            nonce_preimage,
             target_block_interval,
             sync_device,
         )
@@ -314,7 +332,7 @@ impl Block {
         *self = block;
     }
 
-    pub fn get_mining_reward(block_height: BlockHeight) -> NeptuneCoins {
+    pub fn block_subsidy(block_height: BlockHeight) -> NeptuneCoins {
         let mut reward: NeptuneCoins = NeptuneCoins::new(100);
         let generation = block_height.get_generation();
         for _ in 0..generation {
@@ -715,14 +733,27 @@ impl Block {
 
         // 2.e) Verify that the coinbase claimed by the transaction does not exceed
         //      the allowed coinbase based on block height, epoch, etc., and fee
-        let expected_reward: NeptuneCoins = Self::get_mining_reward(self.kernel.header.height)
-            + self.kernel.body.transaction_kernel.fee;
-        if let Some(claimed_reward) = self.kernel.body.transaction_kernel.coinbase {
-            if claimed_reward > expected_reward {
-                warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters.");
-                return false;
-            }
+
+        // We verify that coinbase is not too large by ensuring that guesser fee
+        // is non-negative.
+        if self.kernel.body.transaction_kernel.fee.is_negative() {
+            warn!("Transaction fee is negative.");
+            return false;
         }
+        let guesser_fee = (Self::block_subsidy(self.kernel.header.height)
+            + self.kernel.body.transaction_kernel.fee)
+            .checked_sub(
+                &self
+                    .kernel
+                    .body
+                    .transaction_kernel
+                    .coinbase
+                    .unwrap_or(NeptuneCoins::zero()),
+            );
+        if guesser_fee.is_none() {
+            warn!("Block guesser fee cannot be negative.");
+            return false;
+        };
 
         true
     }
@@ -808,11 +839,21 @@ impl Block {
     }
 
     /// Wrap the transaction's fee into a UTXO
-    pub(crate) fn wrap_guesser_fee(&self) -> Utxo {
+    pub(crate) fn guesser_fee_utxo(&self) -> Utxo {
         let preimage = self.header().nonce;
         let lock_script = LockScript::hash_lock(preimage);
         let lock_script_hash = lock_script.hash();
-        let coins = self.body().transaction_kernel.fee.to_native_coins();
+        let coins = (Self::block_subsidy(self.header().height)
+            + self.body().transaction_kernel.fee)
+            .checked_sub(
+                &self
+                    .body()
+                    .transaction_kernel
+                    .coinbase
+                    .unwrap_or(NeptuneCoins::zero()),
+            )
+            .expect("if block is valid then guesser fee should be non-negative")
+            .to_native_coins();
         Utxo {
             lock_script_hash,
             coins,
@@ -822,12 +863,22 @@ impl Block {
     /// Compute the addition record that corresponds to the UTXO generated for
     /// the block's guesser and containing the transaction fee.
     pub(crate) fn guesser_fee_addition_record(&self) -> AdditionRecord {
-        let utxo = self.wrap_guesser_fee();
+        let utxo = self.guesser_fee_utxo();
         let item = Tip5::hash(&utxo);
         let sender_randomness = self.hash();
         let receiver_digest = self.header().nonce;
 
         commit(item, sender_randomness, receiver_digest)
+    }
+
+    /// Create an [`ExpectedUtxo`] object for the guesser fee.
+    pub(crate) fn guesser_fee_expected_utxo(&self, nonce_preimage: Digest) -> ExpectedUtxo {
+        ExpectedUtxo::new(
+            self.guesser_fee_utxo(),
+            self.hash(),
+            nonce_preimage,
+            UtxoNotifier::OwnMinerGuessNonce,
+        )
     }
 }
 
@@ -1051,6 +1102,7 @@ mod block_tests {
                 &genesis_block,
                 block_tx,
                 now,
+                Digest::default(),
                 None,
                 &TritonProverSync::dummy(),
             )
@@ -1186,7 +1238,7 @@ mod block_tests {
         let preimage = thread_rng().gen::<Digest>();
         block.set_header_nonce(preimage.hash());
 
-        let guesser_fee_utxo = block.wrap_guesser_fee();
+        let guesser_fee_utxo = block.guesser_fee_utxo();
 
         let lock_script_and_witness = LockScriptAndWitness::hash_lock(preimage);
         assert!(lock_script_and_witness.can_unlock(&guesser_fee_utxo));

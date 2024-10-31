@@ -73,7 +73,7 @@ impl BlockInfo {
             num_inputs: body.transaction_kernel.inputs.len(),
             num_outputs: body.transaction_kernel.outputs.len(),
             fee: body.transaction_kernel.fee,
-            mining_reward: crate::Block::get_mining_reward(header.height),
+            mining_reward: crate::Block::block_subsidy(header.height),
             is_genesis: digest == genesis_digest,
             is_tip: digest == tip_digest,
         }

@@ -239,6 +239,7 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
+                    None,
                     &Block::genesis_block(cli_args.network),
                 )
                 .await
@@ -298,7 +299,10 @@ impl WalletState {
 
                 let announced_utxos = self
                     .scan_for_announced_utxos(&tx.kernel)
-                    .chain(self.scan_for_expected_utxos(&tx.kernel).await)
+                    .chain(
+                        self.scan_addition_records_for_expected_utxos(&tx.kernel.outputs)
+                            .await,
+                    )
                     .collect_vec();
 
                 let tx_hash = Hash::hash(&tx);
@@ -446,9 +450,8 @@ impl WalletState {
             })
     }
 
-    /// Scan the transaction for outputs that match with list of expected
-    /// incoming UTXOs, and returns expected UTXOs that are present in the
-    /// transaction.
+    /// Scan the given list of addition records for items that match with list
+    /// of expected incoming UTXOs, and returns expected UTXOs that are present.
     ///
     /// note: this algorithm is o(n) + o(m) where:
     ///   n = number of ExpectedUtxo in database. (all-time)
@@ -457,9 +460,9 @@ impl WalletState {
     /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
     ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
-    pub async fn scan_for_expected_utxos<'a>(
+    pub async fn scan_addition_records_for_expected_utxos<'a>(
         &'a self,
-        tx_kernel: &'a TransactionKernel,
+        addition_records: &'a [AdditionRecord],
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
         let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
         let eu_map: HashMap<_, _> = expected_utxos
@@ -467,8 +470,7 @@ impl WalletState {
             .map(|eu| (eu.addition_record, eu))
             .collect();
 
-        tx_kernel
-            .outputs
+        addition_records
             .iter()
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
@@ -623,11 +625,16 @@ impl WalletState {
         self.wallet_secret.nth_symmetric_key(0)
     }
 
-    /// Update wallet state with new block. Assume the given block
-    /// is valid and that the wallet state is not up to date yet.
+    /// Update wallet state with new block.
+    ///
+    /// Assume the given block is valid and that the wallet state is not synced
+    /// with the new block yet but is synced with the previous block (if any).
+    /// The previous block necessary (if it exists) to supply the
+    /// mutator set accumulator and guesser fee.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
-        current_mutator_set_accumulator: &MutatorSetAccumulator,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator,
+        maybe_guesser_fee_record: Option<AdditionRecord>,
         new_block: &Block,
     ) -> Result<()> {
         /// Preprocess all own monitored UTXOs prior to processing of the block.
@@ -714,8 +721,16 @@ impl WalletState {
 
         let onchain_received_outputs = self.scan_for_announced_utxos(&tx_kernel);
 
-        let offchain_received_outputs =
-            self.scan_for_expected_utxos(&tx_kernel).await.collect_vec();
+        let addition_records = [
+            maybe_guesser_fee_record.into_iter().collect(),
+            new_block.kernel.body.transaction_kernel.outputs.clone(),
+        ]
+        .concat();
+
+        let offchain_received_outputs = self
+            .scan_addition_records_for_expected_utxos(&addition_records)
+            .await
+            .collect_vec();
 
         let all_received_outputs =
             onchain_received_outputs.chain(offchain_received_outputs.iter().cloned());
@@ -763,14 +778,14 @@ impl WalletState {
         // a) Update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
-        let mut msa_state: MutatorSetAccumulator = current_mutator_set_accumulator.clone();
+        let mut msa_state = previous_mutator_set_accumulator.clone();
 
         let mut removal_records = tx_kernel.inputs.clone();
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        for addition_record in new_block.kernel.body.transaction_kernel.outputs.iter() {
+        for addition_record in &addition_records {
             // Don't pull this declaration out of the for-loop since the hash map can grow
             // within this loop.
             let utxo_digests = valid_membership_proofs_and_own_utxo_count
@@ -1233,12 +1248,12 @@ mod tests {
         alice
             .set_new_self_mined_tip(
                 block1.clone(),
-                ExpectedUtxo::new(
+                vec![ExpectedUtxo::new(
                     cb_utxo,
                     cb_sender_randomness,
                     alice_key.privacy_preimage,
                     UtxoNotifier::OwnMinerPrepareBlock,
-                ),
+                )],
                 &alice_proving_lock,
             )
             .await
@@ -1284,7 +1299,6 @@ mod tests {
         let mut bob = bob.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
-        let mut mutator_set_accumulator = genesis_block.kernel.body.mutator_set_accumulator.clone();
         assert!(
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"
@@ -1303,7 +1317,11 @@ mod tests {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, alice_address, rng.gen());
             bob.wallet_state
-                .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
+                .update_wallet_state_with_new_block(
+                    &latest_block.body().mutator_set_accumulator,
+                    Some(latest_block.guesser_fee_addition_record()),
+                    &new_block,
+                )
                 .await
                 .unwrap();
             bob.chain
@@ -1314,7 +1332,6 @@ mod tests {
             bob.chain.light_state_mut().set_block(new_block.clone());
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
         assert!(
             bob.wallet_state
@@ -1341,12 +1358,12 @@ mod tests {
             );
         bob.set_new_self_mined_tip(
             block_3a,
-            ExpectedUtxo::new(
+            vec![ExpectedUtxo::new(
                 block_3a_coinbase_utxo,
                 block_3a_coinbase_sender_randomness,
                 bob_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMinerPrepareBlock,
-            ),
+            )],
             &bob_proving_lock,
         )
         .await
@@ -1683,7 +1700,9 @@ mod tests {
                 make_mock_transaction(vec![], vec![expected_addition_record]);
 
             let ret_with_tx_containing_utxo = wallet
-                .scan_for_expected_utxos(&mock_tx_containing_expected_utxo.kernel)
+                .scan_addition_records_for_expected_utxos(
+                    &mock_tx_containing_expected_utxo.kernel.outputs,
+                )
                 .await
                 .collect_vec();
             assert_eq!(1, ret_with_tx_containing_utxo.len());
@@ -1696,7 +1715,7 @@ mod tests {
             );
             let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
             let ret_with_tx_without_utxo = wallet
-                .scan_for_expected_utxos(&tx_without_utxo.kernel)
+                .scan_addition_records_for_expected_utxos(&tx_without_utxo.kernel.outputs)
                 .await
                 .collect_vec();
             assert!(ret_with_tx_without_utxo.is_empty());

@@ -1156,8 +1156,13 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        let mock_block_2 =
-            Block::block_template_invalid_proof(&mock_block_1, sender_tx, in_seven_months, None);
+        let mock_block_2 = Block::block_template_invalid_proof(
+            &mock_block_1,
+            sender_tx,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await?;
@@ -1265,11 +1270,21 @@ mod archival_state_tests {
         let addition_records_1b = ars(5);
 
         let tx_1a = make_mock_transaction(removal_records_1a, addition_records_1a);
-        let block_1a =
-            Block::block_template_invalid_proof(&genesis_block, tx_1a, in_seven_months, None);
+        let block_1a = Block::block_template_invalid_proof(
+            &genesis_block,
+            tx_1a,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
         let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
-        let block_1b =
-            Block::block_template_invalid_proof(&genesis_block, tx_1b, in_seven_months, None);
+        let block_1b = Block::block_template_invalid_proof(
+            &genesis_block,
+            tx_1b,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
 
         global_state_lock
             .set_new_tip(block_1a.clone())
@@ -1349,8 +1364,13 @@ mod archival_state_tests {
             let addition_records = vec![];
 
             let tx = make_mock_transaction(removal_records, addition_records);
-            let next_block =
-                Block::block_template_invalid_proof(&previous_block, tx, in_seven_months, None);
+            let next_block = Block::block_template_invalid_proof(
+                &previous_block,
+                tx,
+                in_seven_months,
+                Digest::default(),
+                None,
+            );
 
             // 2. Update archival-mutator set with produced block
             state_lock.set_new_tip(next_block.clone()).await.unwrap();
@@ -1541,6 +1561,7 @@ mod archival_state_tests {
             &genesis_block,
             block_tx,
             in_seven_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -1757,6 +1778,7 @@ mod archival_state_tests {
             &block_1,
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )

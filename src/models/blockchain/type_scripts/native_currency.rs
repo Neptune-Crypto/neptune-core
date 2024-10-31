@@ -161,8 +161,8 @@ impl ConsensusProgram for NativeCurrency {
         // test no-inflation equation
         let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
         assert!(!fee.is_negative());
-        let total_output_plus_coinbase: NeptuneCoins = total_output.safe_add(fee).unwrap();
-        assert_eq!(total_input_plus_coinbase, total_output_plus_coinbase);
+        let total_output_plus_fee: NeptuneCoins = total_output.safe_add(fee).unwrap();
+        assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
     }
 
     fn code(&self) -> Vec<LabelledInstruction> {

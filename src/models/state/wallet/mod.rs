@@ -501,11 +501,10 @@ mod wallet_tests {
                 let (nb, _coinbase_utxo, _sender_randomness) =
                     make_mock_block(&previous_block, None, charlie_address, rng.gen());
                 next_block = nb;
-                let current_mutator_set_accumulator =
-                    previous_block.kernel.body.mutator_set_accumulator.clone();
                 alice
                     .update_wallet_state_with_new_block(
-                        &current_mutator_set_accumulator,
+                        &previous_block.body().mutator_set_accumulator,
+                        Some(previous_block.guesser_fee_addition_record()),
                         &next_block,
                     )
                     .await
@@ -574,6 +573,7 @@ mod wallet_tests {
         alice_wallet
             .update_wallet_state_with_new_block(
                 &genesis_block.kernel.body.mutator_set_accumulator,
+                None,
                 &block_1,
             )
             .await
@@ -637,14 +637,16 @@ mod wallet_tests {
         // Verify that the membership proof is valid *after* running the updater
         alice_wallet
             .update_wallet_state_with_new_block(
-                &block_1.kernel.body.mutator_set_accumulator,
+                &block_1.body().mutator_set_accumulator,
+                Some(block_1.guesser_fee_addition_record()),
                 &block_2,
             )
             .await
             .unwrap();
         alice_wallet
             .update_wallet_state_with_new_block(
-                &block_2.kernel.body.mutator_set_accumulator,
+                &block_2.body().mutator_set_accumulator,
+                Some(block_2.guesser_fee_addition_record()),
                 &block_3,
             )
             .await
@@ -835,7 +837,13 @@ mod wallet_tests {
         let addition_records = tx_outputs.addition_records();
         let tx = make_mock_transaction(removal_records, addition_records);
 
-        let next_block = Block::block_template_invalid_proof(&next_block.clone(), tx, now, None);
+        let next_block = Block::block_template_invalid_proof(
+            &next_block.clone(),
+            tx,
+            now,
+            Digest::default(),
+            None,
+        );
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
@@ -1126,6 +1134,7 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &first_block_after_spree.kernel.body.mutator_set_accumulator,
+                Some(first_block_after_spree.guesser_fee_addition_record()),
                 &first_block_continuing_spree,
             )
             .await
@@ -1199,6 +1208,7 @@ mod wallet_tests {
             &block_2_b,
             merged_tx,
             timestamp,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -1239,6 +1249,7 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &block_2_b.kernel.body.mutator_set_accumulator,
+                Some(block_2_b.guesser_fee_addition_record()),
                 &block_3_b,
             )
             .await
@@ -1294,6 +1305,7 @@ mod wallet_tests {
                     .kernel
                     .body
                     .mutator_set_accumulator,
+                Some(first_block_continuing_spree.guesser_fee_addition_record()),
                 &second_block_continuing_spree,
             )
             .await
@@ -1373,6 +1385,7 @@ mod wallet_tests {
             &genesis_block,
             tx_for_block,
             in_seven_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )

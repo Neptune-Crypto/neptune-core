@@ -200,12 +200,12 @@ impl GlobalStateLock {
     pub async fn set_new_self_mined_tip(
         &mut self,
         new_block: Block,
-        coinbase_utxo_info: ExpectedUtxo,
+        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<()> {
         let prover_lock = self.proving_lock.clone();
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, coinbase_utxo_info, &prover_lock)
+            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos, &prover_lock)
             .await
     }
 
@@ -1308,20 +1308,20 @@ impl GlobalState {
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW.
     pub async fn set_new_tip(&mut self, new_block: Block, prover_lock: &ProvingLock) -> Result<()> {
-        self.set_new_tip_internal(new_block, None, prover_lock)
+        self.set_new_tip_internal(new_block, vec![], prover_lock)
             .await
     }
 
-    /// Update client's state with a new block that was mined locally. Block is assumed to be valid,
-    /// also wrt. to PoW. The received block will be set as the new tip, regardless of its
-    /// accumulated PoW.
+    /// Update client's state with a new block that was mined locally. Block is
+    /// assumed to be valid, also wrt. to PoW. The received block will be set as
+    /// the new tip, regardless of its accumulated PoW.
     pub async fn set_new_self_mined_tip(
         &mut self,
         new_block: Block,
-        coinbase_utxo_info: ExpectedUtxo,
+        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
         prover_lock: &ProvingLock,
     ) -> Result<()> {
-        self.set_new_tip_internal(new_block, Some(coinbase_utxo_info), prover_lock)
+        self.set_new_tip_internal(new_block, miner_reward_utxo_infos, prover_lock)
             .await
     }
 
@@ -1331,7 +1331,7 @@ impl GlobalState {
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
-        coinbase_utxo_info: Option<ExpectedUtxo>,
+        miner_reward_utxo_infos: Vec<ExpectedUtxo>,
         prover_lock: &ProvingLock,
     ) -> Result<()> {
         // note: we make this fn internal so we can log its duration and ensure it will
@@ -1339,7 +1339,7 @@ impl GlobalState {
         async fn set_new_tip_internal_worker(
             myself: &mut GlobalState,
             new_block: Block,
-            coinbase_utxo_info: Option<ExpectedUtxo>,
+            miner_reward_utxo_infos: Vec<ExpectedUtxo>,
             prover_lock: &ProvingLock,
         ) -> Result<()> {
             // Apply the updates
@@ -1357,14 +1357,14 @@ impl GlobalState {
                 .await
                 .expect("Updating mutator set must succeed");
 
-            if let Some(coinbase_info) = coinbase_utxo_info {
+            for miner_reward_utxo_info in miner_reward_utxo_infos {
                 // Notify wallet to expect the coinbase UTXO, as we mined this block
                 myself
                     .wallet_state
                     .add_expected_utxo(ExpectedUtxo::new(
-                        coinbase_info.utxo,
-                        coinbase_info.sender_randomness,
-                        coinbase_info.receiver_preimage,
+                        miner_reward_utxo_info.utxo,
+                        miner_reward_utxo_info.sender_randomness,
+                        miner_reward_utxo_info.receiver_preimage,
                         UtxoNotifier::OwnMinerPrepareBlock,
                     ))
                     .await;
@@ -1392,7 +1392,11 @@ impl GlobalState {
             // update wallet state with relevant UTXOs from this block
             myself
                 .wallet_state
-                .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
+                .update_wallet_state_with_new_block(
+                    &previous_ms_accumulator,
+                    Some(tip_parent.guesser_fee_addition_record()),
+                    &new_block,
+                )
                 .await?;
 
             // Update mempool with UTXOs from this block. This is done by removing all transaction
@@ -1414,7 +1418,7 @@ impl GlobalState {
         crate::macros::duration_async_info!(set_new_tip_internal_worker(
             self,
             new_block,
-            coinbase_utxo_info,
+            miner_reward_utxo_infos,
             prover_lock
         ))
     }
@@ -1833,12 +1837,12 @@ mod global_state_tests {
         alice
             .set_new_self_mined_tip(
                 mock_block_1a.clone(),
-                ExpectedUtxo::new(
+                vec![ExpectedUtxo::new(
                     coinbase_utxo,
                     coinbase_output_randomness,
                     alice_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMinerPrepareBlock,
-                ),
+                )],
                 &proving_lock,
             )
             .await
@@ -1966,12 +1970,12 @@ mod global_state_tests {
             alice
                 .set_new_self_mined_tip(
                     block_1.clone(),
-                    ExpectedUtxo::new(
+                    vec![ExpectedUtxo::new(
                         coinbase_utxo_1,
                         cb_utxo_output_randomness_1,
                         alice_spending_key.privacy_preimage,
                         UtxoNotifier::OwnMinerPrepareBlock,
-                    ),
+                    )],
                     &proving_lock,
                 )
                 .await
@@ -2228,6 +2232,7 @@ mod global_state_tests {
             &genesis_block,
             block_transaction,
             in_seven_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -2270,12 +2275,12 @@ mod global_state_tests {
         premine_receiver
             .set_new_self_mined_tip(
                 block_1.clone(),
-                ExpectedUtxo::new(
+                vec![ExpectedUtxo::new(
                     coinbase_expected_utxo.utxo,
                     coinbase_expected_utxo.sender_randomness,
                     genesis_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMinerPrepareBlock,
-                ),
+                )],
             )
             .await
             .unwrap();
@@ -2425,6 +2430,7 @@ mod global_state_tests {
             &block_1,
             block_transaction2,
             in_eight_months,
+            Digest::default(),
             None,
             &TritonProverSync::dummy(),
         )
@@ -2450,10 +2456,16 @@ mod global_state_tests {
         let (cb, _) = make_coinbase_transaction(&global_state_lock, NeptuneCoins::zero(), now)
             .await
             .unwrap();
-        let block_1 =
-            Block::make_block_template(&genesis_block, cb, now, None, &TritonProverSync::dummy())
-                .await
-                .unwrap();
+        let block_1 = Block::make_block_template(
+            &genesis_block,
+            cb,
+            now,
+            Digest::default(),
+            None,
+            &TritonProverSync::dummy(),
+        )
+        .await
+        .unwrap();
 
         global_state_lock.set_new_tip(block_1).await.unwrap();
 
@@ -2605,7 +2617,7 @@ mod global_state_tests {
             for block_height in 1..60 {
                 let (next_block, next_cb) = block_with_cb(&previous_block);
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                    .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
                     .await
                     .unwrap();
                 let global_state = global_state_lock.lock_guard().await;
@@ -2625,7 +2637,7 @@ mod global_state_tests {
             for block_height in 1..60 {
                 let (next_block, next_cb) = block_with_cb(&previous_block);
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), next_cb.clone())
+                    .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
                     .await
                     .unwrap();
 
@@ -2686,19 +2698,35 @@ mod global_state_tests {
 
                 if claim_coinbase {
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), cb_1a.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            block_1a.clone(),
+                            vec![cb_1a.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_2a.clone(), cb_2a.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            block_2a.clone(),
+                            vec![cb_2a.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_3a.clone(), cb_3a.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            block_3a.clone(),
+                            vec![cb_3a.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), cb_1a.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            block_1a.clone(),
+                            vec![cb_1a.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                 } else {
@@ -2753,11 +2781,19 @@ mod global_state_tests {
                 for block_height in 2..60 {
                     let (next_block, next_cb) = block_with_cb(&previous_block);
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), next_cb.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            next_block.clone(),
+                            vec![next_cb.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), next_cb.clone(), &proving_lock)
+                        .set_new_self_mined_tip(
+                            next_block.clone(),
+                            vec![next_cb.clone()],
+                            &proving_lock,
+                        )
                         .await
                         .unwrap();
                     assert_correct_global_state(
@@ -2800,11 +2836,11 @@ mod global_state_tests {
 
                 if claim_cb {
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), cb.clone(), &proving_lock)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &proving_lock)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), cb.clone(), &proving_lock)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &proving_lock)
                         .await
                         .unwrap();
                 } else {
@@ -3013,6 +3049,7 @@ mod global_state_tests {
                     &genesis_block,
                     alice_to_bob_tx,
                     seven_months_post_launch,
+                    Digest::default(),
                     None,
                     &TritonProverSync::dummy(),
                 )

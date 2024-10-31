@@ -995,8 +995,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let block_2 =
-            Block::block_template_invalid_proof(&block_1, block_transaction, in_eight_months, None);
+        let block_2 = Block::block_template_invalid_proof(
+            &block_1,
+            block_transaction,
+            in_eight_months,
+            Digest::default(),
+            None,
+        );
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -1033,8 +1038,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let _block_3_orphaned =
-            Block::block_template_invalid_proof(&block_2, block_transaction2, in_nine_months, None);
+        let _block_3_orphaned = Block::block_template_invalid_proof(
+            &block_2,
+            block_transaction2,
+            in_nine_months,
+            Digest::default(),
+            None,
+        );
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
@@ -1079,6 +1089,7 @@ mod tests {
             &previous_block,
             block_tx_5,
             block_5_timestamp,
+            Digest::default(),
             None,
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);

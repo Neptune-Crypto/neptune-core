@@ -649,7 +649,7 @@ pub(crate) fn make_mock_block(
 
     // Build coinbase UTXO and associated data
     let lock_script = coinbase_beneficiary.lock_script();
-    let coinbase_amount = Block::get_mining_reward(new_block_height);
+    let coinbase_amount = Block::block_subsidy(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
     let coinbase_sender_randomness: Digest = rng.gen();
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
@@ -774,7 +774,7 @@ pub async fn mock_genesis_archival_state(
 }
 
 /// Create and store the next block including any transactions presently in the
-/// mempool.  The coinbase will go to our own wallet.
+/// mempool.  The coinbase and guesser fee will go to our own wallet.
 ///
 /// the stored block does NOT have valid proof-of-work, nor does it have a valid
 /// block proof.
@@ -793,10 +793,21 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         crate::mine_loop::create_block_transaction(&tip_block, global_state_lock, timestamp)
             .await?;
 
-    let block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
+    let nonce_preimage = Digest::default();
+    let block = Block::block_template_invalid_proof(
+        &tip_block,
+        transaction,
+        timestamp,
+        nonce_preimage,
+        None,
+    );
+    let guesser_fee_expected_utxo = block.guesser_fee_expected_utxo(nonce_preimage);
 
     global_state_lock
-        .set_new_self_mined_tip(block.clone(), coinbase_expected_utxo)
+        .set_new_self_mined_tip(
+            block.clone(),
+            vec![coinbase_expected_utxo, guesser_fee_expected_utxo],
+        )
         .await?;
 
     Ok(block)
@@ -805,7 +816,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
 pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     let tx = make_mock_transaction(vec![], vec![]);
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }
 
 pub(crate) async fn valid_block_from_tx_for_tests(
@@ -814,10 +825,16 @@ pub(crate) async fn valid_block_from_tx_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
-    let mut block =
-        Block::make_block_template(predecessor, tx, timestamp, None, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+    let mut block = Block::make_block_template(
+        predecessor,
+        tx,
+        timestamp,
+        Digest::default(),
+        None,
+        &TritonProverSync::dummy(),
+    )
+    .await
+    .unwrap();
 
     let threshold = predecessor.header().difficulty.target();
     let mut rng = StdRng::from_seed(seed);
