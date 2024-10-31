@@ -1,10 +1,24 @@
 [package]
-authors = ["Triton Software"]
-edition = "2021"
 name = "neptune-core"
+description = "A layer-1 cryptocurrency featuring scalable privacy and post-quantum security."
+authors = ["Triton Software"]
+
 version = "0.0.5"
+edition = "2021"
+license = "Apache-2.0"
+readme = "README.md"
+
+homepage = "https://neptune.cash/"
+repository = "https://github.com/Neptune-Crypto/neptune-core/"
+
 default-run = "neptune-core"
-publish = false
+
+# for `dist`-generated Windows installer “msi”
+[package.metadata.wix]
+upgrade-guid = "A6452C01-7126-49A5-A6BD-7D440E71737B"
+path-guid = "8D2A09BD-A068-42BA-B4C7-9DD7AE1F9B94"
+license = false
+eula = false
 
 [features]
 
@@ -160,6 +174,21 @@ build-override.opt-level = 3
 [profile.dev]
 build-override.opt-level = 3
 panic = 'abort'
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[[bin]]
+name = "neptune-core"
+path = "src/main.rs"
+
+[[bin]]
+name = "neptune-dashboard"
+
+[[bin]]
+name = "neptune-cli"
 
 ## We use harness = false on these so that the divan reports are output on stdout.
 
