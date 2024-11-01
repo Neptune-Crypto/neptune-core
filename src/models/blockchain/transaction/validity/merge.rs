@@ -59,13 +59,38 @@ impl MergeWitness {
     /// Generate a `MergeWitness` from two transactions (kernels plus proofs).
     /// Assumes the transactions can be merged. Also takes randomness for shuffling
     /// the concatenations of inputs, outputs, and public announcements.
-    pub fn from_transactions(
+    pub(crate) fn from_transactions(
         left_kernel: TransactionKernel,
         left_proof: Proof,
         right_kernel: TransactionKernel,
         right_proof: Proof,
         shuffle_seed: [u8; 32],
     ) -> Self {
+        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
+
+        Self {
+            left_kernel,
+            right_kernel,
+            new_kernel,
+            left_proof,
+            right_proof,
+        }
+    }
+
+    /// Generate a new transaction kernel from two transactions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if given unmergable transactions as input.
+    pub(super) fn new_kernel(
+        left_kernel: &TransactionKernel,
+        right_kernel: &TransactionKernel,
+        shuffle_seed: [u8; 32],
+    ) -> TransactionKernel {
+        assert_eq!(
+            left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
+            "Attempted to merge transaction kernel with non-matching mutator set hashes"
+        );
         let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
         let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
         inputs.shuffle(&mut rng);
@@ -77,26 +102,17 @@ impl MergeWitness {
         ]
         .concat();
         public_announcements.shuffle(&mut rng);
-        let coinbase = if left_kernel.coinbase.is_some() {
-            left_kernel.coinbase
-        } else {
-            right_kernel.coinbase
-        };
-        let new_kernel = TransactionKernel {
+
+        let old_coinbase = left_kernel.coinbase.or(right_kernel.coinbase);
+
+        TransactionKernel {
             inputs,
             outputs,
             public_announcements,
             fee: left_kernel.fee + right_kernel.fee,
-            coinbase,
+            coinbase: old_coinbase,
             timestamp: max(left_kernel.timestamp, right_kernel.timestamp),
             mutator_set_hash: left_kernel.mutator_set_hash,
-        };
-        Self {
-            left_kernel,
-            right_kernel,
-            new_kernel,
-            left_proof,
-            right_proof,
         }
     }
 }
@@ -972,6 +988,18 @@ pub(crate) mod test {
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
+    #[tokio::test]
+    async fn can_verify_transaction_merger_with_coinbase() {
+        let merge_witness = deterministic_merge_witness_with_coinbase(3, 3, 3).await;
+
+        let claim = merge_witness.claim();
+        let public_input = PublicInput::new(claim.input);
+        let rust_result = Merge.run_rust(&public_input, merge_witness.nondeterminism());
+        let tasm_result = Merge.run_tasm(&public_input, merge_witness.nondeterminism());
+
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+    }
+
     pub(crate) async fn deterministic_merge_witness(
         params_left: (usize, usize, usize),
         params_right: (usize, usize, usize),
@@ -1005,6 +1033,43 @@ pub(crate) mod test {
             single_proof_1,
             primitive_witness_2.kernel,
             single_proof_2,
+            shuffle_seed,
+        )
+    }
+
+    pub(crate) async fn deterministic_merge_witness_with_coinbase(
+        num_total_inputs: usize,
+        num_total_outputs: usize,
+        num_pub_announcements: usize,
+    ) -> MergeWitness {
+        let mut test_runner = TestRunner::deterministic();
+
+        let (left, right) = PrimitiveWitness::arbitrary_pair_with_inputs_and_coinbase_respectively(
+            num_total_inputs,
+            num_total_outputs,
+            num_pub_announcements,
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
+
+        let shuffle_seed = arb::<[u8; 32]>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        let left_proof = SingleProof::produce(&left, &TritonProverSync::dummy())
+            .await
+            .unwrap();
+        let right_proof = SingleProof::produce(&right, &TritonProverSync::dummy())
+            .await
+            .unwrap();
+
+        MergeWitness::from_transactions(
+            left.kernel,
+            left_proof,
+            right.kernel,
+            right_proof,
             shuffle_seed,
         )
     }
