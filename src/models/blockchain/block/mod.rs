@@ -739,22 +739,18 @@ impl Block {
 
         // We verify that coinbase is not too large by ensuring that guesser fee
         // is non-negative.
-        if self.kernel.body.transaction_kernel.fee.is_negative() {
+        let tx_fee = self.kernel.body.transaction_kernel.fee;
+        if tx_fee.is_negative() {
             warn!("Transaction fee is negative.");
             return false;
         }
-        let guesser_fee = (Self::block_subsidy(self.kernel.header.height)
-            + self.kernel.body.transaction_kernel.fee)
-            .checked_sub(
-                &self
-                    .kernel
-                    .body
-                    .transaction_kernel
-                    .coinbase
-                    .unwrap_or(NeptuneCoins::zero()),
-            );
+
+        let block_subsidy = Self::block_subsidy(self.kernel.header.height);
+        let coinbase = self.kernel.body.transaction_kernel.coinbase;
+        let guesser_fee =
+            (block_subsidy + tx_fee).checked_sub(&coinbase.unwrap_or(NeptuneCoins::zero()));
         if guesser_fee.is_none() {
-            warn!("Block guesser fee cannot be negative.");
+            warn!("Block guesser fee cannot be negative.\n\nGot:\nblock subsidy: {block_subsidy}\nfee: {tx_fee}\ncoinbase: {coinbase:?}");
             return false;
         };
 
