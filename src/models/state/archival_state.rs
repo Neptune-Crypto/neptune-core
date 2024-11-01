@@ -30,7 +30,6 @@ use crate::models::database::BlockRecord;
 use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
@@ -728,6 +727,7 @@ impl ArchivalState {
         let mut removal_records = vec![];
 
         let mut haystack = self.get_tip().await;
+        let mut parent = self.get_tip_parent().await;
         loop {
             if haystack.body().mutator_set_accumulator.hash() == mutator_set.hash() {
                 break;
@@ -736,23 +736,31 @@ impl ArchivalState {
             search_depth += 1;
 
             // Notice that comparing the whole mutator set accumulator and not
-            // just its hash allows us to do early return here. Haystack == None
+            // just its hash allows us to do early return here. Parent == None
             // indicates that we've gone all the way back to genesis, with no
             // match.
             if mutator_set.aocl.num_leafs()
                 > haystack.body().mutator_set_accumulator.aocl.num_leafs()
                 || search_depth > max_search_depth
+                || parent.is_none()
             {
                 return None;
             }
 
-            addition_records.push(haystack.body().transaction_kernel.outputs.clone());
+            addition_records.push(
+                [
+                    parent.as_ref().unwrap().guesser_fee_addition_records(),
+                    haystack.body().transaction_kernel.outputs.clone(),
+                ]
+                .concat(),
+            );
             removal_records.push(haystack.body().transaction_kernel.inputs.clone());
 
-            haystack = self
+            haystack = parent.unwrap();
+            parent = self
                 .get_block(haystack.header().prev_block_digest)
                 .await
-                .expect("Must succeed in reading block")?;
+                .expect("Must succeed in reading block");
         }
 
         addition_records.reverse();
@@ -792,28 +800,43 @@ impl ArchivalState {
             (forwards, backwards)
         };
 
+        let mut cached_parent = None;
         for digest in backwards {
             // Roll back mutator set
-            let roll_back_block = self
-                .get_block(digest)
+            let rollback_block = if let Some(block) = cached_parent {
+                block
+            } else {
+                self.get_block(digest)
+                    .await
+                    .expect("Fetching block must succeed")
+                    .unwrap()
+            };
+
+            let parent_of_rollback = self
+                .get_block(rollback_block.header().prev_block_digest)
                 .await
                 .expect("Fetching block must succeed")
                 .unwrap();
 
             debug!(
                 "Updating mutator set: rolling back block with height {}",
-                roll_back_block.kernel.header.height
+                rollback_block.kernel.header.height
             );
 
+            let addition_records = [
+                parent_of_rollback.guesser_fee_addition_records(),
+                rollback_block
+                    .kernel
+                    .body
+                    .transaction_kernel
+                    .outputs
+                    .clone(),
+            ]
+            .concat();
+            cached_parent = Some(parent_of_rollback.clone());
+
             // Roll back all addition records contained in block
-            for addition_record in roll_back_block
-                .kernel
-                .body
-                .transaction_kernel
-                .outputs
-                .iter()
-                .rev()
-            {
+            for addition_record in addition_records.iter().rev() {
                 assert!(
                     self.archival_mutator_set
                         .ams_mut()
@@ -828,7 +851,7 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            for removal_record in roll_back_block.kernel.body.transaction_kernel.inputs.iter() {
+            for removal_record in rollback_block.kernel.body.transaction_kernel.inputs.iter() {
                 self.archival_mutator_set
                     .ams_mut()
                     .revert_remove(removal_record)
@@ -836,9 +859,12 @@ impl ArchivalState {
             }
         }
 
+        let mut maybe_parent: Option<Block> = None;
         for digest in forwards {
             // Add block to mutator set
             let apply_forward_block = if digest == new_block.hash() {
+                // Avoid reading from disk if block to be applied is the block
+                // with which this function is invoked.
                 new_block.to_owned()
             } else {
                 self.get_block(digest)
@@ -856,12 +882,25 @@ impl ArchivalState {
                     .standard_format()
             );
 
-            let mut addition_records: Vec<AdditionRecord> = apply_forward_block
-                .kernel
-                .body
-                .transaction_kernel
-                .outputs
-                .clone();
+            let parent = if let Some(parent) = maybe_parent {
+                parent
+            } else {
+                self.get_block(apply_forward_block.header().prev_block_digest)
+                    .await
+                    .expect("Fetching block must suceed")
+                    .expect("Block must have parent")
+            };
+
+            let mut addition_records = [
+                parent.guesser_fee_addition_records(),
+                apply_forward_block
+                    .kernel
+                    .body
+                    .transaction_kernel
+                    .outputs
+                    .clone(),
+            ]
+            .concat();
             addition_records.reverse();
             let mut removal_records = apply_forward_block
                 .kernel
@@ -899,6 +938,9 @@ impl ArchivalState {
                     .remove(removal_record)
                     .await;
             }
+
+            // Set parent for next loop iteration to save a disk-read.
+            maybe_parent = Some(apply_forward_block);
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
@@ -958,6 +1000,7 @@ mod archival_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::test_shared::mutator_set::mock_item_mp_rr_for_init_msa;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
@@ -1090,56 +1133,45 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn update_mutator_set_db_write_test() -> Result<()> {
-        let mut rng = StdRng::seed_from_u64(107221549301u64);
+    async fn update_mutator_set_db_write_test() {
         // Verify that `update_mutator_set` writes the active window back to disk.
+        // Creates blocks and transaction with invalid proofs.
 
         let network = Network::Alpha;
+        let mut rng = StdRng::seed_from_u64(107221549301u64);
         let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let alice_wallet = alice_wallet.wallet_secret;
-        let alice_address = alice_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
         let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
-
-        let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &alice
-                .lock_guard_mut()
-                .await
-                .chain
-                .archival_state_mut()
-                .genesis_block,
-            None,
-            alice_address,
-            rng.gen(),
-        );
-
-        {
-            alice.set_new_tip(mock_block_1.clone()).await.unwrap();
-            let num_aocl_leafs = alice
-                .lock_guard()
-                .await
-                .chain
-                .archival_state()
-                .archival_mutator_set
-                .ams()
-                .aocl
-                .num_leafs()
-                .await;
-            assert_ne!(0, num_aocl_leafs);
-        }
-
-        let in_seven_months = mock_block_1.kernel.header.timestamp + Timestamp::months(7);
-
-        // Add an input to the next block's transaction. This will add a removal record
-        // to the block, and this removal record will insert indices in the Bloom filter.
-        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
         let change_key = alice
             .lock_guard()
             .await
             .wallet_state
             .wallet_secret
-            .nth_symmetric_key_for_tests(0);
+            .nth_generation_spending_key(0);
+        let alice_address = change_key.to_address();
+
+        let genesis_block = Block::genesis_block(network);
+        let (block1, _, _) = make_mock_block(&genesis_block, None, alice_address, rng.gen());
+
+        alice.set_new_tip(block1.clone()).await.unwrap();
+        let num_aocl_leafs = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .aocl
+            .num_leafs()
+            .await;
+        assert_ne!(0, num_aocl_leafs);
+
+        let in_seven_months = block1.kernel.header.timestamp + Timestamp::months(7);
+
+        // Add an input to the next block's transaction. This will add a removal record
+        // to the block, and this removal record will insert indices in the Bloom filter.
+        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
+
         let tx_output_anyone_can_spend = TxOutput::no_notification(utxo, rng.gen(), rng.gen());
         let (sender_tx, _change_output) = alice
             .lock_guard()
@@ -1150,14 +1182,14 @@ mod archival_state_tests {
                 UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(2),
                 in_seven_months,
-                TxProvingCapability::SingleProof,
+                TxProvingCapability::PrimitiveWitness,
                 &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
         let mock_block_2 = Block::block_template_invalid_proof(
-            &mock_block_1,
+            &block1,
             sender_tx,
             in_seven_months,
             Digest::default(),
@@ -1165,7 +1197,7 @@ mod archival_state_tests {
         );
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
-        alice.set_new_tip(mock_block_2.clone()).await?;
+        alice.set_new_tip(mock_block_2.clone()).await.unwrap();
 
         let swbf_active_sbf_len = alice
             .lock_guard()
@@ -1178,8 +1210,6 @@ mod archival_state_tests {
             .sbf
             .len();
         assert_ne!(0, swbf_active_sbf_len);
-
-        Ok(())
     }
 
     #[traced_test]
@@ -2425,33 +2455,25 @@ mod archival_state_tests {
         let own_receiving_address = own_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &genesis.clone(),
-            None,
-            own_receiving_address,
-            rng.gen(),
-        );
-        add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
+        let (block1, _, _) =
+            make_mock_block(&genesis.clone(), None, own_receiving_address, rng.gen());
+        add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(genesis.hash(), mock_block_1.hash())
+                .block_belongs_to_canonical_chain(genesis.hash(), block1.hash())
                 .await,
             "Genesis block is always part of the canonical chain, tip parent"
         );
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(mock_block_1.hash(), mock_block_1.hash())
+                .block_belongs_to_canonical_chain(block1.hash(), block1.hash())
                 .await,
             "Tip block is always part of the canonical chain"
         );
 
         // Insert three more blocks and verify that all are part of the canonical chain
-        let (mock_block_2_a, _, _) = make_mock_block_with_valid_pow(
-            &mock_block_1.clone(),
-            None,
-            own_receiving_address,
-            rng.gen(),
-        );
+        let (mock_block_2_a, _, _) =
+            make_mock_block_with_valid_pow(&block1.clone(), None, own_receiving_address, rng.gen());
         add_block_to_archival_state(&mut archival_state, mock_block_2_a.clone()).await?;
         let (mock_block_3_a, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_a.clone(),
@@ -2469,7 +2491,7 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, mock_block_4_a.clone()).await?;
         for (i, block) in [
             genesis.clone(),
-            mock_block_1.clone(),
+            block1.clone(),
             mock_block_2_a.clone(),
             mock_block_3_a.clone(),
             mock_block_4_a.clone(),
@@ -2497,12 +2519,8 @@ mod archival_state_tests {
 
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
-        let (mock_block_2_b, _, _) = make_mock_block_with_valid_pow(
-            &mock_block_1.clone(),
-            None,
-            own_receiving_address,
-            rng.gen(),
-        );
+        let (mock_block_2_b, _, _) =
+            make_mock_block_with_valid_pow(&block1.clone(), None, own_receiving_address, rng.gen());
         add_block_to_archival_state(&mut archival_state, mock_block_2_b.clone()).await?;
         let (mock_block_3_b, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_b.clone(),
@@ -2527,7 +2545,7 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, mock_block_5_b.clone()).await?;
         for (i, block) in [
             genesis.clone(),
-            mock_block_1.clone(),
+            block1.clone(),
             mock_block_2_a.clone(),
             mock_block_3_a.clone(),
             mock_block_4_a.clone(),
@@ -2681,7 +2699,7 @@ mod archival_state_tests {
 
         for (i, block) in [
             genesis.clone(),
-            mock_block_1.clone(),
+            block1.clone(),
             mock_block_2_a.clone(),
             mock_block_3_d.clone(),
             mock_block_4_d.clone(),
@@ -2775,7 +2793,7 @@ mod archival_state_tests {
 
         for (i, block) in [
             &genesis,
-            &mock_block_1,
+            &block1,
             &mock_block_2_b,
             &mock_block_3_b,
             &mock_block_4_b,
@@ -2833,7 +2851,7 @@ mod archival_state_tests {
             backwards,
             "find_path backwards return value must match expected value"
         );
-        assert_eq!(mock_block_1.hash(), luca, "Luca must be block 1");
+        assert_eq!(block1.hash(), luca, "Luca must be block 1");
 
         Ok(())
     }

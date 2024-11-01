@@ -653,16 +653,9 @@ pub(crate) fn make_mock_block(
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
     let coinbase_sender_randomness: Digest = rng.gen();
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
-
-    let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
-    let previous_mutator_set = next_mutator_set.clone();
-    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmr.append(previous_block.hash());
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
-
     let coinbase_addition_record: AdditionRecord =
         commit(coinbase_digest, coinbase_sender_randomness, receiver_digest);
-    next_mutator_set.add(&coinbase_addition_record);
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
@@ -676,43 +669,22 @@ pub(crate) fn make_mock_block(
         fee: NeptuneCoins::zero(),
         timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
-        mutator_set_hash: previous_mutator_set.hash(),
+        mutator_set_hash: previous_block.kernel.body.mutator_set_accumulator.hash(),
+    };
+    let tx = Transaction {
+        kernel: tx_kernel,
+        proof: TransactionProof::Invalid,
     };
 
-    let block_body: BlockBody = BlockBody::new(
-        tx_kernel,
-        next_mutator_set.clone(),
-        MmrAccumulator::new_from_leafs(vec![]),
-        block_mmr,
-    );
-
-    let block_target_difficulty = previous_block.kernel.header.difficulty;
-    let new_cumulative_proof_of_work =
-        previous_block.kernel.header.cumulative_proof_of_work + block_target_difficulty;
-    let zero = BFieldElement::zero();
-    let target_difficulty = difficulty_control(
+    let block = Block::block_template_invalid_proof(
+        previous_block,
+        tx,
         block_timestamp,
-        previous_block.header().timestamp,
-        previous_block.header().difficulty,
+        Digest::default(),
         None,
-        previous_block.header().height,
     );
-    let block_header = BlockHeader {
-        version: zero,
-        height: new_block_height,
-        prev_block_digest: previous_block.hash(),
-        timestamp: block_body.transaction_kernel.timestamp,
-        nonce: Digest::default(),
-        cumulative_proof_of_work: new_cumulative_proof_of_work,
-        difficulty: target_difficulty,
-    };
-    let appendix = BlockAppendix::default();
 
-    (
-        Block::new(block_header, block_body, appendix, BlockProof::Invalid),
-        coinbase_utxo,
-        coinbase_sender_randomness,
-    )
+    (block, coinbase_utxo, coinbase_sender_randomness)
 }
 
 /// Like [make_mock_block] but returns a block with a valid PoW.
