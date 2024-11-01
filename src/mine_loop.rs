@@ -240,32 +240,36 @@ pub(crate) async fn make_coinbase_transaction(
         bail!("Guesser fee fraction must be in [0, 1] interval. Got: {guesser_block_subsidy_fraction}");
     }
 
-    let block_subsidy = Block::block_subsidy(next_block_height);
-    let Some(guesser_fee) = block_subsidy.lossy_f64_mul(guesser_block_subsidy_fraction) else {
+    let coinbase_amount = Block::block_subsidy(next_block_height);
+    let Some(guesser_fee) = coinbase_amount.lossy_f64_fraction_mul(guesser_block_subsidy_fraction)
+    else {
         bail!("Guesser fee times block subsidy must be valid amount");
     };
 
     info!("Setting guesser_fee to {guesser_fee}.");
 
-    let Some(coinbase_amount) = Block::block_subsidy(next_block_height).checked_sub(&guesser_fee)
-    else {
-        bail!("guesser fee cannot exceed block subsidy")
+    // There is no reason to put coinbase UTXO notifications on chain, because:
+    // Both sender randomness and receiver preimage are derived
+    // deterministically from the wallet's seed.
+    let Some(amount_to_prover) = coinbase_amount.checked_sub(&guesser_fee) else {
+        bail!(
+            "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}.",
+            coinbase_amount.to_nau(),
+            guesser_fee.to_nau()
+        );
     };
 
-    info!("Setting coinbase amount to {coinbase_amount}.");
-
+    info!(
+        "Setting coinbase amount to {coinbase_amount}; and amount to prover to {amount_to_prover}"
+    );
     let sender_randomness: Digest = global_state_lock
         .lock_guard()
         .await
         .wallet_state
         .wallet_secret
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
-
-    // There is no reason to put coinbase UTXO notifications on chain, because:
-    // Both sender randomness and receiver preimage are derived
-    // deterministically from the wallet's seed.
     let coinbase_output = TxOutput::offchain_native_currency(
-        coinbase_amount,
+        amount_to_prover,
         sender_randomness,
         receiving_address.into(),
     );
@@ -274,6 +278,7 @@ pub(crate) async fn make_coinbase_transaction(
         vec![],
         vec![coinbase_output.clone()].into(),
         coinbase_amount,
+        guesser_fee,
         timestamp,
         mutator_set_accumulator,
     )
@@ -315,11 +320,10 @@ pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
+    guesser_fee_fraction: f64,
 ) -> Result<(Transaction, ExpectedUtxo)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    // TODO: Read this value from CLI arguments.
-    let guesser_fee_fraction = 0f64;
     let (coinbase_transaction, coinbase_as_expected_utxo) =
         make_coinbase_transaction(global_state_lock, guesser_fee_fraction, timestamp).await?;
 
@@ -396,8 +400,15 @@ pub async fn mine(
 
             // TODO: Spawn a task for generating this transaction, such that it
             // can be aborted on shutdown.
-            let (transaction, coinbase_utxo_info) =
-                create_block_transaction(&latest_block, &global_state_lock, now).await?;
+            // TODO: Read this value from CLI arguments.
+            let guesser_fee_fraction = 0f64;
+            let (transaction, coinbase_utxo_info) = create_block_transaction(
+                &latest_block,
+                &global_state_lock,
+                now,
+                guesser_fee_fraction,
+            )
+            .await?;
             let proof_sync = global_state_lock.wait_if_busy();
             let block_template = Block::make_block_template(
                 &latest_block,
@@ -667,59 +678,25 @@ pub(crate) mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_template_is_valid_test() {
+    async fn block_template_is_valid() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        assert!(
-            alice.lock_guard().await.mempool.is_empty(),
-            "Mempool must be empty at startup"
-        );
-
-        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
         let genesis_block = Block::genesis_block(network);
-        let now = genesis_block.kernel.header.timestamp;
-        let in_seven_months = now + Timestamp::months(7);
+        let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         assert!(
             !alice
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_available_amount(now)
                 .is_zero(),
             "Assumed to be premine-recipient"
         );
 
-        // Verify constructed coinbase transaction and block template when mempool is empty
-        let (transaction_empty_mempool, _coinbase_utxo_info) =
-            { make_coinbase_transaction(&alice, 0f64, now).await.unwrap() };
+        let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
 
-        assert_eq!(
-            1,
-            transaction_empty_mempool.kernel.outputs.len(),
-            "Coinbase transaction with empty mempool must have exactly one output"
-        );
-        assert!(
-            transaction_empty_mempool.kernel.inputs.is_empty(),
-            "Coinbase transaction with empty mempool must have zero inputs"
-        );
-        let block_template_empty_mempool = Block::make_block_template(
-            &genesis_block,
-            transaction_empty_mempool,
-            in_seven_months,
-            Digest::default(),
-            None,
-            &TritonProverSync::dummy(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            block_template_empty_mempool.is_valid(&genesis_block, in_seven_months),
-            "Block template created by miner with empty mempool must be valid"
-        );
-
-        // Add a transaction to the mempool
         let alice_key = alice
             .lock_guard()
             .await
@@ -731,9 +708,6 @@ pub(crate) mod mine_loop_tests {
             rng.gen(),
             alice_key.to_address().into(),
         );
-        // About ProveCapability::SingleProof:
-        // The thing being tested is that the block template *for the _miner_*
-        // is valid. The miner is assumed capable of producing `SingleProof`s.
         let (tx_by_preminer, _maybe_change_output) = alice
             .lock_guard()
             .await
@@ -742,51 +716,86 @@ pub(crate) mod mine_loop_tests {
                 alice_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
-                in_seven_months,
+                now,
                 TxProvingCapability::SingleProof,
                 &TritonProverSync::dummy(),
             )
             .await
             .unwrap();
 
-        // no need to inform wallet of expected utxos; block template validity
-        // is what is being tested
+        for guesser_fee_fraction in [0f64, 0.5, 1.0] {
+            // Verify constructed coinbase transaction and block template when mempool is empty
+            assert!(
+                alice.lock_guard().await.mempool.is_empty(),
+                "Mempool must be empty at start of loop"
+            );
+            let (transaction_empty_mempool, _coinbase_utxo_info) = {
+                make_coinbase_transaction(&alice, guesser_fee_fraction, now)
+                    .await
+                    .unwrap()
+            };
 
-        {
-            let mut alice_gsm = alice.lock_guard_mut().await;
-            alice_gsm.mempool_insert(tx_by_preminer).await;
-            assert_eq!(1, alice_gsm.mempool.len());
-        }
+            assert_eq!(
+                1,
+                transaction_empty_mempool.kernel.outputs.len(),
+                "Coinbase transaction with empty mempool must have exactly one output"
+            );
+            assert!(
+                transaction_empty_mempool.kernel.inputs.is_empty(),
+                "Coinbase transaction with empty mempool must have zero inputs"
+            );
+            let block_1_empty_mempool = Block::make_block_template(
+                &genesis_block,
+                transaction_empty_mempool,
+                now,
+                Digest::default(),
+                None,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+            assert!(
+                block_1_empty_mempool.is_valid(&genesis_block, now),
+                "Block template created by miner with empty mempool must be valid"
+            );
 
-        // Build transaction for block
-        let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
-            create_block_transaction(&genesis_block, &alice, in_seven_months)
-                .await
-                .unwrap()
-        };
-        assert_eq!(
+            {
+                let mut alice_gsm = alice.lock_guard_mut().await;
+                alice_gsm.mempool_insert(tx_by_preminer.clone()).await;
+                assert_eq!(1, alice_gsm.mempool.len());
+            }
+
+            // Build transaction for block
+            let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
+                create_block_transaction(&genesis_block, &alice, now, guesser_fee_fraction)
+                    .await
+                    .unwrap()
+            };
+            assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
             "Transaction for block with non-empty mempool must contain coinbase output, send output, and change output"
         );
-        assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
+            assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
-        // Build and verify block template
-        let block_template_non_empty_mempool = Block::make_block_template(
-            &genesis_block,
-            transaction_non_empty_mempool,
-            in_seven_months,
-            Digest::default(),
-            None,
-            &TritonProverSync::dummy(),
-        )
-        .await
-        .unwrap();
-        assert!(
-            block_template_non_empty_mempool
-                .is_valid(&genesis_block, in_seven_months + Timestamp::seconds(2)),
-            "Block template created by miner with non-empty mempool must be valid"
-        );
+            // Build and verify block template
+            let block_1_nonempty_mempool = Block::make_block_template(
+                &genesis_block,
+                transaction_non_empty_mempool,
+                now,
+                Digest::default(),
+                None,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+            assert!(
+                block_1_nonempty_mempool.is_valid(&genesis_block, now + Timestamp::seconds(2)),
+                "Block template created by miner with non-empty mempool must be valid"
+            );
+
+            alice.lock_guard_mut().await.mempool_clear().await;
+        }
     }
 
     /// This test mines a single block at height 1 on the main network

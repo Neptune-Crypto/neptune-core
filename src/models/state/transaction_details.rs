@@ -34,11 +34,10 @@ impl TransactionDetails {
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
         coinbase: NeptuneCoins,
+        fee: NeptuneCoins,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
-        // Fee for coinbase txs is always zero
-        let fee = NeptuneCoins::zero();
         Self::new(
             tx_inputs,
             tx_outputs,

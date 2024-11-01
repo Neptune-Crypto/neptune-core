@@ -789,9 +789,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .light_state()
         .to_owned();
 
-    let (transaction, coinbase_expected_utxo) =
-        crate::mine_loop::create_block_transaction(&tip_block, global_state_lock, timestamp)
-            .await?;
+    let guesser_fee_fraction = 0f64;
+    let (transaction, coinbase_expected_utxo) = crate::mine_loop::create_block_transaction(
+        &tip_block,
+        global_state_lock,
+        timestamp,
+        guesser_fee_fraction,
+    )
+    .await?;
 
     let nonce_preimage = Digest::default();
     let block = Block::block_template_invalid_proof(

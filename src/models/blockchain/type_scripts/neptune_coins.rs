@@ -42,7 +42,7 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// program related to block validity, it is important to use `safe_add` rather than `+` as
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
-#[derive(Clone, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject, Default)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject, Default)]
 pub struct NeptuneCoins(u128);
 
 impl NeptuneCoins {
@@ -164,10 +164,24 @@ impl NeptuneCoins {
         }
     }
 
-    pub(crate) fn lossy_f64_mul(&self, rhs: f64) -> Option<NeptuneCoins> {
+    /// Multiply a coin amount with a fraction, in a lossy manner. Result is
+    /// guaranteed to not exceed `self`.
+    ///
+    /// # Panics
+    ///
+    /// If the provided fraction is not between 0 and 1 (inclusive).
+    pub(crate) fn lossy_f64_fraction_mul(&self, fraction: f64) -> Option<NeptuneCoins> {
+        assert!((0.0..=1.0).contains(&fraction));
+
+        if fraction == 1.0 {
+            return Some(*self);
+        }
+
         let value_as_f64 = self.0 as f64;
-        let res = rhs * value_as_f64;
-        let as_bigint = res.to_bigint()?;
+        let res = fraction * value_as_f64;
+        let as_bigint = res
+            .to_bigint()?
+            .clamp(BigInt::from(0u32), BigInt::from(self.0));
         Self::from_nau(as_bigint)
     }
 }
@@ -364,14 +378,6 @@ impl Display for NeptuneCoins {
     }
 }
 
-impl std::fmt::Debug for NeptuneCoins {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("NeptuneCoins")
-            .field(&self.to_string())
-            .finish()
-    }
-}
-
 impl<'a> Arbitrary<'a> for NeptuneCoins {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let nau: u128 = u.arbitrary()?;
@@ -487,7 +493,7 @@ mod amount_tests {
     #[test]
     fn simple_f64_lossy_mul_half() {
         let one_hundred = NeptuneCoins::new(100);
-        let half_of_one_hundred = one_hundred.lossy_f64_mul(0.5).unwrap();
+        let half_of_one_hundred = one_hundred.lossy_f64_fraction_mul(0.5).unwrap();
 
         // Assert that the value is in a reasonable range, close enough.
         assert!(
@@ -501,7 +507,16 @@ mod amount_tests {
         let one_hundred = NeptuneCoins::new(100);
         assert_eq!(
             NeptuneCoins::zero(),
-            one_hundred.lossy_f64_mul(0f64).unwrap()
+            one_hundred.lossy_f64_fraction_mul(0f64).unwrap()
+        );
+    }
+
+    #[test]
+    fn simple_f64_lossy_mul_one() {
+        let one_hundred = NeptuneCoins::new(100);
+        assert_eq!(
+            one_hundred,
+            one_hundred.lossy_f64_fraction_mul(1f64).unwrap()
         );
     }
 

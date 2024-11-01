@@ -734,25 +734,23 @@ impl Block {
             return false;
         }
 
-        // 2.e) Verify that the coinbase claimed by the transaction does not exceed
-        //      the allowed coinbase based on block height, epoch, etc., and fee
-
-        // We verify that coinbase is not too large by ensuring that guesser fee
-        // is non-negative.
-        let tx_fee = self.kernel.body.transaction_kernel.fee;
-        if tx_fee.is_negative() {
-            warn!("Transaction fee is negative.");
-            return false;
-        }
-
+        // 2.e) Verify that the coinbase claimed by the transaction does not
+        //      exceed the block subsidy
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
-        let guesser_fee =
-            (block_subsidy + tx_fee).checked_sub(&coinbase.unwrap_or(NeptuneCoins::zero()));
-        if guesser_fee.is_none() {
-            warn!("Block guesser fee cannot be negative.\n\nGot:\nblock subsidy: {block_subsidy}\nfee: {tx_fee}\ncoinbase: {coinbase:?}");
-            return false;
-        };
+        if let Some(coinbase) = coinbase {
+            if coinbase > block_subsidy {
+                warn!("Coinbase exceeds block subsidy. coinbase: {coinbase}; block subsidy: {block_subsidy}.");
+                return false;
+            }
+        }
+
+        // This check *should* already follow from SingleProof.
+        // So we don't think this panic can ever be triggered.
+        assert!(
+            !self.kernel.body.transaction_kernel.fee.is_negative(),
+            "Tx fee cannot be negative"
+        );
 
         true
     }
