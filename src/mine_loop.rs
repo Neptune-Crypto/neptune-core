@@ -137,14 +137,17 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_info = block
-        .guesser_fee_expected_utxo(nonce_preimage)
-        .expect("All mined blocks have guesser fees");
+    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(nonce_preimage);
+
+    assert!(
+        !guesser_fee_utxo_infos.is_empty(),
+        "All mined blocks have guesser fees"
+    );
 
     let new_block_found = NewBlockFound {
         block: Box::new(block),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
-        guesser_fee_utxo_info: Box::new(guesser_fee_utxo_info),
+        guesser_fee_utxo_infos,
     };
 
     sender
@@ -559,6 +562,7 @@ pub(crate) mod mine_loop_tests {
     use block_body::BlockBody;
     use block_header::block_header_tests::random_block_header;
     use difficulty_control::Difficulty;
+    use mutator_set_update::MutatorSetUpdate;
     use num_bigint::BigUint;
     use num_traits::Pow;
     use num_traits::Zero;
@@ -566,8 +570,6 @@ pub(crate) mod mine_loop_tests {
     use transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
-    use twenty_first::prelude::Mmr;
-    use utxo::pseudorandom_utxo;
 
     use super::*;
     use crate::config_models::network::Network;
@@ -1175,7 +1177,7 @@ pub(crate) mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn guesser_fee_is_added_to_mutator_set() {
+    async fn guesser_fees_are_added_to_mutator_set() {
         // Mine two blocks, and then verify that the guesser fee for the first
         // block was added to the mutator set.
 
@@ -1187,103 +1189,50 @@ pub(crate) mod mine_loop_tests {
             Difficulty::from_biguint(BigUint::from(2u32)),
         );
         let launch_date = tip_block_orig.header().timestamp;
-        let (worker_task_tx_1, worker_task_rx_1) = oneshot::channel::<NewBlockFound>();
 
         let transaction_1 = Transaction {
-            kernel: pseudorandom_transaction_kernel(rng.gen(), 0, 5, 2),
+            kernel: pseudorandom_transaction_kernel(rng.gen(), 5, 5, 2),
             proof: TransactionProof::Invalid,
         };
-        let coinbase_utxo_info_1 = ExpectedUtxo::new(
-            pseudorandom_utxo(rng.gen()),
-            rng.gen(),
-            rng.gen(),
-            UtxoNotifier::OwnMinerPrepareBlock,
-        );
 
         let block_1 = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction_1,
             launch_date,
-            Digest::default(),
+            rng.gen(),
             Some(Timestamp::millis(1)),
         );
-
-        let unrestricted_mining = true;
-
-        mine_block_worker(
-            block_1,
-            tip_block_orig.clone(),
-            worker_task_tx_1,
-            coinbase_utxo_info_1,
-            unrestricted_mining,
-            None,
-        );
-
-        let mined_block_info_1: NewBlockFound = worker_task_rx_1.await.unwrap();
 
         let transaction_2 = Transaction {
-            kernel: pseudorandom_transaction_kernel(rng.gen(), 0, 5, 2),
+            kernel: pseudorandom_transaction_kernel(rng.gen(), 5, 5, 2),
             proof: TransactionProof::Invalid,
         };
-        let coinbase_utxo_info_2 = ExpectedUtxo::new(
-            pseudorandom_utxo(rng.gen()),
-            rng.gen(),
-            rng.gen(),
-            UtxoNotifier::OwnMinerPrepareBlock,
-        );
 
         let block_2 = Block::block_template_invalid_proof(
-            &mined_block_info_1.block,
+            &block_1,
             transaction_2,
             launch_date,
-            Digest::default(),
+            rng.gen(),
             Some(Timestamp::millis(1)),
         );
 
-        let (worker_task_tx_2, worker_task_rx_2) = oneshot::channel::<NewBlockFound>();
-
-        mine_block_worker(
-            block_2,
-            tip_block_orig.clone(),
-            worker_task_tx_2,
-            coinbase_utxo_info_2,
-            unrestricted_mining,
-            None,
+        let expected_guesser_addition_records = block_1.guesser_fee_addition_records();
+        assert!(
+            !expected_guesser_addition_records.is_empty(),
+            "all mined blocks should have guesser fee addition records"
         );
-
-        let mined_block_info_2 = worker_task_rx_2.await.unwrap();
-
-        let expected_guesser_addition_record = mined_block_info_1
-            .block
-            .guesser_fee_addition_record()
-            .unwrap();
-        let mut mmr = mined_block_info_1
-            .block
-            .body()
-            .mutator_set_accumulator
-            .aocl
-            .clone();
-        let addition_record_index = mmr.num_leafs();
-        let mut mmr_membership_proof =
-            mmr.append(expected_guesser_addition_record.canonical_commitment);
-        for addition_record in &mined_block_info_2.block.body().transaction_kernel.outputs {
-            mmr_membership_proof.update_from_append(
-                addition_record_index,
-                mmr.num_leafs(),
-                addition_record.canonical_commitment,
-                &mmr.peaks(),
-            );
-            mmr.append(addition_record.canonical_commitment);
-        }
-        assert_eq!(
-            mmr,
-            mined_block_info_2.block.body().mutator_set_accumulator.aocl
+        let all_addition_records = [
+            expected_guesser_addition_records,
+            block_2.body().transaction_kernel.outputs.clone(),
+        ]
+        .concat();
+        let mut ms = block_1.body().mutator_set_accumulator.clone();
+        let mutator_set_update = MutatorSetUpdate::new(
+            block_2.body().transaction_kernel.inputs.clone(),
+            all_addition_records,
         );
-        assert!(mmr_membership_proof.verify(
-            addition_record_index,
-            expected_guesser_addition_record.canonical_commitment,
-            &mmr.peaks(),
-            mmr.num_leafs()
-        ));
+        mutator_set_update.apply_to_accumulator(&mut ms).expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
+
+        assert_eq!(ms, block_2.body().mutator_set_accumulator);
     }
 }

@@ -106,6 +106,10 @@ impl Timestamp {
         ))
     }
 
+    pub const fn years(num: usize) -> Timestamp {
+        Timestamp(BFieldElement::new((num as u64) * 365240 * 2 * 60 * 60 * 12))
+    }
+
     pub const fn months(num: usize) -> Timestamp {
         Timestamp(BFieldElement::new((num as u64) * 365240 * 2 * 60 * 60))
     }

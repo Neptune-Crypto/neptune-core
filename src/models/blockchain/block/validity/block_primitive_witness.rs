@@ -57,7 +57,7 @@ impl BlockPrimitiveWitness {
             // All but one of the addition records stem from the transaction's
             // outputs. The exception is the guesser fee, which originates from
             // the transaction fee of the block's predecessor.
-            let predecessor_guesser_fee_addition_record = self.predecessor_block.guesser_fee_addition_record();
+            let predecessor_guesser_fee_addition_record = self.predecessor_block.guesser_fee_addition_records();
             let all_addition_records = [predecessor_guesser_fee_addition_record.into_iter().collect_vec(), self.transaction.kernel.outputs.clone()].concat();
 
             let mut mutator_set = predecessor_body.mutator_set_accumulator.clone();

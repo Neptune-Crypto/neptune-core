@@ -807,7 +807,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         None,
     );
     let expected_utxos = block
-        .guesser_fee_expected_utxo(nonce_preimage)
+        .guesser_fee_expected_utxos(nonce_preimage)
         .into_iter()
         .chain([coinbase_expected_utxo])
         .collect_vec();
