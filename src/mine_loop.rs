@@ -137,7 +137,9 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_info = block.guesser_fee_expected_utxo(nonce_preimage);
+    let guesser_fee_utxo_info = block
+        .guesser_fee_expected_utxo(nonce_preimage)
+        .expect("All mined blocks have guesser fees");
 
     let new_block_found = NewBlockFound {
         block: Box::new(block),
@@ -1242,8 +1244,10 @@ pub(crate) mod mine_loop_tests {
 
         let mined_block_info_2 = worker_task_rx_2.await.unwrap();
 
-        let expected_guesser_addition_record =
-            mined_block_info_1.block.guesser_fee_addition_record();
+        let expected_guesser_addition_record = mined_block_info_1
+            .block
+            .guesser_fee_addition_record()
+            .unwrap();
         let mut mmr = mined_block_info_1
             .block
             .body()

@@ -699,7 +699,10 @@ impl Block {
         //      block's set of transaction inputs, gives rise to the current
         //      block's mutator set
         let all_addition_records = [
-            vec![previous_block.guesser_fee_addition_record()],
+            previous_block
+                .guesser_fee_addition_record()
+                .into_iter()
+                .collect_vec(),
             self.kernel.body.transaction_kernel.outputs.clone(),
         ]
         .concat();
@@ -839,7 +842,13 @@ impl Block {
     }
 
     /// Wrap the transaction's fee into a UTXO
-    pub(crate) fn guesser_fee_utxo(&self) -> Utxo {
+    ///
+    /// The genesis block does not have a guesser reward.
+    pub(crate) fn guesser_fee_utxo(&self) -> Option<Utxo> {
+        if self.header().height.is_genesis() {
+            return None;
+        }
+
         let preimage = self.header().nonce;
         let lock_script = LockScript::hash_lock(preimage);
         let lock_script_hash = lock_script.hash();
@@ -854,31 +863,33 @@ impl Block {
             )
             .expect("if block is valid then guesser fee should be non-negative")
             .to_native_coins();
-        Utxo {
+        Some(Utxo {
             lock_script_hash,
             coins,
-        }
+        })
     }
 
     /// Compute the addition record that corresponds to the UTXO generated for
     /// the block's guesser and containing the transaction fee.
-    pub(crate) fn guesser_fee_addition_record(&self) -> AdditionRecord {
-        let utxo = self.guesser_fee_utxo();
+    ///
+    /// The genesis block does not have this addition record.
+    pub(crate) fn guesser_fee_addition_record(&self) -> Option<AdditionRecord> {
+        let utxo = self.guesser_fee_utxo()?;
         let item = Tip5::hash(&utxo);
         let sender_randomness = self.hash();
         let receiver_digest = self.header().nonce;
 
-        commit(item, sender_randomness, receiver_digest)
+        Some(commit(item, sender_randomness, receiver_digest))
     }
 
     /// Create an [`ExpectedUtxo`] object for the guesser fee.
-    pub(crate) fn guesser_fee_expected_utxo(&self, nonce_preimage: Digest) -> ExpectedUtxo {
-        ExpectedUtxo::new(
-            self.guesser_fee_utxo(),
+    pub(crate) fn guesser_fee_expected_utxo(&self, nonce_preimage: Digest) -> Option<ExpectedUtxo> {
+        Some(ExpectedUtxo::new(
+            self.guesser_fee_utxo()?,
             self.hash(),
             nonce_preimage,
             UtxoNotifier::OwnMinerGuessNonce,
-        )
+        ))
     }
 }
 
@@ -1242,6 +1253,6 @@ mod block_tests {
         let guesser_fee_utxo = block.guesser_fee_utxo();
 
         let lock_script_and_witness = LockScriptAndWitness::hash_lock(preimage);
-        assert!(lock_script_and_witness.can_unlock(&guesser_fee_utxo));
+        assert!(lock_script_and_witness.can_unlock(&guesser_fee_utxo.unwrap()));
     }
 }

@@ -504,7 +504,7 @@ mod wallet_tests {
                 alice
                     .update_wallet_state_with_new_block(
                         &previous_block.body().mutator_set_accumulator,
-                        Some(previous_block.guesser_fee_addition_record()),
+                        previous_block.guesser_fee_addition_record(),
                         &next_block,
                     )
                     .await
@@ -638,7 +638,7 @@ mod wallet_tests {
         alice_wallet
             .update_wallet_state_with_new_block(
                 &block_1.body().mutator_set_accumulator,
-                Some(block_1.guesser_fee_addition_record()),
+                block_1.guesser_fee_addition_record(),
                 &block_2,
             )
             .await
@@ -646,7 +646,7 @@ mod wallet_tests {
         alice_wallet
             .update_wallet_state_with_new_block(
                 &block_2.body().mutator_set_accumulator,
-                Some(block_2.guesser_fee_addition_record()),
+                block_2.guesser_fee_addition_record(),
                 &block_3,
             )
             .await
@@ -1134,7 +1134,7 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &first_block_after_spree.kernel.body.mutator_set_accumulator,
-                Some(first_block_after_spree.guesser_fee_addition_record()),
+                first_block_after_spree.guesser_fee_addition_record(),
                 &first_block_continuing_spree,
             )
             .await
@@ -1250,7 +1250,7 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &block_2_b.kernel.body.mutator_set_accumulator,
-                Some(block_2_b.guesser_fee_addition_record()),
+                block_2_b.guesser_fee_addition_record(),
                 &block_3_b,
             )
             .await
@@ -1306,7 +1306,7 @@ mod wallet_tests {
                     .kernel
                     .body
                     .mutator_set_accumulator,
-                Some(first_block_continuing_spree.guesser_fee_addition_record()),
+                first_block_continuing_spree.guesser_fee_addition_record(),
                 &second_block_continuing_spree,
             )
             .await

@@ -1319,7 +1319,7 @@ mod tests {
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.body().mutator_set_accumulator,
-                    Some(latest_block.guesser_fee_addition_record()),
+                    latest_block.guesser_fee_addition_record(),
                     &new_block,
                 )
                 .await

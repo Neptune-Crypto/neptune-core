@@ -13,8 +13,8 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
-/// Authenticate coinbase fields against TX kernel mast hash check at most one
-/// is set.
+/// Authenticate that both coinbase and fee fields match the tx-kernel mast
+/// hash. And authenticate that the no-inflation rule for merge is followed.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuthenticateCoinbaseFields {
     left_txk_mast_hash_alloc: StaticAllocation,

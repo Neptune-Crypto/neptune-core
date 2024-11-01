@@ -801,13 +801,14 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         nonce_preimage,
         None,
     );
-    let guesser_fee_expected_utxo = block.guesser_fee_expected_utxo(nonce_preimage);
+    let expected_utxos = block
+        .guesser_fee_expected_utxo(nonce_preimage)
+        .into_iter()
+        .chain([coinbase_expected_utxo])
+        .collect_vec();
 
     global_state_lock
-        .set_new_self_mined_tip(
-            block.clone(),
-            vec![coinbase_expected_utxo, guesser_fee_expected_utxo],
-        )
+        .set_new_self_mined_tip(block.clone(), expected_utxos)
         .await?;
 
     Ok(block)

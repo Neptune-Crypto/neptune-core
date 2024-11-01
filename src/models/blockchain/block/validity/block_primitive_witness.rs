@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+use itertools::Itertools;
 use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -57,7 +58,7 @@ impl BlockPrimitiveWitness {
             // outputs. The exception is the guesser fee, which originates from
             // the transaction fee of the block's predecessor.
             let predecessor_guesser_fee_addition_record = self.predecessor_block.guesser_fee_addition_record();
-            let all_addition_records = [vec![predecessor_guesser_fee_addition_record], self.transaction.kernel.outputs.clone()].concat();
+            let all_addition_records = [predecessor_guesser_fee_addition_record.into_iter().collect_vec(), self.transaction.kernel.outputs.clone()].concat();
 
             let mut mutator_set = predecessor_body.mutator_set_accumulator.clone();
             let mutator_set_update = MutatorSetUpdate::new(

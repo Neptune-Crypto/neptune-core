@@ -1394,7 +1394,7 @@ impl GlobalState {
                 .wallet_state
                 .update_wallet_state_with_new_block(
                     &previous_ms_accumulator,
-                    Some(tip_parent.guesser_fee_addition_record()),
+                    tip_parent.guesser_fee_addition_record(),
                     &new_block,
                 )
                 .await?;
