@@ -578,6 +578,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
     use crate::util_types::test_shared::mutator_set::random_mmra;
@@ -1178,61 +1179,86 @@ pub(crate) mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn guesser_fees_are_added_to_mutator_set() {
-        // Mine two blocks, and then verify that the guesser fee for the first
-        // block was added to the mutator set.
+        // Mine two blocks on top of the genesis block. Verify that the guesser
+        // fee for the 1st block was added to the mutator set. The genesis
+        // block awards no guesser fee.
 
         let mut rng = thread_rng();
         let network = Network::Main;
-        let mut tip_block_orig = Block::genesis_block(network);
-        tip_block_orig.set_header_timestamp_and_difficulty(
-            tip_block_orig.header().timestamp,
-            Difficulty::from_biguint(BigUint::from(2u32)),
-        );
-        let launch_date = tip_block_orig.header().timestamp;
-
-        let transaction_1 = Transaction {
-            kernel: pseudorandom_transaction_kernel(rng.gen(), 5, 5, 2),
-            proof: TransactionProof::Invalid,
-        };
-
-        let block_1 = Block::block_template_invalid_proof(
-            &tip_block_orig,
-            transaction_1,
-            launch_date,
-            rng.gen(),
-            Some(Timestamp::millis(1)),
-        );
-
-        let transaction_2 = Transaction {
-            kernel: pseudorandom_transaction_kernel(rng.gen(), 5, 5, 2),
-            proof: TransactionProof::Invalid,
-        };
-
-        let block_2 = Block::block_template_invalid_proof(
-            &block_1,
-            transaction_2,
-            launch_date,
-            rng.gen(),
-            Some(Timestamp::millis(1)),
-        );
-
-        let expected_guesser_addition_records = block_1.guesser_fee_addition_records();
+        let genesis_block = Block::genesis_block(network);
         assert!(
-            !expected_guesser_addition_records.is_empty(),
-            "all mined blocks should have guesser fee addition records"
+            genesis_block.guesser_fee_addition_records().is_empty(),
+            "Genesis block has no guesser fee UTXOs"
         );
-        let all_addition_records = [
-            expected_guesser_addition_records,
-            block_2.body().transaction_kernel.outputs.clone(),
+
+        let launch_date = genesis_block.header().timestamp;
+        let in_seven_months = launch_date + Timestamp::months(7);
+        let in_eight_months = launch_date + Timestamp::months(8);
+        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key(0);
+        let alice_address = alice_key.to_address();
+        let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
+
+        let output = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(4),
+            rng.gen(),
+            alice_address.into(),
+        );
+        let fee = NeptuneCoins::new(1);
+        let (tx1, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![output.clone()].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_seven_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+
+        let block1 = Block::block_template_invalid_proof(
+            &genesis_block,
+            tx1,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
+        alice.set_new_tip(block1.clone()).await.unwrap();
+
+        let (tx2, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![output].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_eight_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonProverSync::dummy(),
+            )
+            .await
+            .unwrap();
+
+        let block2 =
+            Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
+
+        let new_addition_records = [
+            block1.guesser_fee_addition_records(),
+            block2.body().transaction_kernel.outputs.clone(),
         ]
         .concat();
-        let mut ms = block_1.body().mutator_set_accumulator.clone();
+        let mut ms = block1.body().mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(
-            block_2.body().transaction_kernel.inputs.clone(),
-            all_addition_records,
+            block2.body().transaction_kernel.inputs.clone(),
+            new_addition_records,
         );
         mutator_set_update.apply_to_accumulator(&mut ms).expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
 
-        assert_eq!(ms, block_2.body().mutator_set_accumulator);
+        assert_eq!(ms, block2.body().mutator_set_accumulator);
     }
 }

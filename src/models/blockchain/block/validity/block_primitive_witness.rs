@@ -53,6 +53,8 @@ impl BlockPrimitiveWitness {
 
             let predecessor_body = self.predecessor_block.body();
 
+            assert_eq!(predecessor_body.mutator_set_accumulator.hash(), self.transaction.kernel.mutator_set_hash, "Mutator sets must agree in transaction and predecessor block.");
+
 
             // All but two of the addition records stem from the transaction's
             // outputs. The two remaining are the guesser-rewards from the
