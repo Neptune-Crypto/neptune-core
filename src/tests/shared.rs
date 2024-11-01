@@ -121,10 +121,8 @@ pub async fn unit_test_databases(
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
 
-    // The returned future is not `Send` without block_on().
-    use futures::executor::block_on;
-    let block_db = block_on(ArchivalState::initialize_block_index_database(&data_dir))?;
-    let peer_db = block_on(NetworkingState::initialize_peer_databases(&data_dir))?;
+    let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
 
     Ok((block_db, peer_db, data_dir))
 }

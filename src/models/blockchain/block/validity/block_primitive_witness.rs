@@ -113,30 +113,35 @@ pub(crate) mod test {
         )
             .prop_map(|((primwit_inputs, primwit_coinbase), shuffle_seed)| {
                 let mutator_set_accumulator = primwit_inputs.mutator_set_accumulator.clone();
-                let single_proof_inputs = futures::executor::block_on(SingleProof::produce(
-                    &primwit_inputs,
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
-                ))
-                .unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _guard = rt.enter();
+
+                let single_proof_inputs = rt
+                    .block_on(SingleProof::produce(
+                        &primwit_inputs,
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::default(),
+                    ))
+                    .unwrap();
 
                 let tx_inputs = Transaction {
                     kernel: primwit_inputs.kernel,
                     proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
-                let single_proof_coinbase = futures::executor::block_on(SingleProof::produce(
-                    &primwit_coinbase,
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
-                ))
-                .unwrap();
+                let single_proof_coinbase = rt
+                    .block_on(SingleProof::produce(
+                        &primwit_coinbase,
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::default(),
+                    ))
+                    .unwrap();
                 let tx_coinbase = Transaction {
                     kernel: primwit_coinbase.kernel,
                     proof: TransactionProof::SingleProof(single_proof_coinbase),
                 };
 
                 (
-                    futures::executor::block_on(tx_inputs.merge_with(
+                    rt.block_on(tx_inputs.merge_with(
                         tx_coinbase,
                         shuffle_seed,
                         &TritonVmJobQueue::dummy(),

@@ -178,8 +178,8 @@ pub(crate) mod test {
     use crate::models::proof_abstractions::SecretWitness;
 
     #[traced_test]
-    #[tokio::test]
-    async fn block_program_halts_gracefully() {
+    #[test]
+    fn block_program_halts_gracefully() {
         let block_primitive_witness = deterministic_block_primitive_witness();
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
@@ -189,11 +189,16 @@ pub(crate) mod test {
                 .values()
                 .to_vec(),
         );
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
 
-        let appendix_witness =
-            AppendixWitness::produce(block_primitive_witness, &TritonVmJobQueue::dummy())
-                .await
-                .unwrap();
+        let appendix_witness = rt
+            .block_on(AppendixWitness::produce(
+                block_primitive_witness,
+                &TritonVmJobQueue::dummy(),
+            ))
+            .unwrap();
+
         let block_program_nondeterminism = appendix_witness.nondeterminism();
         let rust_output = BlockProgram
             .run_rust(
