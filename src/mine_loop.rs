@@ -578,6 +578,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
@@ -616,8 +617,16 @@ pub(crate) mod mine_loop_tests {
             .light_state()
             .clone();
 
-        let (transaction, _coinbase_utxo_info) =
-            { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
+        let (transaction, _coinbase_utxo_info) = {
+            (
+                make_mock_transaction_with_mutator_set_hash(
+                    vec![],
+                    vec![],
+                    previous_block.body().mutator_set_accumulator.hash(),
+                ),
+                dummy_expected_utxo(),
+            )
+        };
         let start_time = Timestamp::now();
         let mut block = Block::block_template_invalid_proof(
             &previous_block,
@@ -1028,8 +1037,16 @@ pub(crate) mod mine_loop_tests {
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
-            let (transaction, coinbase_utxo_info) =
-                { (make_mock_transaction(vec![], vec![]), dummy_expected_utxo()) };
+            let (transaction, coinbase_utxo_info) = {
+                (
+                    make_mock_transaction_with_mutator_set_hash(
+                        vec![],
+                        vec![],
+                        prev_block.body().mutator_set_accumulator.hash(),
+                    ),
+                    dummy_expected_utxo(),
+                )
+            };
 
             let block = Block::block_template_invalid_proof(
                 &prev_block,

@@ -494,6 +494,14 @@ pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
 ) -> Transaction {
+    make_mock_transaction_with_mutator_set_hash(inputs, outputs, Digest::default())
+}
+
+pub(crate) fn make_mock_transaction_with_mutator_set_hash(
+    inputs: Vec<RemovalRecord>,
+    outputs: Vec<AdditionRecord>,
+    mutator_set_hash: Digest,
+) -> Transaction {
     let timestamp = Timestamp::now();
 
     Transaction {
@@ -504,7 +512,7 @@ pub fn make_mock_transaction(
             fee: NeptuneCoins::new(1),
             timestamp,
             coinbase: None,
-            mutator_set_hash: Digest::default(),
+            mutator_set_hash,
         },
         proof: TransactionProof::Invalid,
     }
@@ -792,7 +800,11 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
 }
 
 pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
-    let tx = make_mock_transaction(vec![], vec![]);
+    let tx = make_mock_transaction_with_mutator_set_hash(
+        vec![],
+        vec![],
+        predecessor.body().mutator_set_accumulator.hash(),
+    );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }

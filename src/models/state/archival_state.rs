@@ -995,7 +995,7 @@ mod archival_state_tests {
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
-    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -1299,7 +1299,11 @@ mod archival_state_tests {
         let removal_records_1b = rrs(0);
         let addition_records_1b = ars(5);
 
-        let tx_1a = make_mock_transaction(removal_records_1a, addition_records_1a);
+        let tx_1a = make_mock_transaction_with_mutator_set_hash(
+            removal_records_1a,
+            addition_records_1a,
+            genesis_block.body().mutator_set_accumulator.hash(),
+        );
         let block_1a = Block::block_template_invalid_proof(
             &genesis_block,
             tx_1a,
@@ -1307,7 +1311,11 @@ mod archival_state_tests {
             Digest::default(),
             None,
         );
-        let tx_1b = make_mock_transaction(removal_records_1b, addition_records_1b);
+        let tx_1b = make_mock_transaction_with_mutator_set_hash(
+            removal_records_1b,
+            addition_records_1b,
+            genesis_block.body().mutator_set_accumulator.hash(),
+        );
         let block_1b = Block::block_template_invalid_proof(
             &genesis_block,
             tx_1b,
@@ -1393,7 +1401,11 @@ mod archival_state_tests {
             };
             let addition_records = vec![];
 
-            let tx = make_mock_transaction(removal_records, addition_records);
+            let tx = make_mock_transaction_with_mutator_set_hash(
+                removal_records,
+                addition_records,
+                previous_block.body().mutator_set_accumulator.hash(),
+            );
             let next_block = Block::block_template_invalid_proof(
                 &previous_block,
                 tx,

@@ -450,7 +450,7 @@ mod wallet_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_transaction;
+    use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -835,7 +835,11 @@ mod wallet_tests {
             .map(|txi| txi.removal_record(&msa_tip_previous))
             .collect_vec();
         let addition_records = tx_outputs.addition_records();
-        let tx = make_mock_transaction(removal_records, addition_records);
+        let tx = make_mock_transaction_with_mutator_set_hash(
+            removal_records,
+            addition_records,
+            next_block.body().mutator_set_accumulator.hash(),
+        );
 
         let next_block = Block::block_template_invalid_proof(
             &next_block.clone(),
