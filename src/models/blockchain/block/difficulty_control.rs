@@ -589,7 +589,7 @@ mod test {
                 );
                 block_times.push(block_time);
                 let old_timestamp = new_timestamp;
-                new_timestamp = new_timestamp + Timestamp::seconds(block_time.round() as u64);
+                new_timestamp += Timestamp::seconds(block_time.round() as u64);
 
                 difficulty = difficulty_control(
                     new_timestamp,

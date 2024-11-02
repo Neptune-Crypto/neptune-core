@@ -858,7 +858,7 @@ mod block_tests {
 
                 for i in (0..30).step_by(1) {
                     let duration = i as u64 * multiplier;
-                    now = now + Timestamp::millis(duration);
+                    now += Timestamp::millis(duration);
 
                     let (block, _, _) =
                         make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
