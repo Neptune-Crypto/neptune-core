@@ -1,6 +1,10 @@
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
+// enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock
+// log-slow-write-lock logs warning when a write-lock is held longer than 100 millis.
+// to enable: cargo +nightly build --features log-slow-write-lock
+#![cfg_attr(feature = "log-slow-write-lock", feature(async_fn_track_caller))]
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?

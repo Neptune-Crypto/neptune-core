@@ -6,6 +6,12 @@ version = "0.0.5"
 default-run = "neptune-core"
 publish = false
 
+[features]
+
+# logs write-lock acquisitions that take over 100 millis.  requires nightly.
+# to enable: cargo +nightly build --features log-slow-write-lock
+log-slow-write-lock = []
+
 [dependencies]
 aead = { version = "0.5", features = ["std"] }
 aes-gcm = "0.10"
