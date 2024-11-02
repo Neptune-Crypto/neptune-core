@@ -287,8 +287,9 @@ pub(crate) async fn add_block_to_archival_state(
 /// For now we use databases on disk. In-memory databases would be nicer.
 pub(crate) fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
     let mut rng = rand::thread_rng();
+    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
     let tmp_root: PathBuf = env::temp_dir()
-        .join("neptune-unit-tests")
+        .join(format!("neptune-unit-tests-{}", user))
         .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
     DataDirectory::get(Some(tmp_root), network)
