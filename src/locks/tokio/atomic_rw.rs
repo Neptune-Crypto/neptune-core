@@ -435,7 +435,9 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
+    #[cfg(feature = "log-slow-write-lock")]
     location: &'static core::panic::Location<'static>,
+    #[cfg(feature = "log-slow-write-lock")]
     timestamp: std::time::Instant,
 }
 
@@ -451,7 +453,9 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
         Self {
             guard,
             lock_callback_info,
+            #[cfg(feature = "log-slow-write-lock")]
             location: core::panic::Location::caller(),
+            #[cfg(feature = "log-slow-write-lock")]
             timestamp: std::time::Instant::now(),
         }
     }
@@ -459,15 +463,18 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
 
 impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     fn drop(&mut self) {
-        let duration = self.timestamp.elapsed();
-        let max_duration_milli = 100;
-        if duration.as_millis() > max_duration_milli {
-            tracing::warn!(
-                "write-lock held for {} seconds. (exceeds max: {} milli)  location: {}",
-                duration.as_secs_f32(),
-                max_duration_milli,
-                self.location
-            );
+        #[cfg(feature = "log-slow-write-lock")]
+        {
+            let duration = self.timestamp.elapsed();
+            let max_duration_milli = 100;
+            if duration.as_millis() > max_duration_milli {
+                tracing::warn!(
+                    "write-lock held for {} seconds. (exceeds max: {} milli)  location: {}",
+                    duration.as_secs_f32(),
+                    max_duration_milli,
+                    self.location
+                );
+            }
         }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
