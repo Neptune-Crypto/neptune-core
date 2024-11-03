@@ -446,3 +446,44 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
     }
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
+
+pub struct ScopeDurationLogger<'a> {
+    start: Instant,
+    description: &'a str,
+    log_slow_fn_threshold: f64,
+}
+impl<'a> ScopeDurationLogger<'a> {
+    pub fn new_with_threshold(description: &'a str, log_slow_fn_threshold: f64) -> Self {
+        Self {
+            start: Instant::now(),
+            description,
+            log_slow_fn_threshold,
+        }
+    }
+
+    pub fn new(description: &'a str) -> Self {
+        Self::new_with_threshold(
+            description,
+            match env::var("LOG_SLOW_SCOPE_THRESHOLD") {
+                Ok(t) => t.parse().unwrap(),
+                Err(_) => 0.001,
+            },
+        )
+    }
+}
+
+impl Drop for ScopeDurationLogger<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        let duration = elapsed.as_secs_f64();
+
+        if duration >= self.log_slow_fn_threshold {
+            let msg = format!(
+                "executed {} in {} secs.  exceeds slow fn threshold of {} secs",
+                self.description, duration, self.log_slow_fn_threshold,
+            );
+
+            tracing::warn!("{}", msg);
+        }
+    }
+}
