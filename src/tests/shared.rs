@@ -48,6 +48,8 @@ use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::make_coinbase_transaction;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -77,7 +79,6 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
@@ -119,10 +120,8 @@ pub async fn unit_test_databases(
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
 
-    // The returned future is not `Send` without block_on().
-    use futures::executor::block_on;
-    let block_db = block_on(ArchivalState::initialize_block_index_database(&data_dir))?;
-    let peer_db = block_on(NetworkingState::initialize_peer_databases(&data_dir))?;
+    let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
 
     Ok((block_db, peer_db, data_dir))
 }
@@ -817,7 +816,8 @@ pub(crate) async fn valid_block_from_tx_for_tests(
         timestamp,
         Digest::default(),
         None,
-        &TritonProverSync::dummy(),
+        &TritonVmJobQueue::dummy(),
+        TritonVmJobPriority::default(),
     )
     .await
     .unwrap();
@@ -847,7 +847,8 @@ pub(crate) async fn valid_successor_for_tests(
     let tx = GlobalState::create_raw_transaction(
         tx_details,
         TxProvingCapability::SingleProof,
-        &TritonProverSync::dummy(),
+        &TritonVmJobQueue::dummy(),
+        TritonVmJobPriority::default(),
     )
     .await
     .unwrap();

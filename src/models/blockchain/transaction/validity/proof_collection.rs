@@ -9,13 +9,14 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::info;
 
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -26,7 +27,6 @@ use crate::models::blockchain::transaction::validity::removal_records_integrity:
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 
@@ -137,8 +137,9 @@ impl ProofCollection {
 
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        sync_device: &TritonProverSync,
-    ) -> Result<Self, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Self> {
         let (
             removal_records_integrity_witness,
             collect_lock_scripts_witness,
@@ -160,7 +161,8 @@ impl ProofCollection {
             .prove(
                 &removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
 
@@ -169,7 +171,8 @@ impl ProofCollection {
             .prove(
                 &collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
 
@@ -178,7 +181,8 @@ impl ProofCollection {
             .prove(
                 &kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
 
@@ -187,7 +191,8 @@ impl ProofCollection {
             .prove(
                 &collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
 
@@ -196,7 +201,11 @@ impl ProofCollection {
         for lock_script_and_witness in primitive_witness.lock_scripts_and_witnesses.iter() {
             lock_scripts_halt.push(
                 lock_script_and_witness
-                    .prove(txk_mast_hash_as_input.clone(), sync_device)
+                    .prove(
+                        txk_mast_hash_as_input.clone(),
+                        triton_vm_job_queue,
+                        priority,
+                    )
                     .await?,
             );
         }
@@ -214,7 +223,8 @@ impl ProofCollection {
                     txk_mast_hash,
                     salted_inputs_hash,
                     salted_outputs_hash,
-                    sync_device,
+                    triton_vm_job_queue,
+                    priority,
                 )
                 .await?,
             );

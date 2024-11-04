@@ -23,7 +23,6 @@ use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::*;
-use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -49,12 +48,13 @@ use super::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::proof_abstractions::tasm::program::TritonProverSync;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -68,8 +68,6 @@ use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 use crate::VERSION;
-
-pub(crate) type ProvingLock = sync_tokio::AtomicMutex<()>;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
@@ -132,10 +130,7 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    /// Lock held used to indicate that the Triton VM prover is running. Used
-    /// to ensure that only one proof is produced at a time. All calls to
-    /// Triton VM's prover (except tests) must acquire this lock.
-    pub(crate) proving_lock: ProvingLock,
+    vm_job_queue: TritonVmJobQueue,
 }
 
 impl GlobalStateLock {
@@ -153,27 +148,20 @@ impl GlobalStateLock {
             Some("GlobalState"),
             Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
         ));
-        let proving_lock = sync_tokio::AtomicMutex::<()>::from((
-            (),
-            Some("proving_lock"),
-            Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
-        ));
-
         Self {
             global_state_lock,
             cli,
-            proving_lock,
+            vm_job_queue: TritonVmJobQueue::start(),
         }
     }
 
-    /// Block execution until prover is free.
-    pub(crate) fn wait_if_busy(&self) -> TritonProverSync {
-        TritonProverSync::wait_if_busy(self.proving_lock.clone())
-    }
-
-    /// Skip proof generation if prover is busy.
-    pub(crate) fn skip_if_busy(&self) -> TritonProverSync {
-        TritonProverSync::skip_if_busy(self.proving_lock.clone())
+    /// returns reference-counted clone of the triton vm job queue.
+    ///
+    /// callers should execute resource intensive triton-vm tasks in this
+    /// queue to avoid running simultaneous tasks that could exceed hardware
+    /// capabilities.
+    pub(crate) fn vm_job_queue(&self) -> &TritonVmJobQueue {
+        &self.vm_job_queue
     }
 
     // check if mining
@@ -202,19 +190,19 @@ impl GlobalStateLock {
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<()> {
-        let prover_lock = self.proving_lock.clone();
+        let vm_job_queue = self.vm_job_queue().clone();
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos, &prover_lock)
+            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos, &vm_job_queue)
             .await
     }
 
     /// store a block (non coinbase)
     pub async fn set_new_tip(&mut self, new_block: Block) -> Result<()> {
-        let prover_lock = self.proving_lock.clone();
+        let vm_job_queue = self.vm_job_queue().clone();
         self.lock_guard_mut()
             .await
-            .set_new_tip(new_block, &prover_lock)
+            .set_new_tip(new_block, &vm_job_queue)
             .await
     }
 
@@ -698,7 +686,7 @@ impl GlobalState {
         change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-        sync_device: &TritonProverSync,
+        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: function not used because all callers got through its
         // equivalent method `create_transaction_with_prover_capability`,
@@ -710,7 +698,7 @@ impl GlobalState {
             fee,
             timestamp,
             self.net.tx_proving_capability,
-            sync_device,
+            triton_vm_job_queue,
         )
         .await
     }
@@ -727,7 +715,7 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
-        sync_device: &TritonProverSync,
+        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
@@ -771,9 +759,13 @@ impl GlobalState {
         )?;
 
         // 2. Create the transaction
-        let transaction =
-            Self::create_raw_transaction(transaction_details, prover_capability, sync_device)
-                .await?;
+        let transaction = Self::create_raw_transaction(
+            transaction_details,
+            prover_capability,
+            triton_vm_job_queue,
+            TritonVmJobPriority::High,
+        )
+        .await?;
 
         Ok((transaction, maybe_change_output))
     }
@@ -808,13 +800,19 @@ impl GlobalState {
     pub(crate) async fn create_raw_transaction(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonProverSync,
-    ) -> Result<Transaction, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
-        Self::create_transaction_from_data_worker(transaction_details, proving_power, sync_device)
-            .await
+        Self::create_transaction_from_data_worker(
+            transaction_details,
+            proving_power,
+            triton_vm_job_queue,
+            priority,
+        )
+        .await
     }
 
     // note: this executes the prover which can take a very
@@ -825,8 +823,9 @@ impl GlobalState {
     async fn create_transaction_from_data_worker(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonProverSync,
-    ) -> Result<Transaction, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Transaction> {
         let TransactionDetails {
             tx_inputs,
             tx_outputs,
@@ -876,10 +875,10 @@ impl GlobalState {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(&primitive_witness, sync_device).await?,
+                ProofCollection::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, sync_device).await?,
+                SingleProof::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
             ),
         };
 
@@ -1320,8 +1319,12 @@ impl GlobalState {
     /// The new block is assumed to be valid, also wrt. to proof-of-work.
     /// The new block will be set as the new tip, regardless of its
     /// cumulative proof-of-work number.
-    pub async fn set_new_tip(&mut self, new_block: Block, prover_lock: &ProvingLock) -> Result<()> {
-        self.set_new_tip_internal(new_block, vec![], prover_lock)
+    pub async fn set_new_tip(
+        &mut self,
+        new_block: Block,
+        vm_job_queue: &TritonVmJobQueue,
+    ) -> Result<()> {
+        self.set_new_tip_internal(new_block, vec![], vm_job_queue)
             .await
     }
 
@@ -1332,9 +1335,9 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-        prover_lock: &ProvingLock,
+        vm_job_queue: &TritonVmJobQueue,
     ) -> Result<()> {
-        self.set_new_tip_internal(new_block, miner_reward_utxo_infos, prover_lock)
+        self.set_new_tip_internal(new_block, miner_reward_utxo_infos, vm_job_queue)
             .await
     }
 
@@ -1345,7 +1348,7 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-        prover_lock: &ProvingLock,
+        vm_job_queue: &TritonVmJobQueue,
     ) -> Result<()> {
         // note: we make this fn internal so we can log its duration and ensure it will
         // never be called directly by another fn, without the timings.
@@ -1353,7 +1356,7 @@ impl GlobalState {
             myself: &mut GlobalState,
             new_block: Block,
             miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-            prover_lock: &ProvingLock,
+            vm_job_queue: &TritonVmJobQueue,
         ) -> Result<()> {
             // Apply the updates
             myself
@@ -1414,10 +1417,14 @@ impl GlobalState {
 
             // Update mempool with UTXOs from this block. This is done by removing all transaction
             // that became invalid/was mined by this block.
-
             myself
                 .mempool
-                .update_with_block_and_predecessor(&new_block, &tip_parent, prover_lock)
+                .update_with_block_and_predecessor(
+                    &new_block,
+                    &tip_parent,
+                    vm_job_queue,
+                    TritonVmJobPriority::Highest,
+                )
                 .await;
 
             myself.chain.light_state_mut().set_block(new_block);
@@ -1432,7 +1439,7 @@ impl GlobalState {
             self,
             new_block,
             miner_reward_utxo_infos,
-            prover_lock
+            vm_job_queue,
         ))
     }
 
@@ -1623,7 +1630,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months - one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy()
+                &TritonVmJobQueue::dummy()
             )
             .await
             .is_err());
@@ -1639,7 +1646,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1678,7 +1685,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1835,7 +1842,7 @@ mod global_state_tests {
         let mut rng = thread_rng();
 
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let proving_lock = alice.proving_lock.clone();
+        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -1856,7 +1863,7 @@ mod global_state_tests {
                     alice_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
-                &proving_lock,
+                &alice_vm_job_queue,
             )
             .await
             .unwrap();
@@ -1881,7 +1888,7 @@ mod global_state_tests {
         for _ in 0..5 {
             let (next_block, _, _) = make_mock_block(&parent_block, None, bob_address, rng.gen());
             alice
-                .set_new_tip(next_block.clone(), &proving_lock)
+                .set_new_tip(next_block.clone(), &alice_vm_job_queue)
                 .await
                 .unwrap();
             parent_block = next_block;
@@ -1965,8 +1972,7 @@ mod global_state_tests {
         let network = Network::Main;
         let mut rng = thread_rng();
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let proving_lock = alice.proving_lock.clone();
-
+        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -1990,7 +1996,7 @@ mod global_state_tests {
                         alice_spending_key.privacy_preimage,
                         UtxoNotifier::OwnMinerComposeBlock,
                     )],
-                    &proving_lock,
+                    &alice_vm_job_queue,
                 )
                 .await
                 .unwrap();
@@ -2014,7 +2020,7 @@ mod global_state_tests {
         let fork_a_block = a_blocks.last().unwrap().to_owned();
         for branch_block in a_blocks.into_iter() {
             alice
-                .set_new_tip(branch_block, &proving_lock)
+                .set_new_tip(branch_block, &alice_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -2031,7 +2037,7 @@ mod global_state_tests {
         let fork_b_block = b_blocks.last().unwrap().to_owned();
         for branch_block in b_blocks.into_iter() {
             alice
-                .set_new_tip(branch_block, &proving_lock)
+                .set_new_tip(branch_block, &alice_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -2074,7 +2080,7 @@ mod global_state_tests {
         let fork_c_block = c_blocks.last().unwrap().to_owned();
         for branch_block in c_blocks.into_iter() {
             alice
-                .set_new_tip(branch_block, &proving_lock)
+                .set_new_tip(branch_block, &alice_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -2212,7 +2218,7 @@ mod global_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2238,7 +2244,8 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -2249,7 +2256,8 @@ mod global_state_tests {
             in_seven_months,
             Digest::default(),
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();
@@ -2375,7 +2383,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2412,7 +2420,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2434,11 +2442,17 @@ mod global_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap()
-            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_2 = Block::make_block_template(
@@ -2447,7 +2461,8 @@ mod global_state_tests {
             in_eight_months,
             Digest::default(),
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();
@@ -2478,7 +2493,8 @@ mod global_state_tests {
             now,
             Digest::default(),
             None,
-            &TritonProverSync::dummy(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
         )
         .await
         .unwrap();
@@ -2709,7 +2725,7 @@ mod global_state_tests {
             for claim_coinbase in [false, true] {
                 let mut global_state_lock =
                     mock_genesis_global_state(network, 2, wallet_secret.clone()).await;
-                let proving_lock = global_state_lock.proving_lock.clone();
+                let vm_job_queue = global_state_lock.vm_job_queue().clone();
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_coinbase {
@@ -2717,7 +2733,7 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             block_1a.clone(),
                             vec![cb_1a.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
@@ -2725,7 +2741,7 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             block_2a.clone(),
                             vec![cb_2a.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
@@ -2733,7 +2749,7 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             block_3a.clone(),
                             vec![cb_3a.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
@@ -2741,25 +2757,25 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             block_1a.clone(),
                             vec![cb_1a.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
                 } else {
                     global_state
-                        .set_new_tip(block_1a.clone(), &proving_lock)
+                        .set_new_tip(block_1a.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_tip(block_2a.clone(), &proving_lock)
+                        .set_new_tip(block_2a.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_tip(block_3a.clone(), &proving_lock)
+                        .set_new_tip(block_3a.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_tip(block_1a.clone(), &proving_lock)
+                        .set_new_tip(block_1a.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                 }
@@ -2780,7 +2796,7 @@ mod global_state_tests {
                 let (block_1b, _, _) =
                     make_mock_block(&genesis_block, None, spending_key.to_address(), random());
                 global_state
-                    .set_new_tip(block_1b.clone(), &proving_lock)
+                    .set_new_tip(block_1b.clone(), &vm_job_queue)
                     .await
                     .unwrap();
                 assert_correct_global_state(
@@ -2800,7 +2816,7 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             next_block.clone(),
                             vec![next_cb.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
@@ -2808,7 +2824,7 @@ mod global_state_tests {
                         .set_new_self_mined_tip(
                             next_block.clone(),
                             vec![next_cb.clone()],
-                            &proving_lock,
+                            &vm_job_queue,
                         )
                         .await
                         .unwrap();
@@ -2847,25 +2863,25 @@ mod global_state_tests {
                 let expected_num_mutxos = if claim_cb { 2 } else { 1 };
                 let mut global_state_lock =
                     mock_genesis_global_state(network, 2, wallet_secret.clone()).await;
-                let proving_lock = global_state_lock.proving_lock.clone();
+                let vm_job_queue = global_state_lock.vm_job_queue().clone();
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_cb {
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &proving_lock)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &vm_job_queue)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &proving_lock)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &vm_job_queue)
                         .await
                         .unwrap();
                 } else {
                     global_state
-                        .set_new_tip(block_1.clone(), &proving_lock)
+                        .set_new_tip(block_1.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                     global_state
-                        .set_new_tip(block_1.clone(), &proving_lock)
+                        .set_new_tip(block_1.clone(), &vm_job_queue)
                         .await
                         .unwrap();
                 }
@@ -3012,7 +3028,7 @@ mod global_state_tests {
 
             // in alice wallet: send pre-mined funds to bob
             let block_1 = {
-                let alice_proving_lock = alice_state_lock.proving_lock.clone();
+                let vm_job_queue = alice_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
 
                 // store and verify alice's initial balance from pre-mine.
@@ -3041,7 +3057,7 @@ mod global_state_tests {
                         alice_to_bob_fee,
                         seven_months_post_launch,
                         TxProvingCapability::SingleProof,
-                        &TritonProverSync::dummy(),
+                        &vm_job_queue,
                     )
                     .await
                     .unwrap();
@@ -3067,14 +3083,15 @@ mod global_state_tests {
                     seven_months_post_launch,
                     Digest::default(),
                     None,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 )
                 .await
                 .unwrap();
 
                 // alice's node learns of the new block.
                 alice_state_mut
-                    .set_new_tip(block_1.clone(), &alice_proving_lock)
+                    .set_new_tip(block_1.clone(), &vm_job_queue)
                     .await
                     .unwrap();
 
@@ -3110,12 +3127,12 @@ mod global_state_tests {
 
             // in bob's wallet
             {
-                let bob_proving_lock = bob_state_lock.proving_lock.clone();
+                let bob_vm_job_queue = bob_state_lock.vm_job_queue().clone();
                 let mut bob_state_mut = bob_state_lock.lock_guard_mut().await;
 
                 // bob's node adds block1 to the chain.
                 bob_state_mut
-                    .set_new_tip(block_1.clone(), &bob_proving_lock)
+                    .set_new_tip(block_1.clone(), &bob_vm_job_queue)
                     .await
                     .unwrap();
 
@@ -3140,7 +3157,7 @@ mod global_state_tests {
                 let mut alice_restored_state_lock =
                     mock_genesis_global_state(network, 3, WalletSecret::devnet_wallet()).await;
 
-                let alice_proving_lock = alice_restored_state_lock.proving_lock.clone();
+                let alice_vm_job_queue = alice_restored_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_restored_state_lock.lock_guard_mut().await;
 
                 // check alice's initial balance after genesis.
@@ -3154,7 +3171,7 @@ mod global_state_tests {
 
                 // now alice must replay old blocks.  (there's only one so far)
                 alice_state_mut
-                    .set_new_tip(block_1, &alice_proving_lock)
+                    .set_new_tip(block_1, &alice_vm_job_queue)
                     .await
                     .unwrap();
 

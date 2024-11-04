@@ -961,12 +961,13 @@ pub(crate) mod test {
     use tasm_lib::triton_vm::prelude::PublicInput;
 
     use super::MergeWitness;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::validity::merge::Merge;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::triton_vm::prelude::Digest;
 
@@ -1021,12 +1022,20 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(&primitive_witness_1, &TritonProverSync::dummy())
-            .await
-            .unwrap();
-        let single_proof_2 = SingleProof::produce(&primitive_witness_2, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+        let single_proof_1 = SingleProof::produce(
+            &primitive_witness_1,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
+        let single_proof_2 = SingleProof::produce(
+            &primitive_witness_2,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,
@@ -1058,12 +1067,20 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let left_proof = SingleProof::produce(&left, &TritonProverSync::dummy())
-            .await
-            .unwrap();
-        let right_proof = SingleProof::produce(&right, &TritonProverSync::dummy())
-            .await
-            .unwrap();
+        let left_proof = SingleProof::produce(
+            &left,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
+        let right_proof = SingleProof::produce(
+            &right,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
 
         MergeWitness::from_transactions(
             left.kernel,

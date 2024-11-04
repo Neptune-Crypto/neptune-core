@@ -17,6 +17,7 @@ use tracing::*;
 use transaction_output::TxOutput;
 use twenty_first::math::digest::Digest;
 
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
@@ -297,11 +298,12 @@ pub(crate) async fn make_coinbase_transaction(
     // It's important to not hold any locks (not even read-locks), as
     // that prevents peers from connecting to this node.
     info!("Start: generate single proof for coinbase transaction");
-    let wait_if_busy = global_state_lock.wait_if_busy();
+    let vm_job_queue = global_state_lock.vm_job_queue();
     let transaction = GlobalState::create_raw_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
-        &wait_if_busy,
+        vm_job_queue,
+        TritonVmJobPriority::High,
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
@@ -350,7 +352,7 @@ pub(crate) async fn create_block_transaction(
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
     let mut block_transaction = coinbase_transaction;
-    let wait_if_busy = global_state_lock.wait_if_busy();
+    let vm_job_queue = global_state_lock.vm_job_queue();
     for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
         info!(
             "Merging transaction {} / {}",
@@ -361,7 +363,8 @@ pub(crate) async fn create_block_transaction(
             block_transaction,
             transaction_to_include,
             rng.gen(),
-            &wait_if_busy,
+            vm_job_queue,
+            TritonVmJobPriority::High,
         )
         .await
         .expect("Must be able to merge transactions in mining context");
@@ -401,10 +404,7 @@ pub async fn mine(
             // Build the block template and spawn the worker task to mine on it
             let now = Timestamp::now();
 
-            // TODO: Spawn a task for generating this transaction, such that it
-            // can be aborted on shutdown.
-            // TODO: Read this value from CLI arguments.
-            let guesser_fee_fraction = 0f64;
+            let guesser_fee_fraction = 0.5f64; // TODO: Set this through CLI!
             let (transaction, coinbase_utxo_info) = create_block_transaction(
                 &latest_block,
                 &global_state_lock,
@@ -412,14 +412,15 @@ pub async fn mine(
                 guesser_fee_fraction,
             )
             .await?;
-            let proof_sync = global_state_lock.wait_if_busy();
+            let triton_vm_job_queue = global_state_lock.vm_job_queue();
             let block_template = Block::make_block_template(
                 &latest_block,
                 transaction,
                 now,
                 Digest::default(),
                 None,
-                &proof_sync,
+                triton_vm_job_queue,
+                TritonVmJobPriority::High,
             )
             .await;
             let block_template = match block_template {
@@ -572,8 +573,8 @@ pub(crate) mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
@@ -727,7 +728,7 @@ pub(crate) mod mine_loop_tests {
                 NeptuneCoins::new(1),
                 now,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -759,7 +760,8 @@ pub(crate) mod mine_loop_tests {
                 now,
                 Digest::default(),
                 None,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::High,
             )
             .await
             .unwrap();
@@ -794,7 +796,8 @@ pub(crate) mod mine_loop_tests {
                 now,
                 Digest::default(),
                 None,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1229,7 +1232,7 @@ pub(crate) mod mine_loop_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1253,7 +1256,7 @@ pub(crate) mod mine_loop_tests {
                 fee,
                 in_eight_months,
                 TxProvingCapability::PrimitiveWitness,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();

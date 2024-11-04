@@ -92,9 +92,10 @@ mod test {
     use tasm_lib::Digest;
 
     use super::GenerateLockScriptClaimTemplate;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 
     impl Function for GenerateLockScriptClaimTemplate {
         fn rust_shadow(
@@ -153,10 +154,12 @@ mod test {
                 .unwrap()
                 .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 ))
                 .unwrap();
 

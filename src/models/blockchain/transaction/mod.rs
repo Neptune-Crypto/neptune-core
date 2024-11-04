@@ -1,8 +1,9 @@
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -31,7 +32,6 @@ use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -275,8 +275,9 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
-        sync_device: &TritonProverSync,
-    ) -> Result<Transaction, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Transaction> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
         let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
@@ -314,7 +315,12 @@ impl Transaction {
         let update_nondeterminism = update_witness.nondeterminism();
         info!("updating transaction; starting update proof ...");
         let update_proof = Update
-            .prove(&update_claim, update_nondeterminism, sync_device)
+            .prove(
+                &update_claim,
+                update_nondeterminism,
+                triton_vm_job_queue,
+                priority,
+            )
             .await?;
         info!("done.");
 
@@ -326,7 +332,8 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
         info!("done.");
@@ -344,7 +351,8 @@ impl Transaction {
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
-        sync_device: &TritonProverSync,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
             TransactionProof::Witness(primitive_witness) => {
@@ -360,7 +368,8 @@ impl Transaction {
                     previous_mutator_set_accumulator,
                     mutator_set_update,
                     proof,
-                    sync_device,
+                    triton_vm_job_queue,
+                    priority,
                 )
                 .await
                 .map_err(|_| TransactionProofError::ProverLockWasTaken)
@@ -390,8 +399,9 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        sync_device: &TritonProverSync,
-    ) -> Result<Transaction, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
@@ -428,7 +438,12 @@ impl Transaction {
         info!("Start: creating merge proof");
         let merge_claim = merge_witness.claim();
         let merge_proof = Merge
-            .prove(&merge_claim, merge_witness.nondeterminism(), sync_device)
+            .prove(
+                &merge_claim,
+                merge_witness.nondeterminism(),
+                triton_vm_job_queue,
+                priority,
+            )
             .await?;
         info!("Done: creating merge proof");
         let new_single_proof_witness =
@@ -439,7 +454,8 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
         info!("Done: creating new single proof");
@@ -563,9 +579,13 @@ mod transaction_tests {
     #[allow(clippy::needless_return)]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
-            let as_single_proof = SingleProof::produce(&to_be_updated, &TritonProverSync::dummy())
-                .await
-                .unwrap();
+            let as_single_proof = SingleProof::produce(
+                &to_be_updated,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
             let original_tx = Transaction {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
@@ -578,7 +598,8 @@ mod transaction_tests {
                 .new_with_updated_mutator_set_records(
                     &to_be_updated.mutator_set_accumulator,
                     &mutator_set_update,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 )
                 .await
                 .unwrap();

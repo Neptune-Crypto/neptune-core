@@ -8,14 +8,14 @@ use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
-use tokio::sync::TryLockError;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
 use super::utxo::Utxo;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -182,14 +182,16 @@ impl LockScriptAndWitness {
     pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
-        sync_device: &TritonProverSync,
-    ) -> Result<Proof, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
+    ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
         prove_consensus_program(
             self.program.clone(),
             claim,
             self.nondeterminism(),
-            sync_device,
+            triton_vm_job_queue,
+            priority,
         )
         .await
     }

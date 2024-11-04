@@ -213,8 +213,9 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 
     #[test]
     fn unit_test() {
@@ -262,10 +263,12 @@ mod tests {
                 .unwrap()
                 .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 ))
                 .unwrap();
 

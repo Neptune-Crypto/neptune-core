@@ -96,6 +96,8 @@ pub(crate) mod test {
     use proptest_arbitrary_interop::arb;
 
     use super::BlockPrimitiveWitness;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;
@@ -106,7 +108,6 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
     fn arbitrary_block_transaction_with_mutator_set(
@@ -124,31 +125,39 @@ pub(crate) mod test {
         )
             .prop_map(|((primwit_inputs, primwit_coinbase), shuffle_seed)| {
                 let mutator_set_accumulator = primwit_inputs.mutator_set_accumulator.clone();
-                let single_proof_inputs = futures::executor::block_on(SingleProof::produce(
-                    &primwit_inputs,
-                    &TritonProverSync::dummy(),
-                ))
-                .unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _guard = rt.enter();
+
+                let single_proof_inputs = rt
+                    .block_on(SingleProof::produce(
+                        &primwit_inputs,
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::default(),
+                    ))
+                    .unwrap();
 
                 let tx_inputs = Transaction {
                     kernel: primwit_inputs.kernel,
                     proof: TransactionProof::SingleProof(single_proof_inputs),
                 };
-                let single_proof_coinbase = futures::executor::block_on(SingleProof::produce(
-                    &primwit_coinbase,
-                    &TritonProverSync::dummy(),
-                ))
-                .unwrap();
+                let single_proof_coinbase = rt
+                    .block_on(SingleProof::produce(
+                        &primwit_coinbase,
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::default(),
+                    ))
+                    .unwrap();
                 let tx_coinbase = Transaction {
                     kernel: primwit_coinbase.kernel,
                     proof: TransactionProof::SingleProof(single_proof_coinbase),
                 };
 
                 (
-                    futures::executor::block_on(tx_inputs.merge_with(
+                    rt.block_on(tx_inputs.merge_with(
                         tx_coinbase,
                         shuffle_seed,
-                        &TritonProverSync::dummy(),
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::default(),
                     ))
                     .unwrap(),
                     mutator_set_accumulator,
