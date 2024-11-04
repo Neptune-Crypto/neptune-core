@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::ops::Add;
+use std::ops::AddAssign;
 use std::ops::Mul;
 use std::ops::Sub;
 use std::time::SystemTime;
@@ -76,6 +77,12 @@ impl Sub for Timestamp {
 
     fn sub(self, rhs: Self) -> Self::Output {
         Timestamp(self.0 - rhs.0)
+    }
+}
+
+impl AddAssign for Timestamp {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs
     }
 }
 

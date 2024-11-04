@@ -779,7 +779,7 @@ pub(crate) mod test {
             .await
             .unwrap();
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
-        updated.kernel.timestamp = updated.kernel.timestamp + Timestamp::seconds(num_seconds);
+        updated.kernel.timestamp += Timestamp::seconds(num_seconds);
 
         UpdateWitness::from_old_transaction(
             old_pw.kernel,
@@ -820,7 +820,7 @@ pub(crate) mod test {
         let mut new_kernel = primitive_witness.kernel.clone();
         new_kernel.mutator_set_hash = new_msa.hash();
 
-        new_kernel.timestamp = new_kernel.timestamp + Timestamp::days(1);
+        new_kernel.timestamp += Timestamp::days(1);
         assert_ne!(
             new_msa, primitive_witness.mutator_set_accumulator,
             "must update mutator set too in order for test to be meaningful"
