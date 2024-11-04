@@ -449,9 +449,9 @@ mod wallet_tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::GlobalStateLock;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
-    use crate::tests::shared::mock_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
 
@@ -933,7 +933,7 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        let block_1 = mock_block_with_transaction(&genesis_block, tx);
+        let block_1 = invalid_block_with_transaction(&genesis_block, tx);
 
         // Update wallet state with block_1
         assert!(

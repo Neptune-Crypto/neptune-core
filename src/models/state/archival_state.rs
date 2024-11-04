@@ -953,6 +953,7 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
+    use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
@@ -980,6 +981,7 @@ mod archival_state_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
@@ -1356,7 +1358,7 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() -> Result<()> {
+    async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() {
         // Make a rollback of multiple blocks that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
@@ -1364,45 +1366,47 @@ mod archival_state_tests {
 
         let network = Network::RegTest;
         let mut rng = thread_rng();
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let alice_wallet = WalletSecret::devnet_wallet();
         let genesis_block = Block::genesis_block(network);
-        let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let own_receiving_address = genesis_wallet
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let mut state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let alice_address = alice_key.to_address();
+        let mut alice = mock_genesis_global_state(network, 42, alice_wallet).await;
 
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
-        let in_seven_months = Timestamp::now() + Timestamp::months(7);
+        let twenty_outputs = (0..20)
+            .map(|_| {
+                TxOutput::onchain_native_currency(
+                    NeptuneCoins::new(1),
+                    rng.gen(),
+                    alice_address.into(),
+                )
+            })
+            .collect_vec();
+        let fee = NeptuneCoins::zero();
 
-        for _ in 0..10 {
-            // Create next block with inputs and outputs
-
-            let removal_records = {
-                let (_, _, rr0) = mock_item_mp_rr_for_init_msa();
-                let (_, _, rr1) = mock_item_mp_rr_for_init_msa();
-                vec![rr0, rr1]
-            };
-            let addition_records = vec![];
-
-            let tx = make_mock_transaction_with_mutator_set_hash(
-                removal_records,
-                addition_records,
-                previous_block.body().mutator_set_accumulator.hash(),
-            );
-            let next_block = Block::block_template_invalid_proof(
-                &previous_block,
-                tx,
-                in_seven_months,
-                Digest::default(),
-                None,
-            );
+        let num_blocks = 20;
+        for _ in 0..num_blocks {
+            let timestamp = previous_block.header().timestamp + Timestamp::months(7);
+            let (tx, _) = alice
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    twenty_outputs.clone().into(),
+                    alice_key.into(),
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    timestamp,
+                    TxProvingCapability::PrimitiveWitness,
+                    &TritonProverSync::dummy(),
+                )
+                .await
+                .unwrap();
+            let next_block = invalid_block_with_transaction(&previous_block, tx);
 
             // 2. Update archival-mutator set with produced block
-            state_lock.set_new_tip(next_block.clone()).await.unwrap();
+            alice.set_new_tip(next_block.clone()).await.unwrap();
 
             previous_block = next_block;
         }
@@ -1410,23 +1414,48 @@ mod archival_state_tests {
         // Verify that MS-update finder works for this many blocks.
         positive_prop_ms_update_to_tip(
             &genesis_block.body().mutator_set_accumulator,
-            state_lock.lock_guard().await.chain.archival_state(),
-            10,
+            alice.lock_guard().await.chain.archival_state(),
+            num_blocks,
         )
         .await;
 
+        // Verify that both active and inactive SWBF are non-empty.
+        assert!(
+            !alice
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .swbf_active
+                .sbf
+                .is_empty(),
+            "Active window must be non-empty after many UTXOs are spent"
+        );
+        assert!(
+            !alice
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .swbf_inactive
+                .num_leafs()
+                .await
+                .is_zero(),
+            "Inactive SWBF must be non-empty after many UTXOs are spent"
+        );
+
         {
             // 3. Create competing block 1 and treat it as new tip
-            let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
-                &genesis_block,
-                None,
-                own_receiving_address,
-                rng.gen(),
-            );
+            let (mock_block_1b, _, _) =
+                make_mock_block(&genesis_block, None, alice_address, rng.gen());
             num_utxos += mock_block_1b.body().transaction_kernel.outputs.len();
 
-            // 4. Update mutator set with that and verify rollback
-            state_lock
+            // 4. Update mutator set with this new block of height 1.
+            alice
                 .lock_guard_mut()
                 .await
                 .chain
@@ -1438,10 +1467,22 @@ mod archival_state_tests {
 
         // 5. Verify correct rollback
 
-        // Verify that the new state of the archival mutator set contains
-        // two UTXOs and that none have been removed
+        // Verify that the new state of the mutator set contains exactly the
+        // number of AOCL records defined in the premine, and zero removals.
+        assert_eq!(
+            num_utxos,
+            alice.lock_guard()
+            .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .aocl
+                .num_leafs().await as usize,
+            "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
+        );
         assert!(
-            state_lock
+            alice
                 .lock_guard()
                 .await
                 .chain
@@ -1453,21 +1494,20 @@ mod archival_state_tests {
                 .is_empty(),
             "Active window must be empty when no UTXOs have been spent"
         );
-
-        assert_eq!(
-            num_utxos,
-            state_lock.lock_guard()
-            .await
+        assert!(
+            alice
+                .lock_guard()
+                .await
                 .chain
                 .archival_state()
                 .archival_mutator_set
                 .ams()
-                .aocl
-                .num_leafs().await as usize,
-            "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
+                .swbf_inactive
+                .num_leafs()
+                .await
+                .is_zero(),
+            "Inactive SWBF must be empty"
         );
-
-        Ok(())
     }
 
     #[traced_test]

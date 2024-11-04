@@ -602,7 +602,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
 /// Create a block containing the supplied transaction.
 ///
 /// The returned block has an invalid block proof.
-pub(crate) fn mock_block_with_transaction(
+pub(crate) fn invalid_block_with_transaction(
     previous_block: &Block,
     transaction: Transaction,
 ) -> Block {
@@ -621,10 +621,8 @@ pub(crate) fn mock_block_with_transaction(
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
-    let ms_update = MutatorSetUpdate::new(
-        transaction.kernel.inputs.clone(),
-        transaction.kernel.outputs.clone(),
-    );
+    let ms_update =
+        Block::ms_update_from_predecessor_and_new_tx_kernel(previous_block, &transaction.kernel);
     ms_update
         .apply_to_accumulator(&mut next_mutator_set)
         .unwrap();

@@ -933,7 +933,7 @@ mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction;
-    use crate::tests::shared::mock_block_with_transaction;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
@@ -1264,7 +1264,7 @@ mod block_tests {
         let mut transaction = make_mock_transaction(vec![], vec![]);
         transaction.kernel.fee = NeptuneCoins::from_nau(1337.into())
             .expect("given number should be valid NeptuneCoins amount");
-        let mut block = mock_block_with_transaction(&genesis_block, transaction);
+        let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
         let preimage = thread_rng().gen::<Digest>();
         block.set_header_nonce(preimage.hash());
