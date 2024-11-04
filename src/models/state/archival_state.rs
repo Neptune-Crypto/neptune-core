@@ -891,32 +891,19 @@ impl ArchivalState {
                     .expect("Block must have parent")
             };
 
-            let mut addition_records = [
-                parent.guesser_fee_addition_records(),
-                apply_forward_block
-                    .kernel
-                    .body
-                    .transaction_kernel
-                    .outputs
-                    .clone(),
-            ]
-            .concat();
-            addition_records.reverse();
-            let mut removal_records = apply_forward_block
-                .kernel
-                .body
-                .transaction_kernel
-                .inputs
-                .clone();
-            removal_records.reverse();
-            let mut removal_records: Vec<&mut RemovalRecord> =
-                removal_records.iter_mut().collect::<Vec<_>>();
+            let MutatorSetUpdate {
+                mut removals,
+                mut additions,
+            } = Block::mutator_set_update_from_consecutive_pair(&parent, &apply_forward_block);
+            additions.reverse();
+            removals.reverse();
+            let mut removals: Vec<&mut RemovalRecord> = removals.iter_mut().collect::<Vec<_>>();
 
             // Add items, thus adding the output UTXOs to the mutator set
-            while let Some(addition_record) = addition_records.pop() {
+            while let Some(addition_record) = additions.pop() {
                 // Batch-update all removal records to keep them valid after next addition
                 RemovalRecord::batch_update_from_addition(
-                    &mut removal_records,
+                    &mut removals,
                     &self.archival_mutator_set.ams().accumulator().await,
                 );
 
@@ -928,9 +915,9 @@ impl ArchivalState {
             }
 
             // Remove items, thus removing the input UTXOs from the mutator set
-            while let Some(removal_record) = removal_records.pop() {
+            while let Some(removal_record) = removals.pop() {
                 // Batch-update all removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
+                RemovalRecord::batch_update_from_remove(&mut removals, removal_record);
 
                 // Remove the element from the mutator set
                 self.archival_mutator_set

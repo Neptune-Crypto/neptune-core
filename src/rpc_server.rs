@@ -1587,7 +1587,7 @@ mod rpc_server_tests {
                     cb_utxo,
                     cb_output_randomness,
                     wallet_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMinerPrepareBlock,
+                    UtxoNotifier::OwnMinerComposeBlock,
                 )],
                 &prover_lock,
             )

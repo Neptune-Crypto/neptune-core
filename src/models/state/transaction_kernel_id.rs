@@ -98,16 +98,13 @@ mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
 
-    use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
-    use crate::tests::shared::mock_block_from_transaction_and_msa;
 
     #[test]
     fn txid_value_is_constant_under_transaction_update() {
         // Verify that the function `txid` returns the same digest before and
         // after a transaction has been updated wrt. a new block.
-        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
 
         let [to_be_updated, mined] =
@@ -116,16 +113,11 @@ mod tests {
                 .unwrap()
                 .current();
         let tx_id_original = to_be_updated.kernel.txid();
-        let block = mock_block_from_transaction_and_msa(
-            mined.kernel,
-            mined.mutator_set_accumulator,
-            network,
-        );
 
-        let updated = Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
-            to_be_updated,
-            &block,
-        );
+        let additions = mined.kernel.outputs;
+        let removals = mined.kernel.inputs.clone();
+        let updated =
+            Transaction::new_with_primitive_witness_ms_data(to_be_updated, additions, removals);
 
         assert_eq!(tx_id_original, updated.kernel.txid());
     }

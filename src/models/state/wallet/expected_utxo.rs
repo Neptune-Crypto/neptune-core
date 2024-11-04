@@ -82,7 +82,7 @@ impl ExpectedUtxo {
     Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum_macros::Display,
 )]
 pub enum UtxoNotifier {
-    OwnMinerPrepareBlock,
+    OwnMinerComposeBlock,
     OwnMinerGuessNonce,
     Cli,
     Myself,

@@ -698,15 +698,9 @@ impl Block {
         //      current block's set of transaction outputs and iii) the current
         //      block's set of transaction inputs, gives rise to the current
         //      block's mutator set
-        let all_addition_records = [
-            previous_block.guesser_fee_addition_records(),
-            self.kernel.body.transaction_kernel.outputs.clone(),
-        ]
-        .concat();
-        let mutator_set_update = MutatorSetUpdate::new(
-            self.kernel.body.transaction_kernel.inputs.clone(),
-            all_addition_records,
-        );
+
+        let mutator_set_update =
+            Block::mutator_set_update_from_consecutive_pair(previous_block, self);
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
         if let Err(err) = ms_update_result {
@@ -890,6 +884,31 @@ impl Block {
                 )
             })
             .collect_vec()
+    }
+
+    pub(crate) fn ms_update_from_predecessor_and_new_tx_kernel(
+        predecessor_block: &Block,
+        new_transaction_kernel: &TransactionKernel,
+    ) -> MutatorSetUpdate {
+        let removals = new_transaction_kernel.inputs.to_owned();
+        let additions = [
+            predecessor_block.guesser_fee_addition_records(),
+            new_transaction_kernel.outputs.clone(),
+        ]
+        .concat();
+
+        MutatorSetUpdate::new(removals, additions)
+    }
+
+    /// Return the mutator set update induced by a consecutive pair of blocks.
+    pub(crate) fn mutator_set_update_from_consecutive_pair(
+        predecessor: &Block,
+        current: &Block,
+    ) -> MutatorSetUpdate {
+        Self::ms_update_from_predecessor_and_new_tx_kernel(
+            predecessor,
+            &current.body().transaction_kernel,
+        )
     }
 }
 

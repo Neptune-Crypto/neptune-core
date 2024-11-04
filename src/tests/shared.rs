@@ -55,7 +55,6 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;

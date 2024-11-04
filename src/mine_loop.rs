@@ -310,7 +310,7 @@ pub(crate) async fn make_coinbase_transaction(
         coinbase_output.utxo(),
         coinbase_output.sender_randomness(),
         coinbase_recipient_spending_key.privacy_preimage,
-        UtxoNotifier::OwnMinerPrepareBlock,
+        UtxoNotifier::OwnMinerComposeBlock,
     );
 
     Ok((transaction, utxo_info_for_coinbase))

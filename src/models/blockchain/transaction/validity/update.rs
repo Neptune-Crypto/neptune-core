@@ -712,6 +712,8 @@ pub(crate) mod test {
     use tasm_lib::Digest;
 
     use super::*;
+    use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+    use crate::models::blockchain::block::Block;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -760,11 +762,18 @@ pub(crate) mod test {
             &newly_confirmed_records,
         );
 
-        let (mut updated, new_msa) = Transaction::new_with_primitive_witness_ms_data(
+        let mut updated = Transaction::new_with_primitive_witness_ms_data(
             old_pw.clone(),
-            mined.kernel.outputs,
-            mined.kernel.inputs,
+            mined.kernel.outputs.clone(),
+            mined.kernel.inputs.clone(),
         );
+
+        // Not including guesser-UTXOs since they're not included in the mined
+        // tx.
+        let mut new_mutator_set_accumulator = old_pw.mutator_set_accumulator.clone();
+        MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs)
+            .apply_to_accumulator(&mut new_mutator_set_accumulator)
+            .unwrap();
 
         let old_proof = SingleProof::produce(&old_pw, &TritonProverSync::dummy())
             .await
@@ -777,7 +786,7 @@ pub(crate) mod test {
             old_proof,
             old_pw.mutator_set_accumulator,
             updated.kernel,
-            new_msa,
+            new_mutator_set_accumulator,
             aocl_successor_proof,
         )
     }

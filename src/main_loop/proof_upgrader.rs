@@ -329,7 +329,7 @@ impl UpgradeJob {
                 let ret = Transaction::new_with_updated_mutator_set_records_given_proof(
                     old_kernel,
                     &old_mutator_set,
-                    mutator_set_update,
+                    &mutator_set_update,
                     old_single_proof,
                     priority,
                 )

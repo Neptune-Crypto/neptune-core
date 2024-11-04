@@ -1252,7 +1252,7 @@ mod tests {
                     cb_utxo,
                     cb_sender_randomness,
                     alice_key.privacy_preimage,
-                    UtxoNotifier::OwnMinerPrepareBlock,
+                    UtxoNotifier::OwnMinerComposeBlock,
                 )],
                 &alice_proving_lock,
             )
@@ -1362,7 +1362,7 @@ mod tests {
                 block_3a_coinbase_utxo,
                 block_3a_coinbase_sender_randomness,
                 bob_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMinerPrepareBlock,
+                UtxoNotifier::OwnMinerComposeBlock,
             )],
             &bob_proving_lock,
         )

@@ -47,7 +47,6 @@ use validity::update::UpdateWitness;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
-use super::block::Block;
 use super::shared::Hash;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::proof::Proof;
@@ -182,7 +181,7 @@ impl Transaction {
         old_primitive_witness: PrimitiveWitness,
         new_addition_records: Vec<AdditionRecord>,
         mut new_removal_records: Vec<RemovalRecord>,
-    ) -> (Transaction, MutatorSetAccumulator) {
+    ) -> Transaction {
         new_removal_records.reverse();
         let mut block_removal_records: Vec<&mut RemovalRecord> =
             new_removal_records.iter_mut().collect::<Vec<_>>();
@@ -258,41 +257,10 @@ impl Transaction {
         let kernel = primitive_witness.kernel.clone();
         let witness = TransactionProof::Witness(primitive_witness);
 
-        (
-            Transaction {
-                kernel,
-                proof: witness,
-            },
-            msa_state,
-        )
-    }
-
-    /// Create a new `Transaction` from a `PrimitiveWitness` (which defines an old
-    /// `Transaction`) by updating the mutator set records according to a new
-    /// `Block`.
-    pub(crate) fn new_with_updated_mutator_set_records_given_primitive_witness(
-        old_primitive_witness: PrimitiveWitness,
-        block: &Block,
-    ) -> Transaction {
-        let block_addition_records: Vec<AdditionRecord> =
-            block.kernel.body.transaction_kernel.outputs.clone();
-        let block_removal_records = block.kernel.body.transaction_kernel.inputs.clone();
-
-        let (new_tx, new_msa) = Self::new_with_primitive_witness_ms_data(
-            old_primitive_witness,
-            block_addition_records,
-            block_removal_records,
-        );
-
-        // Sanity check of block validity
-        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
-        assert_eq!(
-            new_msa.hash(),
-            block_msa_hash,
-            "Internal MSA state must match that from block"
-        );
-
-        new_tx
+        Transaction {
+            kernel,
+            proof: witness,
+        }
     }
 
     /// Create a new `Transaction` by updating the given one with the mutator set
@@ -305,7 +273,7 @@ impl Transaction {
     pub(crate) async fn new_with_updated_mutator_set_records_given_proof(
         old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        mutator_set_update: MutatorSetUpdate,
+        mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
         sync_device: &TritonProverSync,
     ) -> Result<Transaction, TryLockError> {
@@ -375,24 +343,22 @@ impl Transaction {
     pub async fn new_with_updated_mutator_set_records(
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        block: &Block,
+        mutator_set_update: &MutatorSetUpdate,
         sync_device: &TritonProverSync,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
-            TransactionProof::Witness(primitive_witness) => Ok(
-                Self::new_with_updated_mutator_set_records_given_primitive_witness(
+            TransactionProof::Witness(primitive_witness) => {
+                Ok(Self::new_with_primitive_witness_ms_data(
                     primitive_witness,
-                    block,
-                ),
-            ),
+                    mutator_set_update.additions.clone(),
+                    mutator_set_update.removals.clone(),
+                ))
+            }
             TransactionProof::SingleProof(proof) => {
-                let block_body = block.body();
-                let tx_kernel = block_body.transaction_kernel.clone();
-                let ms_update = MutatorSetUpdate::new(tx_kernel.inputs, tx_kernel.outputs);
                 Self::new_with_updated_mutator_set_records_given_proof(
                     self.kernel,
                     previous_mutator_set_accumulator,
-                    ms_update,
+                    mutator_set_update,
                     proof,
                     sync_device,
                 )
@@ -606,15 +572,12 @@ mod transaction_tests {
             };
             assert!(original_tx.is_valid().await);
 
-            let block = mock_block_from_transaction_and_msa(
-                mined.kernel,
-                mined.mutator_set_accumulator,
-                Network::Main,
-            );
+            let mutator_set_update =
+                MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs);
             let updated_tx = original_tx
                 .new_with_updated_mutator_set_records(
                     &to_be_updated.mutator_set_accumulator,
-                    &block,
+                    &mutator_set_update,
                     &TritonProverSync::dummy(),
                 )
                 .await
@@ -659,10 +622,10 @@ mod transaction_tests {
                 mined.mutator_set_accumulator,
                 Network::Main,
             );
-
-            Transaction::new_with_updated_mutator_set_records_given_primitive_witness(
+            Transaction::new_with_primitive_witness_ms_data(
                 to_be_updated.clone(),
-                &block,
+                block.body().transaction_kernel.outputs.clone(),
+                block.body().transaction_kernel.inputs.clone(),
             )
         }
 
@@ -670,13 +633,11 @@ mod transaction_tests {
             to_be_updated: PrimitiveWitness,
             mined: PrimitiveWitness,
         ) -> Transaction {
-            let (updated, _msa_new) = Transaction::new_with_primitive_witness_ms_data(
+            Transaction::new_with_primitive_witness_ms_data(
                 to_be_updated,
                 mined.kernel.outputs,
                 mined.kernel.inputs,
-            );
-
-            updated
+            )
         }
 
         async fn assert_valid_as_pw(transaction: &Transaction) {

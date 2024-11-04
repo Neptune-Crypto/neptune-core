@@ -1305,8 +1305,11 @@ impl GlobalState {
         Ok(())
     }
 
-    /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
-    /// The received block will be set as the new tip, regardless of its accumulated PoW.
+    /// Update client's state with a new block.
+    ///
+    /// The new block is assumed to be valid, also wrt. to proof-of-work.
+    /// The new block will be set as the new tip, regardless of its
+    /// cumulative proof-of-work number.
     pub async fn set_new_tip(&mut self, new_block: Block, prover_lock: &ProvingLock) -> Result<()> {
         self.set_new_tip_internal(new_block, vec![], prover_lock)
             .await
@@ -1365,7 +1368,7 @@ impl GlobalState {
                         miner_reward_utxo_info.utxo,
                         miner_reward_utxo_info.sender_randomness,
                         miner_reward_utxo_info.receiver_preimage,
-                        UtxoNotifier::OwnMinerPrepareBlock,
+                        UtxoNotifier::OwnMinerComposeBlock,
                     ))
                     .await;
             }
@@ -1404,7 +1407,7 @@ impl GlobalState {
 
             myself
                 .mempool
-                .update_with_block(previous_ms_accumulator, &new_block, prover_lock)
+                .update_with_block_and_predecessor(&new_block, &tip_parent, prover_lock)
                 .await;
 
             myself.chain.light_state_mut().set_block(new_block);
@@ -1702,7 +1705,7 @@ mod global_state_tests {
                 cb_utxo,
                 cb_sender_randomness,
                 own_key.privacy_preimage,
-                UtxoNotifier::OwnMinerPrepareBlock,
+                UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
         global_state_lock
@@ -1841,7 +1844,7 @@ mod global_state_tests {
                     coinbase_utxo,
                     coinbase_output_randomness,
                     alice_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMinerPrepareBlock,
+                    UtxoNotifier::OwnMinerComposeBlock,
                 )],
                 &proving_lock,
             )
@@ -1974,7 +1977,7 @@ mod global_state_tests {
                         coinbase_utxo_1,
                         cb_utxo_output_randomness_1,
                         alice_spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMinerPrepareBlock,
+                        UtxoNotifier::OwnMinerComposeBlock,
                     )],
                     &proving_lock,
                 )
@@ -2280,7 +2283,7 @@ mod global_state_tests {
                     coinbase_expected_utxo.utxo,
                     coinbase_expected_utxo.sender_randomness,
                     genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMinerPrepareBlock,
+                    UtxoNotifier::OwnMinerComposeBlock,
                 )],
             )
             .await
@@ -2606,7 +2609,7 @@ mod global_state_tests {
                         cb_utxo,
                         cb_output_randomness,
                         spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMinerPrepareBlock,
+                        UtxoNotifier::OwnMinerComposeBlock,
                     ),
                 )
             };
@@ -2683,7 +2686,7 @@ mod global_state_tests {
                         cb_utxo,
                         cb_output_randomness,
                         spending_key.privacy_preimage,
-                        UtxoNotifier::OwnMinerPrepareBlock,
+                        UtxoNotifier::OwnMinerComposeBlock,
                     ),
                 )
             };
@@ -2826,7 +2829,7 @@ mod global_state_tests {
                 cb_utxo1,
                 cb_sender_randomness1,
                 spend_key.privacy_preimage,
-                UtxoNotifier::OwnMinerPrepareBlock,
+                UtxoNotifier::OwnMinerComposeBlock,
             );
 
             for claim_cb in [false, true] {
