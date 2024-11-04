@@ -567,7 +567,6 @@ pub(crate) mod mine_loop_tests {
     use num_traits::Pow;
     use num_traits::Zero;
     use tracing_test::traced_test;
-    use transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
     use transaction_output::TxOutput;
     use transaction_output::UtxoNotificationMedium;
 
@@ -577,9 +576,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::tasm::program::TritonProverSync;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
-    use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
-    use crate::tests::shared::mock_block_from_transaction_and_msa;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
     use crate::util_types::test_shared::mutator_set::random_mmra;

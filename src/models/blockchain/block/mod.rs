@@ -930,10 +930,10 @@ mod block_tests {
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction;
-    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 

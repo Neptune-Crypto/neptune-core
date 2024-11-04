@@ -713,7 +713,6 @@ pub(crate) mod test {
 
     use super::*;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-    use crate::models::blockchain::block::Block;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;

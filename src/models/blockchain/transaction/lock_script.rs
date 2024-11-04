@@ -13,11 +13,10 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
+use super::utxo::Utxo;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonProverSync;
 use crate::prelude::twenty_first;
-
-use super::utxo::Utxo;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {

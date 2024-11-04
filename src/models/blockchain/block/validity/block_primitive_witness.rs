@@ -3,7 +3,6 @@ use std::sync::OnceLock;
 use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::models::blockchain::block::block_body::BlockBody;
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
 
