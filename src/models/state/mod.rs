@@ -1152,16 +1152,26 @@ impl GlobalState {
                     .get_block(apply_block_hash)
                     .await?
                     .unwrap();
-                let maybe_apply_block_predecessor = self
+                let predecessor_block = self
                     .chain
                     .archival_state()
                     .get_block(apply_block.kernel.header.prev_block_digest)
                     .await?;
-                let mut block_msa = match maybe_apply_block_predecessor {
+                let mut block_msa = match &predecessor_block {
                     Some(block) => block.kernel.body.mutator_set_accumulator.clone(),
                     None => MutatorSetAccumulator::default(),
                 };
-                let addition_records = apply_block.kernel.body.transaction_kernel.outputs.clone();
+                let mut addition_records = predecessor_block
+                    .map(|x| x.guesser_fee_addition_records())
+                    .unwrap_or_default();
+                addition_records.extend(
+                    apply_block
+                        .body()
+                        .transaction_kernel
+                        .outputs
+                        .clone()
+                        .into_iter(),
+                );
                 let removal_records = apply_block.kernel.body.transaction_kernel.inputs.clone();
 
                 // apply additions
@@ -1956,6 +1966,7 @@ mod global_state_tests {
         let mut rng = thread_rng();
         let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let proving_lock = alice.proving_lock.clone();
+
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state

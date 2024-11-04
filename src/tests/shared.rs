@@ -644,7 +644,6 @@ pub(crate) fn invalid_block_with_transaction(
 /// Returns (block, coinbase UTXO, Coinbase output randomness)
 pub(crate) fn make_mock_block(
     previous_block: &Block,
-    // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::GenerationReceivingAddress,
     seed: [u8; 32],
