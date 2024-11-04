@@ -466,12 +466,16 @@ impl<T> Drop for AtomicRwWriteGuard<'_, T> {
         #[cfg(feature = "log-slow-write-lock")]
         {
             let duration = self.timestamp.elapsed();
-            let max_duration_milli = 100;
-            if duration.as_millis() > max_duration_milli {
+            let max_duration_secs = match std::env::var("LOG_SLOW_WRITE_LOCK_THRESHOLD") {
+                Ok(t) => t.parse().unwrap(),
+                Err(_) => 0.1,
+            };
+
+            if duration.as_secs_f32() > max_duration_secs {
                 tracing::warn!(
-                    "write-lock held for {} seconds. (exceeds max: {} milli)  location: {}",
+                    "write-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
                     duration.as_secs_f32(),
-                    max_duration_milli,
+                    max_duration_secs,
                     self.location
                 );
             }
