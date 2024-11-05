@@ -1,19 +1,30 @@
+use std::collections::VecDeque;
+
+use anyhow::bail;
 use async_priority_channel as mpsc;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
+use tokio::io::BufReader;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use super::traits::Job;
 use super::traits::JobResult;
+use super::traits::Synchronicity;
 
 // todo: fix it so that jobs with same priority execute FIFO.
 /// implements a prioritized job queue that sends result of each job to a listener.
 /// At present order of jobs with the same priority is undefined.
 type JobResultOneShotChannel = oneshot::Sender<Box<dyn JobResult>>;
 
-pub struct JobQueue<P: Ord> {
-    tx: mpsc::Sender<(Box<dyn Job>, JobResultOneShotChannel), P>,
+pub struct JobQueue<P: Ord, T: DeserializeOwned + Send> {
+    tx: mpsc::Sender<(Box<dyn Job<ResultType = T>>, JobResultOneShotChannel), P>,
 }
 
-impl<P: Ord> std::fmt::Debug for JobQueue<P> {
+impl<P: Ord, T: DeserializeOwned + Send> std::fmt::Debug for JobQueue<P, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobQueue")
             .field("tx", &"mpsc::Sender")
@@ -21,7 +32,7 @@ impl<P: Ord> std::fmt::Debug for JobQueue<P> {
     }
 }
 
-impl<P: Ord> Clone for JobQueue<P> {
+impl<P: Ord, T: DeserializeOwned + Send> Clone for JobQueue<P, T> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
@@ -29,21 +40,77 @@ impl<P: Ord> Clone for JobQueue<P> {
     }
 }
 
-impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
+impl<P: Ord + Send + Sync + 'static, T: DeserializeOwned + Send> JobQueue<P, T> {
     // creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
-        let (tx, rx) = mpsc::unbounded::<(Box<dyn Job>, JobResultOneShotChannel), P>();
+        let (tx, rx) =
+            mpsc::unbounded::<(Box<dyn Job<ResultType = T>>, JobResultOneShotChannel), P>();
 
+        let mut thread_handles = VecDeque::new();
         // spawns background task that processes job-queue and runs jobs.
-        tokio::spawn(async move {
+        let task_handle = tokio::spawn(async move {
             while let Ok(r) = rx.recv().await {
                 let (job, otx) = r.0;
 
-                let result = match job.is_async() {
-                    true => job.run_async().await,
-                    false => tokio::task::spawn_blocking(move || job.run())
+                let result = match job.synchronicity() {
+                    Synchronicity::Blocking => job.run_async().await,
+                    Synchronicity::Async => tokio::task::spawn_blocking(move || job.run())
                         .await
                         .unwrap(),
+
+                    Synchronicity::Process => {
+                        let token = CancellationToken::new();
+                        let cloned_token = token.clone();
+                        let process_handle = job.process();
+                        let jobresult = tokio::spawn(async move {
+                            let mut buffer = Vec::new();
+                            let mut stdout = process_handle.stdout.take().unwrap();
+                            loop {
+                                tokio::select! {
+                                    _ = token.cancelled() => {
+                                        process_handle.kill().await.expect("Could not kill proof queue task");
+                                        break;
+                                    }
+                                    result = process_handle.wait() => {
+                                        match result { // make into exit code
+                                            Ok(status) => info!("Child process exited with status: {}", status),
+                                            Err(e) => eprintln!("Error waiting for child process: {}", e),
+                                        }
+                                    }
+                                    result = stdout.read_to_end(&mut buffer) => {
+                                        match result {
+                                            Ok(n) => {
+                                                if n == 0 {
+                                                    // End of output
+                                                    break;
+                                                }
+                                                // Process the output
+                                                let jobresult : T = match bincode::deserialize(&buffer) {
+                                                    Ok(tee) => tee,
+                                                    Err(e) => {
+                                                        bail!("Proof queue job failed: {e:?}");
+                                                    }
+                                                };
+                                                buffer.clear(); // Clear the buffer for the next read
+                                                return Some(jobresult);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Error reading process output: {}", e);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            return None;
+                        });
+                        // thread_handles.push_back(thread_handle);
+                        let rest = jobresult.await.unwrap();
+                        // let worker_handle = tokio::task::spawn(move || job.run());
+                        // worker_handle.await
+                    } // false => tokio::task::spawn_blocking(move || job.run())
+                      //     .await
+                      //     .unwrap(),
                 };
                 let _ = otx.send(result);
             }
@@ -115,7 +182,7 @@ mod tests {
     }
 
     impl Job for DoubleJob {
-        fn is_async(&self) -> bool {
+        fn synchronicity(&self) -> bool {
             false
         }
 
@@ -125,6 +192,8 @@ mod tests {
             println!("{} * 2 = {}", r.0, r.1);
             Box::new(r)
         }
+
+        type ResultType = DoubleJobResult;
     }
 
     // todo: make test(s) for async jobs.

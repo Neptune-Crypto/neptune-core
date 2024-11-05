@@ -80,7 +80,7 @@ struct MutableMainLoopState {
     sync_state: SyncState,
     potential_peers: PotentialPeersState,
     task_handles: Vec<JoinHandle<()>>,
-    proof_upgrader_task: Option<JoinHandle<()>>,
+    scheduled_proof_upgrader_task: Option<JoinHandle<()>>,
 }
 
 impl MutableMainLoopState {
@@ -89,7 +89,7 @@ impl MutableMainLoopState {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
             task_handles,
-            proof_upgrader_task: None,
+            scheduled_proof_upgrader_task: None,
         }
     }
 }
@@ -879,7 +879,7 @@ impl MainLoopHandler {
             let duration_since_last_upgrade =
                 now.duration_since(global_state_lock.net.last_tx_proof_upgrade_attempt)?;
             let previous_upgrade_task_is_still_running = main_loop_state
-                .proof_upgrader_task
+                .scheduled_proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
             Ok(!global_state_lock.net.syncing
@@ -942,7 +942,7 @@ impl MainLoopHandler {
                         .await
                 })?;
 
-        main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
+        main_loop_state.scheduled_proof_upgrader_task = Some(proof_upgrader_task);
 
         Ok(())
     }
@@ -1299,6 +1299,9 @@ impl MainLoopHandler {
     async fn graceful_shutdown(&mut self, task_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
+        // Terminate proof queue
+        self.global_state_lock.vm_job_queue().terminate();
+
         // Stop mining
         let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
@@ -1533,7 +1536,10 @@ mod tests {
             );
 
             // Wait for upgrade task to finish.
-            let handle = mutable_main_loop_state.proof_upgrader_task.unwrap().await;
+            let handle = mutable_main_loop_state
+                .scheduled_proof_upgrader_task
+                .unwrap()
+                .await;
             assert!(
                 handle.is_ok(),
                 "Proof-upgrade task must finish successfully."

@@ -89,7 +89,7 @@ impl ConsensusProgramProverJob {
 
 #[async_trait::async_trait]
 impl Job for ConsensusProgramProverJob {
-    fn is_async(&self) -> bool {
+    fn synchronicity(&self) -> bool {
         false
     }
 
