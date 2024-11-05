@@ -1,4 +1,5 @@
 use super::super::JobQueue;
+use crate::models::proof_abstractions::tasm::consensus_program_prover_job::ConsensusProgramProverJobResult;
 
 // todo: maybe we want to have more levels or just make it an integer eg u8.
 // or maybe name the levels by type/usage of job/proof.
@@ -13,4 +14,4 @@ pub enum TritonVmJobPriority {
 }
 
 /// provides type safety and clarity in case we implement multiple job queues.
-pub type TritonVmJobQueue = JobQueue<TritonVmJobPriority>;
+pub type TritonVmJobQueue = JobQueue<TritonVmJobPriority, ConsensusProgramProverJobResult>;

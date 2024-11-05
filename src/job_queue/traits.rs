@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use serde::de::DeserializeOwned;
+use tasm_lib::triton_vm::proof::Proof;
 
 pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
     fn as_any(&self) -> &dyn Any;
@@ -15,7 +16,7 @@ pub(crate) enum Synchronicity {
 // represents any kind of job
 #[async_trait::async_trait]
 pub trait Job: Send + Sync {
-    type ResultType: DeserializeOwned + Send;
+    type ResultType: DeserializeOwned + Send + JobResult;
 
     fn synchronicity(&self) -> Synchronicity;
 
@@ -33,7 +34,7 @@ pub trait Job: Send + Sync {
     }
 
     /// Implement if synchronicity is set to `Process`
-    fn process(&self) -> tokio::process::Child {
+    async fn process(&self) -> tokio::process::Child {
         unimplemented!()
     }
 

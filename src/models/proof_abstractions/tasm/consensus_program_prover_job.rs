@@ -9,8 +9,16 @@
 //! The queue is used to ensure that only one triton-vm
 //! program can execute at a time.
 
+use std::process::Stdio;
+
+use serde::Deserialize;
+use serde::Serialize;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
+use crate::job_queue::traits::Synchronicity;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -21,7 +29,7 @@ use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 use crate::triton_vm::vm::VM;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ConsensusProgramProverJobResult(pub Proof);
 impl JobResult for ConsensusProgramProverJobResult {
     fn as_any(&self) -> &dyn std::any::Any {
@@ -89,11 +97,34 @@ impl ConsensusProgramProverJob {
 
 #[async_trait::async_trait]
 impl Job for ConsensusProgramProverJob {
-    fn synchronicity(&self) -> bool {
-        false
+    type ResultType = ConsensusProgramProverJobResult;
+
+    fn synchronicity(&self) -> Synchronicity {
+        Synchronicity::Process
     }
 
-    fn run(&self) -> Box<dyn JobResult> {
-        Box::new(ConsensusProgramProverJobResult(self.prove()))
+    async fn process(&self) -> tokio::process::Child {
+        let claim = serde_json::to_string(&self.claim).unwrap();
+        let program = serde_json::to_string(&self.program).unwrap();
+        let nondeterminism = serde_json::to_string(&self.nondeterminism).unwrap();
+
+        let mut child = tokio::process::Command::new("triton-vm")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let child_stdin = child.stdin.as_mut().unwrap();
+        child_stdin.write_all(claim.as_bytes()).await.unwrap();
+        child_stdin.write_all(b"\n").await.unwrap();
+        child_stdin.write_all(program.as_bytes()).await.unwrap();
+        child_stdin.write_all(b"\n").await.unwrap();
+        child_stdin
+            .write_all(nondeterminism.as_bytes())
+            .await
+            .unwrap();
+        child_stdin.write_all(b"\n").await.unwrap();
+
+        child
     }
 }
