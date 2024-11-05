@@ -1257,7 +1257,18 @@ impl MainLoopHandler {
                             .await
                     })?;
 
-                    // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
+                    // Do not keep track of `_proof_upgrader_task` join handle.
+                    // Why not?
+                    //  - Store handle where? This point could be solved in
+                    //    principle but let's not find a solution for a problem
+                    //    that doesn't exist.
+                    //  - The task itself takes care of communication with the
+                    //    proof queue and broadcasting the transaction when
+                    //    ready.
+                    //  - In case of graceful shutdown, the proof queue is shut
+                    //    through its handle; all the other steps in this task
+                    //    are negligible and will terminate promptly.
+
                     // If transaction could not be shared immediately because
                     // it contains secret data, upgrade its proof-type.
                 }
