@@ -230,7 +230,7 @@ impl UpgradeJob {
 
                 let Some(ms_update) = global_state
                     .chain
-                    .archival_state()
+                    .archival_state_mut()
                     .get_mutator_set_update_to_tip(
                         &mutator_set_for_tx,
                         SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF,

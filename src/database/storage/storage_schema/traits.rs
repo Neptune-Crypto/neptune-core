@@ -33,4 +33,7 @@ pub trait StorageReader {
 pub trait StorageWriter {
     /// Write data to storage
     async fn persist(&mut self);
+
+    /// Delete all changes that were not persisted.
+    async fn drop_unpersisted(&mut self);
 }

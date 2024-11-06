@@ -80,6 +80,12 @@ impl ChunkDictionary {
             .collect_vec()
     }
 
+    pub fn chunk_indices_and_membership_proofs_and_leafs_iter_mut(
+        &mut self,
+    ) -> std::slice::IterMut<'_, (u64, (MmrMembershipProof, Chunk))> {
+        self.dictionary.iter_mut()
+    }
+
     pub fn authentication_paths(&self) -> Vec<MmrMembershipProof> {
         self.dictionary
             .iter()

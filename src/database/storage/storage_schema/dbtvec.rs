@@ -24,7 +24,7 @@ pub struct DbtVec<V> {
 
 impl<V> DbtVec<V>
 where
-    V: Clone + Serialize,
+    V: Clone + Serialize + DeserializeOwned,
 {
     // DbtVec cannot be instantiated directly outside of storage_schema module
     // use [Schema::new_vec()]
@@ -38,6 +38,11 @@ where
         let vec = DbtVecPrivate::<V>::new(pending_writes, reader, key_prefix, name).await;
 
         Self { inner: vec }
+    }
+
+    #[inline]
+    pub(crate) async fn delete_cache(&mut self) {
+        self.inner.delete_cache().await;
     }
 }
 

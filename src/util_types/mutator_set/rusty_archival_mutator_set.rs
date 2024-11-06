@@ -93,6 +93,14 @@ impl StorageWriter for RustyArchivalMutatorSet {
 
         self.storage.persist().await;
     }
+
+    async fn drop_unpersisted(&mut self) {
+        self.ams_mut().swbf_active.sbf = self.active_window_storage.get().await;
+        self.storage.drop_unpersisted().await;
+        self.ams_mut().aocl.delete_cache().await;
+        self.ams_mut().swbf_inactive.delete_cache().await;
+        self.ams_mut().chunks.delete_cache().await;
+    }
 }
 
 #[cfg(test)]

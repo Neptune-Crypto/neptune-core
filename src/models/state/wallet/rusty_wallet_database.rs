@@ -99,4 +99,8 @@ impl StorageWriter for RustyWalletDatabase {
     async fn persist(&mut self) {
         self.storage.persist().await
     }
+
+    async fn drop_unpersisted(&mut self) {
+        unimplemented!("wallet does not need it")
+    }
 }
