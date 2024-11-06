@@ -42,7 +42,7 @@ pub struct Args {
     /// This sets the threshold for when a peer should be automatically refused.
     ///
     /// For a list of reasons that cause bad standing, see [PeerSanctionReason](crate::models::peer::PeerSanctionReason).
-    #[clap(long, default_value = "100", value_name = "VALUE")]
+    #[clap(long, default_value = "1000", value_name = "VALUE")]
     pub peer_tolerance: u16,
 
     /// Maximum number of peers to accept connections from.
@@ -219,7 +219,7 @@ mod cli_args_tests {
     fn default_args_test() {
         let default_args = Args::default();
 
-        assert_eq!(100, default_args.peer_tolerance);
+        assert_eq!(1000, default_args.peer_tolerance);
         assert_eq!(10, default_args.max_peers);
         assert_eq!(9798, default_args.peer_port);
         assert_eq!(9799, default_args.rpc_port);
