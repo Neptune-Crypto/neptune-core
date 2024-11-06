@@ -73,7 +73,6 @@ readonly = "0.2.12"
 thiserror = "1.0.65"
 systemstat = "0.2.3"
 sysinfo = "0.31.4"
-async-priority-channel = "0.2.0"
 
 [dev-dependencies]
 blake3 = "1.5.4"
