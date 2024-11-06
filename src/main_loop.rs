@@ -44,6 +44,7 @@ use crate::models::peer::transaction_notification::TransactionNotification;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
+use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
@@ -375,7 +376,7 @@ impl MainLoopHandler {
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         [
-                            vec![new_block_info.coinbase_utxo_info.as_ref().clone()],
+                            new_block_info.composer_utxos,
                             new_block_info.guesser_fee_utxo_infos,
                         ]
                         .concat(),
@@ -395,6 +396,37 @@ impl MainLoopHandler {
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
+            }
+            MinerToMain::BlockProposal(boxed_proposal) => {
+                let (block, expected_utxos) = *boxed_proposal;
+
+                // If block proposal from miner does not build on current tip,
+                // don't broadcast it. This check covers reorgs as well.
+                if block.header().prev_block_digest
+                    != self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .hash()
+                {
+                    warn!(
+                        "Got block proposal from miner that does not build on current tip. \
+                           Rejecting. If this happens a lot, then maybe this machine is too \
+                           slow to competitively compose blocks. Consider running the client only \
+                           with the guesser flag set and not the compose flag."
+                    );
+                    return Ok(());
+                }
+
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::BlockProposalNotification((&block).into()))
+                    .expect(
+                        "Peer handler broadcast channel prematurely closed. This should never happen.",
+                    );
+                self.global_state_lock.lock_guard_mut().await.block_proposal =
+                    BlockProposal::own_proposal(block.clone(), expected_utxos);
             }
         }
         Ok(())
@@ -473,7 +505,7 @@ impl MainLoopHandler {
                 }
 
                 // Inform miner to work on a new block
-                if self.global_state_lock.cli().mine {
+                if self.global_state_lock.cli().mine() {
                     self.main_to_miner_tx
                         .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }
@@ -594,6 +626,38 @@ impl MainLoopHandler {
                     .send(MainToPeerTask::TransactionNotification(
                         transaction_notification,
                     ))?;
+            }
+            PeerTaskToMain::BlockProposal(block) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerTaskToMain::BlockProposal"),
+                );
+
+                debug!("main loop received block proposal from peer loop");
+
+                // Due to race-conditions, we need to verify that this
+                // block is still the immediate child of tip. If it is, and
+                // it has a higher guesser fee than what we're currently working
+                // on, then we switch to this, and notify the miner to mine
+                // on this new block. We don't need to verify the block's
+                // validity, since that was done in peer loop.
+                if !self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .favor_incoming_block_proposal(
+                        block.header().height,
+                        block.total_guesser_reward(),
+                    )
+                {
+                    warn!("main loop got unfavorable block proposal.");
+                    return Ok(());
+                }
+
+                {
+                    info!("Received new favorable block proposal for mining operation.");
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    global_state_mut.block_proposal = BlockProposal::foreign_proposal(*block);
+                }
             }
         }
 

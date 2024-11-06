@@ -1,4 +1,5 @@
 pub mod archival_state;
+pub mod block_proposal;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
@@ -15,11 +16,13 @@ use std::ops::DerefMut;
 
 use anyhow::bail;
 use anyhow::Result;
+use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use mempool::Mempool;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
+use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::*;
@@ -221,6 +224,7 @@ impl GlobalStateLock {
             .await
     }
 
+    /// Return the read-only arguments set at startup.
     #[inline]
     pub fn cli(&self) -> &cli_args::Args {
         &self.cli
@@ -268,6 +272,9 @@ pub struct GlobalState {
     /// The `Mempool` may only be updated by the main task.
     pub mempool: Mempool,
 
+    /// The block proposal to which guessers contribute proof-of-work.
+    pub(crate) block_proposal: BlockProposal,
+
     // Only the mining task should write to this, anyone can read.
     pub mining: bool,
 }
@@ -287,6 +294,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
+            block_proposal: BlockProposal::default(),
             mining,
         }
     }
@@ -317,6 +325,30 @@ impl GlobalState {
         debug!("call to get_latest_balance_height() took {time_secs} seconds");
 
         height
+    }
+
+    /// Returns true iff the incoming block proposal is more favorable than the
+    /// one we're currently working on. Returns false if client is not guessing,
+    /// or is composing itself.
+    pub(crate) fn favor_incoming_block_proposal(
+        &self,
+        incoming_block_height: BlockHeight,
+        incoming_guesser_fee: NeptuneCoins,
+    ) -> bool {
+        if !self.cli().guess || self.cli().compose {
+            return false;
+        }
+
+        let expected_height = self.chain.light_state().header().height.next();
+        if incoming_block_height != expected_height {
+            return false;
+        }
+
+        let maybe_existing_fee = self.block_proposal.map(|x| x.total_guesser_reward());
+        match maybe_existing_fee {
+            Some(existing_reward) => existing_reward < incoming_guesser_fee,
+            None => !incoming_guesser_fee.is_zero(),
+        }
     }
 
     /// Determine whether the incoming block is more canonical than the current
@@ -1429,6 +1461,10 @@ impl GlobalState {
 
             myself.chain.light_state_mut().set_block(new_block);
 
+            // Reset block proposal, as that field pertains to the block that
+            // was just set as new tip.
+            myself.block_proposal = BlockProposal::none();
+
             // Flush databases
             myself.flush_databases().await?;
 
@@ -2166,7 +2202,7 @@ mod global_state_tests {
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, coinbase_expected_utxo) =
+        let (coinbase_transaction, coinbase_expected_utxos) =
             make_coinbase_transaction(&premine_receiver, guesser_fraction, in_seven_months)
                 .await
                 .unwrap();
@@ -2250,7 +2286,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             block_transaction,
             in_seven_months,
@@ -2298,12 +2334,17 @@ mod global_state_tests {
         premine_receiver
             .set_new_self_mined_tip(
                 block_1.clone(),
-                vec![ExpectedUtxo::new(
-                    coinbase_expected_utxo.utxo,
-                    coinbase_expected_utxo.sender_randomness,
-                    genesis_spending_key.privacy_preimage,
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )],
+                coinbase_expected_utxos
+                    .into_iter()
+                    .map(|expected_utxo| {
+                        ExpectedUtxo::new(
+                            expected_utxo.utxo,
+                            expected_utxo.sender_randomness,
+                            genesis_spending_key.privacy_preimage,
+                            UtxoNotifier::OwnMinerComposeBlock,
+                        )
+                    })
+                    .collect_vec(),
             )
             .await
             .unwrap();
@@ -2455,7 +2496,7 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-        let block_2 = Block::make_block_template(
+        let block_2 = Block::compose(
             &block_1,
             block_transaction2,
             in_eight_months,
@@ -2487,7 +2528,7 @@ mod global_state_tests {
         let (cb, _) = make_coinbase_transaction(&global_state_lock, guesser_fraction, now)
             .await
             .unwrap();
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             cb,
             now,
@@ -3077,7 +3118,7 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
-                let block_1 = Block::make_block_template(
+                let block_1 = Block::compose(
                     &genesis_block,
                     alice_to_bob_tx,
                     seven_months_post_launch,

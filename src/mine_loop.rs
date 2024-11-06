@@ -25,6 +25,7 @@ use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -35,11 +36,11 @@ use crate::prelude::twenty_first;
 
 /// Attempt to mine a valid block for the network
 #[allow(clippy::too_many_arguments)]
-async fn mine_block(
+async fn guess_nonce(
     block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
-    coinbase_utxo_info: ExpectedUtxo,
+    composer_utxos: Vec<ExpectedUtxo>,
     unrestricted_mining: bool,
     target_block_interval: Option<Timestamp>,
 ) {
@@ -56,11 +57,11 @@ async fn mine_block(
     //
     // note: there is no async code inside the mining loop.
     tokio::task::spawn_blocking(move || {
-        mine_block_worker(
+        guess_worker(
             block,
             previous_block,
             sender,
-            coinbase_utxo_info,
+            composer_utxos,
             unrestricted_mining,
             target_block_interval,
         )
@@ -69,11 +70,11 @@ async fn mine_block(
     .unwrap()
 }
 
-fn mine_block_worker(
+fn guess_worker(
     mut block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
-    coinbase_utxo_info: ExpectedUtxo,
+    composer_utxos: Vec<ExpectedUtxo>,
     unrestricted_mining: bool,
     target_block_interval: Option<Timestamp>,
 ) {
@@ -95,7 +96,7 @@ fn mine_block_worker(
 
     // Mining loop
     let mut nonce_preimage = Digest::default();
-    while !mine_iteration(
+    while !guess_nonce_iteration(
         &mut block,
         &previous_block,
         &sender,
@@ -147,7 +148,7 @@ Difficulty threshold: {threshold}
 
     let new_block_found = NewBlockFound {
         block: Box::new(block),
-        coinbase_utxo_info: Box::new(coinbase_utxo_info),
+        composer_utxos,
         guesser_fee_utxo_infos,
     };
 
@@ -165,7 +166,7 @@ pub(crate) struct DifficultyInfo {
 ///
 /// Returns true if a) a valid block is found; or b) the task is terminated.
 #[inline]
-fn mine_iteration(
+fn guess_nonce_iteration(
     block: &mut Block,
     previous_block: &Block,
     sender: &oneshot::Sender<NewBlockFound>,
@@ -214,7 +215,7 @@ pub(crate) async fn make_coinbase_transaction(
     global_state_lock: &GlobalStateLock,
     guesser_block_subsidy_fraction: f64,
     timestamp: Timestamp,
-) -> Result<(Transaction, ExpectedUtxo)> {
+) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     // note: it is Ok to always use the same key here because:
     //  1. if we find a block, the utxo will go to our wallet
     //     and notification occurs offchain, so there is no privacy issue.
@@ -272,6 +273,8 @@ pub(crate) async fn make_coinbase_transaction(
         .wallet_state
         .wallet_secret
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
+
+    // TODO: Produce two outputs here, one timelocked and one not.
     let coinbase_output = TxOutput::offchain_native_currency(
         amount_to_prover,
         sender_randomness,
@@ -308,14 +311,14 @@ pub(crate) async fn make_coinbase_transaction(
     .await?;
     info!("Done: generating single proof for coinbase transaction");
 
-    let utxo_info_for_coinbase = ExpectedUtxo::new(
+    let composer_utxo_not_timelocked = ExpectedUtxo::new(
         coinbase_output.utxo(),
         coinbase_output.sender_randomness(),
         coinbase_recipient_spending_key.privacy_preimage,
         UtxoNotifier::OwnMinerComposeBlock,
     );
 
-    Ok((transaction, utxo_info_for_coinbase))
+    Ok((transaction, vec![composer_utxo_not_timelocked]))
 }
 
 /// Create the transaction that goes into the block template. The transaction is
@@ -326,10 +329,10 @@ pub(crate) async fn create_block_transaction(
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     guesser_fee_fraction: f64,
-) -> Result<(Transaction, ExpectedUtxo)> {
+) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    let (coinbase_transaction, coinbase_as_expected_utxo) =
+    let (coinbase_transaction, composer_utxos) =
         make_coinbase_transaction(global_state_lock, guesser_fee_fraction, timestamp).await?;
 
     debug!(
@@ -370,9 +373,11 @@ pub(crate) async fn create_block_transaction(
         .expect("Must be able to merge transactions in mining context");
     }
 
-    Ok((block_transaction, coinbase_as_expected_utxo))
+    Ok((block_transaction, composer_utxos))
 }
 
+///
+///
 /// Locking:
 ///   * acquires `global_state_lock` for write
 pub async fn mine(
@@ -392,7 +397,7 @@ pub async fn mine(
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
 
-        let miner_task: Option<JoinHandle<()>> = if is_syncing {
+        let guesser_task: Option<JoinHandle<()>> = if is_syncing {
             info!("Not mining because we are syncing");
             global_state_lock.set_mining(false).await;
             None
@@ -401,62 +406,93 @@ pub async fn mine(
             global_state_lock.set_mining(false).await;
             None
         } else {
-            // Build the block template and spawn the worker task to mine on it
-            let now = Timestamp::now();
+            let block_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+            let (proposal, composer_utxos) = match block_proposal {
+                BlockProposal::OwnComposition((prop, composer_utxos)) => {
+                    (Some(prop), composer_utxos)
+                }
+                BlockProposal::ForeignComposition(prop) => (Some(prop), vec![]),
+                BlockProposal::None => {
+                    // Build the block template and spawn the worker task to mine on it
 
-            // note: if we get a "channel closed" error, it means the tokio runtime is shutting
-            // down, and we should exit/return gracefully.
-            // hopefully we find a cleaner solution, but this avoids an uncaught panic for now.
-            //
-            // todo: this fn is called from tokio::spawn() and the results are not handled
-            // by spawner so the tokio executor prints a stack-trace and continues, but the panic
-            // isn't propagated higher, so program doesn't exit.
-            // as such it, should handle all results itself, usually by log+return,
-            // or alternatively results should be handled by spawner.
+                    if !global_state_lock.cli().compose {
+                        (None, vec![])
+                    } else {
+                        let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
+                        let now = Timestamp::now();
 
-            let guesser_fee_fraction = 0.5f64; // TODO: Set this through CLI!
-            let (transaction, coinbase_utxo_info) = match create_block_transaction(
-                &latest_block,
-                &global_state_lock,
-                now,
-                guesser_fee_fraction,
-            )
-            .await
-            {
-                Ok(r) => r,
-                Err(e) if e.to_string() == "channel closed" => return Ok(()),
-                Err(e) => return Err(e),
+                        let (transaction, composer_utxos) = match create_block_transaction(
+                            &latest_block,
+                            &global_state_lock,
+                            now,
+                            guesser_fee_fraction,
+                        )
+                        .await
+                        {
+                            Ok(r) => r,
+
+                            // "channel closed" indicates an ongoing shutdown of
+                            // the entire program. So: stop miner here.
+                            Err(e) if e.to_string() == "channel closed" => return Ok(()),
+                            Err(e) => return Err(e),
+                        };
+                        let triton_vm_job_queue = global_state_lock.vm_job_queue();
+                        let proposal = Block::compose(
+                            &latest_block,
+                            transaction,
+                            now,
+                            Digest::default(),
+                            None,
+                            triton_vm_job_queue,
+                            TritonVmJobPriority::High,
+                        )
+                        .await;
+                        let proposal = match proposal {
+                            Ok(template) => template,
+
+                            // "channel closed" indicates an ongoing shutdown of
+                            // the entire program. So: stop miner here.
+                            Err(e) if e.to_string() == "channel closed" => return Ok(()),
+                            Err(_) => bail!("Miner failed to generate block template"),
+                        };
+
+                        // Send proposal to main_loop to share with peers.
+                        to_main
+                            .send(MinerToMain::BlockProposal(Box::new((
+                                proposal.clone(),
+                                composer_utxos.clone(),
+                            ))))
+                            .await
+                            .expect("Channel to main closed");
+
+                        (Some(proposal), composer_utxos)
+                    }
+                }
             };
-            let triton_vm_job_queue = global_state_lock.vm_job_queue();
-            let block_template = Block::make_block_template(
-                &latest_block,
-                transaction,
-                now,
-                Digest::default(),
-                None,
-                triton_vm_job_queue,
-                TritonVmJobPriority::High,
-            )
-            .await;
-            let block_template = match block_template {
-                Ok(template) => template,
-                Err(e) if e.to_string() == "channel closed" => return Ok(()),
-                Err(_) => bail!("Miner failed to generate block template"),
-            };
-            let miner_task = mine_block(
-                block_template,
-                latest_block.clone(),
-                worker_task_tx,
-                coinbase_utxo_info,
-                global_state_lock.cli().unrestricted_mining,
-                None, // using default TARGET_BLOCK_INTERVAL
-            );
-            global_state_lock.set_mining(true).await;
-            Some(
-                tokio::task::Builder::new()
-                    .name("mine_block")
-                    .spawn(miner_task)?,
-            )
+
+            // Run guesser iff we have a proposal and we want to guess
+            if let Some(proposal) = proposal {
+                if global_state_lock.lock_guard().await.cli().guess {
+                    let guesser_task = guess_nonce(
+                        proposal,
+                        latest_block.clone(),
+                        worker_task_tx,
+                        composer_utxos,
+                        global_state_lock.cli().sleepy_guessing,
+                        None, // using default TARGET_BLOCK_INTERVAL
+                    );
+                    global_state_lock.set_mining(true).await;
+                    Some(
+                        tokio::task::Builder::new()
+                            .name("mine_block")
+                            .spawn(guesser_task)?,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         };
 
         // Await a message from either the worker task or from the main loop
@@ -474,7 +510,7 @@ pub async fn mine(
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
 
-                        if let Some(mt) = miner_task {
+                        if let Some(mt) = guesser_task {
                             mt.abort();
                             debug!("Abort-signal sent to mining worker.");
                         }
@@ -482,18 +518,24 @@ pub async fn mine(
                         break;
                     }
                     MainToMiner::NewBlock(block) => {
-                        if let Some(mt) = miner_task {
+                        if let Some(mt) = guesser_task {
                             mt.abort();
                         }
                         latest_block = *block;
                         info!("Miner task received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
+                    }
+                    MainToMiner::NewBlockProposal => {
+                        if let Some(mt) = guesser_task {
+                            mt.abort();
+                        }
+                        info!("Miner received new block proposal for guessing.");
                     }
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {}
                     MainToMiner::StopMining => {
                         pause_mine = true;
 
-                        if let Some(mt) = miner_task {
+                        if let Some(mt) = guesser_task {
                             mt.abort();
                             debug!("Abort-signal sent to mining worker.");
                         }
@@ -512,7 +554,7 @@ pub async fn mine(
                         // variable, because it reflects the logical on/off
                         // of mining, which syncing can temporarily override
                         // but not alter the setting.
-                        if let Some(mt) = miner_task {
+                        if let Some(mt) = guesser_task {
                             mt.abort();
                         }
                     }
@@ -657,7 +699,7 @@ pub(crate) mod mine_loop_tests {
         let mut nonce_preimage = Digest::default();
         let tick = std::time::SystemTime::now();
         for _ in 0..num_iterations {
-            mine_iteration(
+            guess_nonce_iteration(
                 &mut block,
                 &previous_block,
                 &worker_task_tx,
@@ -770,7 +812,7 @@ pub(crate) mod mine_loop_tests {
                 transaction_empty_mempool.kernel.inputs.is_empty(),
                 "Coinbase transaction with empty mempool must have zero inputs"
             );
-            let block_1_empty_mempool = Block::make_block_template(
+            let block_1_empty_mempool = Block::compose(
                 &genesis_block,
                 transaction_empty_mempool,
                 now,
@@ -806,7 +848,7 @@ pub(crate) mod mine_loop_tests {
             assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
             // Build and verify block template
-            let block_1_nonempty_mempool = Block::make_block_template(
+            let block_1_nonempty_mempool = Block::compose(
                 &genesis_block,
                 transaction_non_empty_mempool,
                 now,
@@ -867,7 +909,7 @@ pub(crate) mod mine_loop_tests {
 
         let unrestricted_mining = true;
 
-        mine_block_worker(
+        guess_worker(
             block,
             tip_block_orig.clone(),
             worker_task_tx,
@@ -929,7 +971,7 @@ pub(crate) mod mine_loop_tests {
 
         let unrestricted_mining = true;
 
-        mine_block_worker(
+        guess_worker(
             template,
             tip_block_orig.clone(),
             worker_task_tx,
@@ -1053,14 +1095,14 @@ pub(crate) mod mine_loop_tests {
             let start_time = Timestamp::now();
             let start_st = std::time::SystemTime::now();
 
-            let (transaction, coinbase_utxo_info) = {
+            let (transaction, composer_utxos) = {
                 (
                     make_mock_transaction_with_mutator_set_hash(
                         vec![],
                         vec![],
                         prev_block.body().mutator_set_accumulator.hash(),
                     ),
-                    dummy_expected_utxo(),
+                    vec![dummy_expected_utxo()],
                 )
             };
 
@@ -1075,11 +1117,11 @@ pub(crate) mod mine_loop_tests {
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
             let height = block.header().height;
 
-            mine_block_worker(
+            guess_worker(
                 block,
                 prev_block.clone(),
                 worker_task_tx,
-                coinbase_utxo_info,
+                composer_utxos,
                 unrestricted_mining,
                 Some(target_block_interval),
             );

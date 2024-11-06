@@ -1198,7 +1198,7 @@ mod wallet_tests {
             .unwrap();
 
         let guesser_fraction = 0f64;
-        let (coinbase_tx, cb_expected) = make_coinbase_transaction(
+        let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction(
             &alice,
             guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
@@ -1215,7 +1215,7 @@ mod wallet_tests {
             .await
             .unwrap();
         let timestamp = merged_tx.kernel.timestamp;
-        let block_3_b = Block::make_block_template(
+        let block_3_b = Block::compose(
             &block_2_b,
             merged_tx,
             timestamp,
@@ -1230,18 +1230,23 @@ mod wallet_tests {
             block_3_b.is_valid(&block_2_b, in_seven_months),
             "Block must be valid after accumulating txs"
         );
-        let expected_utxo_for_alice_cb = ExpectedUtxo::new(
-            cb_expected.utxo,
-            cb_expected.sender_randomness,
-            alice_spending_key.privacy_preimage,
-            UtxoNotifier::OwnMinerComposeBlock,
-        );
+        let expected_utxos_for_alice_cb = expected_composer_utxos
+            .into_iter()
+            .map(|expected_utxo| {
+                ExpectedUtxo::new(
+                    expected_utxo.utxo,
+                    expected_utxo.sender_randomness,
+                    alice_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMinerComposeBlock,
+                )
+            })
+            .collect_vec();
 
         alice
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(expected_utxo_for_alice_cb)
+            .add_expected_utxos(expected_utxos_for_alice_cb)
             .await;
         let expected_utxo_for_alice = ExpectedUtxo::new(
             receiver_data_1_to_alice_new.utxo(),
@@ -1399,7 +1404,7 @@ mod wallet_tests {
             )
             .await
             .unwrap();
-        let block_1 = Block::make_block_template(
+        let block_1 = Block::compose(
             &genesis_block,
             tx_for_block,
             in_seven_months,

@@ -52,15 +52,40 @@ pub struct Args {
     #[clap(long, default_value = "10", value_name = "COUNT")]
     pub max_peers: u16,
 
-    /// Should this node participate in competitive mining?
-    ///
-    /// Mining is disabled by default.
+    /// Whether to produce block proposals, which is the first step of two-step
+    /// mining. Note that composing block proposals involves the computationally
+    /// expensive task of producing STARK proofs. You should have plenty of
+    /// cores and probably at least 128 GB of RAM.
     #[clap(long)]
-    pub mine: bool,
+    pub compose: bool,
 
-    /// If mining, use all available CPU power. Ignored if mine flag not set.
+    /// Whether to engage in guess-nonce-and-hash, which is the second step in
+    /// two-step mining. If this flag is set and the `compose` flag is not set,
+    /// then the client will rely on block proposals from other nodes. In this
+    /// case, it will always pick the most profitable block proposal.
+    ///
+    /// If this flag is set and the `compose` flag is set, then the client will
+    /// always guess on their own block proposal.
     #[clap(long)]
-    pub unrestricted_mining: bool,
+    pub guess: bool,
+
+    /// By default, a composer will share block proposals with all peers. If
+    /// this flag is set, the composer will *not* share their block proposals.
+    #[clap(long)]
+    pub secret_compositions: bool,
+
+    /// Regulates the fraction of the block subsidy that goes to the guesser.
+    /// Value must be between 0 and 1.
+    ///
+    /// The remainder goes to the composer. This flag is ignored if the
+    /// `compose` flag is not set.
+    #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
+    pub guesser_fraction: f64,
+
+    /// Whether to sleep between nonce-guesses. Useful if you do not want to
+    /// dedicate all your CPU power.
+    #[clap(long)]
+    pub sleepy_guessing: bool,
 
     /// Prune the mempool when it exceeds this size in RAM.
     ///
@@ -143,6 +168,17 @@ impl Default for Args {
     }
 }
 
+fn fraction_validator(s: &str) -> Result<f64, String> {
+    let value = s
+        .parse::<f64>()
+        .map_err(|_| format!("`{s}` isn't a valid float"))?;
+    if (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!("Fraction must be between 0 and 1, got {value}"))
+    }
+}
+
 impl Args {
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
@@ -165,6 +201,11 @@ impl Args {
             0 => None,
             n => Some(Duration::from_secs(n)),
         }
+    }
+
+    /// Whether to engage in mining (composing or guessing or both)
+    pub(crate) fn mine(&self) -> bool {
+        self.guess || self.compose
     }
 }
 

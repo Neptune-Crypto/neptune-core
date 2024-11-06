@@ -857,7 +857,7 @@ impl RPC for NeptuneRPCServer {
     async fn pause_miner(self, _context: tarpc::context::Context) {
         let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-        if self.state.cli().mine {
+        if self.state.cli().mine() {
             let _ = self
                 .rpc_server_to_main_tx
                 .send(RPCServerToMain::PauseMiner)
@@ -871,7 +871,7 @@ impl RPC for NeptuneRPCServer {
     async fn restart_miner(self, _context: tarpc::context::Context) {
         let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-        if self.state.cli().mine {
+        if self.state.cli().mine() {
             let _ = self
                 .rpc_server_to_main_tx
                 .send(RPCServerToMain::RestartMiner)

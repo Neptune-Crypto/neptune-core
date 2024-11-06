@@ -230,7 +230,7 @@ pub(crate) async fn mock_genesis_global_state(
         networking_state,
         cli_args.clone(),
         mempool,
-        cli_args.mine,
+        cli_args.mine(),
     )
 }
 
@@ -765,7 +765,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .to_owned();
 
     let guesser_fee_fraction = 0f64;
-    let (transaction, coinbase_expected_utxo) = crate::mine_loop::create_block_transaction(
+    let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
         &tip_block,
         global_state_lock,
         timestamp,
@@ -784,7 +784,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     let expected_utxos = block
         .guesser_fee_expected_utxos(nonce_preimage)
         .into_iter()
-        .chain([coinbase_expected_utxo])
+        .chain(expected_composer_utxos)
         .collect_vec();
 
     global_state_lock
@@ -810,7 +810,7 @@ pub(crate) async fn valid_block_from_tx_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let timestamp = tx.kernel.timestamp;
-    let mut block = Block::make_block_template(
+    let mut block = Block::compose(
         predecessor,
         tx,
         timestamp,

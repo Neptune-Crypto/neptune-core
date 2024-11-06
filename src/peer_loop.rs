@@ -27,6 +27,7 @@ use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
 use crate::models::peer::transfer_block::TransferBlock;
+use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
@@ -34,6 +35,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanctionReason;
 use crate::models::peer::PeerStanding;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
@@ -1044,6 +1046,98 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::BlockProposalNotification(block_proposal_notification) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalNotification"),
+                );
+
+                let request = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .favor_incoming_block_proposal(
+                        block_proposal_notification.height,
+                        block_proposal_notification.guesser_fee,
+                    );
+
+                if request {
+                    peer.send(PeerMessage::BlockProposalRequest(
+                        BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
+                    ))
+                    .await?;
+                } else {
+                    info!(
+                        "Got unfavorable block proposal notification from {} peer; rejecting",
+                        self.peer_address
+                    );
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockProposalRequest(block_proposal_request) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalRequest"),
+                );
+
+                let matching_proposal = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .block_proposal
+                    .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
+                    .map(|x| x.to_owned());
+                if let Some(proposal) = matching_proposal {
+                    peer.send(PeerMessage::BlockProposal(Box::new(proposal)))
+                        .await?;
+                } else {
+                    self.punish(PeerSanctionReason::BlockProposalNotFound)
+                        .await?;
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockProposal(block) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposal"),
+                );
+
+                info!("Got block proposal from peer.");
+                if !self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .favor_incoming_block_proposal(
+                        block.header().height,
+                        block.total_guesser_reward(),
+                    )
+                {
+                    self.punish(PeerSanctionReason::NonFavorableBlockProposal)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Verify validity and that proposal is child of current tip
+                let tip = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .to_owned();
+                if !block.is_valid(&tip, self.now()) {
+                    self.punish(PeerSanctionReason::InvalidBlockProposal)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                self.to_main_tx
+                    .send(PeerTaskToMain::BlockProposal(block))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
         }
     }
 
@@ -1164,6 +1258,19 @@ impl PeerLoopHandler {
                 ))
                 .await?;
                 debug!("Sent PeerMessage::TransactionNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
+                let _ = crate::ScopeDurationLogger::new(
+                    &(crate::macros::fn_name!() + "::MainToPeerTask::BlockProposalNotification"),
+                );
+
+                debug!("Sending PeerMessage::BlockProposalNotification");
+                peer.send(PeerMessage::BlockProposalNotification(
+                    block_proposal_notification,
+                ))
+                .await?;
+                debug!("Sent PeerMessage::BlockProposalNotification");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
