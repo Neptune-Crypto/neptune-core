@@ -39,6 +39,7 @@ use config_models::cli_args;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
+use job_queue::triton_vm::TritonVmJobQueue;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::PeerInfo;
@@ -169,6 +170,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         cli_args.max_mempool_num_tx,
         latest_block.hash(),
     );
+
+    let (vm_job_queue, job_queue_a, job_queue_b) = TritonVmJobQueue::start();
+    let mut task_join_handles = vec![job_queue_a, job_queue_b];
     let mut global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
@@ -176,6 +180,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         cli_args,
         mempool,
         false,
+        vm_job_queue,
     );
     let own_handshake_data: HandshakeData = global_state_lock
         .lock_guard()
@@ -197,7 +202,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let mut task_join_handles = vec![];
     for peer_address in global_state_lock.cli().peers.clone() {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =

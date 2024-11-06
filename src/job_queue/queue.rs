@@ -1,8 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
+
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::traits::Job;
 use super::traits::JobResult;
@@ -33,7 +35,7 @@ impl<P: Ord> Clone for JobQueue<P> {
 
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     // creates job queue and starts it processing.  returns immediately.
-    pub fn start() -> Self {
+    pub fn start() -> (Self, JoinHandle<()>, JoinHandle<()>) {
         let (tx, mut rx) = mpsc::unbounded_channel::<(JobAndResultChannel, P)>();
 
         let jobs: Arc<Mutex<VecDeque<(JobAndResultChannel, P)>>> =
@@ -43,7 +45,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
-        tokio::spawn(async move {
+        let sequencer = tokio::spawn(async move {
             while let Some(((job, otx), priority)) = rx.recv().await {
                 jobs_rc1.lock().unwrap().push_back(((job, otx), priority));
                 let _ = tx_deque.send(());
@@ -52,7 +54,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
-        tokio::spawn(async move {
+        let job_executor = tokio::spawn(async move {
             while rx_deque.recv().await.is_some() {
                 let ((job, otx), _priority) = {
                     let mut j = jobs_rc2.lock().unwrap();
@@ -71,7 +73,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             }
         });
 
-        Self { tx }
+        (Self { tx }, sequencer, job_executor)
     }
 
     // alias of Self::start().
@@ -81,7 +83,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     //     to find where start() is called for real.
     #[cfg(test)]
     pub fn dummy() -> Self {
-        Self::start()
+        Self::start().0
     }
 
     // adds job to job-queue and returns immediately.
@@ -109,8 +111,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Instant;
+
+    use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sync_jobs_by_priority() -> anyhow::Result<()> {
@@ -154,8 +157,9 @@ mod tests {
     }
 
     mod workers {
-        use super::*;
         use std::any::Any;
+
+        use super::*;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -209,7 +213,7 @@ mod tests {
         //  2. when multiple jobs have the same priority, they run in FIFO order.
         pub(super) async fn run_jobs_by_priority(is_async: bool) -> anyhow::Result<()> {
             // create a job queue
-            let job_queue = JobQueue::start();
+            let (job_queue, _, _) = JobQueue::start();
 
             let mut handles = vec![];
             let duration = std::time::Duration::from_millis(20);
@@ -298,7 +302,7 @@ mod tests {
         // the job initiator.
         pub(super) async fn get_job_result(is_async: bool) -> anyhow::Result<()> {
             // create a job queue
-            let job_queue = JobQueue::start();
+            let (job_queue, _, _) = JobQueue::start();
             let duration = std::time::Duration::from_millis(20);
 
             // create 10 jobs
@@ -348,7 +352,7 @@ mod tests {
             let rt = tokio::runtime::Runtime::new()?;
             let result = rt.block_on(async {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let (job_queue, _, _) = JobQueue::start();
                 // start a 1 hour job.
                 let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
@@ -396,7 +400,7 @@ mod tests {
 
             let result = rt.block_on(async {
                 // create a job queue
-                let job_queue = JobQueue::start();
+                let (job_queue, _, _) = JobQueue::start();
 
                 // this job takes at least 5 secs to complete.
                 let duration = std::time::Duration::from_secs(5);

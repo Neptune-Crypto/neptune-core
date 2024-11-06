@@ -141,6 +141,7 @@ impl GlobalStateLock {
         cli: cli_args::Args,
         mempool: Mempool,
         mining: bool,
+        vm_job_queue: TritonVmJobQueue,
     ) -> Self {
         let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool, mining);
         let global_state_lock = sync_tokio::AtomicRw::from((
@@ -151,7 +152,7 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            vm_job_queue: TritonVmJobQueue::start(),
+            vm_job_queue,
         }
     }
 

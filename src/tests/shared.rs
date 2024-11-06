@@ -50,6 +50,7 @@ use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::job_queue::JobQueue;
 use crate::mine_loop::make_coinbase_transaction;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -224,6 +225,7 @@ pub(crate) async fn mock_genesis_global_state(
 
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
+    let (jobqueue, _, _) = JobQueue::start();
     GlobalStateLock::new(
         wallet_state,
         blockchain_state,
@@ -231,6 +233,7 @@ pub(crate) async fn mock_genesis_global_state(
         cli_args.clone(),
         mempool,
         cli_args.mine,
+        jobqueue,
     )
 }
 
