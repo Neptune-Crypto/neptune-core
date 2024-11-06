@@ -1308,6 +1308,8 @@ impl MainLoopHandler {
             jh.abort();
         }
 
+        self.global_state_lock.vm_job_queue().stop();
+
         // wait 0.5 seconds to ensure that child processes have been shut down
         sleep(Duration::new(0, 500 * 1_000_000));
 

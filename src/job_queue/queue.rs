@@ -1,8 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
+
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::traits::Job;
 use super::traits::JobResult;
@@ -13,12 +15,16 @@ type JobAndResultChannel = (Box<dyn Job>, JobResultOneShotChannel);
 // implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P: Ord> {
     tx: mpsc::UnboundedSender<(JobAndResultChannel, P)>,
+    sequencer: Arc<Mutex<JoinHandle<()>>>,
+    executor: Arc<Mutex<JoinHandle<()>>>,
 }
 
 impl<P: Ord> std::fmt::Debug for JobQueue<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobQueue")
             .field("tx", &"mpsc::Sender")
+            .field("sequencer", &"Arc<Mutex<JoinHandle<()>>>")
+            .field("executor", &"Arc<Mutex<JoinHandle<()>>>")
             .finish()
     }
 }
@@ -27,6 +33,8 @@ impl<P: Ord> Clone for JobQueue<P> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
+            executor: self.executor.clone(),
+            sequencer: self.sequencer.clone(),
         }
     }
 }
@@ -43,7 +51,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
-        tokio::spawn(async move {
+        let sequencer = tokio::spawn(async move {
             while let Some(((job, otx), priority)) = rx.recv().await {
                 jobs_rc1.lock().unwrap().push_back(((job, otx), priority));
                 let _ = tx_deque.send(());
@@ -52,7 +60,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
-        tokio::spawn(async move {
+        let executor = tokio::spawn(async move {
             while rx_deque.recv().await.is_some() {
                 let ((job, otx), _priority) = {
                     let mut j = jobs_rc2.lock().unwrap();
@@ -71,7 +79,19 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             }
         });
 
-        Self { tx }
+        let sequencer = Arc::new(Mutex::new(sequencer));
+        let executor = Arc::new(Mutex::new(executor));
+
+        Self {
+            tx,
+            sequencer,
+            executor,
+        }
+    }
+
+    pub(crate) fn stop(&self) {
+        self.sequencer.lock().unwrap().abort();
+        self.executor.lock().unwrap().abort();
     }
 
     // alias of Self::start().
@@ -109,8 +129,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Instant;
+
+    use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sync_jobs_by_priority() -> anyhow::Result<()> {
@@ -154,8 +175,9 @@ mod tests {
     }
 
     mod workers {
-        use super::*;
         use std::any::Any;
+
+        use super::*;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
