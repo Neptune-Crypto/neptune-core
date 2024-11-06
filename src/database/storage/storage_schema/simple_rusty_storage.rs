@@ -40,6 +40,15 @@ impl StorageWriter for SimpleRustyStorage {
 
         self.db.batch_write(write_ops).await
     }
+
+    async fn drop_unpersisted(&mut self) {
+        self.schema
+            .pending_writes
+            .lock_guard_mut()
+            .await
+            .write_ops
+            .clear();
+    }
 }
 
 impl SimpleRustyStorage {

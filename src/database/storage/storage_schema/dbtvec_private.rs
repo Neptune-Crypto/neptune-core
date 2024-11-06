@@ -320,6 +320,12 @@ where
         }
     }
 
+    /// Delete the non-persisted values, without persisting to disk.
+    pub(super) async fn delete_cache(&mut self) {
+        self.cache.clear();
+        self.current_length = self.persisted_length().await;
+    }
+
     #[inline]
     pub(super) async fn pop(&mut self) -> Option<V> {
         // If vector is empty, return None

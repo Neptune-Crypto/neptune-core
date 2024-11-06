@@ -13,6 +13,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_advanced;
 use twenty_first::util_types::shared::bag_peaks;
 
+use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
@@ -231,6 +232,15 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         }
 
         Some(ret)
+    }
+}
+
+impl ArchivalMmr<DbtVec<Digest>> {
+    /// Delete ephemeral (cache) values, without persisting them.
+    ///
+    /// Can be used to roll-back ephemeral values to a persisted state.
+    pub(crate) async fn delete_cache(&mut self) {
+        self.digests.delete_cache().await;
     }
 }
 

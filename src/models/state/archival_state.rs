@@ -13,6 +13,7 @@ use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::shared::new_block_file_is_needed;
+use super::StorageVecBase;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::create_db_if_missing;
@@ -30,6 +31,7 @@ use crate::models::database::BlockRecord;
 use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
@@ -725,13 +727,12 @@ impl ArchivalState {
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
     pub(crate) async fn get_mutator_set_update_to_tip(
-        &self,
+        &mut self,
         mutator_set: &MutatorSetAccumulator,
         max_search_depth: usize,
     ) -> Option<MutatorSetUpdate> {
         let mut search_depth = 0;
-        let mut addition_records = vec![];
-        let mut removal_records = vec![];
+        let mut block_mutations = vec![];
 
         let mut haystack = self.get_tip().await;
         let mut parent = self.get_tip_parent().await;
@@ -754,14 +755,13 @@ impl ArchivalState {
                 return None;
             }
 
-            addition_records.push(
-                [
-                    parent.as_ref().unwrap().guesser_fee_addition_records(),
-                    haystack.body().transaction_kernel.outputs.clone(),
-                ]
-                .concat(),
-            );
-            removal_records.push(haystack.body().transaction_kernel.inputs.clone());
+            let addition_records = [
+                parent.as_ref().unwrap().guesser_fee_addition_records(),
+                haystack.body().transaction_kernel.outputs.clone(),
+            ]
+            .concat();
+            let removal_records = haystack.body().transaction_kernel.inputs.clone();
+            block_mutations.push((addition_records, removal_records));
 
             haystack = parent.unwrap();
             parent = self
@@ -770,13 +770,64 @@ impl ArchivalState {
                 .expect("Must succeed in reading block");
         }
 
+        // The removal records collected above were valid for each block but
+        // are in the general case not valid for the `mutator_set` which was
+        // given as input to this function. In order to find the right removal
+        // records, we make ephemeral changes (not persisted to disk) to the
+        // archival mutator set. This allows us to read out MMR-authentication
+        // paths from a previous state of the mutator set. It's crucial that
+        // these changes are not persisted, as that would leave the archival
+        // mutator set in a state incompatible with the tip.
+        self.archival_mutator_set.persist().await;
+        for (additions, removals) in block_mutations.iter() {
+            for rr in removals.iter().rev() {
+                self.archival_mutator_set.ams_mut().revert_remove(rr).await;
+            }
+
+            for ar in additions.iter().rev() {
+                self.archival_mutator_set.ams_mut().revert_add(ar).await;
+            }
+        }
+
+        let (mut addition_records, mut removal_records): (
+            Vec<Vec<AdditionRecord>>,
+            Vec<Vec<RemovalRecord>>,
+        ) = block_mutations.clone().into_iter().unzip();
+
         addition_records.reverse();
         removal_records.reverse();
 
-        Some(MutatorSetUpdate::new(
-            removal_records.concat(),
-            addition_records.concat(),
-        ))
+        let addition_records = addition_records.concat();
+        let mut removal_records = removal_records.concat();
+
+        let swbf_length = self.archival_mutator_set.ams().chunks.len().await;
+        for rr in removal_records.iter_mut() {
+            let mut removals = vec![];
+            for (chkidx, (mp, chunk)) in rr
+                .target_chunks
+                .chunk_indices_and_membership_proofs_and_leafs_iter_mut()
+            {
+                if swbf_length <= *chkidx {
+                    removals.push(*chkidx);
+                } else {
+                    *mp = self
+                        .archival_mutator_set
+                        .ams()
+                        .swbf_inactive
+                        .prove_membership_async(*chkidx)
+                        .await;
+                    *chunk = self.archival_mutator_set.ams().chunks.get(*chkidx).await;
+                }
+            }
+
+            for remove in removals {
+                rr.target_chunks.retain(|(x, _)| *x != remove);
+            }
+        }
+
+        self.archival_mutator_set.drop_unpersisted().await;
+
+        Some(MutatorSetUpdate::new(removal_records, addition_records))
     }
 
     /// Update the mutator set with a block after this block has been stored to the database.
@@ -960,6 +1011,7 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
+
     use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::thread_rng;
@@ -1383,7 +1435,7 @@ mod archival_state_tests {
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
-        let twenty_outputs = (0..20)
+        let outputs = (0..20)
             .map(|_| {
                 TxOutput::onchain_native_currency(
                     NeptuneCoins::new(1),
@@ -1394,14 +1446,14 @@ mod archival_state_tests {
             .collect_vec();
         let fee = NeptuneCoins::zero();
 
-        let num_blocks = 20;
+        let num_blocks = 30;
         for _ in 0..num_blocks {
             let timestamp = previous_block.header().timestamp + Timestamp::months(7);
             let (tx, _) = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
-                    twenty_outputs.clone().into(),
+                    outputs.clone().into(),
                     alice_key.into(),
                     UtxoNotificationMedium::OnChain,
                     fee,
@@ -1420,12 +1472,35 @@ mod archival_state_tests {
         }
 
         // Verify that MS-update finder works for this many blocks.
+        let ams_digest_prior = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .hash()
+            .await;
         positive_prop_ms_update_to_tip(
             &genesis_block.body().mutator_set_accumulator,
-            alice.lock_guard().await.chain.archival_state(),
+            alice.lock_guard_mut().await.chain.archival_state_mut(),
             num_blocks,
         )
         .await;
+
+        assert_eq!(
+            ams_digest_prior,
+            alice
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_mutator_set
+                .ams()
+                .hash()
+                .await,
+            "get_mutator_set_update_to_tip must leave the mutator set unchanged."
+        );
 
         // Verify that both active and inactive SWBF are non-empty.
         assert!(
@@ -1952,13 +2027,13 @@ mod archival_state_tests {
         // and outputs.
         positive_prop_ms_update_to_tip(
             &genesis_block.body().mutator_set_accumulator,
-            genesis.lock_guard().await.chain.archival_state(),
+            genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )
         .await;
         positive_prop_ms_update_to_tip(
             &block_1.body().mutator_set_accumulator,
-            genesis.lock_guard().await.chain.archival_state(),
+            genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )
         .await;
@@ -2130,7 +2205,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn ms_update_to_tip_genesis() {
         let network = Network::Main;
-        let archival_state = make_test_archival_state(network).await;
+        let mut archival_state = make_test_archival_state(network).await;
         let current_msa = archival_state
             .archival_mutator_set
             .ams()
@@ -2150,7 +2225,7 @@ mod archival_state_tests {
     /// that the returned MS update produces the current MSA tip.
     async fn positive_prop_ms_update_to_tip(
         past_msa: &MutatorSetAccumulator,
-        archival_state: &ArchivalState,
+        archival_state: &mut ArchivalState,
         search_depth: usize,
     ) {
         let tip_msa = archival_state
@@ -2195,12 +2270,13 @@ mod archival_state_tests {
                     .await
                     .is_none());
             } else {
-                positive_prop_ms_update_to_tip(&genesis_msa, &archival_state, search_depth).await;
+                positive_prop_ms_update_to_tip(&genesis_msa, &mut archival_state, search_depth)
+                    .await;
             }
         }
 
         // Walking the opposite way returns None, and does not crash.
-        let genesis_archival_state = make_test_archival_state(network).await;
+        let mut genesis_archival_state = make_test_archival_state(network).await;
         for i in 0..10 {
             assert!(genesis_archival_state
                 .get_mutator_set_update_to_tip(&current_msa, i)
@@ -2230,8 +2306,8 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, block_1a.clone())
             .await
             .unwrap();
-        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
-        positive_prop_ms_update_to_tip(block_1a_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_1b_msa, 1)
             .await
@@ -2241,12 +2317,12 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, block_1b.clone())
             .await
             .unwrap();
-        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_1a_msa, 1)
             .await
             .is_none());
-        positive_prop_ms_update_to_tip(block_1b_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1b_msa, &mut archival_state, search_depth).await;
     }
 
     #[traced_test]
@@ -2300,9 +2376,9 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, block_2a.clone())
             .await
             .unwrap();
-        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
-        positive_prop_ms_update_to_tip(block_1a_msa, &archival_state, search_depth).await;
-        positive_prop_ms_update_to_tip(block_2a_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_2a_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_1b_msa, search_depth)
             .await
@@ -2316,9 +2392,9 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, block_2b.clone())
             .await
             .unwrap();
-        positive_prop_ms_update_to_tip(genesis_msa, &archival_state, search_depth).await;
-        positive_prop_ms_update_to_tip(block_1b_msa, &archival_state, search_depth).await;
-        positive_prop_ms_update_to_tip(block_2b_msa, &archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_1b_msa, &mut archival_state, search_depth).await;
+        positive_prop_ms_update_to_tip(block_2b_msa, &mut archival_state, search_depth).await;
         assert!(archival_state
             .get_mutator_set_update_to_tip(block_1a_msa, search_depth)
             .await
