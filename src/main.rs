@@ -11,7 +11,7 @@ pub fn main() -> Result<()> {
         .build()
         .expect("Could not create tokio runtime");
 
-    let _ = tokio_runtime.block_on(async {
+    let res = tokio_runtime.block_on(async {
         // Fetch the CLI arguments
         let args: cli_args::Args = cli_args::Args::parse();
 
@@ -40,5 +40,6 @@ pub fn main() -> Result<()> {
     });
 
     tokio_runtime.shutdown_timeout(tokio::time::Duration::from_secs(10));
-    Ok(())
+
+    res
 }
