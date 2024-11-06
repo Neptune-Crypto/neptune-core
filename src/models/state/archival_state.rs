@@ -402,7 +402,14 @@ impl ArchivalState {
                     .len(block_record.file_location.block_length)
                     .map(&block_file)?
             };
-            let block: Block = bincode::deserialize(&mmap).unwrap();
+            let block: Block = match bincode::deserialize(&mmap) {
+                Ok(b) => b,
+                Err(e) => {
+                    panic!("Could not deserialize block file into `Block`.\n\
+                            Block files may be corrupt, out of date, or incompatible with current version of neptune-core.\n\
+                            Error was: {e}");
+                }
+            };
             Ok(block)
         })
         .await?
