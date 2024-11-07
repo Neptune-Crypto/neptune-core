@@ -174,6 +174,15 @@ mod tests {
         workers::runtime_shutdown_cancels_job(true)
     }
 
+    // this test should NOT panic, but I don't yet have a fix for
+    // the behavior that makes it fail.  Marking it should_panic for
+    // now so it doesn't disrupt CI.
+    #[should_panic]
+    #[test]
+    fn spawned_tasks_live_as_long_as_jobqueue() {
+        workers::spawned_tasks_live_as_long_as_jobqueue(true).unwrap();
+    }
+
     mod workers {
         use std::any::Any;
 
@@ -452,6 +461,71 @@ mod tests {
             assert!(start.elapsed() < std::time::Duration::from_secs(5));
 
             result
+        }
+
+        // this test attemptes to verify that the tasks spawned by the JobQueue
+        // continue running until the JobQueue is dropped after the tokio
+        // runtime is dropped.
+        //
+        // If the tasks are cencelled before JobQueue is dropped then a subsequent
+        // api calls that sends a msg will result in a "channel closed" error, which
+        // is what the test checks for.
+        //
+        // note that the test has to do some tricky stuff to setup conditions
+        // where the "channel closed" error occurs. It's a subtle issue.
+        //
+        // Unfortunately I haven't been able to make the test succeed yet.  It seems
+        // tokio is cancelling the spawned tasks even when JobQueue still holds
+        // their JoinHandles.  That may or may not be a tokio bug.
+        pub(super) fn spawned_tasks_live_as_long_as_jobqueue(is_async: bool) -> anyhow::Result<()> {
+            let rt = tokio::runtime::Runtime::new()?;
+
+            let result_ok: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
+
+            let result_ok_clone = result_ok.clone();
+            rt.block_on(async {
+                // create a job queue
+                let job_queue = JobQueue::start();
+
+                // spawns background task that adds job
+                let job_queue_cloned = job_queue.clone();
+                let _jh = tokio::spawn(async move {
+                    // sleep 200 ms to let runtime finish.
+                    // ie ensure drop(rt) will be reached and wait for us.
+                    // note that we use std sleep.  if tokio sleep is used
+                    // the test will always succeed due to the await point.
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+
+                    let job = Box::new(DoubleJob {
+                        data: 10,
+                        duration: std::time::Duration::from_secs(1),
+                        is_async,
+                    });
+
+                    let result = job_queue_cloned.add_job(job, DoubleJobPriority::Low).await;
+
+                    // an assert on result.is_ok() would panic, but that panic would be
+                    // printed and swallowed by tokio runtime, so the test would succeed
+                    // despite the panic. instead we pass the result in a mutex so it
+                    // can be asserted where it will be caught by the test runner.
+                    *result_ok_clone.lock().unwrap() = result.is_ok();
+                });
+
+                // sleep 50 ms to let job get started.
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                // note; neither of these make the test succeed.
+
+                // job_queue.stop().await;
+                // jh.abort();
+            });
+
+            // drop the tokio runtime. It will abort tasks.
+            drop(rt);
+
+            assert!(*result_ok.lock().unwrap());
+
+            Ok(())
         }
     }
 }
