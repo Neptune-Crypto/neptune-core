@@ -57,7 +57,7 @@ tasm-lib = "0.2.1"
 tiny-bip39 = "1.0"
 tokio = { version = "1.41", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time", "fmt"] }
 tracing-test = "0.2"

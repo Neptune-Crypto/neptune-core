@@ -1,30 +1,36 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use tokio_util::task::TaskTracker;
 
 use super::traits::Job;
 use super::traits::JobResult;
 
-type JobResultOneShotChannel = oneshot::Sender<Box<dyn JobResult>>;
-type JobAndResultChannel = (Box<dyn Job>, JobResultOneShotChannel);
+// in case we need to add any future msg types.
+enum JobQueueMsg<P: Ord> {
+    AddJob(AddJobMsg<P>),
+    Stop,
+}
+
+/// represents a msg to add a job to the queue.
+struct AddJobMsg<P: Ord> {
+    job: Box<dyn Job>,
+    result_tx: oneshot::Sender<Box<dyn JobResult>>,
+    priority: P,
+}
 
 // implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P: Ord> {
-    tx: mpsc::UnboundedSender<(JobAndResultChannel, P)>,
-    sequencer: Arc<Mutex<JoinHandle<()>>>,
-    executor: Arc<Mutex<JoinHandle<()>>>,
+    tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
+    tracker: TaskTracker,
 }
 
 impl<P: Ord> std::fmt::Debug for JobQueue<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobQueue")
             .field("tx", &"mpsc::Sender")
-            .field("sequencer", &"Arc<Mutex<JoinHandle<()>>>")
-            .field("executor", &"Arc<Mutex<JoinHandle<()>>>")
             .finish()
     }
 }
@@ -33,8 +39,7 @@ impl<P: Ord> Clone for JobQueue<P> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
-            executor: self.executor.clone(),
-            sequencer: self.sequencer.clone(),
+            tracker: self.tracker.clone(),
         }
     }
 }
@@ -42,56 +47,58 @@ impl<P: Ord> Clone for JobQueue<P> {
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     // creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<(JobAndResultChannel, P)>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
 
-        let jobs: Arc<Mutex<VecDeque<(JobAndResultChannel, P)>>> =
-            Arc::new(Mutex::new(VecDeque::new()));
+        let jobs: Arc<Mutex<VecDeque<AddJobMsg<P>>>> = Arc::new(Mutex::new(VecDeque::new()));
 
         let (tx_deque, mut rx_deque) = tokio::sync::mpsc::unbounded_channel();
 
+        let tracker = TaskTracker::new();
+
         // spawns background task that adds incoming jobs to job-queue
         let jobs_rc1 = jobs.clone();
-        let sequencer = tokio::spawn(async move {
-            while let Some(((job, otx), priority)) = rx.recv().await {
-                jobs_rc1.lock().unwrap().push_back(((job, otx), priority));
-                let _ = tx_deque.send(());
+        tracker.spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    JobQueueMsg::AddJob(m) => {
+                        jobs_rc1.lock().unwrap().push_back(m);
+                        let _ = tx_deque.send(());
+                    }
+                    JobQueueMsg::Stop => break,
+                }
             }
         });
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
-        let executor = tokio::spawn(async move {
+        tracker.spawn(async move {
             while rx_deque.recv().await.is_some() {
-                let ((job, otx), _priority) = {
+                let msg = {
                     let mut j = jobs_rc2.lock().unwrap();
-                    j.make_contiguous().sort_by(|(_, a), (_, b)| b.cmp(a));
+                    j.make_contiguous()
+                        .sort_by(|a, b| b.priority.cmp(&a.priority));
                     j.pop_front().unwrap()
                 };
 
-                let job_result = match job.is_async() {
-                    true => job.run_async().await,
-                    false => tokio::task::spawn_blocking(move || job.run())
+                let job_result = match msg.job.is_async() {
+                    true => msg.job.run_async().await,
+                    false => tokio::task::spawn_blocking(move || msg.job.run())
                         .await
                         .unwrap(),
                 };
 
-                let _ = otx.send(job_result);
+                let _ = msg.result_tx.send(job_result);
             }
         });
+        tracker.close();
 
-        let sequencer = Arc::new(Mutex::new(sequencer));
-        let executor = Arc::new(Mutex::new(executor));
-
-        Self {
-            tx,
-            sequencer,
-            executor,
-        }
+        Self { tx, tracker }
     }
 
-    pub(crate) fn stop(&self) {
-        self.sequencer.lock().unwrap().abort();
-        self.executor.lock().unwrap().abort();
+    // shutdown job queue. experimental.  this will probably go away.
+    pub async fn stop(&self) {
+        self.tx.send(JobQueueMsg::Stop).unwrap();
+        self.tracker.wait().await;
     }
 
     // alias of Self::start().
@@ -111,7 +118,12 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         priority: P,
     ) -> anyhow::Result<oneshot::Receiver<Box<dyn JobResult>>> {
         let (otx, orx) = oneshot::channel();
-        self.tx.send(((job, otx), priority))?;
+        let msg = JobQueueMsg::AddJob(AddJobMsg {
+            job,
+            result_tx: otx,
+            priority,
+        });
+        self.tx.send(msg)?;
         Ok(orx)
     }
 
@@ -122,16 +134,20 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         priority: P,
     ) -> anyhow::Result<Box<dyn JobResult>> {
         let (otx, orx) = oneshot::channel();
-        self.tx.send(((job, otx), priority))?;
+        let msg = JobQueueMsg::AddJob(AddJobMsg {
+            job,
+            result_tx: otx,
+            priority,
+        });
+        self.tx.send(msg)?;
         Ok(orx.await?)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use super::*;
+    use std::time::Instant;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sync_jobs_by_priority() -> anyhow::Result<()> {
@@ -184,9 +200,8 @@ mod tests {
     }
 
     mod workers {
-        use std::any::Any;
-
         use super::*;
+        use std::any::Any;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -463,20 +478,6 @@ mod tests {
             result
         }
 
-        // this test attemptes to verify that the tasks spawned by the JobQueue
-        // continue running until the JobQueue is dropped after the tokio
-        // runtime is dropped.
-        //
-        // If the tasks are cencelled before JobQueue is dropped then a subsequent
-        // api calls that sends a msg will result in a "channel closed" error, which
-        // is what the test checks for.
-        //
-        // note that the test has to do some tricky stuff to setup conditions
-        // where the "channel closed" error occurs. It's a subtle issue.
-        //
-        // Unfortunately I haven't been able to make the test succeed yet.  It seems
-        // tokio is cancelling the spawned tasks even when JobQueue still holds
-        // their JoinHandles.  That may or may not be a tokio bug.
         pub(super) fn spawned_tasks_live_as_long_as_jobqueue(is_async: bool) -> anyhow::Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
 
