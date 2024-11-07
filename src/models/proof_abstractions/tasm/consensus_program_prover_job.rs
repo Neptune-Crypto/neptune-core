@@ -94,6 +94,10 @@ impl Job for ConsensusProgramProverJob {
     }
 
     fn run(&self) -> Box<dyn JobResult> {
-        Box::new(ConsensusProgramProverJobResult(self.prove()))
+        let job_id: u16 = rand::random(); // only for log disambiguation.
+        tracing::debug!("job start.  ConsensusProgramProverJob id: {}", job_id);
+        let result = Box::new(ConsensusProgramProverJobResult(self.prove()));
+        tracing::debug!("job finished.  ConsensusProgramProverJob id: {}", job_id);
+        result
     }
 }
