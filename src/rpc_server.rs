@@ -34,6 +34,7 @@ use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::KeyType;
@@ -59,10 +60,7 @@ pub struct DashBoardOverviewDataFromClient {
     pub peer_count: Option<usize>,
 
     // `None` symbolizes failure to get mining status
-    pub is_guessing: Option<bool>,
-
-    // `None` symbolizes failure to get mining status
-    pub is_composing: Option<bool>,
+    pub mining_status: Option<MiningStatus>,
 
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
@@ -723,8 +721,7 @@ impl RPC for NeptuneRPCServer {
 
         let peer_count = Some(state.net.peer_map.len());
 
-        let is_guessing = Some(state.guessing);
-        let is_composing = Some(state.composing);
+        let mining_status = Some(state.mining_status.clone());
         drop(state);
 
         let confirmations = self.confirmations_internal().await;
@@ -739,8 +736,7 @@ impl RPC for NeptuneRPCServer {
             mempool_size,
             mempool_tx_count,
             peer_count,
-            is_guessing,
-            is_composing,
+            mining_status,
             confirmations,
             cpu_temp,
         }

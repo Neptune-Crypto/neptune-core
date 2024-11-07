@@ -453,8 +453,7 @@ pub async fn mine(
     loop {
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
-        global_state_lock.set_guessing(false).await;
-        global_state_lock.set_composing(false).await;
+        global_state_lock.set_mining_status_to_inactive().await;
 
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
 
@@ -467,7 +466,7 @@ pub async fn mine(
             && !pause_mine
         {
             let composer_utxos = maybe_proposal.composer_utxos();
-            global_state_lock.set_guessing(true).await;
+            global_state_lock.set_mining_status_to_guesing().await;
             maybe_proposal.map(|proposal| {
                 let guesser_task = guess_nonce(
                     proposal.to_owned(),
@@ -494,7 +493,7 @@ pub async fn mine(
             && !is_syncing
             && !pause_mine
         {
-            global_state_lock.set_composing(true).await;
+            global_state_lock.set_mining_status_to_composing().await;
             let compose_task =
                 compose_block(latest_block.clone(), global_state_lock.clone(), composer_tx);
             let task = tokio::task::Builder::new()

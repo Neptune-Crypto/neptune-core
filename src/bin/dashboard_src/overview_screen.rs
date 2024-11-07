@@ -12,6 +12,7 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::models::state::mining_status::MiningStatus;
 use neptune_core::prelude::twenty_first;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
@@ -43,8 +44,7 @@ pub struct OverviewData {
 
     network: Network,
     syncing: bool,
-    is_guessing: Option<bool>,
-    is_composing: Option<bool>,
+    mining_status: Option<MiningStatus>,
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
@@ -81,8 +81,7 @@ impl OverviewData {
             synchronization_percentage: Default::default(),
             network,
             syncing: Default::default(),
-            is_guessing: Default::default(),
-            is_composing: Default::default(),
+            mining_status: Default::default(),
             listen_address,
             tip_digest: Default::default(),
             block_header: Default::default(),
@@ -113,8 +112,7 @@ impl OverviewData {
 
             listen_address: None,
             network: Network::Testnet,
-            is_guessing: Some(false),
-            is_composing: Some(false),
+            mining_status: Some(MiningStatus::Inactive),
             syncing: false,
             tip_digest: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
@@ -226,8 +224,7 @@ impl OverviewScreen {
                                 own_overview_data.available_balance = Some(resp.available_balance);
                                 own_overview_data.available_unconfirmed_balance = Some(resp.available_unconfirmed_balance);
                                 own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
-                                own_overview_data.is_guessing = resp.is_guessing;
-                                own_overview_data.is_composing = resp.is_composing;
+                                own_overview_data.mining_status = resp.mining_status;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
                             }
@@ -417,12 +414,8 @@ impl Widget for OverviewScreen {
         lines.push(format!("synchronizing: {}", data.syncing));
 
         lines.push(format!(
-            "composing block: {}",
-            dashifnotset!(data.is_composing)
-        ));
-        lines.push(format!(
-            "guessing nonce: {}",
-            dashifnotset!(data.is_guessing)
+            "mining status: {}",
+            dashifnotset!(data.mining_status.clone())
         ));
 
         let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());

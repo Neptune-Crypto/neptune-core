@@ -3,6 +3,7 @@ pub mod block_proposal;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
+pub mod mining_status;
 pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
@@ -13,6 +14,7 @@ pub mod wallet;
 use std::cmp::max;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -20,6 +22,7 @@ use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use mempool::Mempool;
+use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -168,17 +171,31 @@ impl GlobalStateLock {
 
     // check if mining
     pub async fn mining(&self) -> bool {
-        self.lock(|s| s.guessing).await
+        self.lock(|s| match s.mining_status {
+            MiningStatus::Guessing(_) => true,
+            MiningStatus::Composing(_) => true,
+            MiningStatus::Inactive => false,
+        })
+        .await
+    }
+
+    pub async fn set_mining_status_to_inactive(&mut self) {
+        self.lock_mut(|s| s.mining_status = MiningStatus::Inactive)
+            .await
     }
 
     /// Indicate if we are guessing
-    pub async fn set_guessing(&mut self, guessing: bool) {
-        self.lock_mut(|s| s.guessing = guessing).await
+    pub async fn set_mining_status_to_guesing(&mut self) {
+        let now = SystemTime::now();
+        self.lock_mut(|s| s.mining_status = MiningStatus::Guessing(now))
+            .await
     }
 
     /// Indicate if we are composing
-    pub async fn set_composing(&mut self, composing: bool) {
-        self.lock_mut(|s| s.composing = composing).await
+    pub async fn set_mining_status_to_composing(&mut self) {
+        let now = SystemTime::now();
+        self.lock_mut(|s| s.mining_status = MiningStatus::Composing(now))
+            .await
     }
 
     // persist wallet state to disk
@@ -279,13 +296,10 @@ pub struct GlobalState {
     /// The block proposal to which guessers contribute proof-of-work.
     pub(crate) block_proposal: BlockProposal,
 
-    /// Indicates whether the guessing task is running.
+    /// Indicates whether the guessing or composing task is running, and if so,
+    /// since when.
     // Only the mining task should write to this, anyone can read.
-    pub guessing: bool,
-
-    /// Indicates whether the composing task is running.
-    // Only the mining task should write to this, anyone can read.
-    pub composing: bool,
+    pub(crate) mining_status: MiningStatus,
 }
 
 impl GlobalState {
@@ -303,8 +317,7 @@ impl GlobalState {
             cli,
             mempool,
             block_proposal: BlockProposal::default(),
-            guessing: false,
-            composing: false,
+            mining_status: MiningStatus::Inactive,
         }
     }
 
