@@ -404,14 +404,29 @@ pub async fn mine(
             // Build the block template and spawn the worker task to mine on it
             let now = Timestamp::now();
 
+            // note: if we get a "channel closed" error, it means the tokio runtime is shutting
+            // down, and we should exit/return gracefully.
+            // hopefully we find a cleaner solution, but this avoids an uncaught panic for now.
+            //
+            // todo: this fn is called from tokio::spawn() and the results are not handled
+            // by spawner so the tokio executor prints a stack-trace and continues, but the panic
+            // isn't propagated higher, so program doesn't exit.
+            // as such it, should handle all results itself, usually by log+return,
+            // or alternatively results should be handled by spawner.
+
             let guesser_fee_fraction = 0.5f64; // TODO: Set this through CLI!
-            let (transaction, coinbase_utxo_info) = create_block_transaction(
+            let (transaction, coinbase_utxo_info) = match create_block_transaction(
                 &latest_block,
                 &global_state_lock,
                 now,
                 guesser_fee_fraction,
             )
-            .await?;
+            .await
+            {
+                Ok(r) => r,
+                Err(e) if e.to_string() == "channel closed" => return Ok(()),
+                Err(e) => return Err(e),
+            };
             let triton_vm_job_queue = global_state_lock.vm_job_queue();
             let block_template = Block::make_block_template(
                 &latest_block,
@@ -425,6 +440,7 @@ pub async fn mine(
             .await;
             let block_template = match block_template {
                 Ok(template) => template,
+                Err(e) if e.to_string() == "channel closed" => return Ok(()),
                 Err(_) => bail!("Miner failed to generate block template"),
             };
             let miner_task = mine_block(
