@@ -59,7 +59,10 @@ pub struct DashBoardOverviewDataFromClient {
     pub peer_count: Option<usize>,
 
     // `None` symbolizes failure to get mining status
-    pub is_mining: Option<bool>,
+    pub is_guessing: Option<bool>,
+
+    // `None` symbolizes failure to get mining status
+    pub is_composing: Option<bool>,
 
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
@@ -720,7 +723,8 @@ impl RPC for NeptuneRPCServer {
 
         let peer_count = Some(state.net.peer_map.len());
 
-        let is_mining = Some(state.mining);
+        let is_guessing = Some(state.guessing);
+        let is_composing = Some(state.composing);
         drop(state);
 
         let confirmations = self.confirmations_internal().await;
@@ -735,7 +739,8 @@ impl RPC for NeptuneRPCServer {
             mempool_size,
             mempool_tx_count,
             peer_count,
-            is_mining,
+            is_guessing,
+            is_composing,
             confirmations,
             cpu_temp,
         }

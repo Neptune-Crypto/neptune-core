@@ -25,10 +25,10 @@ fi
 SLEEP_TIME="$1"
 echo "Sleeping for $SLEEP_TIME seconds before starting 2nd instance"
 
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 0 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --mine 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 0 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --compose --guess 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
 pid[0]=$!
 sleep "$SLEEP_TIME"s;
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 0 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 --mine --max-number-of-blocks-before-syncing 2 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 0 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 --max-number-of-blocks-before-syncing 2 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g'  &
 pid[1]=$!
 
 # Inspired by https://stackoverflow.com/a/52033580/2574407

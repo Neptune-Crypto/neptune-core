@@ -22,10 +22,9 @@ pub enum MainToMiner {
     /// Communicates to miner that it should work on a new block proposal
     NewBlockProposal,
 
-    // `ReadyToMineNextBlock` is used to communicate that a block received from the miner has
-    // been processed by `main_loop` and that the mempool thus is in an updated state, ready to
-    // mine the next block.
-    ReadyToMineNextBlock,
+    /// Used to communicate that main loop has received the block or block
+    /// proposal from the miner, and that miner can start a new task.
+    Continue,
 
     StopMining,
     StartMining,

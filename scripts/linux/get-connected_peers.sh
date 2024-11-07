@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Ask three nodes about their latest block
+# Ask three nodes about connected peers
 
 set -e # Exit on first error.
 

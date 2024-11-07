@@ -38,7 +38,7 @@ sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 18 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g' &
 pid[1]=$!
 sleep 2s;
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --mine --peers 127.0.0.1:29791 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I2:  \1/g' &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --compose --guess --peers 127.0.0.1:29791 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I2:  \1/g' &
 pid[2]=$!
 sleep 2s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/3/ nice -n 18 --  cargo run -- --network regtest --peer-port 29793 --rpc-port 19793 --peers 127.0.0.1:29792 2>&1 | tee -a advanced_integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I3:  \1/g' &

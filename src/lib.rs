@@ -175,7 +175,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         networking_state,
         cli_args,
         mempool,
-        false,
     );
     let own_handshake_data: HandshakeData = global_state_lock
         .lock_guard()

@@ -43,7 +43,8 @@ pub struct OverviewData {
 
     network: Network,
     syncing: bool,
-    is_mining: Option<bool>,
+    is_guessing: Option<bool>,
+    is_composing: Option<bool>,
     tip_digest: Option<Digest>,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
@@ -80,7 +81,8 @@ impl OverviewData {
             synchronization_percentage: Default::default(),
             network,
             syncing: Default::default(),
-            is_mining: Default::default(),
+            is_guessing: Default::default(),
+            is_composing: Default::default(),
             listen_address,
             tip_digest: Default::default(),
             block_header: Default::default(),
@@ -111,7 +113,8 @@ impl OverviewData {
 
             listen_address: None,
             network: Network::Testnet,
-            is_mining: Some(false),
+            is_guessing: Some(false),
+            is_composing: Some(false),
             syncing: false,
             tip_digest: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
@@ -223,7 +226,8 @@ impl OverviewScreen {
                                 own_overview_data.available_balance = Some(resp.available_balance);
                                 own_overview_data.available_unconfirmed_balance = Some(resp.available_unconfirmed_balance);
                                 own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
-                                own_overview_data.is_mining = resp.is_mining;
+                                own_overview_data.is_guessing = resp.is_guessing;
+                                own_overview_data.is_composing = resp.is_composing;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
                             }
@@ -412,7 +416,14 @@ impl Widget for OverviewScreen {
 
         lines.push(format!("synchronizing: {}", data.syncing));
 
-        lines.push(format!("mining: {}", dashifnotset!(data.is_mining)));
+        lines.push(format!(
+            "composing block: {}",
+            dashifnotset!(data.is_composing)
+        ));
+        lines.push(format!(
+            "guessing nonce: {}",
+            dashifnotset!(data.is_guessing)
+        ));
 
         let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());
         lines.push(format!("tip (hex): {}\n", dashifnotset!(tip_digest_hex),));

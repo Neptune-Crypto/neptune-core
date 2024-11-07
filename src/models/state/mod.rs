@@ -143,9 +143,8 @@ impl GlobalStateLock {
         net: NetworkingState,
         cli: cli_args::Args,
         mempool: Mempool,
-        mining: bool,
     ) -> Self {
-        let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool, mining);
+        let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
         let global_state_lock = sync_tokio::AtomicRw::from((
             global_state,
             Some("GlobalState"),
@@ -169,12 +168,17 @@ impl GlobalStateLock {
 
     // check if mining
     pub async fn mining(&self) -> bool {
-        self.lock(|s| s.mining).await
+        self.lock(|s| s.guessing).await
     }
 
-    // enable or disable mining
-    pub async fn set_mining(&mut self, mining: bool) {
-        self.lock_mut(|s| s.mining = mining).await
+    /// Indicate if we are guessing
+    pub async fn set_guessing(&mut self, guessing: bool) {
+        self.lock_mut(|s| s.guessing = guessing).await
+    }
+
+    /// Indicate if we are composing
+    pub async fn set_composing(&mut self, composing: bool) {
+        self.lock_mut(|s| s.composing = composing).await
     }
 
     // persist wallet state to disk
@@ -275,8 +279,13 @@ pub struct GlobalState {
     /// The block proposal to which guessers contribute proof-of-work.
     pub(crate) block_proposal: BlockProposal,
 
+    /// Indicates whether the guessing task is running.
     // Only the mining task should write to this, anyone can read.
-    pub mining: bool,
+    pub guessing: bool,
+
+    /// Indicates whether the composing task is running.
+    // Only the mining task should write to this, anyone can read.
+    pub composing: bool,
 }
 
 impl GlobalState {
@@ -286,7 +295,6 @@ impl GlobalState {
         net: NetworkingState,
         cli: cli_args::Args,
         mempool: Mempool,
-        mining: bool,
     ) -> Self {
         Self {
             wallet_state,
@@ -295,7 +303,8 @@ impl GlobalState {
             cli,
             mempool,
             block_proposal: BlockProposal::default(),
-            mining,
+            guessing: false,
+            composing: false,
         }
     }
 

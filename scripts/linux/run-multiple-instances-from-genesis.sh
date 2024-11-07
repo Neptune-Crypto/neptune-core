@@ -27,7 +27,7 @@ rm -rf $LOCAL_STATE_DIR
 # to build at the same time.
 cargo build
 
-RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --mine $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-0.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --compose --guess $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-0.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
 pid[0]=$!
 sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/1/ nice -n 18 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-1.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g'  &

@@ -387,8 +387,7 @@ impl MainLoopHandler {
 
                 // Inform miner that mempool has been updated and that it is safe
                 // to mine the next block
-                self.main_to_miner_tx
-                    .send(MainToMiner::ReadyToMineNextBlock)?;
+                self.main_to_miner_tx.send(MainToMiner::Continue)?;
 
                 // Share block with peers
                 self.main_to_peer_broadcast_tx
@@ -427,6 +426,11 @@ impl MainLoopHandler {
                     );
                 self.global_state_lock.lock_guard_mut().await.block_proposal =
                     BlockProposal::own_proposal(block.clone(), expected_utxos);
+
+                // Indicate to miner that block proposal was received
+                self.main_to_miner_tx
+                    .send(MainToMiner::Continue)
+                    .expect("Could not reach miner task. This should never happen.");
             }
         }
         Ok(())

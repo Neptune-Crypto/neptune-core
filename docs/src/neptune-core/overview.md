@@ -128,7 +128,7 @@ It then prints everything that is `debug` level or above, where `trace < debug <
 To develop a new RPC, it can be productive to view two terminals simultaneously and run one of the following commands in each:
 
 ```bash
-XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=debug cargo run -- --mine --network regtest # Window1 RPC-server
+XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=debug cargo run -- --compose --guess --network regtest # Window1 RPC-server
 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=trace cargo run --bin rpc_cli -- --server-addr 127.0.0.1:9799 send '[{"public_key": "0399bb06fa556962201e1647a7c5b231af6ff6dd6d1c1a8599309caa126526422e", "amount":{"values":[11,0,0,0]}}]' # Window2 RPC-client
 ```
 

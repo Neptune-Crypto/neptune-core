@@ -37,7 +37,7 @@ With a functioning version of cargo, compilation on Windows should just work out
  - Generate a wallet file: `neptune-cli generate-wallet`
  - Run neptune-core daemon: `neptune-core` with flags
    - `--peers [ip_address:port]` to connect to a given peer, for instance `--peers [2001:bc8:611:1c72::1]:9798` or `--peers 139.162.193.206:9798` or both
-   - `--mine` to mine — if you want to generate testnet coins to test sending and receiving
+   - `--compose --guess` to mine — if you want to generate testnet coins to test sending and receiving
    - `--help` to get a list of available command-line arguments
 
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience that you will then be able to open and receive connections to other nodes through Nepture Core's built-in peer-discovery process.

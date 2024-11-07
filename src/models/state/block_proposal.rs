@@ -15,6 +15,13 @@ pub(crate) enum BlockProposal {
 }
 
 impl BlockProposal {
+    pub(crate) fn composer_utxos(&self) -> Vec<ExpectedUtxo> {
+        match self {
+            BlockProposal::OwnComposition((_, utxo_info)) => utxo_info.clone(),
+            _ => vec![],
+        }
+    }
+
     pub(crate) fn own_proposal(block: Block, expected_utxos: Vec<ExpectedUtxo>) -> Self {
         Self::OwnComposition((block, expected_utxos))
     }
@@ -25,6 +32,10 @@ impl BlockProposal {
 
     pub(crate) fn none() -> Self {
         Self::None
+    }
+
+    pub(crate) fn is_some(&self) -> bool {
+        !matches!(self, BlockProposal::None)
     }
 
     /// Map the inner block (if any) to some result

@@ -25,7 +25,6 @@ use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -33,6 +32,59 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+
+async fn compose_block(
+    latest_block: Block,
+    global_state_lock: GlobalStateLock,
+    sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
+) -> Result<()> {
+    let now = Timestamp::now();
+    let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
+
+    let (transaction, composer_utxos) = match create_block_transaction(
+        &latest_block,
+        &global_state_lock,
+        now,
+        guesser_fee_fraction,
+    )
+    .await
+    {
+        Ok(r) => r,
+
+        // "channel closed" indicates an ongoing shutdown of
+        // the entire program. So: stop miner here.
+        Err(e) if e.to_string() == "channel closed" => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    let triton_vm_job_queue = global_state_lock.vm_job_queue();
+
+    let proposal = Block::compose(
+        &latest_block,
+        transaction,
+        now,
+        Digest::default(),
+        None,
+        triton_vm_job_queue,
+        TritonVmJobPriority::High,
+    )
+    .await;
+
+    let proposal = match proposal {
+        Ok(template) => template,
+
+        // "channel closed" indicates an ongoing shutdown of
+        // the entire program. So: stop miner here.
+        Err(e) if e.to_string() == "channel closed" => return Ok(()),
+        Err(_) => bail!("Miner failed to generate block template"),
+    };
+
+    // Please clap.
+    match sender.send((proposal, composer_utxos)) {
+        Ok(_) => Ok(()),
+        Err(_) => bail!("Composer task failed to send to miner master"),
+    }
+}
 
 /// Attempt to mine a valid block for the network
 #[allow(clippy::too_many_arguments)]
@@ -393,106 +445,62 @@ pub async fn mine(
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
 
     let mut pause_mine = false;
+    let mut wait_for_confirmation = false;
     loop {
-        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+        let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
+        global_state_lock.set_guessing(false).await;
+        global_state_lock.set_composing(false).await;
+
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
 
-        let guesser_task: Option<JoinHandle<()>> = if is_syncing {
-            info!("Not mining because we are syncing");
-            global_state_lock.set_mining(false).await;
-            None
-        } else if pause_mine {
-            info!("Not mining because mining was paused");
-            global_state_lock.set_mining(false).await;
-            None
+        let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+        let guess = global_state_lock.cli().guess;
+        let guesser_task: Option<JoinHandle<()>> = if !wait_for_confirmation
+            && guess
+            && maybe_proposal.is_some()
+            && !is_syncing
+            && !pause_mine
+        {
+            let composer_utxos = maybe_proposal.composer_utxos();
+            global_state_lock.set_guessing(true).await;
+            maybe_proposal.map(|proposal| {
+                let guesser_task = guess_nonce(
+                    proposal.to_owned(),
+                    latest_block.clone(),
+                    guesser_tx,
+                    composer_utxos,
+                    global_state_lock.cli().sleepy_guessing,
+                    None, // using default TARGET_BLOCK_INTERVAL
+                );
+
+                tokio::task::Builder::new()
+                    .name("guesser")
+                    .spawn(guesser_task)
+                    .expect("Failed to spawn guesser task")
+            })
         } else {
-            let block_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
-            let (proposal, composer_utxos) = match block_proposal {
-                BlockProposal::OwnComposition((prop, composer_utxos)) => {
-                    (Some(prop), composer_utxos)
-                }
-                BlockProposal::ForeignComposition(prop) => (Some(prop), vec![]),
-                BlockProposal::None => {
-                    // Build the block template and spawn the worker task to mine on it
+            None
+        };
 
-                    if !global_state_lock.cli().compose {
-                        (None, vec![])
-                    } else {
-                        let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
-                        let now = Timestamp::now();
+        let compose = global_state_lock.cli().compose;
+        let composer_task = if !wait_for_confirmation
+            && compose
+            && guesser_task.is_none()
+            && !is_syncing
+            && !pause_mine
+        {
+            global_state_lock.set_composing(true).await;
+            let compose_task =
+                compose_block(latest_block.clone(), global_state_lock.clone(), composer_tx);
+            let task = tokio::task::Builder::new()
+                .name("composer")
+                .spawn(compose_task)
+                .expect("Failed to spawn composer task.");
 
-                        let (transaction, composer_utxos) = match create_block_transaction(
-                            &latest_block,
-                            &global_state_lock,
-                            now,
-                            guesser_fee_fraction,
-                        )
-                        .await
-                        {
-                            Ok(r) => r,
-
-                            // "channel closed" indicates an ongoing shutdown of
-                            // the entire program. So: stop miner here.
-                            Err(e) if e.to_string() == "channel closed" => return Ok(()),
-                            Err(e) => return Err(e),
-                        };
-                        let triton_vm_job_queue = global_state_lock.vm_job_queue();
-                        let proposal = Block::compose(
-                            &latest_block,
-                            transaction,
-                            now,
-                            Digest::default(),
-                            None,
-                            triton_vm_job_queue,
-                            TritonVmJobPriority::High,
-                        )
-                        .await;
-                        let proposal = match proposal {
-                            Ok(template) => template,
-
-                            // "channel closed" indicates an ongoing shutdown of
-                            // the entire program. So: stop miner here.
-                            Err(e) if e.to_string() == "channel closed" => return Ok(()),
-                            Err(_) => bail!("Miner failed to generate block template"),
-                        };
-
-                        // Send proposal to main_loop to share with peers.
-                        to_main
-                            .send(MinerToMain::BlockProposal(Box::new((
-                                proposal.clone(),
-                                composer_utxos.clone(),
-                            ))))
-                            .await
-                            .expect("Channel to main closed");
-
-                        (Some(proposal), composer_utxos)
-                    }
-                }
-            };
-
-            // Run guesser iff we have a proposal and we want to guess
-            if let Some(proposal) = proposal {
-                if global_state_lock.lock_guard().await.cli().guess {
-                    let guesser_task = guess_nonce(
-                        proposal,
-                        latest_block.clone(),
-                        worker_task_tx,
-                        composer_utxos,
-                        global_state_lock.cli().sleepy_guessing,
-                        None, // using default TARGET_BLOCK_INTERVAL
-                    );
-                    global_state_lock.set_mining(true).await;
-                    Some(
-                        tokio::task::Builder::new()
-                            .name("mine_block")
-                            .spawn(guesser_task)?,
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            Some(task)
+        } else {
+            None
         };
 
         // Await a message from either the worker task or from the main loop
@@ -510,34 +518,56 @@ pub async fn mine(
                     MainToMiner::Shutdown => {
                         debug!("Miner shutting down.");
 
-                        if let Some(mt) = guesser_task {
-                            mt.abort();
-                            debug!("Abort-signal sent to mining worker.");
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
+                        }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
                         }
 
                         break;
                     }
                     MainToMiner::NewBlock(block) => {
-                        if let Some(mt) = guesser_task {
-                            mt.abort();
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
                         }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
+                        }
+
                         latest_block = *block;
                         info!("Miner task received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
                     }
                     MainToMiner::NewBlockProposal => {
-                        if let Some(mt) = guesser_task {
-                            mt.abort();
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
                         }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
+                        }
+
                         info!("Miner received new block proposal for guessing.");
                     }
                     MainToMiner::Empty => (),
-                    MainToMiner::ReadyToMineNextBlock => {}
+                    MainToMiner::Continue => {
+                        wait_for_confirmation = false;
+                    }
                     MainToMiner::StopMining => {
                         pause_mine = true;
 
-                        if let Some(mt) = guesser_task {
-                            mt.abort();
-                            debug!("Abort-signal sent to mining worker.");
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
+                        }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
                         }
                     }
                     MainToMiner::StartMining => {
@@ -554,14 +584,29 @@ pub async fn mine(
                         // variable, because it reflects the logical on/off
                         // of mining, which syncing can temporarily override
                         // but not alter the setting.
-                        if let Some(mt) = guesser_task {
-                            mt.abort();
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
+                        }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
                         }
                     }
                 }
             }
-            new_block_res = worker_task_rx => {
-                let new_block_found = match new_block_res {
+            new_composition = composer_rx => {
+                let (new_block_proposal, composer_utxos) = match new_composition {
+                    Ok(k) => k,
+                    Err(e) => {warn!("composing task was cancelled prematurely. Got: {}", e);
+                    continue;}
+                };
+                to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
+
+                wait_for_confirmation = true;
+            }
+            new_block = guesser_rx => {
+                let new_block_found = match new_block {
                     Ok(res) => res,
                     Err(err) => {
                         warn!("Mining task was cancelled prematurely. Got: {}", err);
@@ -591,21 +636,7 @@ pub async fn mine(
                 latest_block = *new_block_found.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
 
-                // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
-                // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
-                // received value as read yet as this would open up for race conditions if `main_loop` received
-                // a block from a peer at the same time as this block was found.
-                let _wait = from_main.changed().await;
-                let msg = from_main.borrow().clone();
-                debug!("Got {:?} msg from main after finding block", msg);
-                if !matches!(msg, MainToMiner::ReadyToMineNextBlock) {
-                    error!("Got bad message from `main_loop`: {:?}", msg);
-
-                    // TODO: Handle this case
-                    // We found a new block but the main task updated with a block
-                    // before ours could be registered. We should mine on the one
-                    // received from the main loop and not the one we found here.
-                }
+                wait_for_confirmation = true;
             }
         }
     }
