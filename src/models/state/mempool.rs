@@ -347,7 +347,8 @@ impl Mempool {
     }
 
     /// Return a vector with copies of the transactions, in descending order by fee
-    /// density.
+    /// density. Set `only_single_proofs` to true to only return transactions
+    /// that are backed by single proofs.
     ///
     /// Number of transactions returned can be capped by either size (measured
     /// in bytes), or by transaction count. The function guarantees that neither
@@ -356,6 +357,7 @@ impl Mempool {
         &self,
         mut remaining_storage: usize,
         max_num_txs: Option<usize>,
+        only_single_proofs: bool,
     ) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = NeptuneCoins::zero();
@@ -369,6 +371,12 @@ impl Mempool {
             if let Some(transaction_ptr) = self.get(transaction_digest) {
                 let transaction_copy = transaction_ptr.to_owned();
                 let transaction_size = transaction_copy.get_size();
+
+                if only_single_proofs
+                    && !matches!(transaction_ptr.proof, TransactionProof::SingleProof(_))
+                {
+                    continue;
+                }
 
                 // Current transaction is too big
                 if transaction_size > remaining_storage {
@@ -634,6 +642,7 @@ impl Mempool {
 mod tests {
     use itertools::Itertools;
     use num_bigint::BigInt;
+    use num_traits::One;
     use num_traits::Zero;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
@@ -726,7 +735,8 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, None) {
+        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, None, false)
+        {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
@@ -745,7 +755,7 @@ mod tests {
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
         for curr_transaction in
-            mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(num_txs))
+            mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(num_txs), false)
         {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
@@ -820,7 +830,7 @@ mod tests {
             assert_eq!(
                 i,
                 mempool
-                    .get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(i))
+                    .get_transactions_for_block(SIZE_20MB_IN_BYTES, Some(i), false)
                     .len()
             );
         }
@@ -1024,7 +1034,7 @@ mod tests {
         // Create a new block to verify that the non-mined transaction contains
         // updated and valid-again mutator set data
         let mut tx_by_alice_updated: Transaction =
-            mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
+            mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
         assert!(
             tx_by_alice_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
@@ -1053,7 +1063,7 @@ mod tests {
             previous_block = next_block;
         }
 
-        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None)[0].clone();
+        tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
         let (cbtx, _eutxo) = make_coinbase_transaction(&alice, guesser_fraction, block_5_timestamp)
             .await
@@ -1176,6 +1186,17 @@ mod tests {
         // Verify that `most_dense_single_proof_pair` returns expected value
         // now that there's only *one* tx in the mempool.
         assert!(mempool.most_dense_single_proof_pair().is_none());
+
+        // Verify that `get_transactions_for_block` handles single-proof
+        // argument correctly.
+        assert!(mempool
+            .get_transactions_for_block(usize::MAX, None, true)
+            .len()
+            .is_one());
+        assert!(mempool
+            .get_transactions_for_block(usize::MAX, None, false)
+            .len()
+            .is_one());
     }
 
     #[traced_test]
@@ -1235,11 +1256,12 @@ mod tests {
                 make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
-            let mempool_txs = alice
-                .lock_guard()
-                .await
-                .mempool
-                .get_transactions_for_block(usize::MAX, None);
+            let mempool_txs =
+                alice
+                    .lock_guard()
+                    .await
+                    .mempool
+                    .get_transactions_for_block(usize::MAX, None, true);
             assert_eq!(
                 1,
                 mempool_txs.len(),
@@ -1276,7 +1298,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block(usize::MAX, None)
+                .get_transactions_for_block(usize::MAX, None, false)
                 .iter()
                 .all(|tx| tx.is_confirmable_relative_to(&block_1b.body().mutator_set_accumulator)),
             "All retained txs in the mempool must be confirmable relative to the new block.
@@ -1370,6 +1392,24 @@ mod tests {
             assert!(mempool.get(tx_medium_fee.kernel.txid()).is_none());
             assert!(mempool.get(tx_low_fee.kernel.txid()).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn single_proof_flag_is_respected() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+        let txs = make_plenty_mock_transaction_with_primitive_witness(11);
+        let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
+        for tx in txs {
+            mempool.insert(tx);
+        }
+
+        assert!(mempool
+            .get_transactions_for_block(usize::MAX, None, true)
+            .is_empty());
+        assert!(!mempool
+            .get_transactions_for_block(usize::MAX, None, false)
+            .is_empty());
     }
 
     #[traced_test]

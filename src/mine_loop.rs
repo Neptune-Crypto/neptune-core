@@ -58,7 +58,6 @@ async fn compose_block(
     };
 
     let triton_vm_job_queue = global_state_lock.vm_job_queue();
-
     let proposal = Block::compose(
         &latest_block,
         transaction,
@@ -398,11 +397,16 @@ pub(crate) async fn create_block_transaction(
     // Get most valuable transactions from mempool.
     // TODO: Change this const to be defined through CLI arguments.
     const MAX_NUM_TXS_TO_MERGE: usize = 7;
+    let only_merge_single_proofs = true;
     let transactions_to_include = global_state_lock
         .lock_guard()
         .await
         .mempool
-        .get_transactions_for_block(block_capacity_for_transactions, Some(MAX_NUM_TXS_TO_MERGE));
+        .get_transactions_for_block(
+            block_capacity_for_transactions,
+            Some(MAX_NUM_TXS_TO_MERGE),
+            only_merge_single_proofs,
+        );
 
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
