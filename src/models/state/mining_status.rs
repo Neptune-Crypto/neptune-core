@@ -23,10 +23,10 @@ impl Display for MiningStatus {
 
         match self {
             MiningStatus::Guessing(_) => {
-                write!(f, "guessing for {:?}", elapsed_time.unwrap())
+                write!(f, "guessing for {}", elapsed_time.unwrap().as_secs())
             }
             MiningStatus::Composing(_) => {
-                write!(f, "composing for {:?}", elapsed_time.unwrap())
+                write!(f, "composing for {}", elapsed_time.unwrap().as_secs())
             }
             MiningStatus::Inactive => write!(f, "inactive"),
         }
