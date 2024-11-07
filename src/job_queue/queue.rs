@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
+
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::task::TaskTracker;
@@ -146,8 +147,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Instant;
+
+    use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sync_jobs_by_priority() -> anyhow::Result<()> {
@@ -200,8 +202,9 @@ mod tests {
     }
 
     mod workers {
-        use super::*;
         use std::any::Any;
+
+        use super::*;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
