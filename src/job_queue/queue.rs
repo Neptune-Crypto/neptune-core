@@ -75,12 +75,15 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             let mut job_num: usize = 1;
 
             while rx_deque.recv().await.is_some() {
-                let msg = {
+                let (msg, pending) = {
                     let mut j = jobs_rc2.lock().unwrap();
+                    let pending = j.len();
                     j.make_contiguous()
                         .sort_by(|a, b| b.priority.cmp(&a.priority));
-                    j.pop_front().unwrap()
+                    (j.pop_front().unwrap(), pending)
                 };
+
+                tracing::info!("JobQueue has {} pending jobs.", pending);
 
                 tracing::info!("  *** JobQueue: begin job #{} ***", job_num);
                 let job_result = match msg.job.is_async() {
