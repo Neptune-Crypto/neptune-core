@@ -121,6 +121,19 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
+    pub(crate) fn into_single_proof(self) -> Proof {
+        match self {
+            TransactionProof::SingleProof(proof) => proof,
+            TransactionProof::Invalid => panic!("Expected SingleProof, got Invalid"),
+            TransactionProof::Witness(_) => {
+                panic!("Expected SingleProof, got Witness")
+            }
+            TransactionProof::ProofCollection(_) => {
+                panic!("Expected SingleProof, got ProofCollection")
+            }
+        }
+    }
+
     pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
         match self {
             TransactionProof::Invalid => bail!("Invalid proof does not have a proof quality"),
@@ -344,40 +357,6 @@ impl Transaction {
         })
     }
 
-    /// Update mutator set data in a transaction to update its
-    /// compatibility with a new block. Note that for Proof witnesses, this will
-    /// invalidate the proof, requiring an update.
-    pub async fn new_with_updated_mutator_set_records(
-        self,
-        previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        mutator_set_update: &MutatorSetUpdate,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
-    ) -> Result<Transaction, TransactionProofError> {
-        match self.proof {
-            TransactionProof::Witness(primitive_witness) => {
-                Ok(Self::new_with_primitive_witness_ms_data(
-                    primitive_witness,
-                    mutator_set_update.additions.clone(),
-                    mutator_set_update.removals.clone(),
-                ))
-            }
-            TransactionProof::SingleProof(proof) => {
-                Self::new_with_updated_mutator_set_records_given_proof(
-                    self.kernel,
-                    previous_mutator_set_accumulator,
-                    mutator_set_update,
-                    proof,
-                    triton_vm_job_queue,
-                    priority,
-                )
-                .await
-                .map_err(|_| TransactionProofError::ProverLockWasTaken)
-            }
-            _ => Err(TransactionProofError::CannotUpdateProofVariant),
-        }
-    }
-
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
@@ -412,21 +391,8 @@ impl Transaction {
             "Cannot merge two coinbase transactions"
         );
 
-        let as_single_proof = |tx_proof: &TransactionProof, indicator: &str| {
-            if let TransactionProof::SingleProof(single_proof) = tx_proof {
-                single_proof.to_owned()
-            } else {
-                let bad_type = match tx_proof {
-                    TransactionProof::Invalid => "invalid",
-                    TransactionProof::Witness(_primitive_witness) => "primitive_witness",
-                    TransactionProof::SingleProof(_proof) => unreachable!(),
-                    TransactionProof::ProofCollection(_proof_collection) => "proof_collection",
-                };
-                panic!("Transaction proof must be a single proof. {indicator} was: {bad_type}",);
-            }
-        };
-        let self_single_proof = as_single_proof(&self.proof, "self");
-        let other_single_proof = as_single_proof(&other.proof, "other");
+        let self_single_proof = self.proof.into_single_proof();
+        let other_single_proof = other.proof.into_single_proof();
 
         let merge_witness = MergeWitness::from_transactions(
             self.kernel,
@@ -594,15 +560,16 @@ mod transaction_tests {
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs);
-            let updated_tx = original_tx
-                .new_with_updated_mutator_set_records(
-                    &to_be_updated.mutator_set_accumulator,
-                    &mutator_set_update,
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
-                )
-                .await
-                .unwrap();
+            let updated_tx = Transaction::new_with_updated_mutator_set_records_given_proof(
+                original_tx.kernel,
+                &to_be_updated.mutator_set_accumulator,
+                &mutator_set_update,
+                original_tx.proof.into_single_proof(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
 
             assert!(updated_tx.is_valid().await)
         }

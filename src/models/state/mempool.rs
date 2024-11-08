@@ -42,6 +42,7 @@ use priority_queue::DoublePriorityQueue;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
+use tokio::task::JoinHandle;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -255,6 +256,18 @@ impl Mempool {
         self.tx_dictionary
             .get(&transaction_id)
             .map(|x| &x.transaction)
+    }
+
+    /// get mutable reference to a transaction from mempool
+    ///
+    /// Computes in O(1) from HashMap
+    pub(crate) fn get_mut(
+        &mut self,
+        transaction_id: TransactionKernelId,
+    ) -> Option<&mut Transaction> {
+        self.tx_dictionary
+            .get_mut(&transaction_id)
+            .map(|x| &mut x.transaction)
     }
 
     /// Returns the list of transactions already in the mempool that a
@@ -545,6 +558,12 @@ impl Mempool {
     /// of a newly received block. Update all mutator set data for transactions
     /// that are our own. If client acts as a composer, all transactions are
     /// updated.
+    ///
+    /// Since updating SingleProof-backed transactions takes a very long time,
+    /// this proof generation happens in dedicated tasks whose join handles are
+    /// returned. The `MempoolEvent`s being returned will not contain the
+    /// events related to proof-updating. The caller must handle them through
+    /// a callback.
     pub(super) async fn update_with_block_and_predecessor(
         &mut self,
         new_block: &Block,
@@ -552,7 +571,10 @@ impl Mempool {
         vm_job_queue: &TritonVmJobQueue,
         tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> Vec<MempoolEvent> {
+    ) -> (
+        Vec<MempoolEvent>,
+        Vec<JoinHandle<anyhow::Result<Transaction>>>,
+    ) {
         let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
 
         // If we discover a reorganization, we currently just clear the mempool,
@@ -615,50 +637,81 @@ impl Mempool {
         //    these proofs.
         // If we cannot update the transaction, we kick it out regardless.
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
+        let mut update_jobs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
-            let can_upgrade = TxProvingCapability::SingleProof == tx_proving_capability;
-            if !can_upgrade || !(composing || tx.origin.is_own()) {
+            if !(composing || tx.origin.is_own()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
-                        initiated by us, and client is not composing, \
-                        or client deemed too weak to create an update proof"
+                    initiated by us, and client is not composing."
                 );
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 continue;
             }
 
-            // Attempt update, with highest priority since we're either
-            // composing, in which case we have to wait for the update to
-            // finish before composing, or since this is our transaction, and
-            // we want it included in the next block.
-            if let Ok(new_tx) = tx
-                .transaction
-                .clone()
-                .new_with_updated_mutator_set_records(
-                    &previous_mutator_set_accumulator,
-                    &mutator_set_update,
-                    vm_job_queue,
-                    TritonVmJobPriority::Highest,
-                )
-                .await
-            {
-                tx.transaction = new_tx;
-                events.push(MempoolEvent::UpdateTxMutatorSet(
-                    *tx_id,
-                    tx.transaction.clone(),
-                ));
-            } else {
-                info!("Failed to update transaction {tx_id}. Removing from mempool.");
-                if tx.origin.is_own() {
-                    warn!(
-                        "Removed transaction was marked as own transaction. \
-                         You probably have to create this transaction again."
-                    );
-                }
+            let can_upgrade_single_proof =
+                TxProvingCapability::SingleProof == tx_proving_capability;
+            let (update_job, can_update) = match &tx.transaction.proof {
+                TransactionProof::Invalid => panic!("Mempool may not contain invalid proofs"),
+                TransactionProof::ProofCollection(_) => {
+                    info!("Failed to update transaction {tx_id}. Removing from mempool.");
 
+                    (None, false)
+                }
+                TransactionProof::Witness(primitive_witness) => {
+                    let new_tx = Transaction::new_with_primitive_witness_ms_data(
+                        primitive_witness.to_owned(),
+                        mutator_set_update.additions.clone(),
+                        mutator_set_update.removals.clone(),
+                    );
+
+                    tx.transaction = new_tx.clone();
+                    events.push(MempoolEvent::UpdateTxMutatorSet(*tx_id, new_tx.clone()));
+
+                    (None, true)
+                }
+                TransactionProof::SingleProof(proof) => {
+                    if can_upgrade_single_proof {
+                        // Attempt update, with highest priority since we're either
+                        // composing, in which case we have to wait for the update to
+                        // finish before composing, or since this is our transaction, and
+                        // we want it included in the next block.
+                        let transaction_kernel = tx.transaction.kernel.clone();
+                        let previous_msa = previous_mutator_set_accumulator.clone();
+                        let mutator_set_update = mutator_set_update.clone();
+                        let vm_job_queue = vm_job_queue.clone();
+                        let proof = proof.clone();
+                        (
+                            Some(tokio::task::Builder::new().name("mempool_tx_update").spawn(
+                                async move {
+                                    Transaction::new_with_updated_mutator_set_records_given_proof(
+                                        transaction_kernel,
+                                        &previous_msa,
+                                        &mutator_set_update,
+                                        proof,
+                                        &vm_job_queue,
+                                        TritonVmJobPriority::Highest,
+                                    ).await
+                                }
+                            ).expect("Must be able to spawn task for proof upgrading")),
+                            true,
+                        )
+                    } else {
+                        (None, false)
+                    }
+                }
+            };
+
+            if let Some(update_job) = update_job {
+                update_jobs.push(update_job);
+            }
+
+            if !can_update {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
+                if tx.origin.is_own() {
+                    warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
+                }
             }
         }
 
@@ -673,7 +726,7 @@ impl Mempool {
         let current_block_digest = new_block.hash();
         self.set_tip_digest_sync_label(current_block_digest);
 
-        events
+        (events, update_jobs)
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -740,6 +793,7 @@ impl Mempool {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::One;
@@ -983,11 +1037,32 @@ mod tests {
         // Check that the mempool removes transactions that were incorporated or
         // made unconfirmable by the new block.
 
-        // Do not check whether blocks are valid: that would require
-        // producing (expensive) proofs. What is being tested here is the correct
-        // mempool update.
+        // This test makes valid transaction proofs but not valid block proofs.
+        // What is being tested here is the correct mempool update.
 
         // Bob is premine receiver, Alice is not.
+
+        /// Mocking what the caller might do with the returned joinhandles for tasks
+        /// producing update proofs.
+        async fn mocked_mempool_update_callback(
+            joinhandles: Vec<JoinHandle<Result<Transaction>>>,
+            mempool: &mut Mempool,
+        ) -> Vec<MempoolEvent> {
+            let mut events = vec![];
+            let updated_txs = futures::future::join_all(joinhandles)
+                .await
+                .into_iter()
+                .map(|x| x.unwrap().unwrap())
+                .collect_vec();
+            for updated_tx in updated_txs {
+                let txid = updated_tx.kernel.txid();
+                let tx = mempool.get_mut(txid).unwrap();
+                *tx = updated_tx.clone();
+                events.push(MempoolEvent::UpdateTxMutatorSet(txid, updated_tx));
+            }
+
+            events
+        }
 
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
@@ -1136,7 +1211,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool
+        let (_, joinhandles0) = mempool
             .update_with_block_and_predecessor(
                 &block_2,
                 &block_1,
@@ -1145,6 +1220,7 @@ mod tests {
                 true,
             )
             .await;
+        mocked_mempool_update_callback(joinhandles0, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -1168,7 +1244,7 @@ mod tests {
                 make_mock_block(&previous_block, None, alice_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            mempool
+            let (_, joinhandles1) = mempool
                 .update_with_block_and_predecessor(
                     &next_block,
                     &previous_block,
@@ -1177,6 +1253,7 @@ mod tests {
                     true,
                 )
                 .await;
+            mocked_mempool_update_callback(joinhandles1, &mut mempool).await;
             previous_block = next_block;
         }
 
@@ -1203,7 +1280,7 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        mempool
+        let (_, joinhandles2) = mempool
             .update_with_block_and_predecessor(
                 &block_5,
                 &previous_block,
@@ -1212,6 +1289,7 @@ mod tests {
                 true,
             )
             .await;
+        mocked_mempool_update_callback(joinhandles2, &mut mempool).await;
 
         assert!(
             mempool.is_empty(),
