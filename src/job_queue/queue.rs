@@ -86,13 +86,18 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                 tracing::info!("JobQueue has {} pending jobs.", pending);
 
                 tracing::info!("  *** JobQueue: begin job #{} ***", job_num);
+                let timer = tokio::time::Instant::now();
                 let job_result = match msg.job.is_async() {
                     true => msg.job.run_async().await,
                     false => tokio::task::spawn_blocking(move || msg.job.run())
                         .await
                         .unwrap(),
                 };
-                tracing::info!("  *** JobQueue: ended job #{} ***", job_num);
+                tracing::info!(
+                    "  *** JobQueue: ended job #{} - {} secs ***",
+                    job_num,
+                    timer.elapsed().as_secs_f32()
+                );
                 job_num += 1;
 
                 let _ = msg.result_tx.send(job_result);
