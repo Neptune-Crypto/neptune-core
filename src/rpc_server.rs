@@ -1016,7 +1016,10 @@ mod rpc_server_tests {
                 network,
                 WalletSecret::new_random(),
                 2,
-                cli_args::Args::default(),
+                cli_args::Args {
+                    network,
+                    ..Default::default()
+                },
             )
             .await;
             assert_eq!(network, rpc_server.network(context::current()).await);
