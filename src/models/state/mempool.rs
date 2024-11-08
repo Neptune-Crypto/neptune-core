@@ -155,7 +155,7 @@ impl Mempool {
                     // with an associated proof is queried. That probably shouldn't
                     // happen.
                     error!("Failed to read proof quality for tx in mempool");
-                    true
+                    false
                 }
             }
         } else {
