@@ -331,6 +331,10 @@ impl Block {
         &self.kernel.body
     }
 
+    pub(crate) fn mutator_set_accumulator(&self) -> &MutatorSetAccumulator {
+        &self.kernel.body.mutator_set_accumulator
+    }
+
     #[inline]
     pub(crate) fn appendix(&self) -> &BlockAppendix {
         &self.kernel.appendix
@@ -711,17 +715,18 @@ impl Block {
 
         let mutator_set_update =
             Block::mutator_set_update_from_consecutive_pair(previous_block, self);
-        let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
+        let mut ms = previous_block.mutator_set_accumulator().clone();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
         if let Err(err) = ms_update_result {
             warn!("Failed to apply mutator set update: {}", err);
             return false;
         };
-        if ms.hash() != self.kernel.body.mutator_set_accumulator.hash() {
+        if ms.hash() != self.mutator_set_accumulator().hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
-                self.kernel.body.mutator_set_accumulator, ms
+                self.mutator_set_accumulator(),
+                ms
             );
             return false;
         }

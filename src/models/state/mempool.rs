@@ -552,8 +552,7 @@ impl Mempool {
         priority: TritonVmJobPriority,
         composing: bool,
     ) -> Vec<MempoolEvent> {
-        let previous_mutator_set_accumulator =
-            predecessor_block.body().mutator_set_accumulator.clone();
+        let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
 
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
@@ -1147,7 +1146,7 @@ mod tests {
         let mut tx_by_alice_updated: Transaction =
             mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
         assert!(
-            tx_by_alice_updated.is_confirmable_relative_to(&block_2.body().mutator_set_accumulator),
+            tx_by_alice_updated.is_confirmable_relative_to(block_2.mutator_set_accumulator()),
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
         );
 
@@ -1387,8 +1386,7 @@ mod tests {
                 "The inserted tx must stay in the mempool"
             );
             assert!(
-                mempool_txs[0]
-                    .is_confirmable_relative_to(&next_block.body().mutator_set_accumulator),
+                mempool_txs[0].is_confirmable_relative_to(next_block.mutator_set_accumulator()),
                 "Mempool tx must stay confirmable after each new block has been applied"
             );
             assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
@@ -1419,7 +1417,7 @@ mod tests {
                 .mempool
                 .get_transactions_for_block(usize::MAX, None, false)
                 .iter()
-                .all(|tx| tx.is_confirmable_relative_to(&block_1b.body().mutator_set_accumulator)),
+                .all(|tx| tx.is_confirmable_relative_to(block_1b.mutator_set_accumulator())),
             "All retained txs in the mempool must be confirmable relative to the new block.
              Or the mempool must be empty."
         );

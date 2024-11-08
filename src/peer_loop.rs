@@ -932,15 +932,12 @@ impl PeerLoopHandler {
 
                 // 4 if transaction is not confirmable, punish.
                 let confirmable = transaction.is_confirmable_relative_to(
-                    &self
-                        .global_state_lock
+                    self.global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .light_state()
-                        .kernel
-                        .body
-                        .mutator_set_accumulator,
+                        .mutator_set_accumulator(),
                 );
                 if !confirmable {
                     warn!("Received unconfirmable tx");
@@ -1005,12 +1002,7 @@ impl PeerLoopHandler {
 
                 // Only accept transactions that do not require executing
                 // `update`.
-                if state
-                    .chain
-                    .light_state()
-                    .body()
-                    .mutator_set_accumulator
-                    .hash()
+                if state.chain.light_state().mutator_set_accumulator().hash()
                     != tx_notification.mutator_set_hash
                 {
                     debug!("transaction refers to non-canonical mutator set state");

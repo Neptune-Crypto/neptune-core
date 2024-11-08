@@ -288,7 +288,7 @@ pub(crate) async fn make_coinbase_transaction(
         .chain
         .light_state()
         .clone();
-    let mutator_set_accumulator = latest_block.body().mutator_set_accumulator.clone();
+    let mutator_set_accumulator = latest_block.mutator_set_accumulator().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
     #[allow(clippy::manual_range_contains)]
@@ -388,7 +388,7 @@ pub(crate) async fn create_block_transaction(
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        predecessor_block.kernel.body.mutator_set_accumulator.hash()
+        predecessor_block.mutator_set_accumulator().hash()
     );
 
     let mut rng: StdRng =
@@ -719,7 +719,7 @@ pub(crate) mod mine_loop_tests {
                 make_mock_transaction_with_mutator_set_hash(
                     vec![],
                     vec![],
-                    previous_block.body().mutator_set_accumulator.hash(),
+                    previous_block.mutator_set_accumulator().hash(),
                 ),
                 dummy_expected_utxo(),
             )
@@ -1169,7 +1169,7 @@ pub(crate) mod mine_loop_tests {
                     make_mock_transaction_with_mutator_set_hash(
                         vec![],
                         vec![],
-                        prev_block.body().mutator_set_accumulator.hash(),
+                        prev_block.mutator_set_accumulator().hash(),
                     ),
                     vec![dummy_expected_utxo()],
                 )
@@ -1397,13 +1397,13 @@ pub(crate) mod mine_loop_tests {
             block2.body().transaction_kernel.outputs.clone(),
         ]
         .concat();
-        let mut ms = block1.body().mutator_set_accumulator.clone();
+        let mut ms = block1.mutator_set_accumulator().clone();
         let mutator_set_update = MutatorSetUpdate::new(
             block2.body().transaction_kernel.inputs.clone(),
             new_addition_records,
         );
         mutator_set_update.apply_to_accumulator(&mut ms).expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
 
-        assert_eq!(ms, block2.body().mutator_set_accumulator);
+        assert_eq!(ms.hash(), block2.mutator_set_accumulator().hash());
     }
 }

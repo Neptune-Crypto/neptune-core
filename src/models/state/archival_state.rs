@@ -737,7 +737,7 @@ impl ArchivalState {
         let mut haystack = self.get_tip().await;
         let mut parent = self.get_tip_parent().await;
         loop {
-            if haystack.body().mutator_set_accumulator.hash() == mutator_set.hash() {
+            if haystack.mutator_set_accumulator().hash() == mutator_set.hash() {
                 break;
             }
 
@@ -747,8 +747,7 @@ impl ArchivalState {
             // just its hash allows us to do early return here. Parent == None
             // indicates that we've gone all the way back to genesis, with no
             // match.
-            if mutator_set.aocl.num_leafs()
-                > haystack.body().mutator_set_accumulator.aocl.num_leafs()
+            if mutator_set.aocl.num_leafs() > haystack.mutator_set_accumulator().aocl.num_leafs()
                 || search_depth > max_search_depth
                 || parent.is_none()
             {
@@ -992,8 +991,7 @@ impl ArchivalState {
         debug!("sanity check: was AMS updated consistently with new block?");
         assert_eq!(
             new_block
-                .kernel.body
-                .mutator_set_accumulator
+                .mutator_set_accumulator()
                 .hash(),
             self.archival_mutator_set.ams().hash().await,
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
@@ -1353,7 +1351,7 @@ mod archival_state_tests {
         let tx_1a = make_mock_transaction_with_mutator_set_hash(
             removal_records_1a,
             addition_records_1a,
-            genesis_block.body().mutator_set_accumulator.hash(),
+            genesis_block.mutator_set_accumulator().hash(),
         );
         let block_1a = Block::block_template_invalid_proof(
             &genesis_block,
@@ -1365,7 +1363,7 @@ mod archival_state_tests {
         let tx_1b = make_mock_transaction_with_mutator_set_hash(
             removal_records_1b,
             addition_records_1b,
-            genesis_block.body().mutator_set_accumulator.hash(),
+            genesis_block.mutator_set_accumulator().hash(),
         );
         let block_1b = Block::block_template_invalid_proof(
             &genesis_block,
@@ -1485,7 +1483,7 @@ mod archival_state_tests {
             .hash()
             .await;
         positive_prop_ms_update_to_tip(
-            &genesis_block.body().mutator_set_accumulator,
+            genesis_block.mutator_set_accumulator(),
             alice.lock_guard_mut().await.chain.archival_state_mut(),
             num_blocks,
         )
@@ -2018,14 +2016,15 @@ mod archival_state_tests {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(
-                block_2.kernel.body.mutator_set_accumulator,
+                block_2.mutator_set_accumulator().hash(),
                 state
                     .chain
                     .archival_state()
                     .archival_mutator_set
                     .ams()
                     .accumulator()
-                    .await,
+                    .await
+                    .hash(),
                 "AMS must be correctly updated"
             );
             assert_eq!(block_2, state.chain.archival_state().get_tip().await);
@@ -2038,13 +2037,13 @@ mod archival_state_tests {
         // Test that the MS-update to tip functions works for blocks with inputs
         // and outputs.
         positive_prop_ms_update_to_tip(
-            &genesis_block.body().mutator_set_accumulator,
+            genesis_block.mutator_set_accumulator(),
             genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )
         .await;
         positive_prop_ms_update_to_tip(
-            &block_1.body().mutator_set_accumulator,
+            block_1.mutator_set_accumulator(),
             genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )
@@ -2263,7 +2262,7 @@ mod archival_state_tests {
         let mut rng = thread_rng();
         let mut archival_state = make_test_archival_state(network).await;
         let mut current_block = Block::genesis_block(network);
-        let genesis_msa = current_block.body().mutator_set_accumulator.clone();
+        let genesis_msa = current_block.mutator_set_accumulator().clone();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
         for _block_height in 1..=5 {
             let next_block = make_mock_block(&current_block, None, cb_beneficiary, rng.gen()).0;
@@ -2273,7 +2272,7 @@ mod archival_state_tests {
             current_block = next_block;
         }
 
-        let current_msa = current_block.body().mutator_set_accumulator.clone();
+        let current_msa = current_block.mutator_set_accumulator().clone();
         for search_depth in 0..10 {
             println!("{search_depth}");
             if search_depth < 5 {
@@ -2305,13 +2304,13 @@ mod archival_state_tests {
         let wallet = WalletSecret::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis_block(network);
-        let genesis_msa = &genesis_block.body().mutator_set_accumulator;
+        let genesis_msa = &genesis_block.mutator_set_accumulator();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
 
         let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
         let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
-        let block_1a_msa = &block_1a.body().mutator_set_accumulator;
-        let block_1b_msa = &block_1b.body().mutator_set_accumulator;
+        let block_1a_msa = &block_1a.mutator_set_accumulator();
+        let block_1b_msa = &block_1b.mutator_set_accumulator();
 
         // 1a is tip
         let search_depth = 1;
@@ -2345,17 +2344,17 @@ mod archival_state_tests {
         let wallet = WalletSecret::new_random();
         let mut archival_state = make_test_archival_state(network).await;
         let genesis_block = Block::genesis_block(network);
-        let genesis_msa = &genesis_block.body().mutator_set_accumulator;
+        let genesis_msa = &genesis_block.mutator_set_accumulator();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
 
         let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
         let block_2a = make_mock_block(&block_1a, None, cb_beneficiary, rng.gen()).0;
         let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
         let block_2b = make_mock_block(&block_1b, None, cb_beneficiary, rng.gen()).0;
-        let block_1a_msa = &block_1a.body().mutator_set_accumulator;
-        let block_2a_msa = &block_2a.body().mutator_set_accumulator;
-        let block_1b_msa = &block_1b.body().mutator_set_accumulator;
-        let block_2b_msa = &block_2b.body().mutator_set_accumulator;
+        let block_1a_msa = &block_1a.mutator_set_accumulator();
+        let block_2a_msa = &block_2a.mutator_set_accumulator();
+        let block_1b_msa = &block_1b.mutator_set_accumulator();
+        let block_2b_msa = &block_2b.mutator_set_accumulator();
 
         // 1a is tip
         let search_depth = 10;
