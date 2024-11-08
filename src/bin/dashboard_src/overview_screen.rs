@@ -6,7 +6,6 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use bytesize::ByteSize;
-use chrono::DateTime;
 use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
@@ -15,7 +14,6 @@ use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::mining_status::MiningStatus;
 use neptune_core::prelude::twenty_first;
 use neptune_core::rpc_server::RPCClient;
-use num_traits::Zero;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -34,7 +32,7 @@ use twenty_first::prelude::Digest;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OverviewData {
     available_balance: Option<NeptuneCoins>,
     available_unconfirmed_balance: Option<NeptuneCoins>,
@@ -74,80 +72,9 @@ pub struct OverviewData {
 impl OverviewData {
     pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
         Self {
-            available_balance: Default::default(),
-            available_unconfirmed_balance: Default::default(),
-            timelocked_balance: Default::default(),
-            confirmations: Default::default(),
-            synchronization_percentage: Default::default(),
             network,
-            syncing: Default::default(),
-            mining_status: Default::default(),
             listen_address,
-            tip_digest: Default::default(),
-            block_header: Default::default(),
-            block_interval: Default::default(),
-            archive_size: Default::default(),
-            archive_coverage: Default::default(),
-            mempool_size: Default::default(),
-            mempool_tx_count: Default::default(),
-            peer_count: Default::default(),
-            max_peer_count: Default::default(),
-            authenticated_peer_count: Default::default(),
-            up_since: Default::default(),
-            cpu_load: Default::default(),
-            cpu_capacity: Default::default(),
-            cpu_temperature: Default::default(),
-            ram_total: Default::default(),
-            ram_available: Default::default(),
-            ram_used: Default::default(),
-        }
-    }
-    pub async fn test() -> Self {
-        OverviewData {
-            available_balance: Some(NeptuneCoins::zero()),
-            available_unconfirmed_balance: Some(NeptuneCoins::zero()),
-            timelocked_balance: Some(NeptuneCoins::zero()),
-            confirmations: Some(17.into()),
-            synchronization_percentage: Some(99.5),
-
-            listen_address: None,
-            network: Network::Testnet,
-            mining_status: Some(MiningStatus::Inactive),
-            syncing: false,
-            tip_digest: Some(
-                neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
-                    .hash(),
-            ),
-            block_header: Some(
-                neptune_core::models::blockchain::block::Block::genesis_block(Network::Testnet)
-                    .kernel
-                    .header
-                    .clone(),
-            ),
-            block_interval: Some(558u64),
-
-            mempool_size: Some(ByteSize::b(10000)), // units?
-            mempool_tx_count: Some(1001),
-
-            archive_size: Some(ByteSize::b(100000000)),
-            archive_coverage: Some(100.0),
-
-            peer_count: Some(11),
-            max_peer_count: Some(21),
-            authenticated_peer_count: Some(1),
-
-            up_since: Some(
-                DateTime::parse_from_rfc2822("Tue, 1 Jul 2003 10:52:37 +0200")
-                    .unwrap()
-                    .naive_utc()
-                    .timestamp() as u64,
-            ),
-            cpu_load: Some(0.15),
-            cpu_capacity: Some(2.0),
-            cpu_temperature: Some(293.0),
-            ram_total: Some(ByteSize::b(1 << 24)),
-            ram_available: Some(ByteSize::b(1 << 20)),
-            ram_used: Some(ByteSize::b(1 << 19)),
+            ..Default::default()
         }
     }
 }
