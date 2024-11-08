@@ -1472,15 +1472,16 @@ impl GlobalState {
                 )
                 .await?;
 
-            // Update mempool with UTXOs from this block. This is done by removing all transaction
-            // that became invalid/was mined by this block.
+            // Update mempool with UTXOs from this block. This is done by
+            // removing all transaction that became invalid/was mined by this
+            // block.
             myself
                 .mempool
                 .update_with_block_and_predecessor(
                     &new_block,
                     &tip_parent,
                     vm_job_queue,
-                    TritonVmJobPriority::Highest,
+                    myself.net.tx_proving_capability,
                     myself.cli().compose,
                 )
                 .await;

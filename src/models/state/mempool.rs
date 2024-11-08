@@ -49,6 +49,7 @@ use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
+use super::tx_proving_capability::TxProvingCapability;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::Block;
@@ -549,7 +550,7 @@ impl Mempool {
         new_block: &Block,
         predecessor_block: &Block,
         vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        tx_proving_capability: TxProvingCapability,
         composing: bool,
     ) -> Vec<MempoolEvent> {
         let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
@@ -610,22 +611,27 @@ impl Mempool {
         // Update policy:
         // We update transaction if either of these conditions are true:
         // a) We're composing
-        // b) We initiated this transaction.
-
+        // b) We initiated this transaction *and* client is capable of creating
+        //    these proofs.
         // If we cannot update the transaction, we kick it out regardless.
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
-            if !(composing || tx.origin.is_own()) {
+            let can_upgrade = TxProvingCapability::SingleProof == tx_proving_capability;
+            if !can_upgrade || !(composing || tx.origin.is_own()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
-                        initiated by us, and client is not composing."
+                        initiated by us, and client is not composing, \
+                        or client deemed too weak to create an update proof"
                 );
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 continue;
             }
 
-            // Attempt update
+            // Attempt update, with highest priority since we're either
+            // composing, in which case we have to wait for the update to
+            // finish before composing, or since this is our transaction, and
+            // we want it included in the next block.
             if let Ok(new_tx) = tx
                 .transaction
                 .clone()
@@ -633,7 +639,7 @@ impl Mempool {
                     &previous_mutator_set_accumulator,
                     &mutator_set_update,
                     vm_job_queue,
-                    priority,
+                    TritonVmJobPriority::Highest,
                 )
                 .await
             {
@@ -1135,7 +1141,7 @@ mod tests {
                 &block_2,
                 &block_1,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TxProvingCapability::SingleProof,
                 true,
             )
             .await;
@@ -1167,7 +1173,7 @@ mod tests {
                     &next_block,
                     &previous_block,
                     &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
+                    TxProvingCapability::SingleProof,
                     true,
                 )
                 .await;
@@ -1202,7 +1208,7 @@ mod tests {
                 &block_5,
                 &previous_block,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TxProvingCapability::SingleProof,
                 true,
             )
             .await;
