@@ -1131,6 +1131,8 @@ mod block_tests {
     }
 
     mod block_is_valid {
+        use crate::config_models::cli_args;
+
         use super::*;
 
         #[traced_test]
@@ -1140,7 +1142,8 @@ mod block_tests {
             let genesis_block = Block::genesis_block(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let wallet = WalletSecret::devnet_wallet();
-            let genesis_state = mock_genesis_global_state(network, 0, wallet).await;
+            let genesis_state =
+                mock_genesis_global_state(network, 0, wallet, cli_args::Args::default()).await;
 
             let guesser_fraction = 0f64;
             let (block_tx, _expected_utxo) =

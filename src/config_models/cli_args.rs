@@ -52,6 +52,15 @@ pub struct Args {
     #[clap(long, default_value = "10", value_name = "COUNT")]
     pub max_peers: u16,
 
+    /// If this flag is set, the node will refuse to initiate a transaction.
+    /// This flag makes sense for machines whose resources are dedicated to
+    /// composing, and which must do so in a regular and predictable manner,
+    /// undisrupted by transaction initiation tasks. To spend funds from the
+    /// wallet of a node where this flag is set, either restart it and drop the
+    /// flag, or else copy the wallet file to another machine.
+    #[clap(long, alias = "notx")]
+    pub no_transaction_initiation: bool,
+
     /// Whether to produce block proposals, which is the first step of two-step
     /// mining. Note that composing block proposals involves the computationally
     /// expensive task of producing STARK proofs. You should have plenty of

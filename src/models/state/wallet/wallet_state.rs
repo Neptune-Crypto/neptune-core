@@ -1176,6 +1176,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::tests::shared::make_mock_block;
@@ -1191,8 +1192,13 @@ mod tests {
         // <https://github.com/Neptune-Crypto/neptune-core/issues/207>.
 
         let network = Network::Main;
-        let mut alice_global_lock =
-            mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
+        let mut alice_global_lock = mock_genesis_global_state(
+            network,
+            0,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let alice_vm_job_queue = alice_global_lock.vm_job_queue().clone();
 
         let mut alice = alice_global_lock.global_state_lock.lock_guard_mut().await;
@@ -1295,7 +1301,9 @@ mod tests {
         let network = Network::RegTest;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut bob_global_lock = mock_genesis_global_state(network, 0, bob_wallet_secret).await;
+        let mut bob_global_lock =
+            mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
+                .await;
         let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
@@ -1535,6 +1543,7 @@ mod tests {
         use rand::SeedableRng;
 
         use super::*;
+        use crate::config_models::cli_args;
         use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1556,9 +1565,13 @@ mod tests {
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(664505904);
-            let mut global_state_lock =
-                mock_genesis_global_state(network, 0, WalletSecret::new_pseudorandom(rng.gen()))
-                    .await;
+            let mut global_state_lock = mock_genesis_global_state(
+                network,
+                0,
+                WalletSecret::new_pseudorandom(rng.gen()),
+                cli_args::Args::default(),
+            )
+            .await;
             let change_key = global_state_lock
                 .lock_guard_mut()
                 .await

@@ -2813,6 +2813,7 @@ mod peer_loop_tests {
         use strum::IntoEnumIterator;
 
         use super::*;
+        use crate::config_models::cli_args;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::tests::shared::mock_genesis_global_state;
@@ -2823,7 +2824,9 @@ mod peer_loop_tests {
         ) -> Transaction {
             let wallet_secret = WalletSecret::devnet_wallet();
             let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let alice = mock_genesis_global_state(network, 1, wallet_secret).await;
+            let alice =
+                mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
+                    .await;
             let alice = alice.lock_guard().await;
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);

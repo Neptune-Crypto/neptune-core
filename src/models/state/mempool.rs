@@ -749,6 +749,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -872,7 +873,13 @@ mod tests {
         let genesis_block = Block::genesis_block(network);
         let bob_wallet_secret = WalletSecret::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let bob = mock_genesis_global_state(network, 2, bob_wallet_secret.clone()).await;
+        let bob = mock_genesis_global_state(
+            network,
+            2,
+            bob_wallet_secret.clone(),
+            cli_args::Args::default(),
+        )
+        .await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NeptuneCoins::new(15);
         let (tx_by_bob, _maybe_change_output) = bob
@@ -981,14 +988,17 @@ mod tests {
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut bob = mock_genesis_global_state(network, 2, bob_wallet_secret).await;
+        let mut bob =
+            mock_genesis_global_state(network, 2, bob_wallet_secret, cli_args::Args::default())
+                .await;
 
         let bob_address = bob_spending_key.to_address();
 
         let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_spending_key.to_address();
-        let mut alice = mock_genesis_global_state(network, 2, alice_wallet).await;
+        let mut alice =
+            mock_genesis_global_state(network, 2, alice_wallet, cli_args::Args::default()).await;
 
         // Ensure that both wallets have a non-zero balance by letting Alice
         // mine a block.
@@ -1315,7 +1325,8 @@ mod tests {
         let network = Network::Main;
         let alice_wallet = WalletSecret::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let mut alice = mock_genesis_global_state(network, 2, alice_wallet).await;
+        let mut alice =
+            mock_genesis_global_state(network, 2, alice_wallet, cli_args::Args::default()).await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
@@ -1419,8 +1430,13 @@ mod tests {
     async fn conflicting_txs_preserve_highest_fee() {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let network = Network::Main;
-        let mut preminer =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut preminer = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let premine_spending_key = preminer
             .lock_guard()
             .await

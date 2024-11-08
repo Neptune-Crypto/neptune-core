@@ -664,6 +664,7 @@ pub(crate) mod mine_loop_tests {
     use transaction_output::UtxoNotificationMedium;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -698,8 +699,13 @@ pub(crate) mod mine_loop_tests {
     ) -> f64 {
         let mut rng: StdRng = SeedableRng::from_rng(thread_rng()).unwrap();
         let network = Network::RegTest;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         let previous_block = global_state_lock
             .lock_guard()
@@ -758,8 +764,13 @@ pub(crate) mod mine_loop_tests {
         let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
 
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let tick = std::time::SystemTime::now();
         let (transaction, _coinbase_utxo_info) =
             make_coinbase_transaction(&global_state_lock, 0f64, network.launch_date())
@@ -784,7 +795,13 @@ pub(crate) mod mine_loop_tests {
     async fn block_template_is_valid() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
-        let mut alice = mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let mut alice = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         assert!(
@@ -925,8 +942,13 @@ pub(crate) mod mine_loop_tests {
     #[tokio::test]
     async fn mined_block_has_proof_of_work() {
         let network = Network::Main;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let tip_block_orig = Block::genesis_block(network);
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -973,8 +995,13 @@ pub(crate) mod mine_loop_tests {
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
         let network = Network::Main;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let tip_block_orig = global_state_lock
@@ -1065,8 +1092,13 @@ pub(crate) mod mine_loop_tests {
     async fn mine_m_blocks_in_n_seconds<const NUM_BLOCKS: usize, const NUM_SECONDS: usize>(
     ) -> Result<()> {
         let network = Network::RegTest;
-        let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         let mut prev_block = global_state_lock
             .lock_guard()
@@ -1309,7 +1341,8 @@ pub(crate) mod mine_loop_tests {
         let alice_wallet = WalletSecret::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key(0);
         let alice_address = alice_key.to_address();
-        let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
+        let mut alice =
+            mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
 
         let output = TxOutput::offchain_native_currency(
             NeptuneCoins::new(4),

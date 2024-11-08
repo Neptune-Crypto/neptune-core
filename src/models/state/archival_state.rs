@@ -1190,7 +1190,8 @@ mod archival_state_tests {
         let mut rng = StdRng::seed_from_u64(107221549301u64);
         let alice_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let alice_wallet = alice_wallet.wallet_secret;
-        let mut alice = mock_genesis_global_state(network, 0, alice_wallet).await;
+        let mut alice =
+            mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
         let change_key = alice
             .lock_guard()
             .await
@@ -1320,7 +1321,8 @@ mod archival_state_tests {
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_block = Block::genesis_block(network);
         let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let mut global_state_lock = mock_genesis_global_state(network, 42, genesis_wallet).await;
+        let mut global_state_lock =
+            mock_genesis_global_state(network, 42, genesis_wallet, cli_args::Args::default()).await;
         let num_premine_utxos = Block::premine_utxos(network).len();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
@@ -1430,7 +1432,8 @@ mod archival_state_tests {
         let genesis_block = Block::genesis_block(network);
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let mut alice = mock_genesis_global_state(network, 42, alice_wallet).await;
+        let mut alice =
+            mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
 
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
@@ -1603,8 +1606,13 @@ mod archival_state_tests {
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let mut genesis =
-            mock_genesis_global_state(network, 3, genesis_wallet_state.wallet_secret).await;
+        let mut genesis = mock_genesis_global_state(
+            network,
+            3,
+            genesis_wallet_state.wallet_secret,
+            cli_args::Args::default(),
+        )
+        .await;
         assert_eq!(
             1,
             genesis
@@ -1621,11 +1629,15 @@ mod archival_state_tests {
         let mut rng = StdRng::seed_from_u64(41251549301u64);
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
-        let mut alice = mock_genesis_global_state(network, 3, wallet_secret_alice).await;
+        let mut alice =
+            mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
+                .await;
 
         let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
-        let mut bob = mock_genesis_global_state(network, 3, wallet_secret_bob).await;
+        let mut bob =
+            mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
+                .await;
 
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);

@@ -20,6 +20,7 @@ use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use crate::config_models::network::Network;
@@ -828,6 +829,17 @@ impl RPC for NeptuneRPCServer {
     ) -> Option<TransactionKernelId> {
         let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
+        if self
+            .state
+            .lock_guard()
+            .await
+            .cli()
+            .no_transaction_initiation
+        {
+            warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
+            return None;
+        }
+
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang. Instead,
         // we let (a task started by) main loop handle the proving.
@@ -946,6 +958,7 @@ mod rpc_server_tests {
     use num_traits::One;
     use num_traits::Zero;
     use rand::rngs::StdRng;
+    use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
@@ -953,10 +966,12 @@ mod rpc_server_tests {
     use ReceivingAddress;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
@@ -970,8 +985,10 @@ mod rpc_server_tests {
         network: Network,
         wallet_secret: WalletSecret,
         peer_count: u8,
+        cli: cli_args::Args,
     ) -> (NeptuneRPCServer, GlobalStateLock) {
-        let global_state_lock = mock_genesis_global_state(network, peer_count, wallet_secret).await;
+        let global_state_lock =
+            mock_genesis_global_state(network, peer_count, wallet_secret, cli).await;
         let (dummy_tx, mut dummy_rx) =
             tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
 
@@ -995,7 +1012,13 @@ mod rpc_server_tests {
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         for network in Network::iter() {
-            let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+            let (rpc_server, _) = test_rpc_server(
+                network,
+                WalletSecret::new_random(),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
             assert_eq!(network, rpc_server.network(context::current()).await);
         }
 
@@ -1011,8 +1034,13 @@ mod rpc_server_tests {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(123456789088u64);
 
-        let (rpc_server, _) =
-            test_rpc_server(network, WalletSecret::new_pseudorandom(rng.gen()), 2).await;
+        let (rpc_server, _) = test_rpc_server(
+            network,
+            WalletSecret::new_pseudorandom(rng.gen()),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let ctx = context::current();
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;
@@ -1097,7 +1125,13 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let (rpc_server, _) = test_rpc_server(
+            Network::Alpha,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let balance = rpc_server.synced_balance(context::current()).await;
         assert!(balance.is_zero());
 
@@ -1108,8 +1142,13 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (rpc_server, mut state_lock) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let (rpc_server, mut state_lock) = test_rpc_server(
+            Network::Alpha,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let rpc_request_context = context::current();
         let global_state = state_lock.lock_guard().await;
         let peer_address_0 =
@@ -1251,8 +1290,13 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (rpc_server, mut state_lock) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let (rpc_server, mut state_lock) = test_rpc_server(
+            Network::Alpha,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let mut state = state_lock.lock_guard_mut().await;
         let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
@@ -1363,8 +1407,13 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_digest_test() {
-        let (rpc_server, state_lock) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let (rpc_server, state_lock) = test_rpc_server(
+            Network::Alpha,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let global_state = state_lock.lock_guard().await;
         let aocl_leaves = global_state
             .chain
@@ -1393,8 +1442,13 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_info_test() {
         let network = Network::RegTest;
-        let (rpc_server, state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let (rpc_server, state_lock) = test_rpc_server(
+            network,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let global_state = state_lock.lock_guard().await;
         let ctx = context::current();
 
@@ -1472,8 +1526,13 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_digest_test() {
         let network = Network::RegTest;
-        let (rpc_server, state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let (rpc_server, state_lock) = test_rpc_server(
+            network,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let global_state = state_lock.lock_guard().await;
         let ctx = context::current();
 
@@ -1540,7 +1599,13 @@ mod rpc_server_tests {
         // On your local machine, this should return a temperature but in CI,
         // the RPC call returns `None`, so we only verify that the call doesn't
         // crash the host machine, we don't verify that any value is returned.
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let (rpc_server, _) = test_rpc_server(
+            Network::Alpha,
+            WalletSecret::new_random(),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let _current_server_temperature = rpc_server.cpu_temp(context::current()).await;
     }
 
@@ -1550,8 +1615,13 @@ mod rpc_server_tests {
         // --- Init.  Basics ---
         let mut rng = StdRng::seed_from_u64(1814);
         let network = Network::Main;
-        let (rpc_server, mut state_lock) =
-            test_rpc_server(network, WalletSecret::new_pseudorandom(rng.gen()), 2).await;
+        let (rpc_server, mut state_lock) = test_rpc_server(
+            network,
+            WalletSecret::new_pseudorandom(rng.gen()),
+            2,
+            cli_args::Args::default(),
+        )
+        .await;
         let ctx = context::current();
 
         // --- Init.  get wallet spending key ---
@@ -1671,5 +1741,46 @@ mod rpc_server_tests {
         );
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn cannot_initiate_transaction_if_notx_flag_is_set() {
+        let network = Network::Main;
+        let ctx = context::current();
+        let mut rng = thread_rng();
+        let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
+        let amount = NeptuneCoins::new(rng.gen_range(0..10));
+
+        // set flag on, verify non-initiation
+        let cli_on = cli_args::Args {
+            no_transaction_initiation: true,
+            ..Default::default()
+        };
+
+        let (rpc_server, _state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2, cli_on).await;
+
+        assert!(rpc_server
+            .clone()
+            .send(
+                ctx,
+                amount,
+                address.into(),
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::zero()
+            )
+            .await
+            .is_none());
+        assert!(rpc_server
+            .clone()
+            .send_to_many(
+                ctx,
+                vec![(address.into(), amount)],
+                UtxoNotificationMedium::OffChain,
+                NeptuneCoins::zero()
+            )
+            .await
+            .is_none());
     }
 }

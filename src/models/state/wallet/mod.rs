@@ -431,6 +431,7 @@ mod wallet_tests {
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -684,7 +685,9 @@ mod wallet_tests {
 
         let network = Network::Main;
         let alice_wallet_secret = WalletSecret::new_random();
-        let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
+        let mut alice =
+            mock_genesis_global_state(network, 1, alice_wallet_secret, cli_args::Args::default())
+                .await;
         let alice_vm_job_queue = alice.vm_job_queue().clone();
         let alice_spending_key = alice
             .lock_guard()
@@ -878,7 +881,9 @@ mod wallet_tests {
         let network = Network::Main;
         let mut rng: StdRng = StdRng::seed_from_u64(456416);
         let alice_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let mut alice = mock_genesis_global_state(network, 2, alice_wallet_secret).await;
+        let mut alice =
+            mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
+                .await;
         let alice_spending_key = alice
             .lock_guard()
             .await
@@ -890,7 +895,9 @@ mod wallet_tests {
         let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let mut bob_global_lock = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
+        let mut bob_global_lock =
+            mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
+                .await;
         let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
@@ -1367,7 +1374,13 @@ mod wallet_tests {
         let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
-        let bob = mock_genesis_global_state(network, 42, WalletSecret::devnet_wallet()).await;
+        let bob = mock_genesis_global_state(
+            network,
+            42,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 

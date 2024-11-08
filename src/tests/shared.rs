@@ -187,6 +187,7 @@ pub(crate) async fn mock_genesis_global_state(
     network: Network,
     peer_count: u8,
     wallet: WalletSecret,
+    cli: cli_args::Args,
 ) -> GlobalStateLock {
     let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
 
@@ -212,13 +213,9 @@ pub(crate) async fn mock_genesis_global_state(
         light_state,
         archival_state,
     });
-    let cli_args = cli_args::Args {
-        network,
-        ..Default::default()
-    };
     let mempool = Mempool::new(
-        cli_args.max_mempool_size,
-        cli_args.max_mempool_num_tx,
+        cli.max_mempool_size,
+        cli.max_mempool_num_tx,
         genesis_block.hash(),
     );
 
@@ -228,7 +225,7 @@ pub(crate) async fn mock_genesis_global_state(
         wallet_state,
         blockchain_state,
         networking_state,
-        cli_args.clone(),
+        cli.clone(),
         mempool,
     )
 }
@@ -255,7 +252,13 @@ pub(crate) async fn get_test_genesis_setup(
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let devnet_wallet = WalletSecret::devnet_wallet();
-    let state = mock_genesis_global_state(network, peer_count, devnet_wallet).await;
+    let state = mock_genesis_global_state(
+        network,
+        peer_count,
+        devnet_wallet,
+        cli_args::Args::default(),
+    )
+    .await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,

@@ -391,6 +391,7 @@ mod tests {
     use rand::Rng;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
@@ -400,8 +401,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_utxoreceiver_auto_not_owned_output() {
-        let global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+        let global_state_lock = mock_genesis_global_state(
+            Network::RegTest,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
@@ -443,8 +449,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_utxoreceiver_auto_owned_output() {
-        let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+        let mut global_state_lock = mock_genesis_global_state(
+            Network::RegTest,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
 
         // obtain next unused receiving address from our wallet.
         let spending_key_gen = global_state_lock
