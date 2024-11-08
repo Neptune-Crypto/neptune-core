@@ -668,6 +668,7 @@ pub(crate) mod mine_loop_tests {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::mempool::TransactionOrigin;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
@@ -810,7 +811,7 @@ pub(crate) mod mine_loop_tests {
             rng.gen(),
             alice_key.to_address().into(),
         );
-        let (tx_by_preminer, _maybe_change_output) = alice
+        let (tx_from_alice, _maybe_change_output) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -864,7 +865,9 @@ pub(crate) mod mine_loop_tests {
 
             {
                 let mut alice_gsm = alice.lock_guard_mut().await;
-                alice_gsm.mempool_insert(tx_by_preminer.clone()).await;
+                alice_gsm
+                    .mempool_insert(tx_from_alice.clone(), TransactionOrigin::Own)
+                    .await;
                 assert_eq!(1, alice_gsm.mempool.len());
             }
 

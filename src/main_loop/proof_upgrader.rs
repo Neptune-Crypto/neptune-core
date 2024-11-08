@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
 
+use super::TransactionOrigin;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -150,12 +151,17 @@ impl UpgradeJob {
     pub(crate) async fn handle_upgrade(
         self,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        tx_origin: TransactionOrigin,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
     ) {
         let mut upgrade_job = self;
+
+        let job_priority = match tx_origin {
+            TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
+            TransactionOrigin::Own => TritonVmJobPriority::High,
+        };
 
         // process in a loop.  in case a new block comes in while processing
         // the current tx, then we can move on to the next, and so on.
@@ -170,7 +176,7 @@ impl UpgradeJob {
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
-            let upgraded = match upgrade_job.upgrade(triton_vm_job_queue, priority).await {
+            let upgraded = match upgrade_job.upgrade(triton_vm_job_queue, job_priority).await {
                 Ok(upgraded_tx) => {
                     info!(
                         "Successfully upgraded transaction {}",
@@ -208,7 +214,7 @@ impl UpgradeJob {
                         ))
                         .unwrap();
 
-                    global_state.mempool_insert(upgraded).await;
+                    global_state.mempool_insert(upgraded, tx_origin).await;
 
                     info!("Successfully handled proof upgrade.");
                     return;
@@ -357,12 +363,15 @@ impl UpgradeJob {
 }
 
 /// Return an [UpgradeJob] that describes work that can be done to upgrade the
-/// proof-quality of a transaction found in mempool.
-pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Option<UpgradeJob> {
+/// proof-quality of a transaction found in mempool. Also indicates whether the
+/// upgrade job affects one of our own transaction, or a foreign transaction.
+pub(super) fn get_upgrade_task_from_mempool(
+    global_state: &GlobalState,
+) -> Option<(UpgradeJob, TransactionOrigin)> {
     // Do we have any `ProofCollection`s?
     let tip = global_state.chain.light_state().body();
 
-    if let Some((kernel, proof)) = global_state.mempool.most_dense_proof_collection() {
+    if let Some((kernel, proof, tx_origin)) = global_state.mempool.most_dense_proof_collection() {
         let upgrade_decision = UpgradeJob::ProofCollectionToSingleProof {
             kernel: kernel.to_owned(),
             proof: proof.to_owned(),
@@ -374,12 +383,14 @@ pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Optio
             return None;
         }
 
-        return Some(upgrade_decision);
+        return Some((upgrade_decision, tx_origin));
     }
 
     // Can we merge two single proofs?
-    if let Some([(left_kernel, left_single_proof), (right_kernel, right_single_proof)]) =
-        global_state.mempool.most_dense_single_proof_pair()
+    if let Some((
+        [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
+        tx_origin,
+    )) = global_state.mempool.most_dense_single_proof_pair()
     {
         let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
         let upgrade_decision = UpgradeJob::Merge {
@@ -398,7 +409,7 @@ pub(super) fn get_upgrade_task_from_mempool(global_state: &GlobalState) -> Optio
             return None;
         }
 
-        return Some(upgrade_decision);
+        return Some((upgrade_decision, tx_origin));
     }
 
     None

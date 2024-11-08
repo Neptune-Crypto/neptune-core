@@ -1485,6 +1485,7 @@ mod peer_loop_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::transaction_notification::TransactionNotification;
+    use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
@@ -2779,7 +2780,7 @@ mod peer_loop_tests {
         state_lock
             .lock_guard_mut()
             .await
-            .mempool_insert(transaction_1.clone())
+            .mempool_insert(transaction_1.clone(), TransactionOrigin::Foreign)
             .await;
         assert!(
             !state_lock.lock_guard().await.mempool.is_empty(),
@@ -2883,7 +2884,7 @@ mod peer_loop_tests {
                 alice
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(own_tx.to_owned())
+                    .mempool_insert(own_tx.to_owned(), TransactionOrigin::Foreign)
                     .await;
 
                 let tx_notification: TransactionNotification = new_tx.try_into().unwrap();

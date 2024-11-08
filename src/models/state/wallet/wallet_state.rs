@@ -1539,6 +1539,7 @@ mod tests {
         use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
+        use crate::models::state::TransactionOrigin;
         use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
 
         /// basic test for confirmed and unconfirmed balance.
@@ -1618,7 +1619,7 @@ mod tests {
             global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(tx)
+                .mempool_insert(tx, TransactionOrigin::Own)
                 .await;
 
             {

@@ -51,7 +51,8 @@ pub struct OverviewData {
     archive_coverage: Option<f64>,
 
     mempool_size: Option<ByteSize>,
-    mempool_tx_count: Option<u32>,
+    mempool_total_tx_count: Option<u32>,
+    mempool_own_tx_count: Option<u32>,
 
     listen_address: Option<SocketAddr>,
     peer_count: Option<usize>,
@@ -144,7 +145,8 @@ impl OverviewScreen {
                                 own_overview_data.tip_digest = Some(resp.tip_digest);
                                 own_overview_data.block_header = Some(resp.tip_header);
                                 own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
-                                own_overview_data.mempool_tx_count = Some(resp.mempool_tx_count.try_into().unwrap());
+                                own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
+                                own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
                                 own_overview_data.peer_count=resp.peer_count;
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
@@ -398,7 +400,7 @@ impl Widget for OverviewScreen {
         lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
         lines.push(format!(
             "tx count: {}",
-            dashifnotset!(data.mempool_tx_count)
+            dashifnotset!(data.mempool_total_tx_count)
         ));
         Self::report(&lines, "Mempool")
             .style(style)

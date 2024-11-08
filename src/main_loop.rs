@@ -29,7 +29,6 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer_wrapper;
 use crate::connect_to_peers::call_peer_wrapper;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
@@ -45,6 +44,7 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::state::block_proposal::BlockProposal;
+use crate::models::state::mempool::TransactionOrigin;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
@@ -620,7 +620,10 @@ impl MainLoopHandler {
 
                 // Insert into mempool
                 global_state_mut
-                    .mempool_insert(pt2m_transaction.transaction.to_owned())
+                    .mempool_insert(
+                        pt2m_transaction.transaction.to_owned(),
+                        TransactionOrigin::Foreign,
+                    )
                     .await;
 
                 // send notification to peers
@@ -962,7 +965,7 @@ impl MainLoopHandler {
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
         let tx_upgrade_interval = self.global_state_lock.cli().tx_upgrade_interval();
-        let upgrade_candidate = {
+        let (upgrade_candidate, tx_origin) = {
             let global_state = self.global_state_lock.lock_guard().await;
             let now = self.now();
             if !attempt_upgrade(&global_state, now, tx_upgrade_interval, main_loop_state)? {
@@ -973,12 +976,13 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&global_state) else {
+            let Some((upgrade_candidate, tx_origin)) = get_upgrade_task_from_mempool(&global_state)
+            else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };
 
-            upgrade_candidate
+            (upgrade_candidate, tx_origin)
         };
 
         info!(
@@ -1002,7 +1006,7 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             &vm_job_queue,
-                            TritonVmJobPriority::Low,
+                            tx_origin,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
@@ -1279,7 +1283,7 @@ impl MainLoopHandler {
                 self.global_state_lock
                     .lock_guard_mut()
                     .await
-                    .mempool_insert(*transaction.clone())
+                    .mempool_insert(*transaction.clone(), TransactionOrigin::Own)
                     .await;
 
                 // Is this a transaction we can share with peers? If so, share
@@ -1317,7 +1321,7 @@ impl MainLoopHandler {
                         upgrade_job
                             .handle_upgrade(
                                 &vm_job_queue,
-                                TritonVmJobPriority::High,
+                                TransactionOrigin::Own,
                                 true,
                                 global_state_lock_clone,
                                 main_to_peer_broadcast_tx_clone,
@@ -1553,7 +1557,7 @@ mod tests {
                 .global_state_lock
                 .lock_guard_mut()
                 .await
-                .mempool_insert(proof_collection_tx.clone())
+                .mempool_insert(proof_collection_tx.clone(), TransactionOrigin::Foreign)
                 .await;
 
             assert!(

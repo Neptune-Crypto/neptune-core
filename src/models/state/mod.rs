@@ -22,6 +22,7 @@ use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use mempool::Mempool;
+use mempool::TransactionOrigin;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
@@ -1478,6 +1479,7 @@ impl GlobalState {
                     &tip_parent,
                     vm_job_queue,
                     TritonVmJobPriority::Highest,
+                    myself.cli().compose,
                 )
                 .await;
 
@@ -1542,8 +1544,12 @@ impl GlobalState {
     }
 
     /// adds Tx to mempool and notifies wallet of change.
-    pub async fn mempool_insert(&mut self, transaction: Transaction) {
-        let events = self.mempool.insert(transaction);
+    pub(crate) async fn mempool_insert(
+        &mut self,
+        transaction: Transaction,
+        origin: TransactionOrigin,
+    ) {
+        let events = self.mempool.insert(transaction, origin);
         self.wallet_state.handle_mempool_events(events).await
     }
 

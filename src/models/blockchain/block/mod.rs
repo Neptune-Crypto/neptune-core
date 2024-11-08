@@ -902,6 +902,8 @@ impl Block {
             .collect_vec()
     }
 
+    /// Return the mutator set update induced by the previous block and the
+    /// new transaction.
     pub(crate) fn ms_update_from_predecessor_and_new_tx_kernel(
         predecessor_block: &Block,
         new_transaction_kernel: &TransactionKernel,

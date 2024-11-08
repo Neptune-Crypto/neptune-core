@@ -54,7 +54,8 @@ pub struct DashBoardOverviewDataFromClient {
     pub timelocked_balance: NeptuneCoins,
     pub available_unconfirmed_balance: NeptuneCoins,
     pub mempool_size: usize,
-    pub mempool_tx_count: usize,
+    pub mempool_total_tx_count: usize,
+    pub mempool_own_tx_count: usize,
 
     // `None` symbolizes failure in getting peer count
     pub peer_count: Option<usize>,
@@ -712,7 +713,8 @@ impl RPC for NeptuneRPCServer {
         let wallet_status = state.get_wallet_status_for_tip().await;
         let syncing = state.net.syncing;
         let mempool_size = state.mempool.get_size();
-        let mempool_tx_count = state.mempool.len();
+        let mempool_total_tx_count = state.mempool.len();
+        let mempool_own_tx_count = state.mempool.num_own_txs();
         let cpu_temp = Self::cpu_temp_inner();
         let unconfirmed_balance = state
             .wallet_state
@@ -734,7 +736,8 @@ impl RPC for NeptuneRPCServer {
             timelocked_balance: wallet_status.synced_unspent_timelocked_amount(now),
             available_unconfirmed_balance: unconfirmed_balance,
             mempool_size,
-            mempool_tx_count,
+            mempool_total_tx_count,
+            mempool_own_tx_count,
             peer_count,
             mining_status,
             confirmations,
