@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::task::TaskTracker;
@@ -73,6 +72,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = jobs.clone();
         tracker.spawn(async move {
+            let mut job_num: usize = 1;
+
             while rx_deque.recv().await.is_some() {
                 let msg = {
                     let mut j = jobs_rc2.lock().unwrap();
@@ -81,12 +82,15 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     j.pop_front().unwrap()
                 };
 
+                tracing::info!("  *** JobQueue: begin job #{} ***", job_num);
                 let job_result = match msg.job.is_async() {
                     true => msg.job.run_async().await,
                     false => tokio::task::spawn_blocking(move || msg.job.run())
                         .await
                         .unwrap(),
                 };
+                tracing::info!("  *** JobQueue: ended job #{} ***", job_num);
+                job_num += 1;
 
                 let _ = msg.result_tx.send(job_result);
             }
@@ -147,47 +151,55 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use super::*;
+    use std::time::Instant;
+    use tracing_test::traced_test;
 
     #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
     async fn run_sync_jobs_by_priority() -> anyhow::Result<()> {
         workers::run_jobs_by_priority(false).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
     async fn run_async_jobs_by_priority() -> anyhow::Result<()> {
         workers::run_jobs_by_priority(true).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
     async fn get_sync_job_result() -> anyhow::Result<()> {
         workers::get_job_result(false).await
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
     async fn get_async_job_result() -> anyhow::Result<()> {
         workers::get_job_result(true).await
     }
 
     #[test]
+    #[traced_test]
     fn runtime_shutdown_timeout_force_cancels_sync_job() -> anyhow::Result<()> {
         workers::runtime_shutdown_timeout_force_cancels_job(false)
     }
 
     #[test]
+    #[traced_test]
     fn runtime_shutdown_timeout_force_cancels_async_job() -> anyhow::Result<()> {
         workers::runtime_shutdown_timeout_force_cancels_job(true)
     }
 
     #[test]
+    #[traced_test]
     #[should_panic]
     fn runtime_shutdown_cancels_sync_job() {
         let _ = workers::runtime_shutdown_cancels_job(false);
     }
 
     #[test]
+    #[traced_test]
     fn runtime_shutdown_cancels_async_job() -> anyhow::Result<()> {
         workers::runtime_shutdown_cancels_job(true)
     }
@@ -197,14 +209,14 @@ mod tests {
     // now so it doesn't disrupt CI.
     #[should_panic]
     #[test]
+    #[traced_test]
     fn spawned_tasks_live_as_long_as_jobqueue() {
         workers::spawned_tasks_live_as_long_as_jobqueue(true).unwrap();
     }
 
     mod workers {
-        use std::any::Any;
-
         use super::*;
+        use std::any::Any;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -238,7 +250,7 @@ mod tests {
                 std::thread::sleep(self.duration);
 
                 let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-                println!("{} * 2 = {}", r.0, r.1);
+                tracing::info!("results: {} * 2 = {}", r.0, r.1);
 
                 Box::new(r)
             }
@@ -247,7 +259,7 @@ mod tests {
                 tokio::time::sleep(self.duration).await;
 
                 let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-                println!("{} * 2 = {}", r.0, r.1);
+                tracing::info!("results: {} * 2 = {}", r.0, r.1);
 
                 Box::new(r)
             }
