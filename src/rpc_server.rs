@@ -516,8 +516,8 @@ impl RPC for NeptuneRPCServer {
 
         // Get all connected peers
         for (socket_address, peer_info) in global_state.net.peer_map.iter() {
-            if peer_info.standing.is_negative() {
-                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing);
+            if peer_info.standing().is_negative() {
+                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing());
             }
         }
 
@@ -1155,9 +1155,9 @@ mod rpc_server_tests {
         let rpc_request_context = context::current();
         let global_state = state_lock.lock_guard().await;
         let peer_address_0 =
-            global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
+            global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
         let peer_address_1 =
-            global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
+            global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
         drop(global_state);
 
         // Verify that sanctions list is empty
@@ -1179,14 +1179,18 @@ mod rpc_server_tests {
                 .peer_map
                 .entry(peer_address_0)
                 .and_modify(|p| {
-                    p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                    p.standing
+                        .sanction(PeerSanctionReason::DifferentGenesis)
+                        .unwrap();
                 });
             global_state_mut
                 .net
                 .peer_map
                 .entry(peer_address_1)
                 .and_modify(|p| {
-                    p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                    p.standing
+                        .sanction(PeerSanctionReason::DifferentGenesis)
+                        .unwrap();
                 });
             let standing_0 = global_state_mut.net.peer_map[&peer_address_0].standing;
             let standing_1 = global_state_mut.net.peer_map[&peer_address_1].standing;
@@ -1301,16 +1305,20 @@ mod rpc_server_tests {
         )
         .await;
         let mut state = state_lock.lock_guard_mut().await;
-        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
-        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
+        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
+        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
 
         // sanction both peers
         let (standing_0, standing_1) = {
             state.net.peer_map.entry(peer_address_0).and_modify(|p| {
-                p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                p.standing
+                    .sanction(PeerSanctionReason::DifferentGenesis)
+                    .unwrap();
             });
             state.net.peer_map.entry(peer_address_1).and_modify(|p| {
-                p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                p.standing
+                    .sanction(PeerSanctionReason::DifferentGenesis)
+                    .unwrap();
             });
             let standing_0 = state.net.peer_map[&peer_address_0].standing;
             let standing_1 = state.net.peer_map[&peer_address_1].standing;

@@ -107,8 +107,8 @@ async fn check_if_connection_is_allowed(
         }
         // Disallow connection to already connected peer.
         else if global_state.net.peer_map.values().any(|peer| {
-            peer.instance_id == other_handshake.instance_id
-                || *peer_address == peer.connected_address
+            peer.instance_id() == other_handshake.instance_id
+                || *peer_address == peer.connected_address()
         }) {
             Some(ConnectionStatus::Refused(
                 ConnectionRefusedReason::AlreadyConnected,
@@ -441,11 +441,12 @@ pub(crate) async fn close_peer_connected_callback(
     // Store any new peer-standing to database
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
 
+    let peer_tolerance = global_state_mut.cli().peer_tolerance;
     let new_standing = match peer_info_writeback {
-        Some(new) => new.standing,
+        Some(new) => new.standing(),
         None => {
             error!("Could not find peer standing for {peer_address}");
-            PeerStanding::new_on_no_standing_found_in_map()
+            PeerStanding::new_on_no_standing_found_in_map(i32::from(peer_tolerance))
         }
     };
     debug!("Fetched peer info standing for {}", peer_address);
@@ -474,6 +475,7 @@ mod connect_tests {
     use twenty_first::math::digest::Digest;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::peer::ConnectionStatus;
     use crate::models::peer::PeerInfo;
@@ -598,7 +600,7 @@ mod connect_tests {
             .lock(|s| s.net.peer_map.values().collect::<Vec<_>>()[0].clone())
             .await;
         let mut mutated_other_handshake = other_handshake.clone();
-        mutated_other_handshake.instance_id = connected_peer.instance_id;
+        mutated_other_handshake.instance_id = connected_peer.instance_id();
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -631,7 +633,7 @@ mod connect_tests {
 
         // pretend --ban ""
         cli.ban.pop();
-        state_lock.set_cli(cli).await;
+        state_lock.set_cli(cli.clone()).await;
 
         status = check_if_connection_is_allowed(
             state_lock.clone(),
@@ -645,14 +647,15 @@ mod connect_tests {
         }
 
         // Then check that peers can be banned by bad behavior
-        let bad_standing: PeerStanding = PeerStanding {
-            standing: i32::MIN,
-            latest_sanction: Some(PeerSanctionReason::InvalidBlock((
+        let bad_standing: PeerStanding = PeerStanding::new(
+            i32::MIN,
+            Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(SystemTime::now()),
-        };
+            Some(SystemTime::now()),
+            i32::from(cli.peer_tolerance),
+        );
 
         state_lock
             .lock_guard_mut()
@@ -932,14 +935,15 @@ mod connect_tests {
             peer_count_before_incoming_connection_request,
         )
         .await?;
-        let bad_standing: PeerStanding = PeerStanding {
-            standing: i32::MIN,
-            latest_sanction: Some(PeerSanctionReason::InvalidBlock((
+        let bad_standing: PeerStanding = PeerStanding::new(
+            i32::MIN,
+            Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(SystemTime::now()),
-        };
+            Some(SystemTime::now()),
+            i32::from(cli_args::Args::default().peer_tolerance),
+        );
         let peer_address = get_dummy_socket_address(3);
 
         state_lock

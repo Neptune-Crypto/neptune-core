@@ -24,45 +24,106 @@ use crate::config_models::network::Network;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
-const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;
-const INVALID_BLOCK_SEVERITY: u16 = 10;
-const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
-const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = 5;
-const FLOODED_PEER_LIST_RESPONSE_SEVERITY: u16 = 2;
-const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
-const INVALID_MESSAGE_SEVERITY: u16 = 2;
-const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
-const INVALID_TRANSACTION: u16 = 10;
-const UNCONFIRMABLE_TRANSACTION: u16 = 2;
-const NO_STANDING_FOUND_MAYBE_CRASH: u16 = 10;
-const BLOCK_PROPOSAL_NOT_FOUND_SEVERITY: u16 = 1;
-const UNWANTED_MESSAGE_SEVERITY: u16 = 1;
+pub(crate) type InstanceId = u128;
 
-pub type InstanceId = u128;
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct PeerInfo {
-    pub port_for_incoming_connections: Option<u16>,
-    pub connected_address: SocketAddr,
-    pub instance_id: InstanceId,
-    pub inbound: bool,
-    pub connection_established: SystemTime,
-    pub standing: PeerStanding,
-    pub version: String,
-    pub is_archival_node: bool,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct PeerConnectionInfo {
+    port_for_incoming_connections: Option<u16>,
+    connected_address: SocketAddr,
+    inbound: bool,
 }
 
-impl PeerInfo {
-    /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
-    /// incoming connections.
-    pub fn listen_address(&self) -> Option<SocketAddr> {
-        self.port_for_incoming_connections
-            .map(|port| SocketAddr::new(self.connected_address.ip(), port))
+impl PeerConnectionInfo {
+    pub(crate) fn new(
+        port_for_incoming_connections: Option<u16>,
+        connected_address: SocketAddr,
+        inbound: bool,
+    ) -> Self {
+        Self {
+            port_for_incoming_connections,
+            connected_address,
+            inbound,
+        }
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct PeerInfo {
+    peer_connection_info: PeerConnectionInfo,
+    instance_id: InstanceId,
+    connection_established: SystemTime,
+    pub(crate) standing: PeerStanding,
+    version: String,
+    is_archival_node: bool,
+}
+
+impl PeerInfo {
+    pub(crate) fn new(
+        peer_connection_info: PeerConnectionInfo,
+        instance_id: InstanceId,
+        connection_established: SystemTime,
+        version: String,
+        is_archival_node: bool,
+        peer_tolerance: u16,
+    ) -> Self {
+        let standing = PeerStanding {
+            peer_tolerance: i32::from(peer_tolerance),
+            ..Default::default()
+        };
+        Self {
+            peer_connection_info,
+            instance_id,
+            connection_established,
+            standing,
+            version,
+            is_archival_node,
+        }
+    }
+
+    pub(crate) fn with_standing(mut self, standing: PeerStanding) -> Self {
+        self.standing = standing;
+        self
+    }
+
+    pub(crate) fn instance_id(&self) -> u128 {
+        self.instance_id
+    }
+
+    pub fn standing(&self) -> PeerStanding {
+        self.standing
+    }
+
+    pub fn connected_address(&self) -> SocketAddr {
+        self.peer_connection_info.connected_address
+    }
+
+    pub fn connection_established(&self) -> SystemTime {
+        self.connection_established
+    }
+
+    pub fn is_archival_node(&self) -> bool {
+        self.is_archival_node
+    }
+
+    pub(crate) fn connection_is_inbound(&self) -> bool {
+        self.peer_connection_info.inbound
+    }
+
+    /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
+    /// incoming connections.
+    pub fn listen_address(&self) -> Option<SocketAddr> {
+        self.peer_connection_info
+            .port_for_incoming_connections
+            .map(|port| SocketAddr::new(self.peer_connection_info.connected_address.ip(), port))
+    }
+}
+
+/// The reason for changing a peer's standing.
+///
+/// Sanctions can be positive (rewards) or negative (punishments).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PeerSanctionReason {
+    // negative sanctions (standing-degrading)
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
     ForkResolutionError((BlockHeight, u16, Digest)),
@@ -86,6 +147,11 @@ pub enum PeerSanctionReason {
     UnwantedMessage,
 
     NoStandingFoundMaybeCrash,
+
+    // positive sanctions (standing-improving)
+    ValidBlocks(usize),
+    ValidNewTransaction,
+    NewBlockProposal,
 }
 
 impl Display for PeerSanctionReason {
@@ -118,6 +184,10 @@ impl Display for PeerSanctionReason {
             PeerSanctionReason::InvalidBlockProposal => "Invalid block proposal",
             PeerSanctionReason::UnwantedMessage => "unwanted message",
             PeerSanctionReason::NonFavorableBlockProposal => "non-favorable block proposal",
+
+            PeerSanctionReason::ValidBlocks(_) => "valid blocks",
+            PeerSanctionReason::ValidNewTransaction => "valid transaction",
+            PeerSanctionReason::NewBlockProposal => "new block proposal",
         };
         write!(f, "{string}")
     }
@@ -146,29 +216,38 @@ impl PeerSynchronizationState {
 }
 
 impl PeerSanctionReason {
-    pub fn to_severity(self) -> u16 {
+    pub fn severity(self) -> i32 {
         match self {
-            PeerSanctionReason::InvalidBlock(_) => INVALID_BLOCK_SEVERITY,
-            PeerSanctionReason::DifferentGenesis => DIFFERENT_GENESIS_SEVERITY,
+            // negative sanctions
+            PeerSanctionReason::InvalidBlock(_) => -10,
+            PeerSanctionReason::DifferentGenesis => i32::MIN,
             PeerSanctionReason::ForkResolutionError((_height, count, _digest)) => {
-                FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * count
+                i32::from(count).saturating_mul(-3)
             }
-            PeerSanctionReason::SynchronizationTimeout => SYNCHRONIZATION_TIMEOUT_SEVERITY,
-            PeerSanctionReason::FloodPeerListResponse => FLOODED_PEER_LIST_RESPONSE_SEVERITY,
-            PeerSanctionReason::InvalidMessage => INVALID_MESSAGE_SEVERITY,
-            PeerSanctionReason::TooShortBlockBatch => INVALID_MESSAGE_SEVERITY,
-            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => INVALID_MESSAGE_SEVERITY,
-            PeerSanctionReason::BatchBlocksInvalidStartHeight => INVALID_MESSAGE_SEVERITY,
-            PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
-            PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
-            PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
-            PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
-            PeerSanctionReason::NonMinedTransactionHasCoinbase => INVALID_TRANSACTION,
-            PeerSanctionReason::NoStandingFoundMaybeCrash => NO_STANDING_FOUND_MAYBE_CRASH,
-            PeerSanctionReason::BlockProposalNotFound => BLOCK_PROPOSAL_NOT_FOUND_SEVERITY,
-            PeerSanctionReason::InvalidBlockProposal => INVALID_BLOCK_SEVERITY,
-            PeerSanctionReason::UnwantedMessage => UNWANTED_MESSAGE_SEVERITY,
-            PeerSanctionReason::NonFavorableBlockProposal => UNWANTED_MESSAGE_SEVERITY,
+            PeerSanctionReason::SynchronizationTimeout => -5,
+            PeerSanctionReason::FloodPeerListResponse => -2,
+            PeerSanctionReason::InvalidMessage => -2,
+            PeerSanctionReason::TooShortBlockBatch => -2,
+            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => -2,
+            PeerSanctionReason::BatchBlocksInvalidStartHeight => -2,
+            PeerSanctionReason::BatchBlocksUnknownRequest => -10,
+            PeerSanctionReason::BlockRequestUnknownHeight => -1,
+            PeerSanctionReason::InvalidTransaction => -10,
+            PeerSanctionReason::UnconfirmableTransaction => -2,
+            PeerSanctionReason::NonMinedTransactionHasCoinbase => -10,
+            PeerSanctionReason::NoStandingFoundMaybeCrash => -10,
+            PeerSanctionReason::BlockProposalNotFound => -1,
+            PeerSanctionReason::InvalidBlockProposal => -10,
+            PeerSanctionReason::UnwantedMessage => -1,
+            PeerSanctionReason::NonFavorableBlockProposal => -1,
+
+            // positive sanctions
+            PeerSanctionReason::ValidBlocks(number) => number
+                .try_into()
+                .map(|n: i32| n.saturating_mul(10))
+                .unwrap_or(i32::MAX),
+            PeerSanctionReason::ValidNewTransaction => 3,
+            PeerSanctionReason::NewBlockProposal => 7,
         }
     }
 }
@@ -180,15 +259,43 @@ pub struct PeerStanding {
     pub standing: i32,
     pub latest_sanction: Option<PeerSanctionReason>,
     pub timestamp_of_latest_sanction: Option<SystemTime>,
+    peer_tolerance: i32,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct StandingExceedsBanThreshold;
+
 impl PeerStanding {
+    pub(crate) fn new(
+        standing: i32,
+        latest_sanction: Option<PeerSanctionReason>,
+        timestamp_of_latest_sanction: Option<SystemTime>,
+        peer_tolerance: i32,
+    ) -> PeerStanding {
+        Self {
+            standing,
+            latest_sanction,
+            timestamp_of_latest_sanction,
+            peer_tolerance,
+        }
+    }
+
     /// Sanction peer and return latest standing score
-    pub fn sanction(&mut self, reason: PeerSanctionReason) -> i32 {
-        self.standing = self.standing.saturating_sub(reason.to_severity().into());
+    pub(crate) fn sanction(
+        &mut self,
+        reason: PeerSanctionReason,
+    ) -> Result<i32, StandingExceedsBanThreshold> {
+        self.standing = self
+            .standing
+            .saturating_add(reason.severity())
+            .clamp(-self.peer_tolerance, self.peer_tolerance);
         self.latest_sanction = Some(reason);
         self.timestamp_of_latest_sanction = Some(SystemTime::now());
-        self.standing
+        if self.standing == -self.peer_tolerance {
+            Err(StandingExceedsBanThreshold)
+        } else {
+            Ok(self.standing)
+        }
     }
 
     /// Clear peer standing record
@@ -200,12 +307,19 @@ impl PeerStanding {
         self.standing.is_negative()
     }
 
-    pub fn new_on_no_standing_found_in_map() -> Self {
-        Self {
-            standing: -(NO_STANDING_FOUND_MAYBE_CRASH as i32),
-            latest_sanction: Some(PeerSanctionReason::NoStandingFoundMaybeCrash),
-            timestamp_of_latest_sanction: Some(SystemTime::now()),
-        }
+    pub fn new_on_no_standing_found_in_map(peer_tolerance: i32) -> Self {
+        Self::new(
+            -PeerSanctionReason::NoStandingFoundMaybeCrash.severity(),
+            Some(PeerSanctionReason::NoStandingFoundMaybeCrash),
+            Some(SystemTime::now()),
+            peer_tolerance,
+        )
+    }
+}
+
+impl Display for PeerStanding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.standing)
     }
 }
 

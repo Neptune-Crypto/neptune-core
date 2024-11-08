@@ -43,6 +43,7 @@ pub struct Args {
     /// Refuse connection if peer is in bad standing.
     ///
     /// This sets the threshold for when a peer should be automatically refused.
+    /// The default is set to 1000.
     ///
     /// For a list of reasons that cause bad standing, see [PeerSanctionReason](crate::models::peer::PeerSanctionReason).
     #[clap(long, default_value = "1000", value_name = "VALUE")]

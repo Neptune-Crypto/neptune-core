@@ -76,9 +76,9 @@ use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
 use crate::models::peer::HandshakeData;
+use crate::models::peer::PeerConnectionInfo;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
-use crate::models::peer::PeerStanding;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
@@ -132,16 +132,15 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
 
 /// Get a dummy-peer representing an outgoing connection.
 pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
-    PeerInfo {
-        connected_address: address,
-        inbound: false,
-        instance_id: rand::random(),
-        connection_established: SystemTime::now(),
-        standing: PeerStanding::default(),
-        version: get_dummy_version(),
-        port_for_incoming_connections: Some(8080),
-        is_archival_node: true,
-    }
+    let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
+    PeerInfo::new(
+        peer_connection_info,
+        rand::random(),
+        SystemTime::now(),
+        get_dummy_version(),
+        true,
+        cli_args::Args::default().peer_tolerance,
+    )
 }
 
 pub fn get_dummy_version() -> String {

@@ -260,7 +260,7 @@ impl PotentialPeersState {
         own_instance_id: u128,
     ) -> Option<(SocketAddr, u8)> {
         let peers_instance_ids: Vec<u128> =
-            connected_clients.iter().map(|x| x.instance_id).collect();
+            connected_clients.iter().map(|x| x.instance_id()).collect();
 
         // Only pick those peers that report a listening port
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
@@ -798,7 +798,7 @@ impl MainLoopHandler {
             // the max-peer count. But in that case we don't want to connect to
             // more peers, so we should just stop execution of this scheduled
             // task here.
-            if connected_peers.iter().all(|x| !x.inbound) {
+            if connected_peers.iter().all(|x| !x.connection_is_inbound()) {
                 return Ok(());
             }
 
@@ -815,12 +815,12 @@ impl MainLoopHandler {
             // pick a peer that was not specified in the CLI arguments to disconnect from
             let peer_to_disconnect = connected_peers
                 .iter()
-                .filter(|peer| !global_state.cli().peers.contains(&peer.connected_address))
+                .filter(|peer| !global_state.cli().peers.contains(&peer.connected_address()))
                 .choose(&mut rng);
             match peer_to_disconnect {
                 Some(peer) => {
                     self.main_to_peer_broadcast_tx
-                        .send(MainToPeerTask::Disconnect(peer.connected_address))?;
+                        .send(MainToPeerTask::Disconnect(peer.connected_address()))?;
                 }
                 None => warn!("Unable to resolve max peer constraint due to manual override."),
             };
@@ -832,7 +832,7 @@ impl MainLoopHandler {
         // If we did, attempt to reconnect.
         let connected_peer_addresses = connected_peers
             .iter()
-            .map(|x| x.connected_address)
+            .map(|x| x.connected_address())
             .collect_vec();
         let peers_with_lost_connection = global_state
             .cli()
@@ -1572,7 +1572,7 @@ mod tests {
                 .net
                 .peer_map
                 .iter()
-                .all(|(_addr, peer)| !peer.inbound),
+                .all(|(_addr, peer)| !peer.connection_is_inbound()),
             "Test assumption: All initial peers must represent outgoing connections."
         );
 

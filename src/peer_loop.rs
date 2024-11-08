@@ -31,6 +31,7 @@ use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
+use crate::models::peer::PeerConnectionInfo;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanctionReason;
@@ -121,28 +122,58 @@ impl PeerLoopHandler {
 
     // TODO: Add a reward function that mutates the peer status
 
-    /// Locking:
+    /// Punish a peer for bad behavior.
+    ///
+    /// Return `Err` if the peer in question is (now) banned.
+    ///
+    /// # Locking:
     ///   * acquires `global_state_lock` for write
     async fn punish(&mut self, reason: PeerSanctionReason) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        warn!(
-            "Sanctioning peer {} for {:?}",
-            self.peer_address.ip(),
-            reason
-        );
-        let new_standing = global_state_mut
+        warn!("Punishing peer {} for {:?}", self.peer_address.ip(), reason);
+        match global_state_mut
             .net
             .peer_map
             .get_mut(&self.peer_address)
             .map(|p| p.standing.sanction(reason))
-            .unwrap_or(0);
-
-        if new_standing < -(global_state_mut.cli().peer_tolerance as PeerStandingNumber) {
-            warn!("Banning peer");
-            bail!("Banning peer");
+        {
+            Some(Ok(_standing)) => Ok(()),
+            Some(Err(_banned)) => {
+                warn!("Banning peer");
+                bail!("Banning peer");
+            }
+            None => {
+                error!("Could not read peer map.");
+                Ok(())
+            }
         }
+    }
 
-        Ok(())
+    /// Reward a peer for good behavior.
+    ///
+    /// Return `Err` if the peer in question is banned.
+    ///
+    /// # Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn reward(&mut self, reason: PeerSanctionReason) -> Result<()> {
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+        info!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
+        match global_state_mut
+            .net
+            .peer_map
+            .get_mut(&self.peer_address)
+            .map(|p| p.standing.sanction(reason))
+        {
+            Some(Ok(_standing)) => Ok(()),
+            Some(Err(_banned)) => {
+                error!("Cannot reward banned peer");
+                bail!("Cannot reward banned peer");
+            }
+            None => {
+                error!("Could not read peer map.");
+                Ok(())
+            }
+        }
     }
 
     /// Handle validation and send all blocks to the main task if they're all
@@ -238,6 +269,7 @@ impl PeerLoopHandler {
         // Send the new blocks to the main task which handles the state update
         // and storage to the database.
         let new_block_height = received_blocks.last().unwrap().header().height;
+        let number_of_received_blocks = received_blocks.len();
         self.to_main_tx
             .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
@@ -245,6 +277,10 @@ impl PeerLoopHandler {
             "Updated block info by block from peer. block height {}",
             new_block_height
         );
+
+        // Valuable, new, hard-to-produce information. Reward peer.
+        self.reward(PeerSanctionReason::ValidBlocks(number_of_received_blocks))
+            .await?;
 
         Ok(Some(new_block_height))
     }
@@ -452,7 +488,7 @@ impl PeerLoopHandler {
                         (
                             // unwrap is safe bc of above `filter`
                             peer_info.listen_address().unwrap(),
-                            peer_info.instance_id,
+                            peer_info.instance_id(),
                         )
                     })
                     .collect();
@@ -505,6 +541,8 @@ impl PeerLoopHandler {
                 }
 
                 self.try_ensure_path(block, peer, peer_state_info).await?;
+
+                // Reward happens as part of `try_ensure_path`
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -696,6 +734,8 @@ impl PeerLoopHandler {
                 self.handle_blocks(received_blocks, most_canonical_own_block_match)
                     .await?;
 
+                // Reward happens as part of `handle_blocks`.
+
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
@@ -779,6 +819,9 @@ impl PeerLoopHandler {
                         );
                     }
                 }
+
+                // We can't reward a peer for notifying us of a block without
+                // knowing that that block is valid.
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -870,6 +913,10 @@ impl PeerLoopHandler {
                 let _ = crate::ScopeDurationLogger::new(
                     &(crate::macros::fn_name!() + "::PeerMessage::Handshake"),
                 );
+
+                // The handshake should have been sent during connection
+                // initalization. Here it is out of order at best, malicious at
+                // worst.
                 self.punish(PeerSanctionReason::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -877,6 +924,10 @@ impl PeerLoopHandler {
                 let _ = crate::ScopeDurationLogger::new(
                     &(crate::macros::fn_name!() + "::PeerMessage::ConnectionStatus"),
                 );
+
+                // The connection status should have been sent during connection
+                // initalization. Here it is out of order at best, malicious at
+                // worst.
 
                 self.punish(PeerSanctionReason::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -981,6 +1032,9 @@ impl PeerLoopHandler {
                     .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
                     .await?;
 
+                // Valuable, hard-to-produce, new information. So reward peer.
+                self.reward(PeerSanctionReason::ValidNewTransaction).await?;
+
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(tx_notification) => {
@@ -1018,6 +1072,9 @@ impl PeerLoopHandler {
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
+
+                // We cannot reward the peer for notifying us of a transaction
+                // without knowing whether the transaction is valid.
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1068,6 +1125,9 @@ impl PeerLoopHandler {
                         self.peer_address
                     );
                 }
+
+                // We cannot reward the peer for notifying us of a new block
+                // proposal without knowing if it is valid.
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1132,6 +1192,9 @@ impl PeerLoopHandler {
                 self.to_main_tx
                     .send(PeerTaskToMain::BlockProposal(block))
                     .await?;
+
+                // Valuable, new, hard-to-produce information. Reward peer.
+                self.reward(PeerSanctionReason::NewBlockProposal).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1386,16 +1449,20 @@ impl PeerLoopHandler {
             .unwrap_or_default();
 
         // Add peer to peer map
-        let new_peer = PeerInfo {
-            port_for_incoming_connections: self.peer_handshake_data.listen_port,
-            connected_address: self.peer_address,
-            inbound: self.inbound_connection,
-            instance_id: self.peer_handshake_data.instance_id,
-            connection_established: SystemTime::now(),
-            standing,
-            version: self.peer_handshake_data.version.clone(),
-            is_archival_node: self.peer_handshake_data.is_archival_node,
-        };
+        let peer_connection_info = PeerConnectionInfo::new(
+            self.peer_handshake_data.listen_port,
+            self.peer_address,
+            self.inbound_connection,
+        );
+        let new_peer = PeerInfo::new(
+            peer_connection_info,
+            self.peer_handshake_data.instance_id,
+            SystemTime::now(),
+            self.peer_handshake_data.version.clone(),
+            self.peer_handshake_data.is_archival_node,
+            global_state.cli().peer_tolerance,
+        )
+        .with_standing(standing);
 
         // There is potential for a race-condition in the peer_map here, as we've previously
         // counted the number of entries and checked if instance ID was already connected. But
@@ -1405,7 +1472,7 @@ impl PeerLoopHandler {
             .net
             .peer_map
             .values()
-            .any(|pi| pi.instance_id == self.peer_handshake_data.instance_id)
+            .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
         {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
@@ -1534,11 +1601,15 @@ mod peer_loop_tests {
             .clone()
             .into_values()
             .collect::<Vec<_>>();
-        peer_infos.sort_by_cached_key(|x| x.connected_address);
-        let (peer_address0, instance_id0) =
-            (peer_infos[0].connected_address, peer_infos[0].instance_id);
-        let (peer_address1, instance_id1) =
-            (peer_infos[1].connected_address, peer_infos[1].instance_id);
+        peer_infos.sort_by_cached_key(|x| x.connected_address());
+        let (peer_address0, instance_id0) = (
+            peer_infos[0].connected_address(),
+            peer_infos[0].instance_id(),
+        );
+        let (peer_address1, instance_id1) = (
+            peer_infos[1].connected_address(),
+            peer_infos[1].instance_id(),
+        );
 
         let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2).await;
         let expected_response = vec![
@@ -2570,7 +2641,7 @@ mod peer_loop_tests {
         let expected_peer_list_resp = vec![
             (
                 peer_infos[0].listen_address().unwrap(),
-                peer_infos[0].instance_id,
+                peer_infos[0].instance_id(),
             ),
             (sa_1, hsd_1.instance_id),
         ];

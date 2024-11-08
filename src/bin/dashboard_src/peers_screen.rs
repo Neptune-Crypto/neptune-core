@@ -186,17 +186,17 @@ impl Widget for PeersScreen {
             .iter()
             .map(|pi| {
                 let latest_violation: Option<String> =
-                    pi.standing.latest_sanction.map(|x| x.to_string());
+                    pi.standing().latest_sanction.map(|x| x.to_string());
                 let connection_established = pi
-                    .connection_established
+                    .connection_established()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap();
                 vec![
-                    pi.connected_address.to_string(),
+                    pi.connected_address().to_string(),
                     neptune_core::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
-                    pi.standing.standing.to_string(),
-                    if pi.is_archival_node {
+                    pi.standing().to_string(),
+                    if pi.is_archival_node() {
                         "✓".to_string()
                     } else {
                         "".to_string()
