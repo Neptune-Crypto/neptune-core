@@ -215,10 +215,6 @@ mod tests {
         workers::runtime_shutdown_cancels_job(true)
     }
 
-    // this test should NOT panic, but I don't yet have a fix for
-    // the behavior that makes it fail.  Marking it should_panic for
-    // now so it doesn't disrupt CI.
-    #[should_panic]
     #[test]
     #[traced_test]
     fn spawned_tasks_live_as_long_as_jobqueue() {
@@ -505,6 +501,19 @@ mod tests {
             result
         }
 
+        // this test attempts to verify that the tasks spawned by the JobQueue
+        // continue running until the JobQueue is dropped after the tokio
+        // runtime is dropped.
+        //
+        // If the tasks are cencelled before JobQueue is dropped then a subsequent
+        // api call that sends a msg will result in a "channel closed" error, which
+        // is what the test checks for.
+        //
+        // note that the test has to do some tricky stuff to setup conditions
+        // where the "channel closed" error can occur. It's a subtle issue.
+        //
+        // see description at:
+        // https://github.com/tokio-rs/tokio/discussions/6961
         pub(super) fn spawned_tasks_live_as_long_as_jobqueue(is_async: bool) -> anyhow::Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
 
@@ -517,7 +526,7 @@ mod tests {
 
                 // spawns background task that adds job
                 let job_queue_cloned = job_queue.clone();
-                let _jh = tokio::spawn(async move {
+                let jh = tokio::spawn(async move {
                     // sleep 200 ms to let runtime finish.
                     // ie ensure drop(rt) will be reached and wait for us.
                     // note that we use std sleep.  if tokio sleep is used
@@ -542,10 +551,10 @@ mod tests {
                 // sleep 50 ms to let job get started.
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-                // note; neither of these make the test succeed.
+                // note; awaiting the joinhandle makes the test succeed.
 
-                // job_queue.stop().await;
-                // jh.abort();
+                jh.abort();
+                let _ = jh.await;
             });
 
             // drop the tokio runtime. It will abort tasks.
