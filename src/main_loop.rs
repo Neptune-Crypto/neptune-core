@@ -2,7 +2,6 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::thread::sleep;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -1372,18 +1371,13 @@ impl MainLoopHandler {
         // Flush all databases
         self.global_state_lock.flush_databases().await?;
 
-        // wait 0.5 seconds to ensure that child processes have been shut down
-        sleep(Duration::new(0, 500 * 1_000_000));
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Child processes should have finished by now. If not, abort them violently.
-        for jh in task_handles {
-            jh.abort();
-        }
+        task_handles.iter().for_each(|jh| jh.abort());
 
-        self.global_state_lock.vm_job_queue().stop().await;
-
-        // wait 0.5 seconds to ensure that child processes have been shut down
-        sleep(Duration::new(0, 500 * 1_000_000));
+        // wait for all to finish.
+        futures::future::join_all(task_handles).await;
 
         Ok(())
     }

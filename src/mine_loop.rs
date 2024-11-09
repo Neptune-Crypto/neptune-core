@@ -41,21 +41,9 @@ async fn compose_block(
     let now = Timestamp::now();
     let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
 
-    let (transaction, composer_utxos) = match create_block_transaction(
-        &latest_block,
-        &global_state_lock,
-        now,
-        guesser_fee_fraction,
-    )
-    .await
-    {
-        Ok(r) => r,
-
-        // "channel closed" indicates an ongoing shutdown of
-        // the entire program. So: stop miner here.
-        Err(e) if e.to_string() == "channel closed" => return Ok(()),
-        Err(e) => return Err(e),
-    };
+    let (transaction, composer_utxos) =
+        create_block_transaction(&latest_block, &global_state_lock, now, guesser_fee_fraction)
+            .await?;
 
     let triton_vm_job_queue = global_state_lock.vm_job_queue();
     let proposal = Block::compose(
@@ -71,10 +59,6 @@ async fn compose_block(
 
     let proposal = match proposal {
         Ok(template) => template,
-
-        // "channel closed" indicates an ongoing shutdown of
-        // the entire program. So: stop miner here.
-        Err(e) if e.to_string() == "channel closed" => return Ok(()),
         Err(_) => bail!("Miner failed to generate block template"),
     };
 
