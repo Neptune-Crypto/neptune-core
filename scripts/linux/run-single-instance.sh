@@ -19,7 +19,7 @@ export RUST_LOG=debug;
 # Build before proceeding
 cargo build
 
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --compose --guess 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 1 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --compose --guess 2>&1 | tee integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
 pid[0]=$!
 sleep 5s;
 
