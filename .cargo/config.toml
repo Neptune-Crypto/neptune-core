@@ -3,7 +3,9 @@
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
 
-# workaround for rustc 1.80 running out of stack space when building triton-vm
 [env]
+# workaround for rustc 1.80 running out of stack space when building triton-vm
 RUST_MIN_STACK="33554432"
+# so that anyhow errors automatically display stack trace
+RUST_BACKTRACE="1"
 

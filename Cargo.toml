@@ -15,7 +15,7 @@ log-slow-write-lock = []
 [dependencies]
 aead = { version = "0.5", features = ["std"] }
 aes-gcm = "0.10"
-anyhow = "1.0"
+anyhow = { version = "1.0", features = ["backtrace"] }
 arbitrary = { version = "1.3", features = ["derive"] }
 bech32 = "0.9"
 bincode = "1.3"
