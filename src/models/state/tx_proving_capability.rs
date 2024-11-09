@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::str::FromStr;
 
 use clap::error::ErrorKind;
@@ -9,6 +10,21 @@ pub enum TxProvingCapability {
     LockScript,
     ProofCollection,
     SingleProof,
+}
+
+impl Display for TxProvingCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                TxProvingCapability::PrimitiveWitness => "primitive witness",
+                TxProvingCapability::LockScript => "lock script",
+                TxProvingCapability::ProofCollection => "proof collection",
+                TxProvingCapability::SingleProof => "single proof",
+            }
+        )
+    }
 }
 
 impl FromStr for TxProvingCapability {

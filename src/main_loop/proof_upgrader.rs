@@ -67,6 +67,22 @@ pub struct UpdateMutatorSetDataJob {
     mutator_set_update: MutatorSetUpdate,
 }
 
+impl UpdateMutatorSetDataJob {
+    pub(crate) fn new(
+        old_kernel: TransactionKernel,
+        old_single_proof: Proof,
+        old_mutator_set: MutatorSetAccumulator,
+        mutator_set_update: MutatorSetUpdate,
+    ) -> Self {
+        Self {
+            old_kernel,
+            old_single_proof,
+            old_mutator_set,
+            mutator_set_update,
+        }
+    }
+}
+
 impl UpgradeJob {
     /// Create an upgrade job from a primitive witness, for upgrading proof-
     /// support for a transaction that this client has initiated.

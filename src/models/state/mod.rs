@@ -63,6 +63,7 @@ use crate::database::storage::storage_vec::Index;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
+use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -214,21 +215,16 @@ impl GlobalStateLock {
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-    ) -> Result<()> {
-        let vm_job_queue = self.vm_job_queue().clone();
+    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos, &vm_job_queue)
+            .set_new_self_mined_tip(new_block, miner_reward_utxo_infos)
             .await
     }
 
     /// store a block (non coinbase)
-    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<()> {
-        let vm_job_queue = self.vm_job_queue().clone();
-        self.lock_guard_mut()
-            .await
-            .set_new_tip(new_block, &vm_job_queue)
-            .await
+    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
+        self.lock_guard_mut().await.set_new_tip(new_block).await
     }
 
     /// resync membership proofs
@@ -1376,13 +1372,8 @@ impl GlobalState {
     /// The new block is assumed to be valid, also wrt. to proof-of-work.
     /// The new block will be set as the new tip, regardless of its
     /// cumulative proof-of-work number.
-    pub async fn set_new_tip(
-        &mut self,
-        new_block: Block,
-        vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<()> {
-        self.set_new_tip_internal(new_block, vec![], vm_job_queue)
-            .await
+    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
+        self.set_new_tip_internal(new_block, vec![]).await
     }
 
     /// Update client's state with a new block that was mined locally. Block is
@@ -1392,9 +1383,8 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-        vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<()> {
-        self.set_new_tip_internal(new_block, miner_reward_utxo_infos, vm_job_queue)
+    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
+        self.set_new_tip_internal(new_block, miner_reward_utxo_infos)
             .await
     }
 
@@ -1405,16 +1395,14 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-        vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<()> {
+    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         // note: we make this fn internal so we can log its duration and ensure it will
         // never be called directly by another fn, without the timings.
         async fn set_new_tip_internal_worker(
             myself: &mut GlobalState,
             new_block: Block,
             miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-            vm_job_queue: &TritonVmJobQueue,
-        ) -> Result<()> {
+        ) -> Result<Vec<UpdateMutatorSetDataJob>> {
             // Apply the updates
             myself
                 .chain
@@ -1475,16 +1463,17 @@ impl GlobalState {
             // Update mempool with UTXOs from this block. This is done by
             // removing all transaction that became invalid/was mined by this
             // block.
-            myself
+            let (mempool_events, update_jobs) = myself
                 .mempool
                 .update_with_block_and_predecessor(
                     &new_block,
                     &tip_parent,
-                    vm_job_queue,
                     myself.net.tx_proving_capability,
                     myself.cli().compose,
                 )
                 .await;
+
+            // TODO: Inform wallet about mempool_events
 
             myself.chain.light_state_mut().set_block(new_block);
 
@@ -1495,14 +1484,13 @@ impl GlobalState {
             // Flush databases
             myself.flush_databases().await?;
 
-            Ok(())
+            Ok(update_jobs)
         }
 
         crate::macros::duration_async_info!(set_new_tip_internal_worker(
             self,
             new_block,
             miner_reward_utxo_infos,
-            vm_job_queue,
         ))
     }
 
@@ -1936,7 +1924,6 @@ mod global_state_tests {
             cli_args::Args::default(),
         )
         .await;
-        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -1957,7 +1944,6 @@ mod global_state_tests {
                     alice_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
-                &alice_vm_job_queue,
             )
             .await
             .unwrap();
@@ -1981,10 +1967,7 @@ mod global_state_tests {
         let mut parent_block = genesis_block;
         for _ in 0..5 {
             let (next_block, _, _) = make_mock_block(&parent_block, None, bob_address, rng.gen());
-            alice
-                .set_new_tip(next_block.clone(), &alice_vm_job_queue)
-                .await
-                .unwrap();
+            alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
 
@@ -2072,7 +2055,6 @@ mod global_state_tests {
             cli_args::Args::default(),
         )
         .await;
-        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
@@ -2096,7 +2078,6 @@ mod global_state_tests {
                         alice_spending_key.privacy_preimage,
                         UtxoNotifier::OwnMinerComposeBlock,
                     )],
-                    &alice_vm_job_queue,
                 )
                 .await
                 .unwrap();
@@ -2119,10 +2100,7 @@ mod global_state_tests {
         // Add 60 blocks on top of 1, *not* mined by Alice
         let fork_a_block = a_blocks.last().unwrap().to_owned();
         for branch_block in a_blocks.into_iter() {
-            alice
-                .set_new_tip(branch_block, &alice_vm_job_queue)
-                .await
-                .unwrap();
+            alice.set_new_tip(branch_block).await.unwrap();
         }
 
         // Verify that all both MUTXOs have synced MPs
@@ -2136,10 +2114,7 @@ mod global_state_tests {
         // Fork away from the "a" chain to the "b" chain, with block 1 as LUCA
         let fork_b_block = b_blocks.last().unwrap().to_owned();
         for branch_block in b_blocks.into_iter() {
-            alice
-                .set_new_tip(branch_block, &alice_vm_job_queue)
-                .await
-                .unwrap();
+            alice.set_new_tip(branch_block).await.unwrap();
         }
 
         // Verify that there are zero MUTXOs with synced MPs
@@ -2179,10 +2154,7 @@ mod global_state_tests {
         // to this new chain
         let fork_c_block = c_blocks.last().unwrap().to_owned();
         for branch_block in c_blocks.into_iter() {
-            alice
-                .set_new_tip(branch_block, &alice_vm_job_queue)
-                .await
-                .unwrap();
+            alice.set_new_tip(branch_block).await.unwrap();
         }
 
         // Verify that there are zero MUTXOs with synced MPs
@@ -2854,59 +2826,30 @@ mod global_state_tests {
                     cli_args::Args::default(),
                 )
                 .await;
-                let vm_job_queue = global_state_lock.vm_job_queue().clone();
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_coinbase {
                     global_state
-                        .set_new_self_mined_tip(
-                            block_1a.clone(),
-                            vec![cb_1a.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(block_1a.clone(), vec![cb_1a.clone()])
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(
-                            block_2a.clone(),
-                            vec![cb_2a.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(block_2a.clone(), vec![cb_2a.clone()])
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(
-                            block_3a.clone(),
-                            vec![cb_3a.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(block_3a.clone(), vec![cb_3a.clone()])
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(
-                            block_1a.clone(),
-                            vec![cb_1a.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(block_1a.clone(), vec![cb_1a.clone()])
                         .await
                         .unwrap();
                 } else {
-                    global_state
-                        .set_new_tip(block_1a.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
-                    global_state
-                        .set_new_tip(block_2a.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
-                    global_state
-                        .set_new_tip(block_3a.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
-                    global_state
-                        .set_new_tip(block_1a.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_2a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_3a.clone()).await.unwrap();
+                    global_state.set_new_tip(block_1a.clone()).await.unwrap();
                 }
 
                 let expected_number_of_mutxos = if claim_coinbase { 2 } else { 1 };
@@ -2924,10 +2867,7 @@ mod global_state_tests {
                 // the genesis block.
                 let (block_1b, _, _) =
                     make_mock_block(&genesis_block, None, spending_key.to_address(), random());
-                global_state
-                    .set_new_tip(block_1b.clone(), &vm_job_queue)
-                    .await
-                    .unwrap();
+                global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
                     block_1b.clone(),
@@ -2942,19 +2882,11 @@ mod global_state_tests {
                 for block_height in 2..60 {
                     let (next_block, next_cb) = block_with_cb(&previous_block);
                     global_state
-                        .set_new_self_mined_tip(
-                            next_block.clone(),
-                            vec![next_cb.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(
-                            next_block.clone(),
-                            vec![next_cb.clone()],
-                            &vm_job_queue,
-                        )
+                        .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
                         .await
                         .unwrap();
                     assert_correct_global_state(
@@ -2997,27 +2929,20 @@ mod global_state_tests {
                     cli_args::Args::default(),
                 )
                 .await;
-                let vm_job_queue = global_state_lock.vm_job_queue().clone();
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
                 if claim_cb {
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &vm_job_queue)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()])
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()], &vm_job_queue)
+                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()])
                         .await
                         .unwrap();
                 } else {
-                    global_state
-                        .set_new_tip(block_1.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
-                    global_state
-                        .set_new_tip(block_1.clone(), &vm_job_queue)
-                        .await
-                        .unwrap();
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
+                    global_state.set_new_tip(block_1.clone()).await.unwrap();
                 }
 
                 assert_correct_global_state(
@@ -3233,10 +3158,7 @@ mod global_state_tests {
                 .unwrap();
 
                 // alice's node learns of the new block.
-                alice_state_mut
-                    .set_new_tip(block_1.clone(), &vm_job_queue)
-                    .await
-                    .unwrap();
+                alice_state_mut.set_new_tip(block_1.clone()).await.unwrap();
 
                 // alice should have 2 monitored utxos.
                 assert_eq!(
@@ -3270,14 +3192,10 @@ mod global_state_tests {
 
             // in bob's wallet
             {
-                let bob_vm_job_queue = bob_state_lock.vm_job_queue().clone();
                 let mut bob_state_mut = bob_state_lock.lock_guard_mut().await;
 
                 // bob's node adds block1 to the chain.
-                bob_state_mut
-                    .set_new_tip(block_1.clone(), &bob_vm_job_queue)
-                    .await
-                    .unwrap();
+                bob_state_mut.set_new_tip(block_1.clone()).await.unwrap();
 
                 // Now Bob should have a balance of 10, from Alice
                 assert_eq!(
@@ -3305,7 +3223,6 @@ mod global_state_tests {
                 )
                 .await;
 
-                let alice_vm_job_queue = alice_restored_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_restored_state_lock.lock_guard_mut().await;
 
                 // check alice's initial balance after genesis.
@@ -3318,10 +3235,7 @@ mod global_state_tests {
                 assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
 
                 // now alice must replay old blocks.  (there's only one so far)
-                alice_state_mut
-                    .set_new_tip(block_1, &alice_vm_job_queue)
-                    .await
-                    .unwrap();
+                alice_state_mut.set_new_tip(block_1).await.unwrap();
 
                 // Now alice should have a balance of 9.
                 // 20 from premine - 11

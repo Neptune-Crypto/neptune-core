@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use itertools::Itertools;
 use proof_upgrader::get_upgrade_task_from_mempool;
+use proof_upgrader::UpdateMutatorSetDataJob;
 use proof_upgrader::UpgradeJob;
 use rand::prelude::IteratorRandom;
 use rand::prelude::SliceRandom;
@@ -363,7 +364,6 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // This block spans global state write lock for updating.
-                let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
@@ -379,7 +379,6 @@ impl MainLoopHandler {
                             new_block_info.guesser_fee_utxo_infos,
                         ]
                         .concat(),
-                        &vm_job_queue,
                     )
                     .await?;
                 drop(global_state_mut);
@@ -450,7 +449,7 @@ impl MainLoopHandler {
                 );
 
                 let last_block = blocks.last().unwrap().to_owned();
-                {
+                let update_jobs = {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer (or from own miner).
@@ -458,7 +457,6 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                     if !global_state_mut.incoming_block_is_more_canonical(&last_block) {
@@ -484,6 +482,7 @@ impl MainLoopHandler {
                         }
                     }
 
+                    let mut update_jobs: Vec<UpdateMutatorSetDataJob> = vec![];
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
@@ -501,22 +500,29 @@ impl MainLoopHandler {
                         // [GlobalState::test::setting_same_tip_twice_is_allowed]
                         // test for a test of this phenomenon.
 
-                        global_state_mut
-                            .set_new_tip(new_block, &vm_job_queue)
-                            .await?;
+                        let update_jobs_ = global_state_mut.set_new_tip(new_block).await?;
+                        update_jobs.extend(update_jobs_);
                     }
-                }
+
+                    update_jobs
+                };
+
+                // Inform all peers about new block
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::Block(Box::new(last_block.clone())))
+                    .expect("Peer handler broadcast was closed. This should never happen");
+
+                // Start executing all update jobs.
+                // TODO: Do clever trick to collapse all jobs relating to the same transaction,
+                //       identified by transaction-ID, into *one* update job.
+                let proof_queue = self.global_state_lock.vm_job_queue();
+                for update_job in update_jobs {}
 
                 // Inform miner to work on a new block
                 if self.global_state_lock.cli().mine() {
                     self.main_to_miner_tx
-                        .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
+                        .send(MainToMiner::NewBlock(Box::new(last_block)))?;
                 }
-
-                // Inform all peers about new block
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(Box::new(last_block)))
-                    .expect("Peer handler broadcast was closed. This should never happen");
             }
             PeerTaskToMain::AddPeerMaxBlockHeight((
                 socket_addr,

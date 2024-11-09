@@ -42,17 +42,14 @@ use priority_queue::DoublePriorityQueue;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
-use tokio::task::JoinHandle;
 use tracing::debug;
 use tracing::error;
-use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use super::tx_proving_capability::TxProvingCapability;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -560,23 +557,18 @@ impl Mempool {
     /// updated.
     ///
     /// Since updating SingleProof-backed transactions takes a very long time,
-    /// this proof generation happens in dedicated tasks whose join handles are
-    /// returned. The `MempoolEvent`s being returned will not contain the
-    /// events related to proof-updating. The caller must handle them through
-    /// a callback.
+    /// this proof generation does not happen in this method. Only a
+    /// description of the jobs to be done is returned. It is then up to the
+    /// caller to ensure these updates happen. Returned mempool events does not
+    /// include information about mutator set updates. That must be handled by
+    /// the caller where the update jobs are executed.
     pub(super) async fn update_with_block_and_predecessor(
         &mut self,
         new_block: &Block,
         predecessor_block: &Block,
-        vm_job_queue: &TritonVmJobQueue,
         tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> (
-        Vec<MempoolEvent>,
-        Vec<JoinHandle<anyhow::Result<Transaction>>>,
-    ) {
-        let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
-
+    ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
         // proofs back to previous blocks. It would be nice if we could handle a
@@ -636,6 +628,7 @@ impl Mempool {
         // b) We initiated this transaction *and* client is capable of creating
         //    these proofs.
         // If we cannot update the transaction, we kick it out regardless.
+        let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         let mut update_jobs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
@@ -654,7 +647,7 @@ impl Mempool {
             let (update_job, can_update) = match &tx.transaction.proof {
                 TransactionProof::Invalid => panic!("Mempool may not contain invalid proofs"),
                 TransactionProof::ProofCollection(_) => {
-                    info!("Failed to update transaction {tx_id}. Removing from mempool.");
+                    debug!("Failed to update transaction {tx_id}. Because it is only supported by a proof collection.");
 
                     (None, false)
                 }
@@ -667,36 +660,23 @@ impl Mempool {
 
                     tx.transaction = new_tx.clone();
                     events.push(MempoolEvent::UpdateTxMutatorSet(*tx_id, new_tx.clone()));
+                    debug!("Updating primitive-witness supported transaction {tx_id} to new mutator set.");
 
                     (None, true)
                 }
-                TransactionProof::SingleProof(proof) => {
+                TransactionProof::SingleProof(old_proof) => {
                     if can_upgrade_single_proof {
-                        // Attempt update, with highest priority since we're either
-                        // composing, in which case we have to wait for the update to
-                        // finish before composing, or since this is our transaction, and
-                        // we want it included in the next block.
-                        let transaction_kernel = tx.transaction.kernel.clone();
-                        let previous_msa = previous_mutator_set_accumulator.clone();
-                        let mutator_set_update = mutator_set_update.clone();
-                        let vm_job_queue = vm_job_queue.clone();
-                        let proof = proof.clone();
-                        (
-                            Some(tokio::task::Builder::new().name("mempool_tx_update").spawn(
-                                async move {
-                                    Transaction::new_with_updated_mutator_set_records_given_proof(
-                                        transaction_kernel,
-                                        &previous_msa,
-                                        &mutator_set_update,
-                                        proof,
-                                        &vm_job_queue,
-                                        TritonVmJobPriority::Highest,
-                                    ).await
-                                }
-                            ).expect("Must be able to spawn task for proof upgrading")),
-                            true,
-                        )
+                        let job = UpdateMutatorSetDataJob::new(
+                            tx.transaction.kernel.clone(),
+                            old_proof.to_owned(),
+                            previous_mutator_set_accumulator.clone(),
+                            mutator_set_update.clone(),
+                        );
+                        debug!("Updating single-proof supported transaction {tx_id} to new mutator set.");
+
+                        (Some(job), true)
                     } else {
+                        debug!("Not updating single-proof supported transaction {tx_id}, because TxProvingCapability was only {tx_proving_capability}.");
                         (None, false)
                     }
                 }
@@ -793,7 +773,6 @@ impl Mempool {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::One;
@@ -810,6 +789,8 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::main_loop::proof_upgrader::UpgradeJob;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -1042,18 +1023,21 @@ mod tests {
 
         // Bob is premine receiver, Alice is not.
 
-        /// Mocking what the caller might do with the returned joinhandles for tasks
-        /// producing update proofs.
-        async fn mocked_mempool_update_callback(
-            joinhandles: Vec<JoinHandle<Result<Transaction>>>,
+        /// Mocking what the caller might do with the update jobs.
+        async fn mocked_mempool_update_handler(
+            update_jobs: Vec<UpdateMutatorSetDataJob>,
             mempool: &mut Mempool,
         ) -> Vec<MempoolEvent> {
+            let mut updated_txs = vec![];
+            for job in update_jobs {
+                let updated = UpgradeJob::UpdateMutatorSetData(job)
+                    .upgrade(&TritonVmJobQueue::dummy(), TritonVmJobPriority::Highest)
+                    .await
+                    .unwrap();
+                updated_txs.push(updated);
+            }
+
             let mut events = vec![];
-            let updated_txs = futures::future::join_all(joinhandles)
-                .await
-                .into_iter()
-                .map(|x| x.unwrap().unwrap())
-                .collect_vec();
             for updated_tx in updated_txs {
                 let txid = updated_tx.kernel.txid();
                 let tx = mempool.get_mut(txid).unwrap();
@@ -1211,16 +1195,15 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, joinhandles0) = mempool
+        let (_, update_jobs) = mempool
             .update_with_block_and_predecessor(
                 &block_2,
                 &block_1,
-                &TritonVmJobQueue::dummy(),
                 TxProvingCapability::SingleProof,
                 true,
             )
             .await;
-        mocked_mempool_update_callback(joinhandles0, &mut mempool).await;
+        mocked_mempool_update_handler(update_jobs, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -1248,12 +1231,11 @@ mod tests {
                 .update_with_block_and_predecessor(
                     &next_block,
                     &previous_block,
-                    &TritonVmJobQueue::dummy(),
                     TxProvingCapability::SingleProof,
                     true,
                 )
                 .await;
-            mocked_mempool_update_callback(joinhandles1, &mut mempool).await;
+            mocked_mempool_update_handler(joinhandles1, &mut mempool).await;
             previous_block = next_block;
         }
 
@@ -1284,12 +1266,11 @@ mod tests {
             .update_with_block_and_predecessor(
                 &block_5,
                 &previous_block,
-                &TritonVmJobQueue::dummy(),
                 TxProvingCapability::SingleProof,
                 true,
             )
             .await;
-        mocked_mempool_update_callback(joinhandles2, &mut mempool).await;
+        mocked_mempool_update_handler(joinhandles2, &mut mempool).await;
 
         assert!(
             mempool.is_empty(),
