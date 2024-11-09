@@ -857,20 +857,10 @@ impl ArchivalState {
             (forwards, backwards)
         };
 
-        let mut cached_parent = None;
         for digest in backwards {
             // Roll back mutator set
-            let rollback_block = if let Some(block) = cached_parent {
-                block
-            } else {
-                self.get_block(digest)
-                    .await
-                    .expect("Fetching block must succeed")
-                    .unwrap()
-            };
-
-            let parent_of_rollback = self
-                .get_block(rollback_block.header().prev_block_digest)
+            let rollback_block = self
+                .get_block(digest)
                 .await
                 .expect("Fetching block must succeed")
                 .unwrap();
@@ -880,20 +870,15 @@ impl ArchivalState {
                 rollback_block.kernel.header.height
             );
 
-            let addition_records = [
-                parent_of_rollback.guesser_fee_addition_records(),
-                rollback_block
-                    .kernel
-                    .body
-                    .transaction_kernel
-                    .outputs
-                    .clone(),
-            ]
-            .concat();
-            cached_parent = Some(parent_of_rollback.clone());
-
             // Roll back all addition records contained in block
-            for addition_record in addition_records.iter().rev() {
+            for addition_record in rollback_block
+                .kernel
+                .body
+                .transaction_kernel
+                .outputs
+                .iter()
+                .rev()
+            {
                 assert!(
                     self.archival_mutator_set
                         .ams_mut()
@@ -916,7 +901,6 @@ impl ArchivalState {
             }
         }
 
-        let mut maybe_parent: Option<Block> = None;
         for digest in forwards {
             // Add block to mutator set
             let apply_forward_block = if digest == new_block.hash() {
@@ -939,19 +923,10 @@ impl ArchivalState {
                     .standard_format()
             );
 
-            let parent = if let Some(parent) = maybe_parent {
-                parent
-            } else {
-                self.get_block(apply_forward_block.header().prev_block_digest)
-                    .await
-                    .expect("Fetching block must suceed")
-                    .expect("Block must have parent")
-            };
-
             let MutatorSetUpdate {
                 mut removals,
                 mut additions,
-            } = Block::mutator_set_update_from_consecutive_pair(&parent, &apply_forward_block);
+            } = apply_forward_block.mutator_set_update();
             additions.reverse();
             removals.reverse();
             let mut removals: Vec<&mut RemovalRecord> = removals.iter_mut().collect::<Vec<_>>();
@@ -982,9 +957,6 @@ impl ArchivalState {
                     .remove(removal_record)
                     .await;
             }
-
-            // Set parent for next loop iteration to save a disk-read.
-            maybe_parent = Some(apply_forward_block);
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
@@ -1483,7 +1455,7 @@ mod archival_state_tests {
             .hash()
             .await;
         positive_prop_ms_update_to_tip(
-            genesis_block.mutator_set_accumulator(),
+            &genesis_block.mutator_set_accumulator(),
             alice.lock_guard_mut().await.chain.archival_state_mut(),
             num_blocks,
         )
@@ -2037,13 +2009,13 @@ mod archival_state_tests {
         // Test that the MS-update to tip functions works for blocks with inputs
         // and outputs.
         positive_prop_ms_update_to_tip(
-            genesis_block.mutator_set_accumulator(),
+            &genesis_block.mutator_set_accumulator(),
             genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )
         .await;
         positive_prop_ms_update_to_tip(
-            block_1.mutator_set_accumulator(),
+            &block_1.mutator_set_accumulator(),
             genesis.lock_guard_mut().await.chain.archival_state_mut(),
             2,
         )

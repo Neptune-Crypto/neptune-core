@@ -45,6 +45,7 @@ use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::database::NeptuneLevelDb;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_output::TxOutputList;
@@ -721,11 +722,10 @@ impl WalletState {
 
         let onchain_received_outputs = self.scan_for_announced_utxos(&tx_kernel);
 
-        let addition_records = [
-            guesser_fee_records,
-            new_block.kernel.body.transaction_kernel.outputs.clone(),
-        ]
-        .concat();
+        let MutatorSetUpdate {
+            additions: addition_records,
+            removals: _removal_records,
+        } = new_block.mutator_set_update();
 
         let offchain_received_outputs = self
             .scan_addition_records_for_expected_utxos(&addition_records)
@@ -1327,7 +1327,7 @@ mod tests {
                 make_mock_block(&latest_block, None, alice_address, rng.gen());
             bob.wallet_state
                 .update_wallet_state_with_new_block(
-                    latest_block.mutator_set_accumulator(),
+                    &latest_block.mutator_set_accumulator(),
                     latest_block.guesser_fee_addition_records(),
                     &new_block,
                 )

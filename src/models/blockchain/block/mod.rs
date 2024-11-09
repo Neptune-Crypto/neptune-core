@@ -66,6 +66,7 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// Maximum block size in number of `BFieldElement`.
 ///
@@ -331,8 +332,12 @@ impl Block {
         &self.kernel.body
     }
 
-    pub(crate) fn mutator_set_accumulator(&self) -> &MutatorSetAccumulator {
-        &self.kernel.body.mutator_set_accumulator
+    pub(crate) fn mutator_set_accumulator(&self) -> MutatorSetAccumulator {
+        let mut msa = self.kernel.body.mutator_set_accumulator.clone();
+        let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
+        mutator_set_update.apply_to_accumulator(&mut msa)
+            .expect("mutator set update derived from guesser fees should be applicable to mutator set accumulator contained in body");
+        msa
     }
 
     #[inline]
@@ -707,26 +712,32 @@ impl Block {
             return false;
         }
 
-        // 2.c) Verify that the previous block's mutator set, updated with i)
-        //      the previous block's guesser fee as removal record ii) the
-        //      current block's set of transaction outputs and iii) the current
-        //      block's set of transaction inputs, gives rise to the current
-        //      block's mutator set
-
-        let mutator_set_update =
-            Block::mutator_set_update_from_consecutive_pair(previous_block, self);
-        let mut ms = previous_block.mutator_set_accumulator().clone();
-        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
+        // 2.c) Verify that the previous block's mutator set (as presented in
+        //      in the block body), updated with
+        //       i) the previous block's guesser fees as addition records
+        //       ii) the current block's set of transaction outputs and
+        //       iii) the current block's set of transaction inputs,
+        //     gives rise to the current block's mutator set
+        let mutator_set_update = MutatorSetUpdate::new(
+            self.body().transaction_kernel.inputs.clone(),
+            [
+                previous_block.guesser_fee_addition_records(),
+                self.body().transaction_kernel.outputs.clone(),
+            ]
+            .concat(),
+        );
+        let mut msa = previous_block.body().mutator_set_accumulator.clone();
+        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
         if let Err(err) = ms_update_result {
             warn!("Failed to apply mutator set update: {}", err);
             return false;
         };
-        if ms.hash() != self.mutator_set_accumulator().hash() {
+        if msa.hash() != self.body().mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
-                "From Block\n{:?}. \n\n\nCalculated\n{:?}",
-                self.mutator_set_accumulator(),
-                ms
+                "From Block body\n{:?}. \n\nCalculated\n{:?}",
+                self.body().mutator_set_accumulator,
+                msa
             );
             return false;
         }
@@ -907,31 +918,28 @@ impl Block {
             .collect_vec()
     }
 
-    /// Return the mutator set update induced by the previous block and the
-    /// new transaction.
-    pub(crate) fn ms_update_from_predecessor_and_new_tx_kernel(
-        predecessor_block: &Block,
-        new_transaction_kernel: &TransactionKernel,
-    ) -> MutatorSetUpdate {
-        let removals = new_transaction_kernel.inputs.to_owned();
-        let additions = [
-            predecessor_block.guesser_fee_addition_records(),
-            new_transaction_kernel.outputs.clone(),
-        ]
-        .concat();
+    /// Return the mutator set update corresponding to this block
+    pub(crate) fn mutator_set_update(&self) -> MutatorSetUpdate {
+        let mut mutator_set_update = MutatorSetUpdate::new(
+            self.body().transaction_kernel.inputs.clone(),
+            self.body().transaction_kernel.outputs.clone(),
+        );
 
-        MutatorSetUpdate::new(removals, additions)
-    }
+        let mut mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
 
-    /// Return the mutator set update induced by a consecutive pair of blocks.
-    pub(crate) fn mutator_set_update_from_consecutive_pair(
-        predecessor: &Block,
-        current: &Block,
-    ) -> MutatorSetUpdate {
-        Self::ms_update_from_predecessor_and_new_tx_kernel(
-            predecessor,
-            &current.body().transaction_kernel,
-        )
+        let extra_addition_records = self.guesser_fee_addition_records();
+
+        for addition in &extra_addition_records {
+            RemovalRecord::batch_update_from_addition(
+                &mut mutator_set_update.removals.iter_mut().collect_vec(),
+                &mutator_set_accumulator,
+            );
+            mutator_set_accumulator.add(addition);
+        }
+
+        mutator_set_update.additions.extend(extra_addition_records);
+
+        mutator_set_update
     }
 }
 
@@ -947,11 +955,15 @@ mod block_tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
+    use crate::models::blockchain::transaction::transaction_output::TxOutput;
+    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1302,5 +1314,95 @@ mod block_tests {
         assert!(guesser_fee_utxos
             .iter()
             .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn guesser_fees_are_added_to_mutator_set() {
+        // Mine two blocks on top of the genesis block. Verify that the guesser
+        // fee for the 1st block was added to the mutator set. The genesis
+        // block awards no guesser fee.
+
+        // This test must live in block/mod.rs because it relies on access to
+        // private fields on `BlockBody`.
+
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let genesis_block = Block::genesis_block(network);
+        assert!(
+            genesis_block.guesser_fee_utxos().is_empty(),
+            "Genesis block has no guesser fee UTXOs"
+        );
+
+        let launch_date = genesis_block.header().timestamp;
+        let in_seven_months = launch_date + Timestamp::months(7);
+        let in_eight_months = launch_date + Timestamp::months(8);
+        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key(0);
+        let alice_address = alice_key.to_address();
+        let mut alice =
+            mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
+
+        let output = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(4),
+            rng.gen(),
+            alice_address.into(),
+        );
+        let fee = NeptuneCoins::new(1);
+        let (tx1, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![output.clone()].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_seven_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+
+        let block1 = Block::block_template_invalid_proof(
+            &genesis_block,
+            tx1,
+            in_seven_months,
+            Digest::default(),
+            None,
+        );
+        alice.set_new_tip(block1.clone()).await.unwrap();
+
+        let (tx2, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![output].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_eight_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+
+        let block2 =
+            Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
+
+        let mut ms = block1.body().mutator_set_accumulator.clone();
+        let mutator_set_update = MutatorSetUpdate::new(
+            block2.body().transaction_kernel.inputs.clone(),
+            [
+                block1.guesser_fee_addition_records(),
+                block2.body().transaction_kernel.outputs.clone(),
+            ]
+            .concat(),
+        );
+        mutator_set_update.apply_to_accumulator(&mut ms)
+            .expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
+
+        assert_eq!(ms.hash(), block2.mutator_set_accumulator().hash());
     }
 }
