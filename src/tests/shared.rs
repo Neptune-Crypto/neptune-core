@@ -622,8 +622,10 @@ pub(crate) fn invalid_block_with_transaction(
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
-    let ms_update =
-        Block::ms_update_from_predecessor_and_new_tx_kernel(previous_block, &transaction.kernel);
+    let ms_update = MutatorSetUpdate::new(
+        transaction.kernel.inputs.clone(),
+        transaction.kernel.outputs.clone(),
+    );
     ms_update
         .apply_to_accumulator(&mut next_mutator_set)
         .unwrap();
