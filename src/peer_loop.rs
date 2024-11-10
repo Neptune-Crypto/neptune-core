@@ -937,7 +937,7 @@ impl PeerLoopHandler {
                     .await
                     .chain
                     .light_state()
-                    .mutator_set_accumulator();
+                    .mutator_set_accumulator_after();
                 let confirmable =
                     transaction.is_confirmable_relative_to(&mutator_set_accumulator_after);
                 if !confirmable {
@@ -1003,7 +1003,11 @@ impl PeerLoopHandler {
 
                 // Only accept transactions that do not require executing
                 // `update`.
-                if state.chain.light_state().mutator_set_accumulator().hash()
+                if state
+                    .chain
+                    .light_state()
+                    .mutator_set_accumulator_after()
+                    .hash()
                     != tx_notification.mutator_set_hash
                 {
                     debug!("transaction refers to non-canonical mutator set state");

@@ -225,7 +225,7 @@ impl UpgradeJob {
                     != global_state
                         .chain
                         .light_state()
-                        .mutator_set_accumulator()
+                        .mutator_set_accumulator_after()
                         .hash();
 
                 if !transaction_is_deprecated {
@@ -410,7 +410,7 @@ pub(super) fn get_upgrade_task_from_mempool(
         let upgrade_decision = UpgradeJob::ProofCollectionToSingleProof {
             kernel: kernel.to_owned(),
             proof: proof.to_owned(),
-            mutator_set: tip.mutator_set_accumulator().to_owned(),
+            mutator_set: tip.mutator_set_accumulator_after().to_owned(),
         };
 
         if upgrade_decision.mutator_set().hash() != kernel.mutator_set_hash {
@@ -434,7 +434,7 @@ pub(super) fn get_upgrade_task_from_mempool(
             right_kernel: right_kernel.to_owned(),
             single_proof_right: right_single_proof.to_owned(),
             shuffle_seed: rng.gen(),
-            mutator_set: tip.mutator_set_accumulator().to_owned(),
+            mutator_set: tip.mutator_set_accumulator_after().to_owned(),
         };
 
         if left_kernel.mutator_set_hash != right_kernel.mutator_set_hash
