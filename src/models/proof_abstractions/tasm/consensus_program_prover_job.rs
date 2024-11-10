@@ -129,7 +129,7 @@ impl ConsensusProgramProverJob {
                 serde_json::to_string(&self.nondeterminism)?,
             ];
 
-            let mut child = tokio::process::Command::new("triton-vm-prover")
+            let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()?;
@@ -152,6 +152,21 @@ impl ConsensusProgramProverJob {
                 None => Err(anyhow::anyhow!("prover exited without any exit code")),
             }
         }
+    }
+
+    /// obtains path to triton-vm-prover executable
+    ///
+    /// triton-vm-prover must reside in the same directory as neptune-core.
+    /// This enables debug build of neptune-core to invoke debug build of triton-vm-prover.
+    /// Also works for release build, and for a package/distribution.
+    ///
+    /// note: we do not verify that the path exists.  That will occur anyway
+    /// when triton-vm-prover is executed.
+    #[cfg(not(test))]
+    fn path_to_triton_vm_prover() -> anyhow::Result<std::path::PathBuf> {
+        let mut exe_path = std::env::current_exe()?;
+        exe_path.set_file_name("triton-vm-prover");
+        Ok(exe_path)
     }
 }
 
