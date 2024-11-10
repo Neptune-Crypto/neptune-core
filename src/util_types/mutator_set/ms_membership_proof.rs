@@ -279,7 +279,7 @@ impl MsMembershipProof {
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.aocl_leaf_index < mutator_set.aocl.num_leafs());
-        let new_item_index = mutator_set.aocl.num_leafs();
+        let new_item_aocl_index = mutator_set.aocl.num_leafs();
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
@@ -290,7 +290,7 @@ impl MsMembershipProof {
         );
 
         // if window does not slide, we are done
-        if !MutatorSetAccumulator::window_slides(new_item_index) {
+        if !MutatorSetAccumulator::window_slides(new_item_aocl_index) {
             return Ok(aocl_mp_updated);
         }
 
@@ -312,17 +312,21 @@ impl MsMembershipProof {
 
         // Insert the new SWBF leaf into a duplicate of the SWBFI MMRA to get
         // the new leaf's authentication path.
-        let mut mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
-        let new_leaf_index = mmra.num_leafs();
+        let mut swbfi_mmra: MmrAccumulator = mutator_set.swbf_inactive.to_accumulator();
+        let new_leaf_index = swbfi_mmra.num_leafs();
         let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof =
-            mmra.append(new_chunk_digest);
+            swbfi_mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
-        let batch_index = new_item_index / BATCH_SIZE as u64;
+        let batch_index = new_item_aocl_index / (BATCH_SIZE as u64);
         let old_window_start_batch_index = batch_index - 1;
+
+        // Sanity check: assert that the new SWBFI leaf index agrees with the
+        // batch index of the old window. If these disagree, then the mutator
+        // set accumulator is in an inconsistent state.
         assert_eq!(
             new_leaf_index, old_window_start_batch_index,
-            "new SWBFI leaf index does not match with `old_window_start_batch_index`"
+            "corrupt mutator set accumulator"
         );
         'outer: for chunk_index in chunk_indices_set.into_iter() {
             // Update for indices that are in the inactive part of the SWBF.
@@ -605,6 +609,7 @@ mod ms_proof_tests {
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
+    use crate::util_types::mutator_set::active_window::ActiveWindow;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::test_shared::mutator_set::empty_rusty_mutator_set;
@@ -1406,5 +1411,40 @@ mod ms_proof_tests {
             let decoded: MsMembershipProof = *MsMembershipProof::decode(&encoded).unwrap();
             assert_eq!(msmp, decoded);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "corrupt mutator set accumulator")]
+    fn update_from_addition_fails_for_inconsistent_mutator_set_accumulator() {
+        let mut rng = thread_rng();
+        let aocl_leaf_count = 42966841942012423_u64;
+        let aocl_peaks = (0..aocl_leaf_count.count_ones())
+            .map(|_| rng.gen::<Digest>())
+            .collect_vec();
+        let swbfi_leaf_count = (aocl_leaf_count / (BATCH_SIZE as u64)) + 1;
+        let swbfi_peaks = (0..swbfi_leaf_count.count_ones())
+            .map(|_| rng.gen::<Digest>())
+            .collect_vec();
+        let swbf_active = ActiveWindow::new();
+
+        // Note that we are bypassing the mutator set accumulator constructor,
+        // which guarantees that the leaf counts are in sync.
+        let mut mutator_set_accumulator = MutatorSetAccumulator {
+            aocl: MmrAccumulator::init(aocl_peaks, aocl_leaf_count),
+            swbf_inactive: MmrAccumulator::init(swbfi_peaks, swbfi_leaf_count),
+            swbf_active,
+        };
+
+        let (own_item, sender_randomness, receiver_preimage) =
+            rng.gen::<(Digest, Digest, Digest)>();
+        let own_addition_record = commit(own_item, sender_randomness, receiver_preimage.hash());
+        let mut msmp =
+            mutator_set_accumulator.prove(own_item, sender_randomness, receiver_preimage);
+        mutator_set_accumulator.add(&own_addition_record);
+
+        let other_addition_record = AdditionRecord::new(rng.gen::<Digest>());
+
+        msmp.update_from_addition(own_item, &mutator_set_accumulator, &other_addition_record)
+            .expect("update from add should always work");
     }
 }
