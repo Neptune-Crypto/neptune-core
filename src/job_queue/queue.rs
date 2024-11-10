@@ -127,7 +127,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                             guard.push_back(m);
                             guard.len()
                         };
-                        tracing::info!("JobQueue: job added.  {} jobs in queue.", num_jobs);
+                        tracing::info!("JobQueue: job added.  {} queued job(s).", num_jobs);
                         let _ = tx_deque.send(());
                     }
                     JobQueueMsg::Stop => {
@@ -150,14 +150,13 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             while rx_deque.recv().await.is_some() {
                 let (msg, pending) = {
                     let mut j = jobs_rc2.lock().unwrap();
-                    let pending = j.len();
                     j.make_contiguous()
                         .sort_by(|a, b| b.priority.cmp(&a.priority));
-                    (j.pop_front().unwrap(), pending)
+                    (j.pop_front().unwrap(), j.len())
                 };
 
                 tracing::info!(
-                    "  *** JobQueue: begin job #{} - {} queued jobs ***",
+                    "  *** JobQueue: begin job #{} - {} queued job(s) ***",
                     job_num,
                     pending
                 );
