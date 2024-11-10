@@ -122,10 +122,16 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             while let Some(msg) = rx.recv().await {
                 match msg {
                     JobQueueMsg::AddJob(m) => {
-                        jobs_rc1.lock().unwrap().push_back(m);
+                        let num_jobs = {
+                            let mut guard = jobs_rc1.lock().unwrap();
+                            guard.push_back(m);
+                            guard.len()
+                        };
+                        tracing::info!("JobQueue: job added.  {} jobs in queue.", num_jobs);
                         let _ = tx_deque.send(());
                     }
                     JobQueueMsg::Stop => {
+                        tracing::info!("JobQueue: received stop message.  stopping.");
                         jobs_rc1
                             .lock()
                             .unwrap()
@@ -150,9 +156,11 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     (j.pop_front().unwrap(), pending)
                 };
 
-                tracing::info!("JobQueue has {} pending jobs.", pending);
-
-                tracing::info!("  *** JobQueue: begin job #{} ***", job_num);
+                tracing::info!(
+                    "  *** JobQueue: begin job #{} - {} queued jobs ***",
+                    job_num,
+                    pending
+                );
                 let timer = tokio::time::Instant::now();
                 let job_completion = match msg.job.is_async() {
                     true => msg.job.run_async_cancellable(msg.cancel_rx).await,
