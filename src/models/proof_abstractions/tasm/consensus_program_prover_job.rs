@@ -98,16 +98,27 @@ impl ConsensusProgramProverJob {
         #[cfg(not(test))]
         {
             self.prove_out_of_process().await
-
-            // tasm_lib::triton_vm::prove(
-            //     tasm_lib::triton_vm::stark::Stark::default(),
-            //     &self.claim,
-            //     &self.program,
-            //     self.nondeterminism.clone(),
-            // )
         }
     }
 
+    /// runs triton-vm prover out of process.
+    ///
+    /// input is sent via stdin, output is received via stdout.
+    /// stderr is ignored.
+    ///
+    /// The prover executable is triton-vm-prover.  Presently
+    /// it must be in $PATH.
+    ///
+    /// todo: figure out how to exec correct executable for
+    /// release, debug, etc.
+    ///
+    /// parameters claim, program, nondeterminism are passed as
+    /// json strings.
+    ///
+    /// the result is a [Proof], which is bincode serialized.
+    ///
+    /// The process result is only read if exit code is 0.
+    /// A non-zero exit code or no code results in an error.
     #[cfg(not(test))]
     async fn prove_out_of_process(&self) -> anyhow::Result<Proof> {
         // start child process
@@ -132,11 +143,13 @@ impl ConsensusProgramProverJob {
         // read result from child process stdout.
         {
             let op = child_handle.wait_with_output().await?;
-            if op.status.success() {
-                let proof = bincode::deserialize(&op.stdout)?;
-                Ok(proof)
-            } else {
-                Err(anyhow::anyhow!("prover exited unexpectedly"))
+            match op.status.code() {
+                Some(0) => {
+                    let proof = bincode::deserialize(&op.stdout)?;
+                    Ok(proof)
+                }
+                Some(code) => Err(anyhow::anyhow!("prover exited with exit code: {}", code)),
+                None => Err(anyhow::anyhow!("prover exited without any exit code")),
             }
         }
     }
@@ -144,10 +157,12 @@ impl ConsensusProgramProverJob {
 
 #[async_trait::async_trait]
 impl Job for ConsensusProgramProverJob {
+    // see trait doc-comment
     fn is_async(&self) -> bool {
         true
     }
 
+    // see trait doc-comment
     async fn run_async(&self) -> Box<dyn JobResult> {
         Box::new(ConsensusProgramProverJobResult(self.prove().await))
     }

@@ -164,7 +164,9 @@ pub(crate) async fn prove_consensus_program(
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
     let result = triton_vm_job_queue
-        .add_and_await_job(Box::new(job), priority)
+        .add_job(Box::new(job), priority)
+        .await?
+        .result()
         .await?;
 
     // obtain resulting proof.

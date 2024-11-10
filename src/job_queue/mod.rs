@@ -26,6 +26,7 @@
 //! in a single JobQueue instance.  Any type that implements the Job trait
 //! may be a job.
 
+pub mod errors;
 mod queue;
 pub mod traits;
 pub mod triton_vm;

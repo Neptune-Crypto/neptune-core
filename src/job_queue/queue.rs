@@ -1,15 +1,67 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio_util::task::TaskTracker;
 
+use super::errors::JobHandleError;
+use super::errors::JobQueueError;
 use super::traits::Job;
+use super::traits::JobCancelReceiver;
+use super::traits::JobCancelSender;
+use super::traits::JobCompletion;
 use super::traits::JobResult;
+use super::traits::JobResultReceiver;
+use super::traits::JobResultSender;
 
-// in case we need to add any future msg types.
+/// A job-handle enables cancelling a job and awaiting results
+#[derive(Debug)]
+pub struct JobHandle {
+    result_rx: JobResultReceiver,
+    cancel_tx: JobCancelSender,
+}
+impl JobHandle {
+    /// wait for job to complete
+    ///
+    /// a completed job may either be finished or cancelled.
+    pub async fn complete(self) -> Result<JobCompletion, JobHandleError> {
+        // Ok(self.result_rx.await?)
+        Ok(self.result_rx.await?)
+    }
+
+    /// wait for job result, or err if cancelled.
+    pub async fn result(self) -> Result<Box<dyn JobResult>, JobHandleError> {
+        match self.complete().await? {
+            JobCompletion::Finished(r) => Ok(r),
+            JobCompletion::Cancelled => Err(JobHandleError::JobCancelled),
+        }
+    }
+
+    /// cancel job and return immediately.
+    pub async fn cancel(&self) -> Result<(), JobHandleError> {
+        Ok(self.cancel_tx.send(())?)
+    }
+
+    /// cancel job and wait for it to complete.
+    pub async fn cancel_and_await(self) -> Result<JobCompletion, JobHandleError> {
+        self.cancel_tx.send(())?;
+        self.complete().await
+    }
+
+    /// channel receiver for job results
+    pub fn result_rx(self) -> JobResultReceiver {
+        self.result_rx
+    }
+
+    /// channel sender for cancelling job.
+    pub fn cancel_tx(&self) -> &JobCancelSender {
+        &self.cancel_tx
+    }
+}
+
+/// messages that can be sent to job-queue inner task.
 enum JobQueueMsg<P: Ord> {
     AddJob(AddJobMsg<P>),
     Stop,
@@ -18,11 +70,13 @@ enum JobQueueMsg<P: Ord> {
 /// represents a msg to add a job to the queue.
 struct AddJobMsg<P: Ord> {
     job: Box<dyn Job>,
-    result_tx: oneshot::Sender<Box<dyn JobResult>>,
+    result_tx: JobResultSender,
+    cancel_tx: JobCancelSender,
+    cancel_rx: JobCancelReceiver,
     priority: P,
 }
 
-// implements a job queue that sends result of each job to a listener.
+/// implements a job queue that sends result of each job to a listener.
 pub struct JobQueue<P: Ord> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
     tracker: TaskTracker,
@@ -45,8 +99,14 @@ impl<P: Ord> Clone for JobQueue<P> {
     }
 }
 
+impl<P: Ord> Drop for JobQueue<P> {
+    fn drop(&mut self) {
+        let _ = self.tx.send(JobQueueMsg::Stop);
+    }
+}
+
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
-    // creates job queue and starts it processing.  returns immediately.
+    /// creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
 
@@ -65,7 +125,13 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                         jobs_rc1.lock().unwrap().push_back(m);
                         let _ = tx_deque.send(());
                     }
-                    JobQueueMsg::Stop => break,
+                    JobQueueMsg::Stop => {
+                        jobs_rc1
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .for_each(|j| j.cancel_tx.send(()).unwrap());
+                    }
                 }
             }
         });
@@ -88,9 +154,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
                 tracing::info!("  *** JobQueue: begin job #{} ***", job_num);
                 let timer = tokio::time::Instant::now();
-                let job_result = match msg.job.is_async() {
-                    true => msg.job.run_async().await,
-                    false => tokio::task::spawn_blocking(move || msg.job.run())
+                let job_completion = match msg.job.is_async() {
+                    true => msg.job.run_async_cancellable(msg.cancel_rx).await,
+                    false => tokio::task::spawn_blocking(move || msg.job.run(msg.cancel_rx))
                         .await
                         .unwrap(),
                 };
@@ -101,7 +167,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                 );
                 job_num += 1;
 
-                let _ = msg.result_tx.send(job_result);
+                let _ = msg.result_tx.send(job_completion);
             }
         });
         tracker.close();
@@ -109,62 +175,51 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         Self { tx, tracker }
     }
 
-    // shutdown job queue. experimental.  this will probably go away.
-    pub async fn stop(&self) {
-        self.tx.send(JobQueueMsg::Stop).unwrap();
-        self.tracker.wait().await;
-    }
-
-    // alias of Self::start().
-    // here for two reasons:
-    //  1. backwards compat with existing tests
-    //  2. if tests call dummy() instead of start(), then it is easier
-    //     to find where start() is called for real.
+    /// alias of Self::start().
+    /// here for two reasons:
+    ///  1. backwards compat with existing tests
+    ///  2. if tests call dummy() instead of start(), then it is easier
+    ///     to find where start() is called for real.
     #[cfg(test)]
     pub fn dummy() -> Self {
         Self::start()
     }
 
-    // adds job to job-queue and returns immediately.
+    /// adds job to job-queue and returns immediately.
+    ///
+    /// job-results can be obtained by via JobHandle::results().await
+    /// The job can be cancelled by JobHandle::cancel()
     pub async fn add_job(
         &self,
         job: Box<dyn Job>,
         priority: P,
-    ) -> anyhow::Result<oneshot::Receiver<Box<dyn JobResult>>> {
-        let (otx, orx) = oneshot::channel();
-        let msg = JobQueueMsg::AddJob(AddJobMsg {
-            job,
-            result_tx: otx,
-            priority,
-        });
-        self.tx.send(msg)?;
-        Ok(orx)
-    }
+    ) -> Result<JobHandle, JobQueueError> {
+        let (result_tx, result_rx) = oneshot::channel();
+        let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
-    // adds job to job-queue, waits for job completion, and returns job result.
-    pub async fn add_and_await_job(
-        &self,
-        job: Box<dyn Job>,
-        priority: P,
-    ) -> anyhow::Result<Box<dyn JobResult>> {
-        let (otx, orx) = oneshot::channel();
         let msg = JobQueueMsg::AddJob(AddJobMsg {
             job,
-            result_tx: otx,
+            result_tx,
+            cancel_tx: cancel_tx.clone(),
+            cancel_rx: cancel_rx.clone(),
             priority,
         });
-        self.tx.send(msg)?;
-        Ok(orx.await?)
+        self.tx
+            .send(msg)
+            .map_err(|e| JobQueueError::AddJobError(e.to_string()))?;
+
+        Ok(JobHandle {
+            result_rx,
+            cancel_tx,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
-    use tracing_test::traced_test;
-
     use super::*;
+    use std::time::Instant;
+    use tracing_test::traced_test;
 
     #[tokio::test(flavor = "multi_thread")]
     #[traced_test]
@@ -190,6 +245,18 @@ mod tests {
         workers::get_job_result(true).await
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_sync_job() -> anyhow::Result<()> {
+        workers::cancel_job(false).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_async_job() -> anyhow::Result<()> {
+        workers::cancel_job(true).await
+    }
+
     #[test]
     #[traced_test]
     fn runtime_shutdown_timeout_force_cancels_sync_job() -> anyhow::Result<()> {
@@ -204,7 +271,6 @@ mod tests {
 
     #[test]
     #[traced_test]
-    #[should_panic]
     fn runtime_shutdown_cancels_sync_job() {
         let _ = workers::runtime_shutdown_cancels_job(false);
     }
@@ -217,14 +283,13 @@ mod tests {
 
     #[test]
     #[traced_test]
-    fn spawned_tasks_live_as_long_as_jobqueue() {
-        workers::spawned_tasks_live_as_long_as_jobqueue(true).unwrap();
+    fn spawned_tasks_live_as_long_as_jobqueue() -> anyhow::Result<()> {
+        workers::spawned_tasks_live_as_long_as_jobqueue(true)
     }
 
     mod workers {
-        use std::any::Any;
-
         use super::*;
+        use std::any::Any;
 
         #[derive(PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -254,21 +319,38 @@ mod tests {
                 self.is_async
             }
 
-            fn run(&self) -> Box<dyn JobResult> {
-                std::thread::sleep(self.duration);
+            fn run(&self, cancel_rx: JobCancelReceiver) -> JobCompletion {
+                let start = Instant::now();
+                let sleep_time =
+                    std::cmp::min(std::time::Duration::from_micros(100), self.duration);
 
-                let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-                tracing::info!("results: {} * 2 = {}", r.0, r.1);
+                let r = loop {
+                    if start.elapsed() < self.duration {
+                        match cancel_rx.has_changed() {
+                            Ok(changed) if changed => break JobCompletion::Cancelled,
+                            Err(_) => break JobCompletion::Cancelled,
+                            _ => {}
+                        }
 
-                Box::new(r)
+                        std::thread::sleep(sleep_time);
+                    } else {
+                        break JobCompletion::Finished(Box::new(DoubleJobResult(
+                            self.data,
+                            self.data * 2,
+                            Instant::now(),
+                        )));
+                    }
+                };
+
+                tracing::info!("results: {:?}", r);
+                r
             }
 
             async fn run_async(&self) -> Box<dyn JobResult> {
                 tokio::time::sleep(self.duration).await;
-
                 let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-                tracing::info!("results: {} * 2 = {}", r.0, r.1);
 
+                tracing::info!("results: {:?}", r);
                 Box::new(r)
             }
         }
@@ -302,9 +384,24 @@ mod tests {
                 });
 
                 // process job and print results.
-                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low).await?);
-                handles.push(job_queue.add_job(job2, DoubleJobPriority::Medium).await?);
-                handles.push(job_queue.add_job(job3, DoubleJobPriority::High).await?);
+                handles.push(
+                    job_queue
+                        .add_job(job1, DoubleJobPriority::Low)
+                        .await?
+                        .result_rx(),
+                );
+                handles.push(
+                    job_queue
+                        .add_job(job2, DoubleJobPriority::Medium)
+                        .await?
+                        .result_rx(),
+                );
+                handles.push(
+                    job_queue
+                        .add_job(job3, DoubleJobPriority::High)
+                        .await?
+                        .result_rx(),
+                );
             }
 
             // wait for all jobs to complete.
@@ -312,24 +409,18 @@ mod tests {
 
             // the results are in the same order as handles passed to join_all.
             // we sort them by the timestamp in job result, ascending.
-            results.sort_by(|a, b| {
-                let a = a
-                    .as_ref()
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<DoubleJobResult>()
-                    .unwrap()
-                    .2;
-                let b = b
-                    .as_ref()
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<DoubleJobResult>()
-                    .unwrap()
-                    .2;
+            results.sort_by(
+                |a_completion, b_completion| match (a_completion, b_completion) {
+                    (Ok(JobCompletion::Finished(a_dyn)), Ok(JobCompletion::Finished(b_dyn))) => {
+                        let a = a_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
 
-                a.cmp(&b)
-            });
+                        let b = b_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
+
+                        a.cmp(&b)
+                    }
+                    _ => panic!("at least one job did not finish"),
+                },
+            );
 
             // iterate job results and verify that:
             //   timestamp of each is greater than prev.
@@ -337,15 +428,18 @@ mod tests {
             //     because there are nine jobs per level.
             let mut prev =
                 DoubleJobResult(0, 0, Instant::now() - std::time::Duration::from_secs(86400));
-            for (i, r) in results.into_iter().enumerate() {
-                let job_result = r
-                    .unwrap()
+            for (i, c) in results.into_iter().enumerate() {
+                let dyn_result = match c {
+                    Ok(JobCompletion::Finished(r)) => r,
+                    _ => panic!("A job did not finish"),
+                };
+
+                let job_result = dyn_result
                     .as_any()
                     .downcast_ref::<DoubleJobResult>()
                     .unwrap()
                     .clone();
 
-                //
                 assert!(job_result.2 > prev.2);
 
                 match i > 0 && (i) % 9 == 0 {
@@ -379,7 +473,9 @@ mod tests {
                 });
 
                 let result = job_queue
-                    .add_and_await_job(job, DoubleJobPriority::Low)
+                    .add_job(job, DoubleJobPriority::Low)
+                    .await?
+                    .result()
                     .await?;
 
                 let job_result = result.as_any().downcast_ref::<DoubleJobResult>().unwrap();
@@ -387,6 +483,28 @@ mod tests {
                 assert_eq!(i, job_result.0);
                 assert_eq!(i * 2, job_result.1);
             }
+
+            Ok(())
+        }
+
+        // tests/demonstrates that a long running job can be cancelled early.
+        pub(super) async fn cancel_job(is_async: bool) -> anyhow::Result<()> {
+            // create a job queue
+            let job_queue = JobQueue::start();
+            // start a 1 hour job.
+            let duration = std::time::Duration::from_secs(3600); // 1 hour job.
+
+            let job = Box::new(DoubleJob {
+                data: 10,
+                duration,
+                is_async,
+            });
+            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).await?;
+
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            let completion = job_handle.cancel_and_await().await.unwrap();
+            assert!(matches!(completion, JobCompletion::Cancelled));
 
             Ok(())
         }
