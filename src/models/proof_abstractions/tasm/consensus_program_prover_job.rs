@@ -132,6 +132,7 @@ impl ConsensusProgramProverJob {
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
+                .stderr(Stdio::null()) // ignore stderr
                 .spawn()?;
 
             let mut child_stdin = child.stdin.take().expect("should get stdin handle");
