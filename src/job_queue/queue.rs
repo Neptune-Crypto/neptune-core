@@ -366,7 +366,7 @@ mod tests {
             let duration = std::time::Duration::from_millis(20);
 
             // create 30 jobs, 10 at each priority level.
-            for i in 1..10 {
+            for i in (1..10).rev() {
                 let job1 = Box::new(DoubleJob {
                     data: i,
                     duration,
@@ -426,8 +426,8 @@ mod tests {
             //   timestamp of each is greater than prev.
             //   input value of each is greater than prev, except every 9th item which should be < prev
             //     because there are nine jobs per level.
-            let mut prev =
-                DoubleJobResult(0, 0, Instant::now() - std::time::Duration::from_secs(86400));
+            let one_day_ago = Instant::now() - std::time::Duration::from_secs(86400);
+            let mut prev = DoubleJobResult(9999, 0, one_day_ago);
             for (i, c) in results.into_iter().enumerate() {
                 let dyn_result = match c {
                     Ok(JobCompletion::Finished(r)) => r,
@@ -442,14 +442,12 @@ mod tests {
 
                 assert!(job_result.2 > prev.2);
 
-                match i > 0 && (i) % 9 == 0 {
-                    true => {
-                        assert!(job_result.0 < prev.0)
-                    }
-                    false => {
-                        assert!(job_result.0 > prev.0)
-                    }
-                };
+                // we don't do the assertion for the 2nd job because the job-queue starts
+                // processing immediately and so a race condition is setup where it is possible
+                // for either the Low priority or High job to start processing first.
+                if i != 1 {
+                    assert!(job_result.0 < prev.0);
+                }
 
                 prev = job_result;
             }
