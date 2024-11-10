@@ -946,10 +946,10 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block.mutator_set_accumulator().clone().hash(),
+            new_block.mutator_set_accumulator_after().clone().hash(),
             msa_state.hash(),
             "\n\nMutator set in applied block:\n{}\n\nmust agree with that in wallet handler:\n{}\n\n",
-            new_block.mutator_set_accumulator().clone().hash(),
+            new_block.mutator_set_accumulator_after().clone().hash(),
             msa_state.hash(),
         );
 
@@ -1327,7 +1327,7 @@ mod tests {
                 make_mock_block(&latest_block, None, alice_address, rng.gen());
             bob.wallet_state
                 .update_wallet_state_with_new_block(
-                    &latest_block.mutator_set_accumulator(),
+                    &latest_block.mutator_set_accumulator_after(),
                     latest_block.guesser_fee_addition_records(),
                     &new_block,
                 )
@@ -1531,7 +1531,7 @@ mod tests {
                 .1
                 .clone();
             assert!(genesis_block
-                .mutator_set_accumulator()
+                .mutator_set_accumulator_after()
                 .verify(Hash::hash(&utxo), &ms_membership_proof));
         }
     }

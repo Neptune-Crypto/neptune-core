@@ -272,7 +272,7 @@ pub(crate) async fn make_coinbase_transaction(
         .chain
         .light_state()
         .clone();
-    let mutator_set_accumulator = latest_block.mutator_set_accumulator().clone();
+    let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
     #[allow(clippy::manual_range_contains)]
@@ -372,7 +372,7 @@ pub(crate) async fn create_block_transaction(
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        predecessor_block.mutator_set_accumulator().hash()
+        predecessor_block.mutator_set_accumulator_after().hash()
     );
 
     let mut rng: StdRng =
@@ -702,7 +702,7 @@ pub(crate) mod mine_loop_tests {
                 make_mock_transaction_with_mutator_set_hash(
                     vec![],
                     vec![],
-                    previous_block.mutator_set_accumulator().hash(),
+                    previous_block.mutator_set_accumulator_after().hash(),
                 ),
                 dummy_expected_utxo(),
             )
@@ -1152,7 +1152,7 @@ pub(crate) mod mine_loop_tests {
                     make_mock_transaction_with_mutator_set_hash(
                         vec![],
                         vec![],
-                        prev_block.mutator_set_accumulator().hash(),
+                        prev_block.mutator_set_accumulator_after().hash(),
                     ),
                     vec![dummy_expected_utxo()],
                 )

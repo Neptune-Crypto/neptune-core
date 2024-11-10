@@ -63,6 +63,7 @@ use crate::database::storage::storage_vec::Index;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -775,7 +776,7 @@ impl GlobalState {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
         let tip = self.chain.light_state();
-        let tip_mutator_set_accumulator = tip.mutator_set_accumulator().clone();
+        let tip_mutator_set_accumulator = tip.mutator_set_accumulator_after().clone();
         let tip_digest = tip.hash();
 
         // 1. create/add change output if necessary.
@@ -1161,7 +1162,8 @@ impl GlobalState {
                     .get_block(revert_block.kernel.header.prev_block_digest)
                     .await?
                     .expect("All blocks that are reverted must have a parent, since genesis block can never be reverted.");
-                let previous_mutator_set = revert_block_parent.mutator_set_accumulator().clone();
+                let previous_mutator_set =
+                    revert_block_parent.mutator_set_accumulator_after().clone();
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
@@ -1211,24 +1213,16 @@ impl GlobalState {
                     .get_block(apply_block.kernel.header.prev_block_digest)
                     .await?;
                 let mut block_msa = match &predecessor_block {
-                    Some(block) => block.mutator_set_accumulator().clone(),
+                    Some(block) => block.mutator_set_accumulator_after().clone(),
                     None => MutatorSetAccumulator::default(),
                 };
-                let mut addition_records = predecessor_block
-                    .map(|x| x.guesser_fee_addition_records())
-                    .unwrap_or_default();
-                addition_records.extend(
-                    apply_block
-                        .body()
-                        .transaction_kernel
-                        .outputs
-                        .clone()
-                        .into_iter(),
-                );
-                let removal_records = apply_block.kernel.body.transaction_kernel.inputs.clone();
+                let MutatorSetUpdate {
+                    additions,
+                    removals,
+                } = apply_block.mutator_set_update();
 
                 // apply additions
-                for addition_record in addition_records.iter() {
+                for addition_record in additions.iter() {
                     membership_proof
                         .update_from_addition(
                             Hash::hash(&monitored_utxo.utxo),
@@ -1240,7 +1234,7 @@ impl GlobalState {
                 }
 
                 // apply removals
-                for removal_record in removal_records.iter() {
+                for removal_record in removals.iter() {
                     membership_proof
                         .update_from_remove(removal_record)
                         .expect("Could not update membership proof from removal record.");
@@ -1249,7 +1243,7 @@ impl GlobalState {
 
                 assert_eq!(
                     block_msa.hash(),
-                    apply_block.mutator_set_accumulator().hash()
+                    apply_block.mutator_set_accumulator_after().hash()
                 );
             }
 
@@ -1460,7 +1454,7 @@ impl GlobalState {
                 new_block.header().prev_block_digest,
                 "Tip parent has must match indicated parent hash"
             );
-            let previous_ms_accumulator = tip_parent.mutator_set_accumulator().clone();
+            let previous_ms_accumulator = tip_parent.mutator_set_accumulator_after().clone();
 
             // update wallet state with relevant UTXOs from this block
             myself
@@ -1596,7 +1590,7 @@ mod global_state_tests {
             match current_mp {
                 Some(mp) => {
                     if !tip_block
-                        .mutator_set_accumulator()
+                        .mutator_set_accumulator_after()
                         .verify(Hash::hash(&monitored_utxo.utxo), &mp)
                     {
                         return false;
@@ -1850,7 +1844,7 @@ mod global_state_tests {
                 assert!(global_state
                     .chain
                     .light_state()
-                    .mutator_set_accumulator()
+                    .mutator_set_accumulator_after()
                     .verify(
                         ms_item,
                         &mutxo.get_latest_membership_proof_entry().unwrap().1,
@@ -2701,7 +2695,7 @@ mod global_state_tests {
             );
 
             // Peek into wallet
-            let tip_msa = expected_tip.mutator_set_accumulator().clone();
+            let tip_msa = expected_tip.mutator_set_accumulator_after().clone();
             let mutxos = global_state
                 .wallet_state
                 .wallet_db

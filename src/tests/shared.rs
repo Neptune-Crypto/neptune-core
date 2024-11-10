@@ -207,7 +207,7 @@ pub(crate) async fn mock_genesis_global_state(
     let light_state: LightState = LightState::from(genesis_block.to_owned());
     println!(
         "Genesis light state MSA hash: {}",
-        light_state.mutator_set_accumulator().hash()
+        light_state.mutator_set_accumulator_after().hash()
     );
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
@@ -618,7 +618,7 @@ pub(crate) fn invalid_block_with_transaction(
         difficulty: previous_block.header().difficulty,
     };
 
-    let mut next_mutator_set = previous_block.mutator_set_accumulator().clone();
+    let mut next_mutator_set = previous_block.mutator_set_accumulator_after().clone();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
     block_mmr.append(previous_block.hash());
 
@@ -676,7 +676,7 @@ pub(crate) fn make_mock_block(
         fee: NeptuneCoins::zero(),
         timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
-        mutator_set_hash: previous_block.mutator_set_accumulator().hash(),
+        mutator_set_hash: previous_block.mutator_set_accumulator_after().hash(),
     };
     let tx = Transaction {
         kernel: tx_kernel,
@@ -802,7 +802,7 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     let tx = make_mock_transaction_with_mutator_set_hash(
         vec![],
         vec![],
-        predecessor.mutator_set_accumulator().hash(),
+        predecessor.mutator_set_accumulator_after().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
@@ -845,7 +845,7 @@ pub(crate) async fn valid_successor_for_tests(
         TxOutputList::default(),
         NeptuneCoins::zero(),
         timestamp,
-        predecessor.mutator_set_accumulator().clone(),
+        predecessor.mutator_set_accumulator_after().clone(),
     )
     .unwrap();
     let tx = GlobalState::create_raw_transaction(

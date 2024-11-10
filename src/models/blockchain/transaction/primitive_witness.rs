@@ -704,6 +704,7 @@ mod test {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Utxo {
         /// Set the number of NeptuneCoins, overriding the pre-existing number attached
@@ -849,7 +850,7 @@ mod test {
                                 })
                             });
 
-                        let a = input_amountss
+                        let utxos_and_lock_scripts_and_witnesses = input_amountss
                             .iter()
                             .zip_eq(input_address_seedss)
                             .map(|(input_amounts, input_address_seeds)| {
@@ -860,7 +861,7 @@ mod test {
                             })
                             .collect_vec();
                         let (input_utxoss, input_lock_scripts_and_witnesses): (Vec<_>, Vec<_>) =
-                            a.into_iter().unzip();
+                            utxos_and_lock_scripts_and_witnesses.into_iter().unzip();
                         let input_utxoss: [_; N] = input_utxoss.try_into().unwrap();
                         let input_lock_scripts_and_witnesses: [_; N] =
                             input_lock_scripts_and_witnesses.try_into().unwrap();
@@ -967,6 +968,152 @@ mod test {
                     )
                     .prop_map(|primwit| (primwit[0].clone(), primwit[1].clone()))
                 })
+                .boxed()
+        }
+
+        pub(crate) fn arbitrary_pair_with_inputs_and_coinbase_respectively_from_msa_and_records(
+            total_num_outputs: usize,
+            total_num_announcements: usize,
+            msa_and_records: MsaAndRecords,
+            input_utxos: Vec<Utxo>,
+            lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
+            coinbase_amount: NeptuneCoins,
+            timestamp: Timestamp,
+        ) -> BoxedStrategy<(Self, Self)> {
+            let input_removal_records = msa_and_records.removal_records;
+            let input_membership_proofs = msa_and_records.membership_proofs;
+            let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
+            ((0..total_num_outputs), (0..total_num_announcements))
+                .prop_flat_map(move |(num_outputs, num_announcements)| {
+                    (
+                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
+                            num_outputs,
+                            num_announcements,
+                            None,
+                            input_utxos.clone(),
+                            input_removal_records.clone(),
+                            input_membership_proofs.clone(),
+                            lock_scripts_and_witnesses.clone(),
+                            mutator_set_accumulator.clone(),
+                            timestamp,
+                        ),
+                        Self::arbitrary_given_mutator_set_accumulator_and_inputs(
+                            total_num_outputs - num_outputs,
+                            total_num_announcements - num_announcements,
+                            Some(coinbase_amount),
+                            vec![],
+                            vec![],
+                            vec![],
+                            vec![],
+                            mutator_set_accumulator.clone(),
+                            timestamp,
+                        ),
+                    )
+                })
+                .boxed()
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        pub(crate) fn arbitrary_given_mutator_set_accumulator_and_inputs(
+            num_outputs: usize,
+            num_announcements: usize,
+            coinbase: Option<NeptuneCoins>,
+            input_utxos: Vec<Utxo>,
+            input_removal_records: Vec<RemovalRecord>,
+            input_membership_proofs: Vec<MsMembershipProof>,
+            lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
+            mutator_set_accumulator: MutatorSetAccumulator,
+            timestamp: Timestamp,
+        ) -> BoxedStrategy<Self> {
+            (
+                vec(arb::<NeptuneCoins>(), num_outputs),
+                arb::<NeptuneCoins>(),
+                vec(arb::<Digest>(), num_outputs),
+                vec(arb::<Digest>(), num_outputs),
+                vec(arb::<Digest>(), num_outputs),
+                arb::<[BFieldElement; 3]>(),
+                arb::<[BFieldElement; 3]>(),
+                vec(arb::<PublicAnnouncement>(), num_announcements),
+            )
+                .prop_map(
+                    move |(
+                        mut output_amounts,
+                        mut fee,
+                        lock_script_hashes,
+                        output_sender_randomnesses,
+                        output_receiver_digests,
+                        input_salt,
+                        output_salt,
+                        public_announcements,
+                    )| {
+                        let total_input_amount = input_utxos
+                            .iter()
+                            .map(|utxo| utxo.get_native_currency_amount())
+                            .sum::<NeptuneCoins>()
+                            + coinbase.unwrap_or(NeptuneCoins::zero());
+                        PrimitiveWitness::find_balanced_output_amounts_and_fee(
+                            total_input_amount,
+                            coinbase,
+                            &mut output_amounts,
+                            &mut fee,
+                        );
+
+                        let output_utxos = output_amounts
+                            .into_iter()
+                            .zip(lock_script_hashes)
+                            .map(|(amount, lock_script_hash)| Utxo {
+                                lock_script_hash,
+                                coins: amount.to_native_coins(),
+                            })
+                            .collect_vec();
+
+                        let salted_input_utxos = SaltedUtxos {
+                            utxos: input_utxos.clone(),
+                            salt: input_salt,
+                        };
+                        let salted_output_utxos = SaltedUtxos {
+                            utxos: output_utxos.clone(),
+                            salt: output_salt,
+                        };
+
+                        let output_addition_records = izip!(
+                            output_utxos,
+                            output_sender_randomnesses.clone(),
+                            output_receiver_digests.clone(),
+                        )
+                        .map(|(utxo, sr, rd)| commit(Tip5::hash(&utxo), sr, rd))
+                        .collect_vec();
+
+                        let kernel = TransactionKernel {
+                            inputs: input_removal_records.clone(),
+                            outputs: output_addition_records,
+                            public_announcements,
+                            fee,
+                            coinbase,
+                            timestamp,
+                            mutator_set_hash: mutator_set_accumulator.hash(),
+                        };
+
+                        let type_scripts_and_witnesses = vec![NativeCurrencyWitness {
+                            salted_input_utxos: salted_input_utxos.clone(),
+                            salted_output_utxos: salted_output_utxos.clone(),
+                            kernel: kernel.clone(),
+                        }
+                        .type_script_and_witness()];
+
+                        Self {
+                            input_utxos: salted_input_utxos,
+                            input_membership_proofs: input_membership_proofs.clone(),
+                            lock_scripts_and_witnesses: lock_scripts_and_witnesses.clone(),
+                            type_scripts_and_witnesses,
+                            output_utxos: salted_output_utxos,
+                            output_sender_randomnesses,
+                            output_receiver_digests,
+                            mutator_set_accumulator: mutator_set_accumulator.clone(),
+                            kernel,
+                        }
+                    },
+                )
                 .boxed()
         }
     }

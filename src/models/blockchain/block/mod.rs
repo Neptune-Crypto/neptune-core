@@ -332,7 +332,7 @@ impl Block {
         &self.kernel.body
     }
 
-    pub(crate) fn mutator_set_accumulator(&self) -> MutatorSetAccumulator {
+    pub(crate) fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
         let mut msa = self.kernel.body.mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
         mutator_set_update.apply_to_accumulator(&mut msa)
@@ -352,8 +352,13 @@ impl Block {
     }
 
     pub fn block_subsidy(block_height: BlockHeight) -> NeptuneCoins {
-        let mut reward: NeptuneCoins = NeptuneCoins::new(100);
+        let mut reward: NeptuneCoins = NeptuneCoins::new(128);
         let generation = block_height.get_generation();
+
+        if generation > 128 {
+            return NeptuneCoins::zero();
+        }
+
         for _ in 0..generation {
             reward.div_two()
         }
@@ -918,7 +923,9 @@ impl Block {
             .collect_vec()
     }
 
-    /// Return the mutator set update corresponding to this block
+    /// Return the mutator set update corresponding to this block, which sends
+    /// the mutator set accumulator after the predecessor to the mutator set
+    /// accumulator after self.
     pub(crate) fn mutator_set_update(&self) -> MutatorSetUpdate {
         let mut mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
@@ -1392,17 +1399,17 @@ mod block_tests {
             Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
 
         let mut ms = block1.body().mutator_set_accumulator.clone();
-        let mutator_set_update = MutatorSetUpdate::new(
-            block2.body().transaction_kernel.inputs.clone(),
-            [
-                block1.guesser_fee_addition_records(),
-                block2.body().transaction_kernel.outputs.clone(),
-            ]
-            .concat(),
-        );
-        mutator_set_update.apply_to_accumulator(&mut ms)
-            .expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
 
-        assert_eq!(ms.hash(), block2.mutator_set_accumulator().hash());
+        let mutator_set_update_guesser_fees =
+            MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records());
+        let mut mutator_set_update_tx = MutatorSetUpdate::new(
+            block2.body().transaction_kernel.inputs.clone(),
+            block2.body().transaction_kernel.outputs.clone(),
+        );
+        mutator_set_update_guesser_fees.apply_to_accumulator_and_records(&mut ms, &mut mutator_set_update_tx.removals.iter_mut().collect_vec())
+            .expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
+        mutator_set_update_tx.apply_to_accumulator(&mut ms).expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
+
+        assert_eq!(ms.hash(), block2.body().mutator_set_accumulator.hash());
     }
 }
