@@ -155,7 +155,7 @@ impl Arbitrary for MsaAndRecords {
                         let all_index_sets = all_index_sets.clone();
                         let aocl_membership_proofs = aocl_membership_proofs.clone();
                         let removables = removables.clone();
-                        let swbf_mmr_leaf_count = aocl_mmra.num_leafs() / (BATCH_SIZE as u64);
+                        let swbf_mmr_leaf_count = (aocl_mmra.num_leafs() / (BATCH_SIZE as u64)).saturating_sub(1);
                         let aocl_leaf_indices = aocl_leaf_indices.clone();
 
                         // unwrap random swbf mmra and membership proofs
