@@ -1442,6 +1442,8 @@ mod ms_proof_tests {
             mutator_set_accumulator.prove(own_item, sender_randomness, receiver_preimage);
         mutator_set_accumulator.add(&own_addition_record);
 
+        // aocl leaf count is now 42966841942012424_u64
+
         let other_addition_record = AdditionRecord::new(rng.gen::<Digest>());
 
         msmp.update_from_addition(own_item, &mutator_set_accumulator, &other_addition_record)
