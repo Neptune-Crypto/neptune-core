@@ -15,9 +15,6 @@ pub mod transaction_output;
 pub mod utxo;
 pub mod validity;
 
-use std::hash::Hash as StdHash;
-use std::hash::Hasher as StdHasher;
-
 use anyhow::bail;
 use anyhow::Result;
 use arbitrary::Arbitrary;
@@ -111,20 +108,23 @@ impl PublicAnnouncement {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
-    #[default]
-    Invalid,
     Witness(PrimitiveWitness),
     SingleProof(Proof),
     ProofCollection(ProofCollection),
 }
 
 impl TransactionProof {
+    /// A proof that will always be invalid
+    #[cfg(test)]
+    pub(crate) fn invalid() -> Self {
+        Self::SingleProof(Proof(vec![]))
+    }
+
     pub(crate) fn into_single_proof(self) -> Proof {
         match self {
             TransactionProof::SingleProof(proof) => proof,
-            TransactionProof::Invalid => panic!("Expected SingleProof, got Invalid"),
             TransactionProof::Witness(_) => {
                 panic!("Expected SingleProof, got Witness")
             }
@@ -136,7 +136,6 @@ impl TransactionProof {
 
     pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
         match self {
-            TransactionProof::Invalid => bail!("Invalid proof does not have a proof quality"),
             TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
             TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
             TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
@@ -145,7 +144,6 @@ impl TransactionProof {
 
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
-            TransactionProof::Invalid => false,
             TransactionProof::Witness(primitive_witness) => {
                 primitive_witness.validate().await
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
@@ -169,23 +167,11 @@ pub enum TransactionProofError {
     ProverLockWasTaken,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
-    #[bfield_codec(ignore)]
     pub proof: TransactionProof,
-}
-
-/// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
-///
-/// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derived_hash_with_manual_eq)]
-impl StdHash for Transaction {
-    fn hash<H: StdHasher>(&self, state: &mut H) {
-        let neptune_hash = Hash::hash(self);
-        StdHash::hash(&neptune_hash, state);
-    }
 }
 
 impl Transaction {
@@ -528,14 +514,6 @@ mod transaction_tests {
         // the correct time convention for this test to work.
         let coinbase_transaction = make_mock_transaction(vec![], vec![ar]);
         assert!(Timestamp::now() - coinbase_transaction.kernel.timestamp < Timestamp::seconds(10));
-    }
-
-    #[test]
-    fn encode_decode_empty_tx_test() {
-        let empty_tx = make_mock_transaction(vec![], vec![]);
-        let encoded = empty_tx.encode();
-        let decoded = *Transaction::decode(&encoded).unwrap();
-        assert_eq!(empty_tx, decoded);
     }
 
     // `traced_test` macro inserts return type that clippy doesn't like.

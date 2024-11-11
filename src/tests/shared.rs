@@ -514,7 +514,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
             coinbase: None,
             mutator_set_hash,
         },
-        proof: TransactionProof::Invalid,
+        proof: TransactionProof::invalid(),
     }
 }
 
@@ -562,7 +562,7 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        proof: TransactionProof::Invalid,
+        proof: TransactionProof::invalid(),
     }
 }
 
@@ -678,7 +678,7 @@ pub(crate) fn make_mock_block(
     };
     let tx = Transaction {
         kernel: tx_kernel,
-        proof: TransactionProof::Invalid,
+        proof: TransactionProof::invalid(),
     };
 
     let block = Block::block_template_invalid_proof(

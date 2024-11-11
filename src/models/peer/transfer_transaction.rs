@@ -51,7 +51,6 @@ impl TryFrom<&Transaction> for TransferTransaction {
 
     fn try_from(value: &Transaction) -> Result<Self, Self::Error> {
         let transfer_proof = match &value.proof {
-            TransactionProof::Invalid => bail!("Cannot share invalid transaction with peer"),
             TransactionProof::Witness(_) => {
                 bail!("Cannot share primitive witness-supported transaction, as this would leak secret data")
             }

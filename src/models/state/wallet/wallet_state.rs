@@ -55,6 +55,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -72,8 +73,8 @@ pub struct WalletState {
 
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
-    mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
-    mempool_unspent_utxos: HashMap<Digest, Vec<AnnouncedUtxo>>,
+    mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<AnnouncedUtxo>>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -305,15 +306,15 @@ impl WalletState {
                     )
                     .collect_vec();
 
-                let tx_hash = Hash::hash(&tx);
-                self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
-                self.mempool_unspent_utxos.insert(tx_hash, announced_utxos);
+                let tx_id = tx.kernel.txid();
+                self.mempool_spent_utxos.insert(tx_id, spent_utxos);
+                self.mempool_unspent_utxos.insert(tx_id, announced_utxos);
             }
             MempoolEvent::RemoveTx(tx) => {
                 trace!("handling mempool RemoveTx event.");
-                let tx_hash = Hash::hash(&tx);
-                self.mempool_spent_utxos.remove(&tx_hash);
-                self.mempool_unspent_utxos.remove(&tx_hash);
+                let tx_id = tx.kernel.txid();
+                self.mempool_spent_utxos.remove(&tx_id);
+                self.mempool_unspent_utxos.remove(&tx_id);
             }
             MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
                 // Utxos are not affected by MutatorSet update, so this is a no-op.

@@ -322,7 +322,6 @@ impl Mempool {
             conflicts: &[(TransactionKernelId, &Transaction)],
         ) -> bool {
             match &new_tx.proof {
-                TransactionProof::Invalid => panic!("Invalid proofs don't belong in mempool"),
                 TransactionProof::Witness(_) => false,
                 TransactionProof::ProofCollection(_) => conflicts
                     .iter()
@@ -336,7 +335,6 @@ impl Mempool {
         let mut events = vec![];
 
         match new_tx.proof {
-            TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => {}
             TransactionProof::SingleProof(_) => {}
             TransactionProof::ProofCollection(_) => {}
@@ -667,7 +665,6 @@ impl Mempool {
             let can_upgrade_single_proof =
                 TxProvingCapability::SingleProof == tx_proving_capability;
             let (update_job, can_update) = match &tx.transaction.proof {
-                TransactionProof::Invalid => panic!("Mempool may not contain invalid proofs"),
                 TransactionProof::ProofCollection(_) => {
                     debug!("Failed to update transaction {tx_id}. Because it is only supported by a proof collection.");
 
