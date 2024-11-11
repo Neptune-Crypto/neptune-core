@@ -83,6 +83,9 @@ impl ConsensusProgramProverJob {
                 self.nondeterminism.clone(),
             )
         };
+        if let Err(e) = vm_output {
+            panic!("VM run prior to proving should halt gracefully.\n{e}");
+        }
         assert!(vm_output.is_ok());
         assert_eq!(self.claim.program_digest, self.program.hash());
         assert_eq!(self.claim.output, vm_output?);
