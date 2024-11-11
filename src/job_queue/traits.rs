@@ -39,6 +39,7 @@ pub trait Job: Send + Sync {
     async fn run_async_cancellable(&self, mut rx: JobCancelReceiver) -> JobCompletion {
         tokio::select! {
             _ = rx.changed() => {
+                tracing::debug!("async job got cancel message. cancelling.");
                 JobCompletion::Cancelled
             }
 

@@ -40,7 +40,7 @@ impl JobHandle {
     }
 
     /// cancel job and return immediately.
-    pub async fn cancel(&self) -> Result<(), JobHandleError> {
+    pub fn cancel(&self) -> Result<(), JobHandleError> {
         Ok(self.cancel_tx.send(())?)
     }
 
@@ -80,6 +80,7 @@ struct AddJobMsg<P: Ord> {
 pub struct JobQueue<P: Ord> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
     tracker: TaskTracker,
+    refs: Arc<()>,
 }
 
 impl<P: Ord> std::fmt::Debug for JobQueue<P> {
@@ -95,22 +96,45 @@ impl<P: Ord> Clone for JobQueue<P> {
         Self {
             tx: self.tx.clone(),
             tracker: self.tracker.clone(),
+            refs: self.refs.clone(),
         }
     }
 }
 
 impl<P: Ord> Drop for JobQueue<P> {
+    // since JobQueue has impl Clone there can be other instances.
+    // we must only send the Stop message when dropping the last instance.
+    // if upgrade of a Weak Arc fails then we are the last one.
+    // the refs struct member exists only for this purpose.
+    //
+    // test stop_only_called_once_when_cloned exists to check
+    // it is working.
     fn drop(&mut self) {
-        let _ = self.tx.send(JobQueueMsg::Stop);
+        let refs_weak = Arc::downgrade(&self.refs);
+        self.refs = Arc::new(());
+
+        // if upgrade fails, then this is the last reference.
+        if refs_weak.upgrade().is_none() {
+            let _ = self.tx.send(JobQueueMsg::Stop);
+        }
     }
 }
 
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
+        struct Shared<P: Ord> {
+            jobs: VecDeque<AddJobMsg<P>>,
+            curr_job_cancel_tx: Option<JobCancelSender>,
+        }
+
         let (tx, mut rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
 
-        let jobs: Arc<Mutex<VecDeque<AddJobMsg<P>>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let shared = Shared {
+            jobs: VecDeque::new(),
+            curr_job_cancel_tx: None,
+        };
+        let jobs: Arc<Mutex<Shared<P>>> = Arc::new(Mutex::new(shared));
 
         let (tx_deque, mut rx_deque) = tokio::sync::mpsc::unbounded_channel();
 
@@ -124,19 +148,23 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     JobQueueMsg::AddJob(m) => {
                         let num_jobs = {
                             let mut guard = jobs_rc1.lock().unwrap();
-                            guard.push_back(m);
-                            guard.len()
+                            guard.jobs.push_back(m);
+                            guard.jobs.len()
                         };
                         tracing::info!("JobQueue: job added.  {} queued job(s).", num_jobs);
                         let _ = tx_deque.send(());
                     }
                     JobQueueMsg::Stop => {
                         tracing::info!("JobQueue: received stop message.  stopping.");
-                        jobs_rc1
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .for_each(|j| j.cancel_tx.send(()).unwrap());
+                        drop(tx_deque); // close queue
+
+                        // if there is a presently executing job we need to cancel it.
+                        let guard = jobs_rc1.lock().unwrap();
+                        if let Some(tx_cancel) = &guard.curr_job_cancel_tx {
+                            tx_cancel.send(()).unwrap();
+                            tracing::info!("JobQueue: notified current job to stop.");
+                        }
+                        break;
                     }
                 }
             }
@@ -149,10 +177,14 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
             while rx_deque.recv().await.is_some() {
                 let (msg, pending) = {
-                    let mut j = jobs_rc2.lock().unwrap();
-                    j.make_contiguous()
+                    let mut guard = jobs_rc2.lock().unwrap();
+                    guard
+                        .jobs
+                        .make_contiguous()
                         .sort_by(|a, b| b.priority.cmp(&a.priority));
-                    (j.pop_front().unwrap(), j.len())
+                    let job = guard.jobs.pop_front().unwrap();
+                    guard.curr_job_cancel_tx = Some(job.cancel_tx.clone());
+                    (job, guard.jobs.len())
                 };
 
                 tracing::info!(
@@ -179,7 +211,11 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         });
         tracker.close();
 
-        Self { tx, tracker }
+        Self {
+            tx,
+            tracker,
+            refs: Arc::new(()),
+        }
     }
 
     /// alias of Self::start().
@@ -292,6 +328,12 @@ mod tests {
     #[traced_test]
     fn spawned_tasks_live_as_long_as_jobqueue() -> anyhow::Result<()> {
         workers::spawned_tasks_live_as_long_as_jobqueue(true)
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn stop_only_called_once_when_cloned() -> anyhow::Result<()> {
+        workers::stop_only_called_once_when_cloned().await
     }
 
     mod workers {
@@ -684,6 +726,44 @@ mod tests {
             drop(rt);
 
             assert!(*result_ok.lock().unwrap());
+
+            Ok(())
+        }
+
+        /// this test verifies that the queue is not stopped until the last
+        /// JobQueue reference is dropped.
+        pub(super) async fn stop_only_called_once_when_cloned() -> anyhow::Result<()> {
+            let jq1 = JobQueue::start();
+            let jq2 = jq1.clone();
+            let jq3 = jq1.clone();
+
+            let duration = std::time::Duration::from_secs(3600); // 1 hour job
+
+            let job = Box::new(DoubleJob {
+                data: 10,
+                duration,
+                is_async: true,
+            });
+
+            let rx_handle = jq1.add_job(job, DoubleJobPriority::Low).await?;
+
+            assert!(!jq1.tx.is_closed());
+
+            drop(jq2);
+            assert!(!jq1.tx.is_closed());
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            assert!(!rx_handle.cancel_tx.is_closed());
+
+            drop(jq3);
+            assert!(!jq1.tx.is_closed());
+
+            drop(jq1);
+
+            // rx_handle.cancel().unwrap();
+
+            let completion = rx_handle.complete().await?;
+            assert!(matches!(completion, JobCompletion::Cancelled));
 
             Ok(())
         }
