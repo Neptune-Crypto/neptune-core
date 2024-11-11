@@ -163,14 +163,18 @@ fn guess_worker(
     let hash = block.hash();
     let hex = hash.to_hex();
     let height = block.kernel.header.height;
+    let num_inputs = block.body().transaction_kernel.inputs.len();
+    let num_outputs = block.body().transaction_kernel.outputs.len();
     info!(
         r#"Newly mined block details:
               Height: {height}
-              Time:   {timestamp_standard} ({timestamp})
+              Time  : {timestamp_standard} ({timestamp})
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
           Difficulty: {prev_difficulty}
+          #inputs   : {num_inputs}
+          #outputs  : {num_outputs}
 "#
     );
 
