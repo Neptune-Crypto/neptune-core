@@ -314,12 +314,28 @@ impl Mempool {
     /// Panics if the transaction's proof is of the wrong type.
     pub(super) fn insert(
         &mut self,
-        transaction: Transaction,
+        new_tx: Transaction,
         origin: TransactionOrigin,
     ) -> Vec<MempoolEvent> {
+        fn new_tx_has_higher_proof_quality(
+            new_tx: &Transaction,
+            conflicts: &[(TransactionKernelId, &Transaction)],
+        ) -> bool {
+            match &new_tx.proof {
+                TransactionProof::Invalid => panic!("Invalid proofs don't belong in mempool"),
+                TransactionProof::Witness(_) => false,
+                TransactionProof::ProofCollection(_) => conflicts
+                    .iter()
+                    .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_))),
+                TransactionProof::SingleProof(_) => conflicts
+                    .iter()
+                    .any(|x| !matches!(&x.1.proof, TransactionProof::SingleProof(_))),
+            }
+        }
+
         let mut events = vec![];
 
-        match transaction.proof {
+        match new_tx.proof {
             TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
             TransactionProof::Witness(_) => {}
             TransactionProof::SingleProof(_) => {}
@@ -332,12 +348,14 @@ impl Mempool {
         // the effect that merged transactions always replace those transactions
         // that were merged since the merged transaction is *very* likely to
         // have a higher fee density that the lowest one of the ones that were
-        // merged.
-        let conflicts = self.transaction_conflicts_with(&transaction);
+        // merged. If the new transaction has a higher proof quality than the
+        // conflict, we also replace the old transactions.
+        let conflicts = self.transaction_conflicts_with(&new_tx);
+        let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality(&new_tx, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            if min_fee_of_conflicting_tx < transaction.fee_density() {
+            if new_tx_has_higher_proof_quality || min_fee_of_conflicting_tx < new_tx.fee_density() {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
                         events.push(e);
@@ -354,16 +372,16 @@ impl Mempool {
             }
         }
 
-        let txid = transaction.kernel.txid();
+        let txid = new_tx.kernel.txid();
 
-        self.queue.push(txid, transaction.fee_density());
+        self.queue.push(txid, new_tx.fee_density());
 
         let as_mempool_transaction = MempoolTransaction {
-            transaction: transaction.clone(),
+            transaction: new_tx.clone(),
             origin,
         };
         self.tx_dictionary.insert(txid, as_mempool_transaction);
-        events.push(MempoolEvent::AddTx(transaction));
+        events.push(MempoolEvent::AddTx(new_tx));
 
         assert_eq!(
             self.tx_dictionary.len(),
@@ -1694,5 +1712,134 @@ mod tests {
         println!(
             "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
         );
+    }
+
+    mod proof_quality_tests {
+        use super::*;
+
+        /// Return a valid transaction with a specified proof type.
+        async fn tx_with_proof_type(
+            proof_type: TxProvingCapability,
+            network: Network,
+            fee: NeptuneCoins,
+        ) -> Transaction {
+            let genesis_block = Block::genesis_block(network);
+            let bob_wallet_secret = WalletSecret::devnet_wallet();
+            let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+            let bob = mock_genesis_global_state(
+                network,
+                2,
+                bob_wallet_secret.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+            let (tx_by_bob, _maybe_change_output) = bob
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![].into(),
+                    bob_spending_key.into(),
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    in_seven_months,
+                    proof_type,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+
+            tx_by_bob
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn single_proof_always_replaces_primitive_witness() {
+            let network = Network::Main;
+            let pw_high_fee = tx_with_proof_type(
+                TxProvingCapability::PrimitiveWitness,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pw_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pw-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::SingleProof(_)
+            ));
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn single_proof_always_replaces_proof_collection() {
+            let network = Network::Main;
+            let pc_high_fee = tx_with_proof_type(
+                TxProvingCapability::ProofCollection,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pc-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::SingleProof(_)
+            ));
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn proof_collection_always_replaces_proof_primitive_witness() {
+            let network = Network::Main;
+            let pc_high_fee = tx_with_proof_type(
+                TxProvingCapability::PrimitiveWitness,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pw-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::ProofCollection(_)
+            ));
+        }
     }
 }
