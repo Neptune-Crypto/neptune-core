@@ -18,7 +18,6 @@ use tokio::select;
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::debug;
@@ -70,7 +69,7 @@ pub struct MainLoopHandler {
     global_state_lock: GlobalStateLock,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    main_to_miner_tx: watch::Sender<MainToMiner>,
+    main_to_miner_tx: mpsc::Sender<MainToMiner>,
 
     #[cfg(test)]
     mock_now: Option<SystemTime>,
@@ -318,7 +317,7 @@ impl MainLoopHandler {
         global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-        main_to_miner_tx: watch::Sender<MainToMiner>,
+        main_to_miner_tx: mpsc::Sender<MainToMiner>,
     ) -> Self {
         Self {
             incoming_peer_listener,
@@ -428,6 +427,7 @@ impl MainLoopHandler {
                 // Indicate to miner that block proposal was received
                 self.main_to_miner_tx
                     .send(MainToMiner::Continue)
+                    .await
                     .expect("Could not reach miner task. This should never happen.");
             }
         }
@@ -478,7 +478,7 @@ impl MainLoopHandler {
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
                             global_state_mut.net.syncing = false;
-                            self.main_to_miner_tx.send(MainToMiner::StopSyncing)?;
+                            self.main_to_miner_tx.send(MainToMiner::StopSyncing).await?;
                         }
                     }
 
@@ -518,10 +518,11 @@ impl MainLoopHandler {
                 let proof_queue = self.global_state_lock.vm_job_queue();
                 for update_job in update_jobs {}
 
-                // Inform miner to work on a new block
+                // Inform miner about new block.
                 if self.global_state_lock.cli().mine() {
                     self.main_to_miner_tx
-                        .send(MainToMiner::NewBlock(Box::new(last_block)))?;
+                        .send(MainToMiner::NewBlock(Box::new(last_block)))
+                        .await?;
                 }
             }
             PeerTaskToMain::AddPeerMaxBlockHeight((
@@ -555,7 +556,9 @@ impl MainLoopHandler {
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
                     global_state_mut.net.syncing = true;
-                    self.main_to_miner_tx.send(MainToMiner::StartSyncing)?;
+                    self.main_to_miner_tx
+                        .send(MainToMiner::StartSyncing)
+                        .await?;
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -670,6 +673,11 @@ impl MainLoopHandler {
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     global_state_mut.block_proposal = BlockProposal::foreign_proposal(*block);
                 }
+
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlockProposal)
+                    .await
+                    .expect("Channel to miner must still be open");
             }
         }
 
@@ -1345,12 +1353,12 @@ impl MainLoopHandler {
             RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
-                self.main_to_miner_tx.send(MainToMiner::StopMining)?;
+                self.main_to_miner_tx.send(MainToMiner::StopMining).await?;
                 Ok(false)
             }
             RPCServerToMain::RestartMiner => {
                 info!("Received RPC request to start miner");
-                self.main_to_miner_tx.send(MainToMiner::StartMining)?;
+                self.main_to_miner_tx.send(MainToMiner::StartMining).await?;
                 Ok(false)
             }
             RPCServerToMain::Shutdown => {
@@ -1397,6 +1405,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::tests::shared::get_test_genesis_setup;
+    use crate::MINER_CHANNEL_CAPACITY;
 
     struct TestSetup {
         peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
@@ -1434,7 +1443,7 @@ mod tests {
 
         const CHANNEL_CAPACITY: usize = 10;
         let (main_to_miner_tx, _main_to_miner_rx) =
-            watch::channel::<MainToMiner>(MainToMiner::Empty);
+            mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
         let (_miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(CHANNEL_CAPACITY);
         let (_rpc_server_to_main_tx, rpc_server_to_main_rx) =
             mpsc::channel::<RPCServerToMain>(CHANNEL_CAPACITY);
