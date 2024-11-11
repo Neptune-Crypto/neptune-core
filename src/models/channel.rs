@@ -34,6 +34,22 @@ pub enum MainToMiner {
     // SetCoinbasePubkey,
 }
 
+impl MainToMiner {
+    pub(crate) fn get_type(&self) -> &str {
+        match self {
+            MainToMiner::NewBlock(_) => "new block",
+            MainToMiner::Shutdown => "shutdown",
+            MainToMiner::NewBlockProposal => "new block proposal",
+            MainToMiner::WaitForContinue => "wait for continue",
+            MainToMiner::Continue => "continue",
+            MainToMiner::StopMining => "stop mining",
+            MainToMiner::StartMining => "start mining",
+            MainToMiner::StartSyncing => "start syncing",
+            MainToMiner::StopSyncing => "stop syncing",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NewBlockFound {
     pub block: Box<Block>,
