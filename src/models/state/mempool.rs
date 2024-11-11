@@ -346,6 +346,10 @@ impl Mempool {
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
                 // ignore it. Stop execution here.
+                debug!(
+                    "Attempted to insert transaction into mempool but it's \
+                     fee density was eclipsed by another transaction."
+                );
                 return events;
             }
         }

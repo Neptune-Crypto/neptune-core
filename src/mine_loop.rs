@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::bail;
-use anyhow::Context;
 use anyhow::Result;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
@@ -536,9 +535,20 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to composer worker.");
                         }
 
-                        info!("Miner received new block proposal for guessing.");
+                        info!("Miner received message about new block proposal for guessing.");
                     }
-                    MainToMiner::Empty => (),
+                    MainToMiner::WaitForContinue => {
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
+                        }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
+                        }
+
+                        wait_for_confirmation = true;
+                    }
                     MainToMiner::Continue => {
                         wait_for_confirmation = false;
                     }

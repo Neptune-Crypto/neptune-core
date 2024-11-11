@@ -83,6 +83,12 @@ impl UpdateMutatorSetDataJob {
     }
 }
 
+impl From<UpdateMutatorSetDataJob> for UpgradeJob {
+    fn from(value: UpdateMutatorSetDataJob) -> Self {
+        Self::UpdateMutatorSetData(value)
+    }
+}
+
 impl UpgradeJob {
     /// Create an upgrade job from a primitive witness, for upgrading proof-
     /// support for a transaction that this client has initiated.
@@ -222,14 +228,18 @@ impl UpgradeJob {
                 if !transaction_is_deprecated {
                     // Happy path
 
+                    // Insert tx into mempool before notifying peers, so we're
+                    // sure to have it when they ask.
+                    global_state
+                        .mempool_insert(upgraded.clone(), tx_origin)
+                        .await;
+
                     // Inform all peers about our hard work
                     main_to_peer_channel
                         .send(MainToPeerTask::TransactionNotification(
                             (&upgraded).try_into().unwrap(),
                         ))
                         .unwrap();
-
-                    global_state.mempool_insert(upgraded, tx_origin).await;
 
                     info!("Successfully handled proof upgrade.");
                     return;

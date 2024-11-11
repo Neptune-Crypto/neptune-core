@@ -28,9 +28,12 @@ use tracing::warn;
 
 use crate::connect_to_peers::answer_peer_wrapper;
 use crate::connect_to_peers::call_peer_wrapper;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
@@ -62,6 +65,7 @@ const TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS: u64 = 60; // 1 minute
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
+const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
@@ -81,15 +85,26 @@ struct MutableMainLoopState {
     potential_peers: PotentialPeersState,
     task_handles: Vec<JoinHandle<()>>,
     proof_upgrader_task: Option<JoinHandle<()>>,
+
+    /// A joinhandle to a task running the update of the mempool transactions.
+    update_mempool_txs_handle: Option<JoinHandle<()>>,
+
+    /// A channel that the task updating mempool transactions can use to
+    /// communicate its result.
+    update_mempool_receiver: mpsc::Receiver<Vec<Transaction>>,
 }
 
 impl MutableMainLoopState {
     fn new(task_handles: Vec<JoinHandle<()>>) -> Self {
+        let (_dummy_sender, dummy_receiver) =
+            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
         Self {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
             task_handles,
             proof_upgrader_task: None,
+            update_mempool_txs_handle: None,
+            update_mempool_receiver: dummy_receiver,
         }
     }
 }
@@ -348,9 +363,78 @@ impl MainLoopHandler {
         }
     }
 
+    /// Run a list of Triton VM prover jobs that updates the mutator set state
+    /// for transactions.
+    ///
+    /// Sends the result back through the provided channel.
+    async fn update_mempool_jobs(
+        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        job_queue: &TritonVmJobQueue,
+        transcation_update_sender: mpsc::Sender<Vec<Transaction>>,
+    ) {
+        debug!(
+            "Attempting to update transaction proofs of {} transactions",
+            update_jobs.len()
+        );
+        let mut result = vec![];
+        for job in update_jobs {
+            let job: UpgradeJob = job.into();
+
+            // Jobs for updating txs in the mempool have highest priority since
+            // they block the composer from continuing.
+            // TODO: Handle errors better here.
+            let job_result = job
+                .upgrade(job_queue, TritonVmJobPriority::Highest)
+                .await
+                .unwrap();
+            result.push(job_result);
+        }
+
+        transcation_update_sender
+            .send(result)
+            .await
+            .expect("Receiver for updated txs in main loop must still exist");
+    }
+
+    /// Handles a list of transactions whose proof has been updated with new
+    /// mutator set data.
+    async fn handle_updated_mempool_txs(&mut self, updated_txs: Vec<Transaction>) {
+        // Update mempool with updated transactions
+        {
+            let mut state = self.global_state_lock.lock_guard_mut().await;
+            for updated in updated_txs.iter() {
+                let txid = updated.kernel.txid();
+                if let Some(tx) = state.mempool.get_mut(txid) {
+                    *tx = updated.to_owned();
+                } else {
+                    warn!("Updated transaction which is no longer in mempool");
+                }
+            }
+        }
+
+        // Then notify all peers
+        for updated in updated_txs {
+            self.main_to_peer_broadcast_tx
+                .send(MainToPeerTask::TransactionNotification(
+                    (&updated).try_into().unwrap(),
+                ))
+                .unwrap();
+        }
+
+        // Tell miner that it can now start composing next block.
+        self.main_to_miner_tx
+            .send(MainToMiner::Continue)
+            .await
+            .expect("channel to miner must still be open");
+    }
+
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn handle_miner_task_message(&mut self, msg: MinerToMain) -> Result<()> {
+    async fn handle_miner_task_message(
+        &mut self,
+        msg: MinerToMain,
+        main_loop_state: &mut MutableMainLoopState,
+    ) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
                 let _ = crate::ScopeDurationLogger::new(
@@ -370,7 +454,7 @@ impl MainLoopHandler {
                     return Ok(());
                 }
 
-                global_state_mut
+                let update_jobs = global_state_mut
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         [
@@ -382,9 +466,8 @@ impl MainLoopHandler {
                     .await?;
                 drop(global_state_mut);
 
-                // Inform miner that mempool has been updated and that it is safe
-                // to mine the next block
-                self.main_to_miner_tx.send(MainToMiner::Continue)?;
+                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
+                    .await;
 
                 // Share block with peers
                 self.main_to_peer_broadcast_tx
@@ -421,10 +504,18 @@ impl MainLoopHandler {
                     .expect(
                         "Peer handler broadcast channel prematurely closed. This should never happen.",
                     );
-                self.global_state_lock.lock_guard_mut().await.block_proposal =
-                    BlockProposal::own_proposal(block.clone(), expected_utxos);
 
-                // Indicate to miner that block proposal was received
+                {
+                    // Use block proposal and add expected UTXOs from this
+                    // proposal.
+                    let mut state = self.global_state_lock.lock_guard_mut().await;
+                    state.block_proposal =
+                        BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
+                    state.wallet_state.add_expected_utxos(expected_utxos).await;
+                }
+
+                // Indicate to miner that block proposal was successfully
+                // received by main-loop.
                 self.main_to_miner_tx
                     .send(MainToMiner::Continue)
                     .await
@@ -467,6 +558,11 @@ impl MainLoopHandler {
                         // if this problem is encountered.
                         return Ok(());
                     }
+
+                    // Ask miner to stop work until state update is completed
+                    self.main_to_miner_tx
+                        .send(MainToMiner::WaitForContinue)
+                        .await?;
 
                     // Get out of sync mode if needed
                     if global_state_mut.net.syncing {
@@ -512,11 +608,11 @@ impl MainLoopHandler {
                     .send(MainToPeerTask::Block(Box::new(last_block.clone())))
                     .expect("Peer handler broadcast was closed. This should never happen");
 
-                // Start executing all update jobs.
+                // Spawn task to handle mempool tx-updating after new blocks.
                 // TODO: Do clever trick to collapse all jobs relating to the same transaction,
                 //       identified by transaction-ID, into *one* update job.
-                let proof_queue = self.global_state_lock.vm_job_queue();
-                for update_job in update_jobs {}
+                self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
+                    .await;
 
                 // Inform miner about new block.
                 if self.global_state_lock.cli().mine() {
@@ -1032,6 +1128,33 @@ impl MainLoopHandler {
         Ok(())
     }
 
+    /// Post-processing when new block has arrived. Spawns a task to update
+    /// transactions in the mempool. Only when the spawned task has completed,
+    /// should the miner continue.
+    async fn spawn_mempool_txs_update_job(
+        &self,
+        main_loop_state: &mut MutableMainLoopState,
+        update_jobs: Vec<UpdateMutatorSetDataJob>,
+    ) {
+        // job completion of the spawned task is communicated through the
+        // `update_mempool_txs_handle` channel.
+        let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+        if let Some(handle) = main_loop_state.update_mempool_txs_handle.as_ref() {
+            handle.abort();
+        }
+        let (update_sender, update_receiver) =
+            mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+        main_loop_state.update_mempool_txs_handle = Some(
+            tokio::task::Builder::new()
+                .name("mempool tx ms-updater")
+                .spawn(async move {
+                    Self::update_mempool_jobs(update_jobs, &vm_job_queue, update_sender).await
+                })
+                .unwrap(),
+        );
+        main_loop_state.update_mempool_receiver = update_receiver;
+    }
+
     pub(crate) async fn run(
         &mut self,
         mut peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
@@ -1188,7 +1311,12 @@ impl MainLoopHandler {
 
                 // Handle messages from miner task
                 Some(main_message) = miner_to_main_rx.recv() => {
-                    self.handle_miner_task_message(main_message).await?
+                    self.handle_miner_task_message(main_message, &mut main_loop_state).await?
+                }
+
+                // Handle the completion of mempool tx-update jobs after new
+                Some(ms_updated_transactions) = main_loop_state.update_mempool_receiver.recv() => {
+                    self.handle_updated_mempool_txs(ms_updated_transactions).await;
                 }
 
                 // Handle messages from rpc server task
