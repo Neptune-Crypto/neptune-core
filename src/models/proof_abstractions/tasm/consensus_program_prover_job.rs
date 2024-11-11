@@ -83,7 +83,9 @@ impl ConsensusProgramProverJob {
             let _ =
                 crate::ScopeDurationLogger::new_with_threshold(&crate::macros::fn_name!(), 0.00001);
 
-            vm_state.run()?;
+            if let Err(e) = vm_state.run() {
+                panic!("VM run prior to proving should halt gracefully.\n{e}");
+            }
             vm_state.public_output
         };
         assert_eq!(self.claim.program_digest, self.program.hash());
