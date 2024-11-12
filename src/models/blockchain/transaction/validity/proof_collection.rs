@@ -162,7 +162,7 @@ impl ProofCollection {
                 &removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
 
@@ -172,7 +172,7 @@ impl ProofCollection {
                 &collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
 
@@ -182,7 +182,7 @@ impl ProofCollection {
                 &kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
 
@@ -192,7 +192,7 @@ impl ProofCollection {
                 &collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
 
@@ -204,7 +204,7 @@ impl ProofCollection {
                     .prove(
                         txk_mast_hash_as_input.clone(),
                         triton_vm_job_queue,
-                        proof_job_options.clone(),
+                        proof_job_options,
                     )
                     .await?,
             );
@@ -224,7 +224,7 @@ impl ProofCollection {
                     salted_inputs_hash,
                     salted_outputs_hash,
                     triton_vm_job_queue,
-                    proof_job_options.clone(),
+                    proof_job_options,
                 )
                 .await?,
             );

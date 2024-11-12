@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::bail;
-use anyhow::Context;
 use anyhow::Result;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
@@ -11,7 +10,6 @@ use rand::Rng;
 use rand::SeedableRng;
 use tokio::select;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::*;
 use transaction_output::TxOutput;
@@ -167,14 +165,18 @@ fn guess_worker(
     let hash = block.hash();
     let hex = hash.to_hex();
     let height = block.kernel.header.height;
+    let num_inputs = block.body().transaction_kernel.inputs.len();
+    let num_outputs = block.body().transaction_kernel.outputs.len();
     info!(
         r#"Newly mined block details:
               Height: {height}
-              Time:   {timestamp_standard} ({timestamp})
+              Time  : {timestamp_standard} ({timestamp})
         Digest (Hex): {hex}
         Digest (Raw): {hash}
 Difficulty threshold: {threshold}
           Difficulty: {prev_difficulty}
+          #inputs   : {num_inputs}
+          #outputs  : {num_outputs}
 "#
     );
 
@@ -432,8 +434,8 @@ pub(crate) async fn create_block_transaction(
 ///
 /// Locking:
 ///   * acquires `global_state_lock` for write
-pub async fn mine(
-    mut from_main: watch::Receiver<MainToMiner>,
+pub(crate) async fn mine(
+    mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
     mut global_state_lock: GlobalStateLock,
@@ -504,14 +506,8 @@ pub async fn mine(
 
         // Await a message from either the worker task or from the main loop
         select! {
-            changed = from_main.changed() => {
-                info!("Mining task got message from main");
-                if let e@Err(_) = changed {
-                    return e.context("Miner failed to read from watch channel");
-                }
-
-                let main_message: MainToMiner = from_main.borrow_and_update().clone();
-                debug!("Miner received message {:?}", main_message);
+            Some(main_message) = from_main.recv() => {
+                debug!("Miner received message type: {}", main_message.get_type());
 
                 match main_message {
                     MainToMiner::Shutdown => {
@@ -551,9 +547,20 @@ pub async fn mine(
                             debug!("Abort-signal sent to composer worker.");
                         }
 
-                        info!("Miner received new block proposal for guessing.");
+                        info!("Miner received message about new block proposal for guessing.");
                     }
-                    MainToMiner::Empty => (),
+                    MainToMiner::WaitForContinue => {
+                        if let Some(gt) = guesser_task {
+                            gt.abort();
+                            debug!("Abort-signal sent to guesser worker.");
+                        }
+                        if let Some(ct) = composer_task {
+                            ct.abort();
+                            debug!("Abort-signal sent to composer worker.");
+                        }
+
+                        wait_for_confirmation = true;
+                    }
                     MainToMiner::Continue => {
                         wait_for_confirmation = false;
                     }

@@ -1136,10 +1136,9 @@ mod block_tests {
     }
 
     mod block_is_valid {
+        use super::*;
         use crate::config_models::cli_args;
         use crate::job_queue::triton_vm::TritonVmJobPriority;
-
-        use super::*;
 
         #[traced_test]
         #[tokio::test]

@@ -68,6 +68,28 @@ pub struct UpdateMutatorSetDataJob {
     mutator_set_update: MutatorSetUpdate,
 }
 
+impl UpdateMutatorSetDataJob {
+    pub(crate) fn new(
+        old_kernel: TransactionKernel,
+        old_single_proof: Proof,
+        old_mutator_set: MutatorSetAccumulator,
+        mutator_set_update: MutatorSetUpdate,
+    ) -> Self {
+        Self {
+            old_kernel,
+            old_single_proof,
+            old_mutator_set,
+            mutator_set_update,
+        }
+    }
+}
+
+impl From<UpdateMutatorSetDataJob> for UpgradeJob {
+    fn from(value: UpdateMutatorSetDataJob) -> Self {
+        Self::UpdateMutatorSetData(value)
+    }
+}
+
 impl UpgradeJob {
     /// Create an upgrade job from a primitive witness, for upgrading proof-
     /// support for a transaction that this client has initiated.
@@ -159,7 +181,7 @@ impl UpgradeJob {
     ) {
         let mut upgrade_job = self;
 
-        let job_proof_job_options = match tx_origin {
+        let priority = match tx_origin {
             TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
             TransactionOrigin::Own => TritonVmJobPriority::High,
         };
@@ -177,15 +199,9 @@ impl UpgradeJob {
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
-            let job_options = (
-                job_proof_job_options,
-                global_state_lock.cli().max_log2_padded_height_for_proofs,
-            );
+            let job_options = global_state_lock.cli().proof_job_options(priority);
 
-            let upgraded = match upgrade_job
-                .upgrade(triton_vm_job_queue, job_options.into())
-                .await
-            {
+            let upgraded = match upgrade_job.upgrade(triton_vm_job_queue, job_options).await {
                 Ok(upgraded_tx) => {
                     info!(
                         "Successfully upgraded transaction {}",
@@ -215,14 +231,18 @@ impl UpgradeJob {
                 if !transaction_is_deprecated {
                     // Happy path
 
+                    // Insert tx into mempool before notifying peers, so we're
+                    // sure to have it when they ask.
+                    global_state
+                        .mempool_insert(upgraded.clone(), tx_origin)
+                        .await;
+
                     // Inform all peers about our hard work
                     main_to_peer_channel
                         .send(MainToPeerTask::TransactionNotification(
                             (&upgraded).try_into().unwrap(),
                         ))
                         .unwrap();
-
-                    global_state.mempool_insert(upgraded, tx_origin).await;
 
                     info!("Successfully handled proof upgrade.");
                     return;

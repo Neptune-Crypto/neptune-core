@@ -38,7 +38,6 @@ impl TryFrom<&Transaction> for TransactionNotification {
 
     fn try_from(transaction: &Transaction) -> Result<Self> {
         let proof_quality = match &transaction.proof {
-            TransactionProof::Invalid => bail!("Cannot share invalid transaction proof"),
             TransactionProof::Witness(_) => bail!(
                 "Cannot share primitive witness-backed transaction, as this would leak secret keys"
             ),

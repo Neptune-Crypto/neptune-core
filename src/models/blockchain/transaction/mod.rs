@@ -15,9 +15,6 @@ pub mod transaction_output;
 pub mod utxo;
 pub mod validity;
 
-use std::hash::Hash as StdHash;
-use std::hash::Hasher as StdHasher;
-
 use anyhow::bail;
 use anyhow::Result;
 use arbitrary::Arbitrary;
@@ -111,19 +108,34 @@ impl PublicAnnouncement {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum TransactionProof {
-    #[default]
-    Invalid,
     Witness(PrimitiveWitness),
     SingleProof(Proof),
     ProofCollection(ProofCollection),
 }
 
 impl TransactionProof {
+    /// A proof that will always be invalid
+    #[cfg(test)]
+    pub(crate) fn invalid() -> Self {
+        Self::SingleProof(Proof(vec![]))
+    }
+
+    pub(crate) fn into_single_proof(self) -> Proof {
+        match self {
+            TransactionProof::SingleProof(proof) => proof,
+            TransactionProof::Witness(_) => {
+                panic!("Expected SingleProof, got Witness")
+            }
+            TransactionProof::ProofCollection(_) => {
+                panic!("Expected SingleProof, got ProofCollection")
+            }
+        }
+    }
+
     pub(crate) fn proof_quality(&self) -> Result<TransactionProofQuality> {
         match self {
-            TransactionProof::Invalid => bail!("Invalid proof does not have a proof quality"),
             TransactionProof::Witness(_) => bail!("Primitive witness does not have a proof"),
             TransactionProof::ProofCollection(_) => Ok(TransactionProofQuality::ProofCollection),
             TransactionProof::SingleProof(_) => Ok(TransactionProofQuality::SingleProof),
@@ -132,7 +144,6 @@ impl TransactionProof {
 
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
-            TransactionProof::Invalid => false,
             TransactionProof::Witness(primitive_witness) => {
                 primitive_witness.validate().await
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
@@ -156,23 +167,11 @@ pub enum TransactionProofError {
     ProverLockWasTaken,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
-    #[bfield_codec(ignore)]
     pub proof: TransactionProof,
-}
-
-/// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
-///
-/// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derived_hash_with_manual_eq)]
-impl StdHash for Transaction {
-    fn hash<H: StdHasher>(&self, state: &mut H) {
-        let neptune_hash = Hash::hash(self);
-        StdHash::hash(&neptune_hash, state);
-    }
 }
 
 impl Transaction {
@@ -319,7 +318,7 @@ impl Transaction {
                 &update_claim,
                 update_nondeterminism,
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
         info!("done.");
@@ -344,40 +343,6 @@ impl Transaction {
         })
     }
 
-    /// Update mutator set data in a transaction to update its
-    /// compatibility with a new block. Note that for Proof witnesses, this will
-    /// invalidate the proof, requiring an update.
-    pub async fn new_with_updated_mutator_set_records(
-        self,
-        previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        mutator_set_update: &MutatorSetUpdate,
-        triton_vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
-    ) -> Result<Transaction, TransactionProofError> {
-        match self.proof {
-            TransactionProof::Witness(primitive_witness) => {
-                Ok(Self::new_with_primitive_witness_ms_data(
-                    primitive_witness,
-                    mutator_set_update.additions.clone(),
-                    mutator_set_update.removals.clone(),
-                ))
-            }
-            TransactionProof::SingleProof(proof) => {
-                Self::new_with_updated_mutator_set_records_given_proof(
-                    self.kernel,
-                    previous_mutator_set_accumulator,
-                    mutator_set_update,
-                    proof,
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
-                .await
-                .map_err(|_| TransactionProofError::ProverLockWasTaken)
-            }
-            _ => Err(TransactionProofError::CannotUpdateProofVariant),
-        }
-    }
-
     /// Determine whether the transaction is valid (forget about confirmable).
     /// This method tests the transaction's internal consistency in isolation,
     /// without the context of the canonical chain.
@@ -395,7 +360,7 @@ impl Transaction {
     /// set hashes are not the same, if both transactions have coinbase a
     /// coinbase UTXO, or if either of the transactions are *not* a single
     /// proof.
-    pub async fn merge_with(
+    pub(crate) async fn merge_with(
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
@@ -412,21 +377,8 @@ impl Transaction {
             "Cannot merge two coinbase transactions"
         );
 
-        let as_single_proof = |tx_proof: &TransactionProof, indicator: &str| {
-            if let TransactionProof::SingleProof(single_proof) = tx_proof {
-                single_proof.to_owned()
-            } else {
-                let bad_type = match tx_proof {
-                    TransactionProof::Invalid => "invalid",
-                    TransactionProof::Witness(_primitive_witness) => "primitive_witness",
-                    TransactionProof::SingleProof(_proof) => unreachable!(),
-                    TransactionProof::ProofCollection(_proof_collection) => "proof_collection",
-                };
-                panic!("Transaction proof must be a single proof. {indicator} was: {bad_type}",);
-            }
-        };
-        let self_single_proof = as_single_proof(&self.proof, "self");
-        let other_single_proof = as_single_proof(&other.proof, "other");
+        let self_single_proof = self.proof.into_single_proof();
+        let other_single_proof = other.proof.into_single_proof();
 
         let merge_witness = MergeWitness::from_transactions(
             self.kernel,
@@ -442,7 +394,7 @@ impl Transaction {
                 &merge_claim,
                 merge_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options.clone(),
+                proof_job_options,
             )
             .await?;
         info!("Done: creating merge proof");
@@ -534,7 +486,6 @@ mod tests {
 
 #[cfg(test)]
 mod transaction_tests {
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use lock_script::LockScript;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -544,6 +495,7 @@ mod transaction_tests {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::make_mock_transaction;
@@ -563,14 +515,6 @@ mod transaction_tests {
         // the correct time convention for this test to work.
         let coinbase_transaction = make_mock_transaction(vec![], vec![ar]);
         assert!(Timestamp::now() - coinbase_transaction.kernel.timestamp < Timestamp::seconds(10));
-    }
-
-    #[test]
-    fn encode_decode_empty_tx_test() {
-        let empty_tx = make_mock_transaction(vec![], vec![]);
-        let encoded = empty_tx.encode();
-        let decoded = *Transaction::decode(&encoded).unwrap();
-        assert_eq!(empty_tx, decoded);
     }
 
     // `traced_test` macro inserts return type that clippy doesn't like.
@@ -595,15 +539,16 @@ mod transaction_tests {
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs);
-            let updated_tx = original_tx
-                .new_with_updated_mutator_set_records(
-                    &to_be_updated.mutator_set_accumulator,
-                    &mutator_set_update,
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default().into(),
-                )
-                .await
-                .unwrap();
+            let updated_tx = Transaction::new_with_updated_mutator_set_records_given_proof(
+                original_tx.kernel,
+                &to_be_updated.mutator_set_accumulator,
+                &mutator_set_update,
+                original_tx.proof.into_single_proof(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
 
             assert!(updated_tx.is_valid().await)
         }

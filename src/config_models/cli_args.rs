@@ -9,6 +9,9 @@ use clap::Parser;
 use num_traits::Zero;
 
 use super::network::Network;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::models::proof_abstractions::tasm::consensus_program_prover_job::JobSettings;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// The `neptune-core` command-line program starts a Neptune node.
@@ -230,6 +233,18 @@ impl Args {
     /// Whether to engage in mining (composing or guessing or both)
     pub(crate) fn mine(&self) -> bool {
         self.guess || self.compose
+    }
+
+    pub(crate) fn proof_job_options(
+        &self,
+        job_priority: TritonVmJobPriority,
+    ) -> TritonVmProofJobOptions {
+        TritonVmProofJobOptions {
+            job_priority,
+            job_settings: JobSettings {
+                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
+            },
+        }
     }
 }
 

@@ -2,10 +2,8 @@ use std::panic::catch_unwind;
 use std::panic::RefUnwindSafe;
 
 use itertools::Itertools;
-use tasm_lib::maybe_write_debuggable_program_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
 use tracing::debug;
@@ -73,11 +71,17 @@ where
     }
 
     /// Use Triton VM to run the tasm code.
+    ///
+    /// Should only be called in tests. In production code, use [`Self::run_rust`]
+    /// instead -- it's faster.
+    #[cfg(test)]
     fn run_tasm(
         &self,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        use tasm_lib::maybe_write_debuggable_program_to_disk;
+
         let program = self.program();
         let mut vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
         let init_stack = vm_state.op_stack.clone();
@@ -117,6 +121,7 @@ where
     /// This method is a thin wrapper around [`prove_consensus_program`], which
     /// does the same but for arbitrary programs.
     #[allow(async_fn_in_trait)] // Trait must be public bc of benchmarks.
+    #[allow(private_interfaces)] // Trait must be public bc of benchmarks.
     async fn prove(
         &self,
         claim: &Claim,
@@ -180,11 +185,12 @@ pub(crate) async fn prove_consensus_program(
     Ok(proof)
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct TritonVmProofJobOptions {
+#[derive(Clone, Debug, Default, Copy)]
+pub(crate) struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
     pub job_settings: JobSettings,
 }
+
 impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
     fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
         let (job_priority, max_log2_padded_height_for_proofs) = v;

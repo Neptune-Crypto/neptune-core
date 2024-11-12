@@ -10,12 +10,12 @@
 //! program can execute at a time.
 #[cfg(not(test))]
 use std::process::Stdio;
+
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
-
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -38,9 +38,9 @@ impl From<&ConsensusProgramProverJobResult> for Proof {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct JobSettings {
-    pub max_log2_padded_height_for_proofs: Option<u8>,
+#[derive(Debug, Clone, Default, Copy)]
+pub(crate) struct JobSettings {
+    pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
 }
 
 #[derive(Debug, Clone)]

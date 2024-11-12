@@ -55,6 +55,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
+use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -72,8 +73,8 @@ pub struct WalletState {
 
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
-    mempool_spent_utxos: HashMap<Digest, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
-    mempool_unspent_utxos: HashMap<Digest, Vec<AnnouncedUtxo>>,
+    mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
+    mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<AnnouncedUtxo>>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -305,15 +306,15 @@ impl WalletState {
                     )
                     .collect_vec();
 
-                let tx_hash = Hash::hash(&tx);
-                self.mempool_spent_utxos.insert(tx_hash, spent_utxos);
-                self.mempool_unspent_utxos.insert(tx_hash, announced_utxos);
+                let tx_id = tx.kernel.txid();
+                self.mempool_spent_utxos.insert(tx_id, spent_utxos);
+                self.mempool_unspent_utxos.insert(tx_id, announced_utxos);
             }
             MempoolEvent::RemoveTx(tx) => {
                 trace!("handling mempool RemoveTx event.");
-                let tx_hash = Hash::hash(&tx);
-                self.mempool_spent_utxos.remove(&tx_hash);
-                self.mempool_unspent_utxos.remove(&tx_hash);
+                let tx_id = tx.kernel.txid();
+                self.mempool_spent_utxos.remove(&tx_id);
+                self.mempool_unspent_utxos.remove(&tx_id);
             }
             MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
                 // Utxos are not affected by MutatorSet update, so this is a no-op.
@@ -1199,7 +1200,6 @@ mod tests {
             cli_args::Args::default(),
         )
         .await;
-        let alice_vm_job_queue = alice_global_lock.vm_job_queue().clone();
 
         let mut alice = alice_global_lock.global_state_lock.lock_guard_mut().await;
         let launch_timestamp = alice.chain.light_state().header().timestamp;
@@ -1261,7 +1261,6 @@ mod tests {
                     alice_key.privacy_preimage,
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
-                &alice_vm_job_queue,
             )
             .await
             .unwrap();
@@ -1304,7 +1303,6 @@ mod tests {
         let mut bob_global_lock =
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
                 .await;
-        let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
@@ -1373,7 +1371,6 @@ mod tests {
                 bob_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMinerComposeBlock,
             )],
-            &bob_vm_job_queue,
         )
         .await
         .unwrap();
@@ -1406,9 +1403,7 @@ mod tests {
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
             make_mock_block(&latest_block, None, alice_address, rng.gen());
-        bob.set_new_tip(block_3b.clone(), &bob_vm_job_queue)
-            .await
-            .unwrap();
+        bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
             bob
@@ -1433,9 +1428,7 @@ mod tests {
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, alice_address, rng.gen());
-            bob.set_new_tip(new_block.clone(), &bob_vm_job_queue)
-                .await
-                .unwrap();
+            bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
         }
@@ -1459,9 +1452,7 @@ mod tests {
 
         // Mine *one* more block. Verify that MUTXO is pruned
         let (block_12, _, _) = make_mock_block(&latest_block, None, alice_address, rng.gen());
-        bob.set_new_tip(block_12.clone(), &bob_vm_job_queue)
-            .await
-            .unwrap();
+        bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(
             bob.wallet_state

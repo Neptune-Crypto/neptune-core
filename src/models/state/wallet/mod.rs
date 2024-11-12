@@ -680,7 +680,6 @@ mod wallet_tests {
         let mut alice =
             mock_genesis_global_state(network, 1, alice_wallet_secret, cli_args::Args::default())
                 .await;
-        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let alice_spending_key = alice
             .lock_guard()
             .await
@@ -729,10 +728,7 @@ mod wallet_tests {
                     UtxoNotifier::OwnMinerComposeBlock,
                 ))
                 .await;
-            alice_mut
-                .set_new_tip(block_1.clone(), &alice_vm_job_queue)
-                .await
-                .unwrap();
+            alice_mut.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         // Verify that the allocater returns a sane amount
@@ -772,10 +768,7 @@ mod wallet_tests {
                         UtxoNotifier::OwnMinerComposeBlock,
                     ))
                     .await;
-                alice
-                    .set_new_tip(next_block_prime.clone(), &alice_vm_job_queue)
-                    .await
-                    .unwrap();
+                alice.set_new_tip(next_block_prime.clone()).await.unwrap();
                 next_block = next_block_prime;
             }
         }
@@ -890,7 +883,6 @@ mod wallet_tests {
         let mut bob_global_lock =
             mock_genesis_global_state(network, 2, bob_wallet.clone(), cli_args::Args::default())
                 .await;
-        let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
@@ -945,9 +937,7 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone(), &bob_vm_job_queue)
-            .await
-            .unwrap();
+        bob.set_new_tip(block_1.clone()).await.unwrap();
 
         assert_eq!(
             bobs_original_balance
@@ -1021,9 +1011,7 @@ mod wallet_tests {
                 .add_expected_utxo(expected_utxo)
                 .await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
-            bob.set_new_tip(next_block.clone(), &bob_vm_job_queue)
-                .await
-                .unwrap();
+            bob.set_new_tip(next_block.clone()).await.unwrap();
         }
 
         let first_block_after_spree = next_block;
@@ -1092,9 +1080,7 @@ mod wallet_tests {
             rng.gen(),
         );
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
-        bob.set_new_tip(block_2_b.clone(), &bob_vm_job_queue)
-            .await
-            .unwrap();
+        bob.set_new_tip(block_2_b.clone()).await.unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =
             get_monitored_utxos(&alice.lock_guard().await.wallet_state)
                 .await

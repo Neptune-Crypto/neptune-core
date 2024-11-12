@@ -14,13 +14,16 @@ use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 
 #[derive(Clone, Debug)]
-pub enum MainToMiner {
-    Empty,
+pub(crate) enum MainToMiner {
     NewBlock(Box<Block>),
     Shutdown,
 
     /// Communicates to miner that it should work on a new block proposal
     NewBlockProposal,
+
+    /// Main has received a new block or block proposal, and the miner should
+    /// stop all work until it receives a [MainToMiner::Continue] message.
+    WaitForContinue,
 
     /// Used to communicate that main loop has received the block or block
     /// proposal from the miner, and that miner can start a new task.
@@ -32,6 +35,22 @@ pub enum MainToMiner {
     StartSyncing,
     StopSyncing,
     // SetCoinbasePubkey,
+}
+
+impl MainToMiner {
+    pub(crate) fn get_type(&self) -> &str {
+        match self {
+            MainToMiner::NewBlock(_) => "new block",
+            MainToMiner::Shutdown => "shutdown",
+            MainToMiner::NewBlockProposal => "new block proposal",
+            MainToMiner::WaitForContinue => "wait for continue",
+            MainToMiner::Continue => "continue",
+            MainToMiner::StopMining => "stop mining",
+            MainToMiner::StartMining => "start mining",
+            MainToMiner::StartSyncing => "start syncing",
+            MainToMiner::StopSyncing => "stop syncing",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

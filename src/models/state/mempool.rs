@@ -44,12 +44,12 @@ use serde::Serialize;
 use tasm_lib::triton_vm::proof::Proof;
 use tracing::debug;
 use tracing::error;
-use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use super::tx_proving_capability::TxProvingCapability;
+use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -57,7 +57,6 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
-use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
@@ -256,6 +255,18 @@ impl Mempool {
             .map(|x| &x.transaction)
     }
 
+    /// get mutable reference to a transaction from mempool
+    ///
+    /// Computes in O(1) from HashMap
+    pub(crate) fn get_mut(
+        &mut self,
+        transaction_id: TransactionKernelId,
+    ) -> Option<&mut Transaction> {
+        self.tx_dictionary
+            .get_mut(&transaction_id)
+            .map(|x| &mut x.transaction)
+    }
+
     /// Returns the list of transactions already in the mempool that a
     /// transaction conflicts with.
     ///
@@ -303,13 +314,27 @@ impl Mempool {
     /// Panics if the transaction's proof is of the wrong type.
     pub(super) fn insert(
         &mut self,
-        transaction: Transaction,
+        new_tx: Transaction,
         origin: TransactionOrigin,
     ) -> Vec<MempoolEvent> {
+        fn new_tx_has_higher_proof_quality(
+            new_tx: &Transaction,
+            conflicts: &[(TransactionKernelId, &Transaction)],
+        ) -> bool {
+            match &new_tx.proof {
+                TransactionProof::Witness(_) => false,
+                TransactionProof::ProofCollection(_) => conflicts
+                    .iter()
+                    .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_))),
+                TransactionProof::SingleProof(_) => conflicts
+                    .iter()
+                    .any(|x| !matches!(&x.1.proof, TransactionProof::SingleProof(_))),
+            }
+        }
+
         let mut events = vec![];
 
-        match transaction.proof {
-            TransactionProof::Invalid => panic!("cannot insert invalid transaction into mempool"),
+        match new_tx.proof {
             TransactionProof::Witness(_) => {}
             TransactionProof::SingleProof(_) => {}
             TransactionProof::ProofCollection(_) => {}
@@ -321,12 +346,14 @@ impl Mempool {
         // the effect that merged transactions always replace those transactions
         // that were merged since the merged transaction is *very* likely to
         // have a higher fee density that the lowest one of the ones that were
-        // merged.
-        let conflicts = self.transaction_conflicts_with(&transaction);
+        // merged. If the new transaction has a higher proof quality than the
+        // conflict, we also replace the old transactions.
+        let conflicts = self.transaction_conflicts_with(&new_tx);
+        let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality(&new_tx, &conflicts);
         let min_fee_of_conflicts = conflicts.iter().map(|x| x.1.fee_density()).min();
         let conflicts = conflicts.into_iter().map(|x| x.0).collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            if min_fee_of_conflicting_tx < transaction.fee_density() {
+            if new_tx_has_higher_proof_quality || min_fee_of_conflicting_tx < new_tx.fee_density() {
                 for conflicting_txid in conflicts {
                     if let Some(e) = self.remove(conflicting_txid) {
                         events.push(e);
@@ -335,20 +362,24 @@ impl Mempool {
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
                 // ignore it. Stop execution here.
+                debug!(
+                    "Attempted to insert transaction into mempool but it's \
+                     fee density was eclipsed by another transaction."
+                );
                 return events;
             }
         }
 
-        let txid = transaction.kernel.txid();
+        let txid = new_tx.kernel.txid();
 
-        self.queue.push(txid, transaction.fee_density());
+        self.queue.push(txid, new_tx.fee_density());
 
         let as_mempool_transaction = MempoolTransaction {
-            transaction: transaction.clone(),
+            transaction: new_tx.clone(),
             origin,
         };
         self.tx_dictionary.insert(txid, as_mempool_transaction);
-        events.push(MempoolEvent::AddTx(transaction));
+        events.push(MempoolEvent::AddTx(new_tx));
 
         assert_eq!(
             self.tx_dictionary.len(),
@@ -544,16 +575,20 @@ impl Mempool {
     /// of a newly received block. Update all mutator set data for transactions
     /// that are our own. If client acts as a composer, all transactions are
     /// updated.
+    ///
+    /// Since updating SingleProof-backed transactions takes a very long time,
+    /// this proof generation does not happen in this method. Only a
+    /// description of the jobs to be done is returned. It is then up to the
+    /// caller to ensure these updates happen. Returned mempool events does not
+    /// include information about mutator set updates. That must be handled by
+    /// the caller where the update jobs are executed.
     pub(super) async fn update_with_block_and_predecessor(
         &mut self,
         new_block: &Block,
         predecessor_block: &Block,
-        vm_job_queue: &TritonVmJobQueue,
-        proof_job_options: TritonVmProofJobOptions,
+        tx_proving_capability: TxProvingCapability,
         composing: bool,
-    ) -> Vec<MempoolEvent> {
-        let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
-
+    ) -> (Vec<MempoolEvent>, Vec<UpdateMutatorSetDataJob>) {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
         // proofs back to previous blocks. It would be nice if we could handle a
@@ -610,49 +645,72 @@ impl Mempool {
         // Update policy:
         // We update transaction if either of these conditions are true:
         // a) We're composing
-        // b) We initiated this transaction.
-
+        // b) We initiated this transaction *and* client is capable of creating
+        //    these proofs.
         // If we cannot update the transaction, we kick it out regardless.
+        let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
+        let mut update_jobs = vec![];
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if !(composing || tx.origin.is_own()) {
                 debug!(
                     "Not updating transaction {tx_id} since it's not \
-                        initiated by us, and client is not composing."
+                    initiated by us, and client is not composing."
                 );
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
                 continue;
             }
 
-            // Attempt update
-            if let Ok(new_tx) = tx
-                .transaction
-                .clone()
-                .new_with_updated_mutator_set_records(
-                    &previous_mutator_set_accumulator,
-                    &mutator_set_update,
-                    vm_job_queue,
-                    proof_job_options.clone(),
-                )
-                .await
-            {
-                tx.transaction = new_tx;
-                events.push(MempoolEvent::UpdateTxMutatorSet(
-                    *tx_id,
-                    tx.transaction.clone(),
-                ));
-            } else {
-                info!("Failed to update transaction {tx_id}. Removing from mempool.");
-                if tx.origin.is_own() {
-                    warn!(
-                        "Removed transaction was marked as own transaction. \
-                         You probably have to create this transaction again."
-                    );
-                }
+            let can_upgrade_single_proof =
+                TxProvingCapability::SingleProof == tx_proving_capability;
+            let (update_job, can_update) = match &tx.transaction.proof {
+                TransactionProof::ProofCollection(_) => {
+                    debug!("Failed to update transaction {tx_id}. Because it is only supported by a proof collection.");
 
+                    (None, false)
+                }
+                TransactionProof::Witness(primitive_witness) => {
+                    let new_tx = Transaction::new_with_primitive_witness_ms_data(
+                        primitive_witness.to_owned(),
+                        mutator_set_update.additions.clone(),
+                        mutator_set_update.removals.clone(),
+                    );
+
+                    tx.transaction = new_tx.clone();
+                    events.push(MempoolEvent::UpdateTxMutatorSet(*tx_id, new_tx.clone()));
+                    debug!("Updating primitive-witness supported transaction {tx_id} to new mutator set.");
+
+                    (None, true)
+                }
+                TransactionProof::SingleProof(old_proof) => {
+                    if can_upgrade_single_proof {
+                        let job = UpdateMutatorSetDataJob::new(
+                            tx.transaction.kernel.clone(),
+                            old_proof.to_owned(),
+                            previous_mutator_set_accumulator.clone(),
+                            mutator_set_update.clone(),
+                        );
+                        debug!("Updating single-proof supported transaction {tx_id} to new mutator set.");
+
+                        (Some(job), true)
+                    } else {
+                        debug!("Not updating single-proof supported transaction {tx_id}, because TxProvingCapability was only {tx_proving_capability}.");
+                        (None, false)
+                    }
+                }
+            };
+
+            if let Some(update_job) = update_job {
+                update_jobs.push(update_job);
+            }
+
+            if !can_update {
                 kick_outs.push(*tx_id);
                 events.push(MempoolEvent::RemoveTx(tx.transaction.clone()));
+                if tx.origin.is_own() {
+                    warn!("Unable to update own transaction to new mutator set. You may need to create this transaction again. Removing {tx_id} from mempool.");
+                }
             }
         }
 
@@ -667,7 +725,7 @@ impl Mempool {
         let current_block_digest = new_block.hash();
         self.set_tip_digest_sync_label(current_block_digest);
 
-        events
+        (events, update_jobs)
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -734,7 +792,6 @@ impl Mempool {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::state::TritonVmJobPriority;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::One;
@@ -751,6 +808,8 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::main_loop::proof_upgrader::UpgradeJob;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -978,11 +1037,38 @@ mod tests {
         // Check that the mempool removes transactions that were incorporated or
         // made unconfirmable by the new block.
 
-        // Do not check whether blocks are valid: that would require
-        // producing (expensive) proofs. What is being tested here is the correct
-        // mempool update.
+        // This test makes valid transaction proofs but not valid block proofs.
+        // What is being tested here is the correct mempool update.
 
         // Bob is premine receiver, Alice is not.
+
+        /// Mocking what the caller might do with the update jobs.
+        async fn mocked_mempool_update_handler(
+            update_jobs: Vec<UpdateMutatorSetDataJob>,
+            mempool: &mut Mempool,
+        ) -> Vec<MempoolEvent> {
+            let mut updated_txs = vec![];
+            for job in update_jobs {
+                let updated = UpgradeJob::UpdateMutatorSetData(job)
+                    .upgrade(
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmJobPriority::Highest.into(),
+                    )
+                    .await
+                    .unwrap();
+                updated_txs.push(updated);
+            }
+
+            let mut events = vec![];
+            for updated_tx in updated_txs {
+                let txid = updated_tx.kernel.txid();
+                let tx = mempool.get_mut(txid).unwrap();
+                *tx = updated_tx.clone();
+                events.push(MempoolEvent::UpdateTxMutatorSet(txid, updated_tx));
+            }
+
+            events
+        }
 
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
@@ -1131,15 +1217,15 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool
+        let (_, update_jobs) = mempool
             .update_with_block_and_predecessor(
                 &block_2,
                 &block_1,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
+                TxProvingCapability::SingleProof,
                 true,
             )
             .await;
+        mocked_mempool_update_handler(update_jobs, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -1163,15 +1249,15 @@ mod tests {
                 make_mock_block(&previous_block, None, alice_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            mempool
+            let (_, joinhandles1) = mempool
                 .update_with_block_and_predecessor(
                     &next_block,
                     &previous_block,
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default().into(),
+                    TxProvingCapability::SingleProof,
                     true,
                 )
                 .await;
+            mocked_mempool_update_handler(joinhandles1, &mut mempool).await;
             previous_block = next_block;
         }
 
@@ -1198,15 +1284,15 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        mempool
+        let (_, joinhandles2) = mempool
             .update_with_block_and_predecessor(
                 &block_5,
                 &previous_block,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
+                TxProvingCapability::SingleProof,
                 true,
             )
             .await;
+        mocked_mempool_update_handler(joinhandles2, &mut mempool).await;
 
         assert!(
             mempool.is_empty(),
@@ -1626,5 +1712,134 @@ mod tests {
         println!(
             "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
         );
+    }
+
+    mod proof_quality_tests {
+        use super::*;
+
+        /// Return a valid transaction with a specified proof type.
+        async fn tx_with_proof_type(
+            proof_type: TxProvingCapability,
+            network: Network,
+            fee: NeptuneCoins,
+        ) -> Transaction {
+            let genesis_block = Block::genesis_block(network);
+            let bob_wallet_secret = WalletSecret::devnet_wallet();
+            let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+            let bob = mock_genesis_global_state(
+                network,
+                2,
+                bob_wallet_secret.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+            let (tx_by_bob, _maybe_change_output) = bob
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![].into(),
+                    bob_spending_key.into(),
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    in_seven_months,
+                    proof_type,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+
+            tx_by_bob
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn single_proof_always_replaces_primitive_witness() {
+            let network = Network::Main;
+            let pw_high_fee = tx_with_proof_type(
+                TxProvingCapability::PrimitiveWitness,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pw_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pw-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::SingleProof(_)
+            ));
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn single_proof_always_replaces_proof_collection() {
+            let network = Network::Main;
+            let pc_high_fee = tx_with_proof_type(
+                TxProvingCapability::ProofCollection,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::SingleProof, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pc-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::SingleProof(_)
+            ));
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn proof_collection_always_replaces_proof_primitive_witness() {
+            let network = Network::Main;
+            let pc_high_fee = tx_with_proof_type(
+                TxProvingCapability::PrimitiveWitness,
+                network,
+                NeptuneCoins::new(15),
+            )
+            .await;
+            let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
+            mempool.insert(pc_high_fee, TransactionOrigin::Own);
+            assert!(mempool.len().is_one(), "One tx after insertion");
+
+            let low_fee = NeptuneCoins::new(1);
+            let sp_low_fee =
+                tx_with_proof_type(TxProvingCapability::ProofCollection, network, low_fee).await;
+            let txid = sp_low_fee.kernel.txid();
+            mempool.insert(sp_low_fee, TransactionOrigin::Own);
+            assert!(
+                mempool.len().is_one(),
+                "One tx after 2nd insertion. Because pw-tx was replaced."
+            );
+            let tx_in_mempool = mempool.get(txid).unwrap();
+            assert!(matches!(
+                tx_in_mempool.proof,
+                TransactionProof::ProofCollection(_)
+            ));
+        }
     }
 }

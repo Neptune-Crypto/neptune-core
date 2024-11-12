@@ -171,7 +171,7 @@ impl TypeScriptAndWitness {
     }
 
     /// Assuming the type script halts gracefully, prove it.
-    pub async fn prove(
+    pub(crate) async fn prove(
         &self,
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,

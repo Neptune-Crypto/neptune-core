@@ -52,7 +52,6 @@ use tarpc::tokio_serde::formats::*;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::info;
 use tracing::trace;
@@ -85,7 +84,7 @@ use crate::rpc_server::RPC;
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
-const MINER_CHANNEL_CAPACITY: usize = 3;
+const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -222,7 +221,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
-    let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
+    let (main_to_miner_tx, main_to_miner_rx) = mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
     let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
     if global_state_lock.cli().mine() {
         let miner_join_handle = tokio::task::Builder::new()

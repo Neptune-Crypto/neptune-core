@@ -283,12 +283,9 @@ impl SingleProof {
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        let proof_collection = ProofCollection::produce(
-            primitive_witness,
-            triton_vm_job_queue,
-            proof_job_options.clone(),
-        )
-        .await?;
+        let proof_collection =
+            ProofCollection::produce(primitive_witness, triton_vm_job_queue, proof_job_options)
+                .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();
@@ -849,7 +846,6 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
@@ -858,6 +854,7 @@ mod test {
     use tasm_lib::triton_vm::prelude::BFieldCodec;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::merge::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
