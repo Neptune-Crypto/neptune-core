@@ -820,9 +820,6 @@ impl PeerLoopHandler {
                     }
                 }
 
-                // We can't reward a peer for notifying us of a block without
-                // knowing that that block is valid.
-
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
@@ -1032,9 +1029,6 @@ impl PeerLoopHandler {
                     .send(PeerTaskToMain::Transaction(Box::new(pt2m_transaction)))
                     .await?;
 
-                // Valuable, hard-to-produce, new information. So reward peer.
-                self.reward(PeerSanctionReason::ValidNewTransaction).await?;
-
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(tx_notification) => {
@@ -1072,9 +1066,6 @@ impl PeerLoopHandler {
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
-
-                // We cannot reward the peer for notifying us of a transaction
-                // without knowing whether the transaction is valid.
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1125,9 +1116,6 @@ impl PeerLoopHandler {
                         self.peer_address
                     );
                 }
-
-                // We cannot reward the peer for notifying us of a new block
-                // proposal without knowing if it is valid.
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }

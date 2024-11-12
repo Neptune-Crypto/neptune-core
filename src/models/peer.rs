@@ -149,8 +149,11 @@ pub enum PeerSanctionReason {
     NoStandingFoundMaybeCrash,
 
     // positive sanctions (standing-improving)
+    // We only reward events that are unlikely to occur more frequently than the
+    // target block frequency. This should make it impossible for an attacker
+    // to quickly ramp up their standing with peers, provided that they are on
+    // the global tip.
     ValidBlocks(usize),
-    ValidNewTransaction,
     NewBlockProposal,
 }
 
@@ -186,7 +189,6 @@ impl Display for PeerSanctionReason {
             PeerSanctionReason::NonFavorableBlockProposal => "non-favorable block proposal",
 
             PeerSanctionReason::ValidBlocks(_) => "valid blocks",
-            PeerSanctionReason::ValidNewTransaction => "valid transaction",
             PeerSanctionReason::NewBlockProposal => "new block proposal",
         };
         write!(f, "{string}")
@@ -246,7 +248,6 @@ impl PeerSanctionReason {
                 .try_into()
                 .map(|n: i32| n.saturating_mul(10))
                 .unwrap_or(i32::MAX),
-            PeerSanctionReason::ValidNewTransaction => 3,
             PeerSanctionReason::NewBlockProposal => 7,
         }
     }
