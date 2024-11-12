@@ -31,11 +31,13 @@ use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
 use crate::models::peer::MutablePeerState;
+use crate::models::peer::NegativePeerSanction;
 use crate::models::peer::PeerConnectionInfo;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
-use crate::models::peer::PeerSanctionReason;
+use crate::models::peer::PeerSanction;
 use crate::models::peer::PeerStanding;
+use crate::models::peer::PositivePeerSanction;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
@@ -120,22 +122,29 @@ impl PeerLoopHandler {
         }
     }
 
-    // TODO: Add a reward function that mutates the peer status
-
     /// Punish a peer for bad behavior.
     ///
     /// Return `Err` if the peer in question is (now) banned.
     ///
     /// # Locking:
     ///   * acquires `global_state_lock` for write
-    async fn punish(&mut self, reason: PeerSanctionReason) -> Result<()> {
+    async fn punish(&mut self, reason: NegativePeerSanction) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         warn!("Punishing peer {} for {:?}", self.peer_address.ip(), reason);
+        debug!(
+            "Peer standing before punishment is {}",
+            global_state_mut
+                .net
+                .peer_map
+                .get(&self.peer_address)
+                .unwrap()
+                .standing
+        );
         match global_state_mut
             .net
             .peer_map
             .get_mut(&self.peer_address)
-            .map(|p| p.standing.sanction(reason))
+            .map(|p: &mut PeerInfo| p.standing.sanction(PeerSanction::Negative(reason)))
         {
             Some(Ok(_standing)) => Ok(()),
             Some(Err(_banned)) => {
@@ -143,8 +152,7 @@ impl PeerLoopHandler {
                 bail!("Banning peer");
             }
             None => {
-                error!("Could not read peer map.");
-                Ok(())
+                bail!("Could not read peer map.");
             }
         }
     }
@@ -155,14 +163,14 @@ impl PeerLoopHandler {
     ///
     /// # Locking:
     ///   * acquires `global_state_lock` for write
-    async fn reward(&mut self, reason: PeerSanctionReason) -> Result<()> {
+    async fn reward(&mut self, reason: PositivePeerSanction) -> Result<()> {
         let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         info!("Rewarding peer {} for {:?}", self.peer_address.ip(), reason);
         match global_state_mut
             .net
             .peer_map
             .get_mut(&self.peer_address)
-            .map(|p| p.standing.sanction(reason))
+            .map(|p| p.standing.sanction(PeerSanction::Positive(reason)))
         {
             Some(Ok(_standing)) => Ok(()),
             Some(Err(_banned)) => {
@@ -221,7 +229,7 @@ impl PeerLoopHandler {
                     previous_block.kernel.header.difficulty.target(),
                     new_block.hash().values().iter().join(", ")
                 );
-                self.punish(PeerSanctionReason::InvalidBlock((
+                self.punish(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
                 )))
@@ -233,7 +241,7 @@ impl PeerLoopHandler {
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
                 );
-                self.punish(PeerSanctionReason::InvalidBlock((
+                self.punish(NegativePeerSanction::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
                 )))
@@ -279,7 +287,7 @@ impl PeerLoopHandler {
         );
 
         // Valuable, new, hard-to-produce information. Reward peer.
-        self.reward(PeerSanctionReason::ValidBlocks(number_of_received_blocks))
+        self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))
             .await?;
 
         Ok(Some(new_block_height))
@@ -361,7 +369,7 @@ impl PeerLoopHandler {
             } else {
                 // Blocks received out of order. Or more than allowed received without
                 // going into sync mode. Give up on block resolution attempt.
-                self.punish(PeerSanctionReason::ForkResolutionError((
+                self.punish(NegativePeerSanction::ForkResolutionError((
                     received_block.kernel.header.height,
                     peer_state.fork_reconciliation_blocks.len() as u16,
                     received_block.hash(),
@@ -383,7 +391,7 @@ impl PeerLoopHandler {
 
         // We got all the way back to genesis, but disagree about genesis. Ban peer.
         if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-            self.punish(PeerSanctionReason::DifferentGenesis).await?;
+            self.punish(NegativePeerSanction::DifferentGenesis).await?;
             return Ok(());
         }
 
@@ -506,7 +514,7 @@ impl PeerLoopHandler {
                 );
 
                 if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(PeerSanctionReason::FloodPeerListResponse)
+                    self.punish(NegativePeerSanction::FloodPeerListResponse)
                         .await?;
                 }
                 self.to_main_tx
@@ -600,7 +608,7 @@ impl PeerLoopHandler {
                 let peers_latest_canonical_block = match peers_preferred_canonical_block {
                     Some(plcb) => plcb,
                     None => {
-                        self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)
+                        self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
@@ -686,7 +694,8 @@ impl PeerLoopHandler {
                 );
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
-                    self.punish(PeerSanctionReason::TooShortBlockBatch).await?;
+                    self.punish(NegativePeerSanction::TooShortBlockBatch)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -695,7 +704,7 @@ impl PeerLoopHandler {
                 // and those that are not
                 if !self.global_state_lock.lock_guard().await.net.syncing {
                     warn!("Received a batch of blocks without being in syncing mode");
-                    self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
+                    self.punish(NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -717,7 +726,7 @@ impl PeerLoopHandler {
                     Some(block) => block,
                     None => {
                         warn!("Got batch reponse with invalid start height");
-                        self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)
+                        self.punish(NegativePeerSanction::BatchBlocksInvalidStartHeight)
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
@@ -867,7 +876,7 @@ impl PeerLoopHandler {
 
                 if block_digests.is_empty() {
                     warn!("Got block request by height for unknown block");
-                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)
+                    self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -914,7 +923,7 @@ impl PeerLoopHandler {
                 // The handshake should have been sent during connection
                 // initalization. Here it is out of order at best, malicious at
                 // worst.
-                self.punish(PeerSanctionReason::InvalidMessage).await?;
+                self.punish(NegativePeerSanction::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::ConnectionStatus(_) => {
@@ -926,7 +935,7 @@ impl PeerLoopHandler {
                 // initalization. Here it is out of order at best, malicious at
                 // worst.
 
-                self.punish(PeerSanctionReason::InvalidMessage).await?;
+                self.punish(NegativePeerSanction::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Transaction(transaction) => {
@@ -946,7 +955,8 @@ impl PeerLoopHandler {
                 // 1. If transaction is invalid, punish.
                 if !transaction.is_valid().await {
                     warn!("Received invalid tx");
-                    self.punish(PeerSanctionReason::InvalidTransaction).await?;
+                    self.punish(NegativePeerSanction::InvalidTransaction)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -955,7 +965,7 @@ impl PeerLoopHandler {
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
                     warn!("Received non-mined transaction with coinbase.");
-                    self.punish(PeerSanctionReason::NonMinedTransactionHasCoinbase)
+                    self.punish(NegativePeerSanction::NonMinedTransactionHasCoinbase)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -990,7 +1000,7 @@ impl PeerLoopHandler {
                     transaction.is_confirmable_relative_to(&mutator_set_accumulator_after);
                 if !confirmable {
                     warn!("Received unconfirmable tx");
-                    self.punish(PeerSanctionReason::UnconfirmableTransaction)
+                    self.punish(NegativePeerSanction::UnconfirmableTransaction)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -1135,7 +1145,7 @@ impl PeerLoopHandler {
                     peer.send(PeerMessage::BlockProposal(Box::new(proposal)))
                         .await?;
                 } else {
-                    self.punish(PeerSanctionReason::BlockProposalNotFound)
+                    self.punish(NegativePeerSanction::BlockProposalNotFound)
                         .await?;
                 }
 
@@ -1156,7 +1166,7 @@ impl PeerLoopHandler {
                         block.total_guesser_reward(),
                     )
                 {
-                    self.punish(PeerSanctionReason::NonFavorableBlockProposal)
+                    self.punish(NegativePeerSanction::NonFavorableBlockProposal)
                         .await?;
 
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1171,7 +1181,7 @@ impl PeerLoopHandler {
                     .light_state()
                     .to_owned();
                 if !block.is_valid(&tip, self.now()) {
-                    self.punish(PeerSanctionReason::InvalidBlockProposal)
+                    self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
 
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1182,7 +1192,7 @@ impl PeerLoopHandler {
                     .await?;
 
                 // Valuable, new, hard-to-produce information. Reward peer.
-                self.reward(PeerSanctionReason::NewBlockProposal).await?;
+                self.reward(PositivePeerSanction::NewBlockProposal).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -1258,7 +1268,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                self.punish(PeerSanctionReason::SynchronizationTimeout)
+                self.punish(NegativePeerSanction::SynchronizationTimeout)
                     .await?;
 
                 // If this peer failed the last synchronization attempt, we only
@@ -1427,14 +1437,13 @@ impl PeerLoopHandler {
     {
         let global_state = self.global_state_lock.lock_guard().await;
 
-        // Check if peer standing exists in database, return default if it does not.
-        let standing: PeerStanding = global_state
+        let standing = global_state
             .net
             .peer_databases
             .peer_standings
             .get(self.peer_address.ip())
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|| PeerStanding::new(global_state.cli().peer_tolerance));
 
         // Add peer to peer map
         let peer_connection_info = PeerConnectionInfo::new(
@@ -1637,6 +1646,7 @@ mod peer_loop_tests {
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
+        assert_eq!(1000, state_lock.cli().peer_tolerance);
         let peer_address = get_dummy_socket_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
@@ -1701,10 +1711,13 @@ mod peer_loop_tests {
             .net
             .get_peer_standing_from_database(peer_address.ip())
             .await;
-        assert_eq!(-(u16::MAX as i32), peer_standing.unwrap().standing);
         assert_eq!(
-            PeerSanctionReason::DifferentGenesis,
-            peer_standing.unwrap().latest_sanction.unwrap()
+            -i32::from(state_lock.cli().peer_tolerance),
+            peer_standing.unwrap().standing
+        );
+        assert_eq!(
+            NegativePeerSanction::DifferentGenesis,
+            peer_standing.unwrap().latest_punishment.unwrap().0
         );
 
         Ok(())

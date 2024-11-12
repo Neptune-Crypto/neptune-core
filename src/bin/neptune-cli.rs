@@ -374,8 +374,8 @@ async fn main() -> Result<()> {
             let peer_sanctions = client.all_sanctioned_peers(ctx).await?;
             for (ip, sanction) in peer_sanctions {
                 let standing = sanction.standing;
-                let latest_sanction_str = match sanction.latest_sanction {
-                    Some(sanction) => sanction.to_string(),
+                let latest_sanction_str = match sanction.latest_punishment {
+                    Some((sanction, _timestamp)) => sanction.to_string(),
                     None => String::default(),
                 };
                 println!(

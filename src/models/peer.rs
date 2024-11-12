@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use serde::Deserialize;
 use serde::Serialize;
+use tracing::trace;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 use twenty_first::math::digest::Digest;
@@ -66,10 +67,8 @@ impl PeerInfo {
         is_archival_node: bool,
         peer_tolerance: u16,
     ) -> Self {
-        let standing = PeerStanding {
-            peer_tolerance: i32::from(peer_tolerance),
-            ..Default::default()
-        };
+        assert!(peer_tolerance > 0, "Peer tolerance must be positive");
+        let standing = PeerStanding::new(peer_tolerance);
         Self {
             peer_connection_info,
             instance_id,
@@ -118,12 +117,12 @@ impl PeerInfo {
     }
 }
 
-/// The reason for changing a peer's standing.
-///
-/// Sanctions can be positive (rewards) or negative (punishments).
+trait Sanction {
+    fn severity(self) -> i32;
+}
+/// The reason for degrading a peer's standing
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum PeerSanctionReason {
-    // negative sanctions (standing-degrading)
+pub enum NegativePeerSanction {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
     ForkResolutionError((BlockHeight, u16, Digest)),
@@ -147,7 +146,11 @@ pub enum PeerSanctionReason {
     UnwantedMessage,
 
     NoStandingFoundMaybeCrash,
+}
 
+/// The reason for improving a peer's standing
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum PositivePeerSanction {
     // positive sanctions (standing-improving)
     // We only reward events that are unlikely to occur more frequently than the
     // target block frequency. This should make it impossible for an attacker
@@ -157,39 +160,46 @@ pub enum PeerSanctionReason {
     NewBlockProposal,
 }
 
-impl Display for PeerSanctionReason {
+impl Display for NegativePeerSanction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let string = match self {
-            PeerSanctionReason::InvalidBlock(_) => "invalid block",
-            PeerSanctionReason::DifferentGenesis => "different genesis",
-            PeerSanctionReason::ForkResolutionError(_) => "fork resolution error",
-            PeerSanctionReason::SynchronizationTimeout => "synchronization timeout",
-            PeerSanctionReason::FloodPeerListResponse => "flood peer list response",
-            PeerSanctionReason::BlockRequestUnknownHeight => "block request unknown height",
-            PeerSanctionReason::InvalidMessage => "invalid message",
-            PeerSanctionReason::TooShortBlockBatch => "too short block batch",
-            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => {
+            NegativePeerSanction::InvalidBlock(_) => "invalid block",
+            NegativePeerSanction::DifferentGenesis => "different genesis",
+            NegativePeerSanction::ForkResolutionError(_) => "fork resolution error",
+            NegativePeerSanction::SynchronizationTimeout => "synchronization timeout",
+            NegativePeerSanction::FloodPeerListResponse => "flood peer list response",
+            NegativePeerSanction::BlockRequestUnknownHeight => "block request unknown height",
+            NegativePeerSanction::InvalidMessage => "invalid message",
+            NegativePeerSanction::TooShortBlockBatch => "too short block batch",
+            NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync => {
                 "received block batch outside of sync"
             }
-            PeerSanctionReason::BatchBlocksInvalidStartHeight => {
+            NegativePeerSanction::BatchBlocksInvalidStartHeight => {
                 "invalid start height of batch blocks"
             }
-            PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
-            PeerSanctionReason::InvalidTransaction => "invalid transaction",
-            PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
-            PeerSanctionReason::NonMinedTransactionHasCoinbase => {
+            NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
+            NegativePeerSanction::InvalidTransaction => "invalid transaction",
+            NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
+            NegativePeerSanction::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
             }
-            PeerSanctionReason::NoStandingFoundMaybeCrash => {
+            NegativePeerSanction::NoStandingFoundMaybeCrash => {
                 "No standing found in map. Did peer task crash?"
             }
-            PeerSanctionReason::BlockProposalNotFound => "Block proposal not found",
-            PeerSanctionReason::InvalidBlockProposal => "Invalid block proposal",
-            PeerSanctionReason::UnwantedMessage => "unwanted message",
-            PeerSanctionReason::NonFavorableBlockProposal => "non-favorable block proposal",
+            NegativePeerSanction::BlockProposalNotFound => "Block proposal not found",
+            NegativePeerSanction::InvalidBlockProposal => "Invalid block proposal",
+            NegativePeerSanction::UnwantedMessage => "unwanted message",
+            NegativePeerSanction::NonFavorableBlockProposal => "non-favorable block proposal",
+        };
+        write!(f, "{string}")
+    }
+}
 
-            PeerSanctionReason::ValidBlocks(_) => "valid blocks",
-            PeerSanctionReason::NewBlockProposal => "new block proposal",
+impl Display for PositivePeerSanction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            PositivePeerSanction::ValidBlocks(_) => "valid blocks",
+            PositivePeerSanction::NewBlockProposal => "new block proposal",
         };
         write!(f, "{string}")
     }
@@ -217,81 +227,123 @@ impl PeerSynchronizationState {
     }
 }
 
-impl PeerSanctionReason {
-    pub fn severity(self) -> i32 {
+impl Sanction for NegativePeerSanction {
+    fn severity(self) -> i32 {
         match self {
-            // negative sanctions
-            PeerSanctionReason::InvalidBlock(_) => -10,
-            PeerSanctionReason::DifferentGenesis => i32::MIN,
-            PeerSanctionReason::ForkResolutionError((_height, count, _digest)) => {
+            NegativePeerSanction::InvalidBlock(_) => -10,
+            NegativePeerSanction::DifferentGenesis => i32::MIN,
+            NegativePeerSanction::ForkResolutionError((_height, count, _digest)) => {
                 i32::from(count).saturating_mul(-3)
             }
-            PeerSanctionReason::SynchronizationTimeout => -5,
-            PeerSanctionReason::FloodPeerListResponse => -2,
-            PeerSanctionReason::InvalidMessage => -2,
-            PeerSanctionReason::TooShortBlockBatch => -2,
-            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => -2,
-            PeerSanctionReason::BatchBlocksInvalidStartHeight => -2,
-            PeerSanctionReason::BatchBlocksUnknownRequest => -10,
-            PeerSanctionReason::BlockRequestUnknownHeight => -1,
-            PeerSanctionReason::InvalidTransaction => -10,
-            PeerSanctionReason::UnconfirmableTransaction => -2,
-            PeerSanctionReason::NonMinedTransactionHasCoinbase => -10,
-            PeerSanctionReason::NoStandingFoundMaybeCrash => -10,
-            PeerSanctionReason::BlockProposalNotFound => -1,
-            PeerSanctionReason::InvalidBlockProposal => -10,
-            PeerSanctionReason::UnwantedMessage => -1,
-            PeerSanctionReason::NonFavorableBlockProposal => -1,
+            NegativePeerSanction::SynchronizationTimeout => -5,
+            NegativePeerSanction::FloodPeerListResponse => -2,
+            NegativePeerSanction::InvalidMessage => -2,
+            NegativePeerSanction::TooShortBlockBatch => -2,
+            NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync => -2,
+            NegativePeerSanction::BatchBlocksInvalidStartHeight => -2,
+            NegativePeerSanction::BatchBlocksUnknownRequest => -10,
+            NegativePeerSanction::BlockRequestUnknownHeight => -1,
+            NegativePeerSanction::InvalidTransaction => -10,
+            NegativePeerSanction::UnconfirmableTransaction => -2,
+            NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
+            NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
+            NegativePeerSanction::BlockProposalNotFound => -1,
+            NegativePeerSanction::InvalidBlockProposal => -10,
+            NegativePeerSanction::UnwantedMessage => -1,
+            NegativePeerSanction::NonFavorableBlockProposal => -1,
+        }
+    }
+}
 
-            // positive sanctions
-            PeerSanctionReason::ValidBlocks(number) => number
+/// The reason for changing a peer's standing.
+///
+/// Sanctions can be positive (rewards) or negative (punishments).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) enum PeerSanction {
+    Positive(PositivePeerSanction),
+    Negative(NegativePeerSanction),
+}
+
+impl Sanction for PositivePeerSanction {
+    fn severity(self) -> i32 {
+        match self {
+            PositivePeerSanction::ValidBlocks(number) => number
                 .try_into()
                 .map(|n: i32| n.saturating_mul(10))
                 .unwrap_or(i32::MAX),
-            PeerSanctionReason::NewBlockProposal => 7,
+            PositivePeerSanction::NewBlockProposal => 7,
+        }
+    }
+}
+
+impl Sanction for PeerSanction {
+    fn severity(self) -> i32 {
+        match self {
+            PeerSanction::Positive(positive_peer_sanction) => positive_peer_sanction.severity(),
+            PeerSanction::Negative(negative_peer_sanction) => negative_peer_sanction.severity(),
         }
     }
 }
 
 /// This is object that gets stored in the database to record how well a peer
 /// at a certain IP behaves. A lower number is better.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerStanding {
     pub standing: i32,
-    pub latest_sanction: Option<PeerSanctionReason>,
-    pub timestamp_of_latest_sanction: Option<SystemTime>,
+    pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+    pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
     peer_tolerance: i32,
 }
-
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct StandingExceedsBanThreshold;
 
 impl PeerStanding {
-    pub(crate) fn new(
+    #[cfg(test)]
+    pub(crate) fn init(
         standing: i32,
-        latest_sanction: Option<PeerSanctionReason>,
-        timestamp_of_latest_sanction: Option<SystemTime>,
+        latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+        latest_reward: Option<(PositivePeerSanction, SystemTime)>,
         peer_tolerance: i32,
     ) -> PeerStanding {
         Self {
             standing,
-            latest_sanction,
-            timestamp_of_latest_sanction,
+            latest_punishment,
+            latest_reward,
             peer_tolerance,
+        }
+    }
+
+    pub(crate) fn new(peer_tolerance: u16) -> Self {
+        Self {
+            peer_tolerance: i32::from(peer_tolerance),
+            standing: 0,
+            latest_punishment: None,
+            latest_reward: None,
         }
     }
 
     /// Sanction peer and return latest standing score
     pub(crate) fn sanction(
         &mut self,
-        reason: PeerSanctionReason,
+        reason: PeerSanction,
     ) -> Result<i32, StandingExceedsBanThreshold> {
         self.standing = self
             .standing
             .saturating_add(reason.severity())
             .clamp(-self.peer_tolerance, self.peer_tolerance);
-        self.latest_sanction = Some(reason);
-        self.timestamp_of_latest_sanction = Some(SystemTime::now());
+        trace!(
+            "new standing: {}, peer tolerance: {}",
+            self.standing,
+            self.peer_tolerance
+        );
+        match reason {
+            PeerSanction::Negative(negative_peer_sanction) => {
+                self.latest_punishment = Some((negative_peer_sanction, SystemTime::now()))
+            }
+            PeerSanction::Positive(positive_peer_sanction) => {
+                self.latest_reward = Some((positive_peer_sanction, SystemTime::now()))
+            }
+        }
         if self.standing == -self.peer_tolerance {
             Err(StandingExceedsBanThreshold)
         } else {
@@ -300,21 +352,33 @@ impl PeerStanding {
     }
 
     /// Clear peer standing record
-    pub fn clear_standing(&mut self) {
-        *self = PeerStanding::default();
+    pub(crate) fn clear_standing(&mut self) {
+        self.standing = 0;
+        self.latest_punishment = None;
+        self.latest_reward = None;
     }
 
     pub fn is_negative(&self) -> bool {
         self.standing.is_negative()
     }
 
-    pub fn new_on_no_standing_found_in_map(peer_tolerance: i32) -> Self {
-        Self::new(
-            -PeerSanctionReason::NoStandingFoundMaybeCrash.severity(),
-            Some(PeerSanctionReason::NoStandingFoundMaybeCrash),
-            Some(SystemTime::now()),
-            peer_tolerance,
-        )
+    /// Should only be used if peer was expected to be found in the peer map
+    /// but, for some reason, was not there. Please only use this function for
+    /// that purpose.
+    pub fn new_on_no_standing_found(peer_tolerance: u16) -> Self {
+        assert!(
+            peer_tolerance > 0,
+            " peer tolerance must be greater than zero"
+        );
+        Self {
+            standing: NegativePeerSanction::NoStandingFoundMaybeCrash.severity(),
+            latest_punishment: Some((
+                NegativePeerSanction::NoStandingFoundMaybeCrash,
+                SystemTime::now(),
+            )),
+            latest_reward: None,
+            peer_tolerance: peer_tolerance.into(),
+        }
     }
 }
 

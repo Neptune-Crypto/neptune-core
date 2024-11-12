@@ -969,7 +969,8 @@ mod rpc_server_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::peer::PeerSanctionReason;
+    use crate::models::peer::NegativePeerSanction;
+    use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -1180,7 +1181,9 @@ mod rpc_server_tests {
                 .entry(peer_address_0)
                 .and_modify(|p| {
                     p.standing
-                        .sanction(PeerSanctionReason::DifferentGenesis)
+                        .sanction(PeerSanction::Negative(
+                            NegativePeerSanction::DifferentGenesis,
+                        ))
                         .unwrap();
                 });
             global_state_mut
@@ -1189,7 +1192,9 @@ mod rpc_server_tests {
                 .entry(peer_address_1)
                 .and_modify(|p| {
                     p.standing
-                        .sanction(PeerSanctionReason::DifferentGenesis)
+                        .sanction(PeerSanction::Negative(
+                            NegativePeerSanction::DifferentGenesis,
+                        ))
                         .unwrap();
                 });
             let standing_0 = global_state_mut.net.peer_map[&peer_address_0].standing;
@@ -1240,13 +1245,13 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
-            assert_ne!(None, peer_standing_0.unwrap().latest_sanction);
+            assert_ne!(None, peer_standing_0.unwrap().latest_punishment);
             let peer_standing_1 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
-            assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+            assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
             drop(global_state);
 
             // Clear standing of #0
@@ -1264,13 +1269,13 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
-            assert_eq!(None, peer_standing_0.unwrap().latest_sanction);
+            assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
             let peer_standing_1 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
-            assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+            assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
 
             // Verify expected resulting conditions in peer map
             let peer_standing_0_from_memory = global_state.net.peer_map[&peer_address_0].clone();
@@ -1312,12 +1317,16 @@ mod rpc_server_tests {
         let (standing_0, standing_1) = {
             state.net.peer_map.entry(peer_address_0).and_modify(|p| {
                 p.standing
-                    .sanction(PeerSanctionReason::DifferentGenesis)
+                    .sanction(PeerSanction::Negative(
+                        NegativePeerSanction::DifferentGenesis,
+                    ))
                     .unwrap();
             });
             state.net.peer_map.entry(peer_address_1).and_modify(|p| {
                 p.standing
-                    .sanction(PeerSanctionReason::DifferentGenesis)
+                    .sanction(PeerSanction::Negative(
+                        NegativePeerSanction::DifferentGenesis,
+                    ))
                     .unwrap();
             });
             let standing_0 = state.net.peer_map[&peer_address_0].standing;
@@ -1345,7 +1354,7 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
-            assert_ne!(None, peer_standing_0.unwrap().latest_sanction);
+            assert_ne!(None, peer_standing_0.unwrap().latest_punishment);
         }
 
         {
@@ -1356,7 +1365,7 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
-            assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+            assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
         }
 
         // Verify expected reading through an RPC call
@@ -1382,7 +1391,7 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
-            assert_eq!(None, peer_standing_0.unwrap().latest_sanction);
+            assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
         }
 
         {
@@ -1391,7 +1400,7 @@ mod rpc_server_tests {
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_eq!(0, peer_still_standing_1.unwrap().standing);
-            assert_eq!(None, peer_still_standing_1.unwrap().latest_sanction);
+            assert_eq!(None, peer_still_standing_1.unwrap().latest_punishment);
         }
 
         // Verify expected resulting conditions in peer map

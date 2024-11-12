@@ -1275,7 +1275,7 @@ impl GlobalState {
     ///
     /// Locking:
     ///  * acquires `monitored_utxos` lock for write
-    pub async fn prune_abandoned_monitored_utxos<'a>(
+    pub async fn prune_abandoned_monitored_utxos(
         &mut self,
         block_depth_threshhold: usize,
     ) -> Result<usize> {
