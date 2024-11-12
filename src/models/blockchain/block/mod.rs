@@ -932,20 +932,8 @@ impl Block {
             self.body().transaction_kernel.outputs.clone(),
         );
 
-        let mut mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
-
         let extra_addition_records = self.guesser_fee_addition_records();
-
-        for addition in &extra_addition_records {
-            RemovalRecord::batch_update_from_addition(
-                &mut mutator_set_update.removals.iter_mut().collect_vec(),
-                &mutator_set_accumulator,
-            );
-            mutator_set_accumulator.add(addition);
-        }
-
         mutator_set_update.additions.extend(extra_addition_records);
-
         mutator_set_update
     }
 }
@@ -1155,9 +1143,8 @@ mod block_tests {
     }
 
     mod block_is_valid {
-        use crate::config_models::cli_args;
-
         use super::*;
+        use crate::config_models::cli_args;
 
         #[traced_test]
         #[tokio::test]

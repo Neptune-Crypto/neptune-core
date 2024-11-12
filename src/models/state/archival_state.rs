@@ -917,18 +917,13 @@ impl ArchivalState {
                     .standard_format()
             );
 
-            // Apply the addition and removal records mimicking how they are
-            // applied to blocks: first tx addition records (while Updating
-            // removal records), then tx removal records, then guesser fee
-            // addition records.
-            let mut additions = apply_forward_block
-                .body()
-                .transaction_kernel
-                .outputs
-                .clone();
-            let mut removals = apply_forward_block.body().transaction_kernel.inputs.clone();
+            let MutatorSetUpdate {
+                mut additions,
+                mut removals,
+            } = apply_forward_block.mutator_set_update();
             additions.reverse();
             removals.reverse();
+
             let mut removals_mutable = removals.iter_mut().collect::<Vec<_>>();
 
             // Add items, thus adding the output UTXOs to the mutator set
@@ -955,15 +950,6 @@ impl ArchivalState {
                 self.archival_mutator_set
                     .ams_mut()
                     .remove(removal_record)
-                    .await;
-            }
-
-            // Add guesser fee addition records to the mutator set
-            for addition_record in apply_forward_block.guesser_fee_addition_records() {
-                // Add the element to the mutator set
-                self.archival_mutator_set
-                    .ams_mut()
-                    .add(&addition_record)
                     .await;
             }
         }
