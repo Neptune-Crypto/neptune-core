@@ -10,6 +10,7 @@ use tracing::debug;
 
 use super::consensus_program_prover_job::ConsensusProgramProverJob;
 use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
+use super::consensus_program_prover_job::JobError;
 use super::consensus_program_prover_job::JobSettings;
 use super::environment;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -177,7 +178,7 @@ pub(crate) async fn prove_consensus_program(
         .await?;
 
     // obtain resulting proof.
-    let result: anyhow::Result<Proof> = result
+    let result: Result<Proof, JobError> = result
         .as_any()
         .downcast_ref::<ConsensusProgramProverJobResult>()
         .expect("downcast should succeed, else bug")
@@ -189,7 +190,7 @@ pub(crate) async fn prove_consensus_program(
         panic!("Proving job failed with error: {:?}", e);
     }
 
-    result
+    Ok(result?)
 }
 
 #[derive(Clone, Debug, Default, Copy)]

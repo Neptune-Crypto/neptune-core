@@ -25,19 +25,49 @@ use crate::tasm_lib::maybe_write_debuggable_program_to_disk;
 use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum JobError {
+    #[error("triton-vm program complexity limit exceeded.  result: {result},  limit: {limit}")]
+    ProofComplexityLimitExceeded { limit: u32, result: u32 },
+
+    // note: this should be #[from VmProcessError].
+    // however JobError must be clonable and VmProcessError is
+    // not easily clonable, so this is a compromise.
+    #[error("external proving process failed")]
+    TritonVmProverFailed(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum VmProcessError {
+    #[error("parameter serialization failed")]
+    ParameterSerializationFailed(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("stdin unavailable")]
+    StdinUnavailable,
+
+    #[error("result deserialization failed")]
+    ResultDeserializationFailed(#[from] Box<bincode::ErrorKind>),
+
+    #[error("proving process returned non-zero exit code: {0}")]
+    NonZeroExitCode(i32),
+
+    #[error("proving process did not return any exit code")]
+    NoExitCode,
+}
+
 #[derive(Debug)]
-pub struct ConsensusProgramProverJobResult(pub anyhow::Result<Proof>);
+pub struct ConsensusProgramProverJobResult(pub Result<Proof, JobError>);
 impl JobResult for ConsensusProgramProverJobResult {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
-impl From<&ConsensusProgramProverJobResult> for anyhow::Result<Proof> {
+impl From<&ConsensusProgramProverJobResult> for Result<Proof, JobError> {
     fn from(v: &ConsensusProgramProverJobResult) -> Self {
-        match &v.0 {
-            Ok(v) => Ok(v.clone()),
-            Err(e) => Err(anyhow::anyhow!(e.to_string())),
-        }
+        v.0.clone()
     }
 }
 
@@ -60,7 +90,7 @@ impl ConsensusProgramProverJob {
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    async fn prove(&self) -> anyhow::Result<Proof> {
+    async fn prove(&self) -> Result<Proof, JobError> {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let mut vm_state = VMState::new(
@@ -91,11 +121,12 @@ impl ConsensusProgramProverJob {
 
         let padded_height = vm_state.cycle_count.next_power_of_two();
         match self.job_settings.max_log2_padded_height_for_proofs {
-            Some(limit) if 2u32.pow(limit.into()) < padded_height => anyhow::bail!(
-                "proof execution aborted. padded_height exceeds limit.  height: {}, limit: {}",
-                padded_height,
-                2u32.pow(limit.into())
-            ),
+            Some(limit) if 2u32.pow(limit.into()) < padded_height => {
+                return Err(JobError::ProofComplexityLimitExceeded {
+                    result: padded_height,
+                    limit: 2u32.pow(limit.into()),
+                })
+            }
             _ => {}
         }
 
@@ -109,7 +140,9 @@ impl ConsensusProgramProverJob {
         }
         #[cfg(not(test))]
         {
-            self.prove_out_of_process().await
+            self.prove_out_of_process()
+                .await
+                .map_err(|e| JobError::TritonVmProverFailed(e.to_string()))
         }
     }
 
@@ -132,7 +165,7 @@ impl ConsensusProgramProverJob {
     /// The process result is only read if exit code is 0.
     /// A non-zero exit code or no code results in an error.
     #[cfg(not(test))]
-    async fn prove_out_of_process(&self) -> anyhow::Result<Proof> {
+    async fn prove_out_of_process(&self) -> Result<Proof, VmProcessError> {
         // start child process
         let child_handle = {
             let inputs = [
@@ -147,7 +180,10 @@ impl ConsensusProgramProverJob {
                 .stderr(Stdio::null()) // ignore stderr
                 .spawn()?;
 
-            let mut child_stdin = child.stdin.take().expect("should get stdin handle");
+            let mut child_stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| VmProcessError::StdinUnavailable)?;
             child_stdin.write_all(inputs.join("\n").as_bytes()).await?;
 
             child
@@ -161,8 +197,9 @@ impl ConsensusProgramProverJob {
                     let proof = bincode::deserialize(&op.stdout)?;
                     Ok(proof)
                 }
-                Some(code) => Err(anyhow::anyhow!("prover exited with exit code: {}", code)),
-                None => Err(anyhow::anyhow!("prover exited without any exit code")),
+                Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
+
+                None => Err(VmProcessError::NoExitCode),
             }
         }
     }
@@ -176,7 +213,7 @@ impl ConsensusProgramProverJob {
     /// note: we do not verify that the path exists.  That will occur anyway
     /// when triton-vm-prover is executed.
     #[cfg(not(test))]
-    fn path_to_triton_vm_prover() -> anyhow::Result<std::path::PathBuf> {
+    fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, std::io::Error> {
         let mut exe_path = std::env::current_exe()?;
         exe_path.set_file_name("triton-vm-prover");
         Ok(exe_path)
