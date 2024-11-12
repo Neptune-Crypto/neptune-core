@@ -177,7 +177,8 @@ impl Widget for PeersScreen {
             "archival",
             "authenticated",
             "alias",
-            "last sanction",
+            "last punishment",
+            "last reward",
         ];
         let matrix = self
             .data
@@ -185,8 +186,14 @@ impl Widget for PeersScreen {
             .unwrap()
             .iter()
             .map(|pi| {
-                let latest_violation: Option<String> =
-                    pi.standing().latest_sanction.map(|x| x.to_string());
+                let latest_punishment: Option<String> = pi
+                    .standing()
+                    .latest_punishment
+                    .map(|(peer_sanction, _timestamp)| peer_sanction.to_string());
+                let latest_reward: Option<String> = pi
+                    .standing()
+                    .latest_reward
+                    .map(|(peer_sanction, _timestamp)| peer_sanction.to_string());
                 let connection_established = pi
                     .connection_established()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -203,7 +210,8 @@ impl Widget for PeersScreen {
                     },
                     "✕".to_string(), // no support for authentication yet
                     "-".to_string(), // no support for aliases yes
-                    latest_violation.unwrap_or_default(),
+                    latest_punishment.unwrap_or_default(),
+                    latest_reward.unwrap_or_default(),
                 ]
             })
             .collect_vec();

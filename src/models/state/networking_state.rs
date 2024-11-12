@@ -134,11 +134,10 @@ impl NetworkingState {
     pub async fn clear_ip_standing_in_database(&mut self, ip: IpAddr) {
         let old_standing = self.peer_databases.peer_standings.get(ip).await;
 
-        if old_standing.is_some() {
-            self.peer_databases
-                .peer_standings
-                .put(ip, PeerStanding::default())
-                .await
+        if let Some(mut standing) = old_standing {
+            standing.clear_standing();
+
+            self.peer_databases.peer_standings.put(ip, standing).await;
         }
     }
 
@@ -147,7 +146,10 @@ impl NetworkingState {
             .peer_databases
             .peer_standings
             .iter()
-            .map(|(ip, _old_standing)| (ip, PeerStanding::default()))
+            .map(|(ip, mut standing)| {
+                standing.clear_standing();
+                (ip, standing)
+            })
             .collect();
 
         let mut batch = WriteBatchAsync::new();

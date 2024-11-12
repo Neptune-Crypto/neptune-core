@@ -95,7 +95,7 @@ enum Command {
     },
     Confirmations,
     PeerInfo,
-    AllSanctionedPeers,
+    AllPunishedPeers,
     TipDigest,
     LatestTipDigests {
         n: usize,
@@ -370,12 +370,12 @@ async fn main() -> Result<()> {
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
         }
-        Command::AllSanctionedPeers => {
-            let peer_sanctions = client.all_sanctioned_peers(ctx).await?;
+        Command::AllPunishedPeers => {
+            let peer_sanctions = client.all_punished_peers(ctx).await?;
             for (ip, sanction) in peer_sanctions {
                 let standing = sanction.standing;
-                let latest_sanction_str = match sanction.latest_sanction {
-                    Some(sanction) => sanction.to_string(),
+                let latest_sanction_str = match sanction.latest_punishment {
+                    Some((sanction, _timestamp)) => sanction.to_string(),
                     None => String::default(),
                 };
                 println!(

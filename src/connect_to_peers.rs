@@ -446,15 +446,21 @@ pub(crate) async fn close_peer_connected_callback(
         Some(new) => new.standing(),
         None => {
             error!("Could not find peer standing for {peer_address}");
-            PeerStanding::new_on_no_standing_found_in_map(i32::from(peer_tolerance))
+            PeerStanding::new_on_no_standing_found(peer_tolerance)
         }
     };
-    debug!("Fetched peer info standing for {}", peer_address);
+    debug!(
+        "Fetched peer info standing {} for peer {}",
+        new_standing, peer_address
+    );
     global_state_mut
         .net
         .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
         .await;
-    debug!("Stored peer info standing for {}", peer_address);
+    debug!(
+        "Stored peer info standing {} for peer {}",
+        new_standing, peer_address
+    );
 
     // This message is used to determine if we are to exit synchronization mode
     to_main_tx
@@ -478,9 +484,9 @@ mod connect_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::peer::ConnectionStatus;
+    use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerInfo;
     use crate::models::peer::PeerMessage;
-    use crate::models::peer::PeerSanctionReason;
     use crate::models::peer::PeerStanding;
     use crate::prelude::twenty_first;
     use crate::tests::shared::get_dummy_handshake_data_for_genesis;
@@ -647,13 +653,13 @@ mod connect_tests {
         }
 
         // Then check that peers can be banned by bad behavior
-        let bad_standing: PeerStanding = PeerStanding::new(
+        let bad_standing: PeerStanding = PeerStanding::init(
             i32::MIN,
-            Some(PeerSanctionReason::InvalidBlock((
-                7u64.into(),
-                Digest::default(),
-            ))),
-            Some(SystemTime::now()),
+            Some((
+                NegativePeerSanction::InvalidBlock((7u64.into(), Digest::default())),
+                SystemTime::now(),
+            )),
+            None,
             i32::from(cli.peer_tolerance),
         );
 
@@ -935,13 +941,13 @@ mod connect_tests {
             peer_count_before_incoming_connection_request,
         )
         .await?;
-        let bad_standing: PeerStanding = PeerStanding::new(
+        let bad_standing: PeerStanding = PeerStanding::init(
             i32::MIN,
-            Some(PeerSanctionReason::InvalidBlock((
-                7u64.into(),
-                Digest::default(),
-            ))),
-            Some(SystemTime::now()),
+            Some((
+                NegativePeerSanction::InvalidBlock((7u64.into(), Digest::default())),
+                SystemTime::now(),
+            )),
+            None,
             i32::from(cli_args::Args::default().peer_tolerance),
         );
         let peer_address = get_dummy_socket_address(3);
