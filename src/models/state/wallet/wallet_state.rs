@@ -240,7 +240,6 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
-                    vec![],
                     &Block::genesis_block(cli_args.network),
                 )
                 .await
@@ -635,7 +634,6 @@ impl WalletState {
     pub async fn update_wallet_state_with_new_block(
         &mut self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        guesser_fee_records: Vec<AdditionRecord>,
         new_block: &Block,
     ) -> Result<()> {
         /// Preprocess all own monitored UTXOs prior to processing of the block.
@@ -1328,7 +1326,6 @@ mod tests {
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after(),
-                    latest_block.guesser_fee_addition_records(),
                     &new_block,
                 )
                 .await
