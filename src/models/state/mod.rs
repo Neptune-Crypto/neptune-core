@@ -1472,11 +1472,7 @@ impl GlobalState {
             // update wallet state with relevant UTXOs from this block
             myself
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_ms_accumulator,
-                    tip_parent.guesser_fee_addition_records(),
-                    &new_block,
-                )
+                .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
                 .await?;
             myself
                 .wallet_state

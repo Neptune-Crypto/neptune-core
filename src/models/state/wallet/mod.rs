@@ -506,7 +506,6 @@ mod wallet_tests {
                 alice
                     .update_wallet_state_with_new_block(
                         &previous_block.mutator_set_accumulator_after(),
-                        previous_block.guesser_fee_addition_records(),
                         &next_block,
                     )
                     .await
@@ -573,7 +572,6 @@ mod wallet_tests {
         alice_wallet
             .update_wallet_state_with_new_block(
                 &genesis_block.mutator_set_accumulator_after(),
-                vec![],
                 &block_1,
             )
             .await
@@ -632,19 +630,11 @@ mod wallet_tests {
 
         // Verify that the membership proof is valid *after* running the updater
         alice_wallet
-            .update_wallet_state_with_new_block(
-                &block_1.mutator_set_accumulator_after(),
-                block_1.guesser_fee_addition_records(),
-                &block_2,
-            )
+            .update_wallet_state_with_new_block(&block_1.mutator_set_accumulator_after(), &block_2)
             .await
             .unwrap();
         alice_wallet
-            .update_wallet_state_with_new_block(
-                &block_2.mutator_set_accumulator_after(),
-                block_2.guesser_fee_addition_records(),
-                &block_3,
-            )
+            .update_wallet_state_with_new_block(&block_2.mutator_set_accumulator_after(), &block_3)
             .await
             .unwrap();
 
@@ -1122,7 +1112,6 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &first_block_after_spree.mutator_set_accumulator_after(),
-                first_block_after_spree.guesser_fee_addition_records(),
                 &first_block_continuing_spree,
             )
             .await
@@ -1247,7 +1236,6 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &block_2_b.mutator_set_accumulator_after(),
-                block_2_b.guesser_fee_addition_records(),
                 &block_3_b,
             )
             .await
@@ -1300,7 +1288,6 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &first_block_continuing_spree.mutator_set_accumulator_after(),
-                first_block_continuing_spree.guesser_fee_addition_records(),
                 &second_block_continuing_spree,
             )
             .await
