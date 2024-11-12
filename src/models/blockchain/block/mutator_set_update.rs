@@ -1,5 +1,3 @@
-use std::ops::Add;
-
 use anyhow::bail;
 use anyhow::Result;
 use serde::Deserialize;
@@ -77,73 +75,6 @@ impl MutatorSetUpdate {
             ms_accumulator.remove(applied_removal_record);
         }
 
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct MutatorSetUpdateSequence {
-    sequence: Vec<MutatorSetUpdate>,
-}
-
-impl From<MutatorSetUpdate> for MutatorSetUpdateSequence {
-    fn from(value: MutatorSetUpdate) -> Self {
-        Self {
-            sequence: vec![value],
-        }
-    }
-}
-
-impl<T: Into<MutatorSetUpdateSequence>> Add<T> for MutatorSetUpdateSequence {
-    type Output = MutatorSetUpdateSequence;
-
-    fn add(self, rhs: T) -> Self::Output {
-        Self {
-            sequence: [self.sequence, rhs.into().sequence].concat(),
-        }
-    }
-}
-
-impl Add<MutatorSetUpdate> for MutatorSetUpdate {
-    type Output = MutatorSetUpdateSequence;
-
-    fn add(self, rhs: MutatorSetUpdate) -> Self::Output {
-        Self::Output {
-            sequence: vec![self, rhs],
-        }
-    }
-}
-
-impl MutatorSetUpdateSequence {
-    /// Apply a sequence of mutator-set-updates to a mutator-set-accumulator.
-    ///
-    /// # Return Value
-    ///
-    /// Returns an error if some removal record could not be removed.
-    pub(crate) fn apply_to_accumulator(
-        &self,
-        mutator_set_accumulator: &mut MutatorSetAccumulator,
-    ) -> Result<()> {
-        for update in self.sequence.iter() {
-            update.apply_to_accumulator(mutator_set_accumulator)?;
-        }
-        Ok(())
-    }
-
-    /// Apply a sequence of mutator-set-updates to a mutator-set-accumulator and
-    /// a bunch of removal records.
-    ///
-    /// # Return Value
-    ///
-    /// Returns an error if some removal record could not be removed.
-    pub(crate) fn apply_to_accumulator_and_records(
-        &self,
-        mutator_set_accumulator: &mut MutatorSetAccumulator,
-        removal_records: &mut [&mut RemovalRecord],
-    ) -> Result<()> {
-        for update in self.sequence.iter() {
-            update.apply_to_accumulator_and_records(mutator_set_accumulator, removal_records)?;
-        }
         Ok(())
     }
 }
