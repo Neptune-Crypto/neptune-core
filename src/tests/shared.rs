@@ -136,7 +136,7 @@ pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
         connected_address: address,
         inbound: false,
         instance_id: rand::random(),
-        last_seen: SystemTime::now(),
+        connection_established: SystemTime::now(),
         standing: PeerStanding::default(),
         version: get_dummy_version(),
         port_for_incoming_connections: Some(8080),

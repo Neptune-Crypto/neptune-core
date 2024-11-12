@@ -46,7 +46,7 @@ pub struct PeerInfo {
     pub connected_address: SocketAddr,
     pub instance_id: InstanceId,
     pub inbound: bool,
-    pub last_seen: SystemTime,
+    pub connection_established: SystemTime,
     pub standing: PeerStanding,
     pub version: String,
     pub is_archival_node: bool,

@@ -172,7 +172,7 @@ impl Widget for PeersScreen {
         let style = Style::default().fg(self.fg).bg(self.bg);
         let header = vec![
             "ip",
-            "last seen",
+            "connection established",
             "standing",
             "archival",
             "authenticated",
@@ -187,11 +187,13 @@ impl Widget for PeersScreen {
             .map(|pi| {
                 let latest_violation: Option<String> =
                     pi.standing.latest_sanction.map(|x| x.to_string());
-                let last_seen_timestamp =
-                    pi.last_seen.duration_since(std::time::UNIX_EPOCH).unwrap();
+                let connection_established = pi
+                    .connection_established
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap();
                 vec![
                     pi.connected_address.to_string(),
-                    neptune_core::utc_timestamp_to_localtime(last_seen_timestamp.as_millis())
+                    neptune_core::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
                     pi.standing.standing.to_string(),
                     if pi.is_archival_node {

@@ -1307,6 +1307,7 @@ impl PeerLoopHandler {
                                         debug!("Ignoring {} message because we are not syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
                                     }
+
                                     let close_connection: bool = match self.handle_peer_message(peer_msg, &mut peer, peer_state_info).await {
                                         Ok(close) => close,
                                         Err(err) => {
@@ -1374,6 +1375,7 @@ impl PeerLoopHandler {
         <S as TryStream>::Error: std::error::Error,
     {
         let global_state = self.global_state_lock.lock_guard().await;
+
         // Check if peer standing exists in database, return default if it does not.
         let standing: PeerStanding = global_state
             .net
@@ -1389,7 +1391,7 @@ impl PeerLoopHandler {
             connected_address: self.peer_address,
             inbound: self.inbound_connection,
             instance_id: self.peer_handshake_data.instance_id,
-            last_seen: SystemTime::now(),
+            connection_established: SystemTime::now(),
             standing,
             version: self.peer_handshake_data.version.clone(),
             is_archival_node: self.peer_handshake_data.is_archival_node,
