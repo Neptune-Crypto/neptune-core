@@ -427,6 +427,7 @@ mod wallet_tests {
     use tracing_test::traced_test;
     use twenty_first::math::tip5::Digest;
     use twenty_first::math::x_field_element::EXTENSION_DEGREE;
+    use unlocked_utxo::UnlockedUtxo;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
@@ -689,7 +690,7 @@ mod wallet_tests {
         let mining_reward = cb_utxo.get_native_currency_amount();
         let now = genesis_block.header().timestamp + Timestamp::months(10);
 
-        let input_len = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
+        let allocate_input_utxos = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
             let tip_digest = alice_.lock_guard().await.chain.light_state().hash();
             alice_
                 .lock_guard()
@@ -697,11 +698,13 @@ mod wallet_tests {
                 .wallet_state
                 .allocate_sufficient_input_funds(amount, tip_digest, now)
                 .await
-                .map(|x| x.len())
+        };
+        let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
+            allocate_input_utxos(alice_, amount).await.map(|x| x.len())
         };
 
         assert!(
-            input_len(alice.clone(), NeptuneCoins::new(1),)
+            num_utxos_in_allocation(alice.clone(), NeptuneCoins::new(1),)
                 .await
                 .is_err(),
             "Cannot allocate anything when wallet is empty"
@@ -727,19 +730,31 @@ mod wallet_tests {
 
         // Verify that the allocater returns a sane amount
         let one_coin = NeptuneCoins::new(1);
-        assert_eq!(1, input_len(alice.clone(), one_coin).await.unwrap(),);
         assert_eq!(
             1,
-            input_len(alice.clone(), mining_reward.checked_sub(&one_coin).unwrap(),)
+            num_utxos_in_allocation(alice.clone(), one_coin)
                 .await
                 .unwrap(),
         );
-        assert_eq!(1, input_len(alice.clone(), mining_reward).await.unwrap());
+        assert_eq!(
+            1,
+            num_utxos_in_allocation(alice.clone(), mining_reward.checked_sub(&one_coin).unwrap(),)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            1,
+            num_utxos_in_allocation(alice.clone(), mining_reward)
+                .await
+                .unwrap()
+        );
 
         // Cannot allocate more than we have: `mining_reward`
-        assert!(input_len(alice.clone(), mining_reward + one_coin)
-            .await
-            .is_err());
+        assert!(
+            num_utxos_in_allocation(alice.clone(), mining_reward + one_coin)
+                .await
+                .is_err()
+        );
 
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
@@ -772,13 +787,13 @@ mod wallet_tests {
 
         assert_eq!(
             5,
-            input_len(alice.clone(), mining_reward.scalar_mul(5))
+            num_utxos_in_allocation(alice.clone(), mining_reward.scalar_mul(5))
                 .await
                 .unwrap()
         );
         assert_eq!(
             6,
-            input_len(alice.clone(), mining_reward.scalar_mul(5) + one_coin)
+            num_utxos_in_allocation(alice.clone(), mining_reward.scalar_mul(5) + one_coin)
                 .await
                 .unwrap()
         );
@@ -786,13 +801,17 @@ mod wallet_tests {
         let expected_balance = mining_reward.scalar_mul(22);
         assert_eq!(
             22,
-            input_len(alice.clone(), expected_balance).await.unwrap()
+            num_utxos_in_allocation(alice.clone(), expected_balance)
+                .await
+                .unwrap()
         );
 
         // Cannot allocate more than we have: 22 * mining reward
-        assert!(input_len(alice.clone(), expected_balance + one_coin)
-            .await
-            .is_err());
+        assert!(
+            num_utxos_in_allocation(alice.clone(), expected_balance + one_coin)
+                .await
+                .is_err()
+        );
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
@@ -841,17 +860,48 @@ mod wallet_tests {
 
         alice.set_new_tip(next_block.clone()).await.unwrap();
 
+        // can make allocation of coins for given amount
+        let alice_balance = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .confirmed_balance(next_block.hash(), next_block.header().timestamp)
+            .await;
+        assert!(
+            alice_balance
+                >= allocate_input_utxos(
+                    alice.clone(),
+                    alice_balance.checked_sub(&NeptuneCoins::new(1)).unwrap()
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|unlocked_utxo: UnlockedUtxo| unlocked_utxo.utxo.get_native_currency_amount())
+                .sum::<NeptuneCoins>()
+        );
+
+        // number of UTXOs allocated for maximum amount equals number of UTXOs
+        // in possession
+        let num_utxos_in_possession_of_alice = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_own_coins_with_possible_timelocks()
+            .await
+            .len();
         assert_eq!(
-            20,
-            input_len(alice.clone(), NeptuneCoins::new(2000))
+            num_utxos_in_possession_of_alice,
+            num_utxos_in_allocation(alice.clone(), alice_balance)
                 .await
                 .unwrap()
         );
 
-        // Cannot allocate more than we have: 2000
-        assert!(input_len(alice.clone(), NeptuneCoins::new(2001))
-            .await
-            .is_err());
+        // Cannot allocate more than we have
+        assert!(
+            allocate_input_utxos(alice.clone(), alice_balance + NeptuneCoins::new(1))
+                .await
+                .is_err()
+        );
     }
 
     #[traced_test]
