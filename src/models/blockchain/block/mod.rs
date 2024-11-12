@@ -50,12 +50,12 @@ use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
@@ -224,7 +224,7 @@ impl Block {
         nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
@@ -244,7 +244,7 @@ impl Block {
                     &claim,
                     appendix_witness.nondeterminism(),
                     triton_vm_job_queue,
-                    priority,
+                    proof_job_options,
                 )
                 .await?;
             (appendix, BlockProof::SingleProof(proof))
@@ -263,7 +263,7 @@ impl Block {
         nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         Self::make_block_template_with_valid_proof(
             predecessor,
@@ -272,7 +272,7 @@ impl Block {
             nonce_preimage,
             target_block_interval,
             triton_vm_job_queue,
-            priority,
+            proof_job_options,
         )
         .await
     }
@@ -1137,6 +1137,7 @@ mod block_tests {
 
     mod block_is_valid {
         use crate::config_models::cli_args;
+        use crate::job_queue::triton_vm::TritonVmJobPriority;
 
         use super::*;
 
@@ -1162,7 +1163,7 @@ mod block_tests {
                 Digest::default(),
                 None,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();

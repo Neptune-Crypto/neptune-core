@@ -196,7 +196,7 @@ mod test {
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
                     &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
+                    TritonVmJobPriority::default().into(),
                 ))
                 .unwrap();
 

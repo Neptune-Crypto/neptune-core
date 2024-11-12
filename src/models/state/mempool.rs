@@ -49,7 +49,6 @@ use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -58,6 +57,7 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
@@ -549,7 +549,7 @@ impl Mempool {
         new_block: &Block,
         predecessor_block: &Block,
         vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
         composing: bool,
     ) -> Vec<MempoolEvent> {
         let previous_mutator_set_accumulator = predecessor_block.mutator_set_accumulator().clone();
@@ -633,7 +633,7 @@ impl Mempool {
                     &previous_mutator_set_accumulator,
                     &mutator_set_update,
                     vm_job_queue,
-                    priority,
+                    proof_job_options.clone(),
                 )
                 .await
             {
@@ -734,6 +734,7 @@ impl Mempool {
 
 #[cfg(test)]
 mod tests {
+    use crate::models::state::TritonVmJobPriority;
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::One;
@@ -1116,7 +1117,7 @@ mod tests {
                 coinbase_transaction,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -1135,7 +1136,7 @@ mod tests {
                 &block_2,
                 &block_1,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
                 true,
             )
             .await;
@@ -1167,7 +1168,7 @@ mod tests {
                     &next_block,
                     &previous_block,
                     &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
+                    TritonVmJobPriority::default().into(),
                     true,
                 )
                 .await;
@@ -1184,7 +1185,7 @@ mod tests {
                 tx_by_alice_updated,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -1202,7 +1203,7 @@ mod tests {
                 &block_5,
                 &previous_block,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
                 true,
             )
             .await;
@@ -1231,14 +1232,14 @@ mod tests {
             let left_single_proof = SingleProof::produce(
                 &left,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
             let right_single_proof = SingleProof::produce(
                 &right,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -1261,7 +1262,7 @@ mod tests {
                 right.clone(),
                 shuffle_seed,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();

@@ -819,7 +819,7 @@ pub(crate) async fn valid_block_from_tx_for_tests(
         Digest::default(),
         None,
         &TritonVmJobQueue::dummy(),
-        TritonVmJobPriority::default(),
+        TritonVmJobPriority::default().into(),
     )
     .await
     .unwrap();
@@ -850,7 +850,7 @@ pub(crate) async fn valid_successor_for_tests(
         tx_details,
         TxProvingCapability::SingleProof,
         &TritonVmJobQueue::dummy(),
-        TritonVmJobPriority::default(),
+        TritonVmJobPriority::default().into(),
     )
     .await
     .unwrap();

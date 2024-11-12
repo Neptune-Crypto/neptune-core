@@ -132,7 +132,7 @@ pub(crate) mod test {
                     .block_on(SingleProof::produce(
                         &primwit_inputs,
                         &TritonVmJobQueue::dummy(),
-                        TritonVmJobPriority::default(),
+                        TritonVmJobPriority::default().into(),
                     ))
                     .unwrap();
 
@@ -144,7 +144,7 @@ pub(crate) mod test {
                     .block_on(SingleProof::produce(
                         &primwit_coinbase,
                         &TritonVmJobQueue::dummy(),
-                        TritonVmJobPriority::default(),
+                        TritonVmJobPriority::default().into(),
                     ))
                     .unwrap();
                 let tx_coinbase = Transaction {
@@ -157,7 +157,7 @@ pub(crate) mod test {
                         tx_coinbase,
                         shuffle_seed,
                         &TritonVmJobQueue::dummy(),
-                        TritonVmJobPriority::default(),
+                        TritonVmJobPriority::default().into(),
                     ))
                     .unwrap(),
                     mutator_set_accumulator,

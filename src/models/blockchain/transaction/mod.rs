@@ -1,9 +1,9 @@
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -276,7 +276,7 @@ impl Transaction {
         mutator_set_update: &MutatorSetUpdate,
         old_single_proof: Proof,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
@@ -319,7 +319,7 @@ impl Transaction {
                 &update_claim,
                 update_nondeterminism,
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
         info!("done.");
@@ -333,7 +333,7 @@ impl Transaction {
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options,
             )
             .await?;
         info!("done.");
@@ -352,7 +352,7 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: &MutatorSetUpdate,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
             TransactionProof::Witness(primitive_witness) => {
@@ -369,7 +369,7 @@ impl Transaction {
                     mutator_set_update,
                     proof,
                     triton_vm_job_queue,
-                    priority,
+                    proof_job_options,
                 )
                 .await
                 .map_err(|_| TransactionProofError::ProverLockWasTaken)
@@ -400,7 +400,7 @@ impl Transaction {
         other: Transaction,
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -442,7 +442,7 @@ impl Transaction {
                 &merge_claim,
                 merge_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
         info!("Done: creating merge proof");
@@ -455,7 +455,7 @@ impl Transaction {
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options,
             )
             .await?;
         info!("Done: creating new single proof");
@@ -534,6 +534,7 @@ mod tests {
 
 #[cfg(test)]
 mod transaction_tests {
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use lock_script::LockScript;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -582,7 +583,7 @@ mod transaction_tests {
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -599,7 +600,7 @@ mod transaction_tests {
                     &to_be_updated.mutator_set_accumulator,
                     &mutator_set_update,
                     &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
+                    TritonVmJobPriority::default().into(),
                 )
                 .await
                 .unwrap();

@@ -15,7 +15,6 @@ use tracing::info;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -27,6 +26,7 @@ use crate::models::blockchain::transaction::validity::removal_records_integrity:
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 
@@ -138,7 +138,7 @@ impl ProofCollection {
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Self> {
         let (
             removal_records_integrity_witness,
@@ -162,7 +162,7 @@ impl ProofCollection {
                 &removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
 
@@ -172,7 +172,7 @@ impl ProofCollection {
                 &collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
 
@@ -182,7 +182,7 @@ impl ProofCollection {
                 &kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
 
@@ -192,7 +192,7 @@ impl ProofCollection {
                 &collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
-                priority,
+                proof_job_options.clone(),
             )
             .await?;
 
@@ -204,7 +204,7 @@ impl ProofCollection {
                     .prove(
                         txk_mast_hash_as_input.clone(),
                         triton_vm_job_queue,
-                        priority,
+                        proof_job_options.clone(),
                     )
                     .await?,
             );
@@ -224,7 +224,7 @@ impl ProofCollection {
                     salted_inputs_hash,
                     salted_outputs_hash,
                     triton_vm_job_queue,
-                    priority,
+                    proof_job_options.clone(),
                 )
                 .await?,
             );

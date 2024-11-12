@@ -68,6 +68,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::peer::HandshakeData;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::prelude::twenty_first;
@@ -818,7 +819,11 @@ impl GlobalState {
             transaction_details,
             prover_capability,
             triton_vm_job_queue,
-            TritonVmJobPriority::High,
+            (
+                TritonVmJobPriority::High,
+                self.cli.max_log2_padded_height_for_proofs,
+            )
+                .into(),
         )
         .await?;
 
@@ -856,7 +861,7 @@ impl GlobalState {
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
@@ -865,7 +870,7 @@ impl GlobalState {
             transaction_details,
             proving_power,
             triton_vm_job_queue,
-            priority,
+            proof_job_options,
         )
         .await
     }
@@ -879,7 +884,7 @@ impl GlobalState {
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         let TransactionDetails {
             tx_inputs,
@@ -930,10 +935,16 @@ impl GlobalState {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
+                ProofCollection::produce(
+                    &primitive_witness,
+                    triton_vm_job_queue,
+                    proof_job_options,
+                )
+                .await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
+                SingleProof::produce(&primitive_witness, triton_vm_job_queue, proof_job_options)
+                    .await?,
             ),
         };
 
@@ -1480,7 +1491,11 @@ impl GlobalState {
                     &new_block,
                     &tip_parent,
                     vm_job_queue,
-                    TritonVmJobPriority::Highest,
+                    (
+                        TritonVmJobPriority::Highest,
+                        myself.cli.max_log2_padded_height_for_proofs,
+                    )
+                        .into(),
                     myself.cli().compose,
                 )
                 .await;
@@ -2353,7 +2368,7 @@ mod global_state_tests {
                 coinbase_transaction,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -2365,7 +2380,7 @@ mod global_state_tests {
             Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default(),
+            TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
@@ -2556,7 +2571,7 @@ mod global_state_tests {
                 tx_from_alice,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap()
@@ -2564,7 +2579,7 @@ mod global_state_tests {
                 tx_from_bob,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -2575,7 +2590,7 @@ mod global_state_tests {
             Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default(),
+            TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
@@ -2612,7 +2627,7 @@ mod global_state_tests {
             Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default(),
+            TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
@@ -3226,7 +3241,7 @@ mod global_state_tests {
                     Digest::default(),
                     None,
                     &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default(),
+                    TritonVmJobPriority::default().into(),
                 )
                 .await
                 .unwrap();

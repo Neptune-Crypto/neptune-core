@@ -1715,7 +1715,7 @@ mod archival_state_tests {
                 tx_to_alice_and_bob,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -1728,7 +1728,7 @@ mod archival_state_tests {
             Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default(),
+            TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();
@@ -1933,7 +1933,7 @@ mod archival_state_tests {
                 tx_from_alice,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap()
@@ -1941,7 +1941,7 @@ mod archival_state_tests {
                 tx_from_bob,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
@@ -1952,7 +1952,7 @@ mod archival_state_tests {
             Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default(),
+            TritonVmJobPriority::default().into(),
         )
         .await
         .unwrap();

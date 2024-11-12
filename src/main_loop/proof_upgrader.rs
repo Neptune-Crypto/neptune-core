@@ -20,6 +20,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProofW
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -158,7 +159,7 @@ impl UpgradeJob {
     ) {
         let mut upgrade_job = self;
 
-        let job_priority = match tx_origin {
+        let job_proof_job_options = match tx_origin {
             TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
             TransactionOrigin::Own => TritonVmJobPriority::High,
         };
@@ -176,7 +177,15 @@ impl UpgradeJob {
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
-            let upgraded = match upgrade_job.upgrade(triton_vm_job_queue, job_priority).await {
+            let job_options = (
+                job_proof_job_options,
+                global_state_lock.cli().max_log2_padded_height_for_proofs,
+            );
+
+            let upgraded = match upgrade_job
+                .upgrade(triton_vm_job_queue, job_options.into())
+                .await
+            {
                 Ok(upgraded_tx) => {
                     info!(
                         "Successfully upgraded transaction {}",
@@ -262,12 +271,12 @@ impl UpgradeJob {
     ///
     /// Upgrades transactions to a proof of higher quality that is more likely
     /// to be picked up by a miner. Returns the upgraded proof, or an error if
-    /// the prover is already in use and the priority is set to not wait if
+    /// the prover is already in use and the proof_job_options is set to not wait if
     /// prover is busy.
     pub(crate) async fn upgrade(
         self,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Transaction> {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
@@ -276,7 +285,12 @@ impl UpgradeJob {
                 let nondeterminism = single_proof_witness.nondeterminism();
                 info!("Proof-upgrader: Start generate single proof");
                 let single_proof = SingleProof
-                    .prove(&claim, nondeterminism, triton_vm_job_queue, priority)
+                    .prove(
+                        &claim,
+                        nondeterminism,
+                        triton_vm_job_queue,
+                        proof_job_options,
+                    )
                     .await?;
                 info!("Proof-upgrader: Done");
 
@@ -307,7 +321,7 @@ impl UpgradeJob {
                     right,
                     shuffle_seed.to_owned(),
                     triton_vm_job_queue,
-                    priority,
+                    proof_job_options,
                 )
                 .await?;
                 info!("Proof-upgrader: Done");
@@ -319,7 +333,8 @@ impl UpgradeJob {
             } => {
                 info!("Proof-upgrader: Start producing proof collection");
                 let proof_collection =
-                    ProofCollection::produce(&witness, triton_vm_job_queue, priority).await?;
+                    ProofCollection::produce(&witness, triton_vm_job_queue, proof_job_options)
+                        .await?;
                 info!("Proof-upgrader: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
@@ -330,7 +345,8 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing single proof");
-                let proof = SingleProof::produce(&witness, triton_vm_job_queue, priority).await?;
+                let proof =
+                    SingleProof::produce(&witness, triton_vm_job_queue, proof_job_options).await?;
                 info!("Proof-upgrader: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
@@ -350,7 +366,7 @@ impl UpgradeJob {
                     &mutator_set_update,
                     old_single_proof,
                     triton_vm_job_queue,
-                    priority,
+                    proof_job_options,
                 )
                 .await?;
                 info!("Proof-upgrader: Done");

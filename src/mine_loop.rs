@@ -53,7 +53,11 @@ async fn compose_block(
         Digest::default(),
         None,
         triton_vm_job_queue,
-        TritonVmJobPriority::High,
+        (
+            TritonVmJobPriority::High,
+            global_state_lock.cli().max_log2_padded_height_for_proofs,
+        )
+            .into(),
     )
     .await;
 
@@ -341,7 +345,11 @@ pub(crate) async fn make_coinbase_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
         vm_job_queue,
-        TritonVmJobPriority::High,
+        (
+            TritonVmJobPriority::High,
+            global_state_lock.cli().max_log2_padded_height_for_proofs,
+        )
+            .into(),
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
@@ -407,7 +415,11 @@ pub(crate) async fn create_block_transaction(
             transaction_to_include,
             rng.gen(),
             vm_job_queue,
-            TritonVmJobPriority::High,
+            (
+                TritonVmJobPriority::High,
+                global_state_lock.cli().max_log2_padded_height_for_proofs,
+            )
+                .into(),
         )
         .await
         .expect("Must be able to merge transactions in mining context");
@@ -855,7 +867,7 @@ pub(crate) mod mine_loop_tests {
                 Digest::default(),
                 None,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::High,
+                TritonVmJobPriority::High.into(),
             )
             .await
             .unwrap();
@@ -893,7 +905,7 @@ pub(crate) mod mine_loop_tests {
                 Digest::default(),
                 None,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();

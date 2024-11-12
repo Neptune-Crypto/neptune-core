@@ -12,6 +12,7 @@ use tracing::debug;
 
 use super::consensus_program_prover_job::ConsensusProgramProverJob;
 use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
+use super::consensus_program_prover_job::JobSettings;
 use super::environment;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -121,7 +122,7 @@ where
         claim: &Claim,
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         {
             prove_consensus_program(
@@ -129,7 +130,7 @@ where
                 claim.clone(),
                 nondeterminism,
                 triton_vm_job_queue,
-                priority,
+                proof_job_options,
             )
             .await
         }
@@ -152,19 +153,20 @@ pub(crate) async fn prove_consensus_program(
     claim: Claim,
     nondeterminism: NonDeterminism,
     triton_vm_job_queue: &TritonVmJobQueue,
-    priority: TritonVmJobPriority,
+    proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
     let job = ConsensusProgramProverJob {
         program,
         claim,
         nondeterminism,
+        job_settings: proof_job_options.job_settings,
     };
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
     let result = triton_vm_job_queue
-        .add_job(Box::new(job), priority)
+        .add_job(Box::new(job), proof_job_options.job_priority)
         .await?
         .result()
         .await?;
@@ -176,6 +178,33 @@ pub(crate) async fn prove_consensus_program(
         .expect("downcast should succeed, else bug")
         .into();
     Ok(proof)
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TritonVmProofJobOptions {
+    pub job_priority: TritonVmJobPriority,
+    pub job_settings: JobSettings,
+}
+impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
+    fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
+        let (job_priority, max_log2_padded_height_for_proofs) = v;
+        Self {
+            job_priority,
+            job_settings: JobSettings {
+                max_log2_padded_height_for_proofs,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
+    fn from(job_priority: TritonVmJobPriority) -> Self {
+        Self {
+            job_priority,
+            job_settings: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]

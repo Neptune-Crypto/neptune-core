@@ -901,7 +901,7 @@ pub mod test {
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
                 &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default(),
+                TritonVmJobPriority::default().into(),
             )
             .await
             .unwrap();
