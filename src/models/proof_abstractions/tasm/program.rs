@@ -177,12 +177,19 @@ pub(crate) async fn prove_consensus_program(
         .await?;
 
     // obtain resulting proof.
-    let proof: Proof = result
+    let result: anyhow::Result<Proof> = result
         .as_any()
         .downcast_ref::<ConsensusProgramProverJobResult>()
         .expect("downcast should succeed, else bug")
         .into();
-    Ok(proof)
+
+    // temporary: panic on any job error.
+    // todo: fix callers to handle errors.
+    if let Err(e) = result {
+        panic!("Proving job failed with error: {:?}", e);
+    }
+
+    result
 }
 
 #[derive(Clone, Debug, Default, Copy)]

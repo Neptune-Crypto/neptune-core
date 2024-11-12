@@ -26,15 +26,18 @@ use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
 #[derive(Debug)]
-pub struct ConsensusProgramProverJobResult(pub Proof);
+pub struct ConsensusProgramProverJobResult(pub anyhow::Result<Proof>);
 impl JobResult for ConsensusProgramProverJobResult {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
-impl From<&ConsensusProgramProverJobResult> for Proof {
+impl From<&ConsensusProgramProverJobResult> for anyhow::Result<Proof> {
     fn from(v: &ConsensusProgramProverJobResult) -> Self {
-        v.0.to_owned()
+        match &v.0 {
+            Ok(v) => Ok(v.clone()),
+            Err(e) => Err(anyhow::anyhow!(e.to_string())),
+        }
     }
 }
 
@@ -52,19 +55,12 @@ pub struct ConsensusProgramProverJob {
 }
 
 impl ConsensusProgramProverJob {
-    async fn prove(&self) -> Proof {
-        match self.prove_worker().await {
-            Ok(p) => p,
-            Err(e) => panic!("Proving job failed with error: {:?}", e),
-        }
-    }
-
     /// Run the program and generate a proof for it, assuming the Triton VM run
     /// halts gracefully.
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    async fn prove_worker(&self) -> anyhow::Result<Proof> {
+    async fn prove(&self) -> anyhow::Result<Proof> {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let mut vm_state = VMState::new(
