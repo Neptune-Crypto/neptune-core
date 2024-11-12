@@ -1450,19 +1450,10 @@ impl GlobalState {
             );
             let previous_ms_accumulator = tip_parent.mutator_set_accumulator().clone();
 
-            // update wallet state with relevant UTXOs from this block
-            myself
-                .wallet_state
-                .update_wallet_state_with_new_block(
-                    &previous_ms_accumulator,
-                    tip_parent.guesser_fee_addition_records(),
-                    &new_block,
-                )
-                .await?;
-
             // Update mempool with UTXOs from this block. This is done by
             // removing all transaction that became invalid/was mined by this
-            // block.
+            // block. Also returns the list of update-jobs that should be
+            // performed by this client.
             let (mempool_events, update_jobs) = myself
                 .mempool
                 .update_with_block_and_predecessor(
@@ -1473,7 +1464,19 @@ impl GlobalState {
                 )
                 .await;
 
-            // TODO: Inform wallet about mempool_events
+            // update wallet state with relevant UTXOs from this block
+            myself
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &previous_ms_accumulator,
+                    tip_parent.guesser_fee_addition_records(),
+                    &new_block,
+                )
+                .await?;
+            myself
+                .wallet_state
+                .handle_mempool_events(mempool_events)
+                .await;
 
             myself.chain.light_state_mut().set_block(new_block);
 
