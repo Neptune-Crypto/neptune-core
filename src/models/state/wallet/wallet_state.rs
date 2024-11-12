@@ -1532,6 +1532,7 @@ mod tests {
         use super::*;
         use crate::config_models::cli_args;
         use crate::job_queue::triton_vm::TritonVmJobQueue;
+        use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
@@ -1541,12 +1542,12 @@ mod tests {
         /// basic test for confirmed and unconfirmed balance.
         ///
         /// This test:
-        ///  1. mines a block to self worth 100
-        ///  2. sends 5 to a 3rd party, and 95 change back to self.
-        ///  3. verifies that confirmed balance is 100
-        ///  4. verifies that unconfirmed balance is 95
+        ///  1. mines a block to self worth `coinbase amt`
+        ///  2. sends 5 to a 3rd party, and rest back to self.
+        ///  3. verifies that confirmed balance is `coinbase amt`
+        ///  4. verifies that unconfirmed balance is `coinbase amt - 5`
         ///  5. empties the mempool (removing our unconfirmed tx)
-        ///  6. verifies that unconfirmed balance is 100
+        ///  6. verifies that unconfirmed balance is `coinbase amt`
         #[traced_test]
         #[tokio::test]
         async fn confirmed_and_unconfirmed_balance() -> Result<()> {
@@ -1565,7 +1566,7 @@ mod tests {
                 .wallet_state
                 .next_unused_spending_key(KeyType::Generation);
 
-            let coinbase_amt = NeptuneCoins::new(100);
+            let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next());
             let send_amt = NeptuneCoins::new(5);
 
             let timestamp = Block::genesis_block(network).header().timestamp + Timestamp::hours(1);
@@ -1623,7 +1624,7 @@ mod tests {
                 .await;
 
             {
-                // verify that confirmed balance is still 100
+                // verify that confirmed balance is still `coinbase amt`
                 let gs = global_state_lock.lock_guard().await;
                 assert_eq!(
                     gs.wallet_state
@@ -1631,7 +1632,7 @@ mod tests {
                         .await,
                     coinbase_amt
                 );
-                // verify that unconfirmed balance is now 95.
+                // verify that unconfirmed balance is now `coinbase amt - 5`.
                 assert_eq!(
                     gs.wallet_state
                         .unconfirmed_balance(tip_digest, timestamp)
@@ -1647,7 +1648,7 @@ mod tests {
                 .mempool_clear()
                 .await;
 
-            // verify that wallet's unconfirmed balance is 100 again.
+            // verify that wallet's unconfirmed balance is `coinbase amt` again.
             assert_eq!(
                 global_state_lock
                     .lock_guard()
