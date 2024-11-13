@@ -339,8 +339,8 @@ impl WalletState {
     pub(crate) fn mempool_balance_updates(
         &self,
     ) -> (
-        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + use<'_>,
-        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + use<'_>,
+        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + '_,
+        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + '_,
     ) {
         let incoming = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
             (
