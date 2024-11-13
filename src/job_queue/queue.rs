@@ -357,6 +357,9 @@ mod tests {
             fn as_any(&self) -> &dyn Any {
                 self
             }
+            fn into_any(self: Box<Self>) -> Box<dyn Any> {
+                self
+            }
         }
 
         // represents a prover job.  implements Job.
@@ -480,18 +483,14 @@ mod tests {
             //   input value of each is greater than prev, except every 9th item which should be < prev
             //     because there are nine jobs per level.
             let one_day_ago = Instant::now() - std::time::Duration::from_secs(86400);
-            let mut prev = DoubleJobResult(9999, 0, one_day_ago);
+            let mut prev = Box::new(DoubleJobResult(9999, 0, one_day_ago));
             for (i, c) in results.into_iter().enumerate() {
                 let dyn_result = match c {
                     Ok(JobCompletion::Finished(r)) => r,
                     _ => panic!("A job did not finish"),
                 };
 
-                let job_result = dyn_result
-                    .as_any()
-                    .downcast_ref::<DoubleJobResult>()
-                    .unwrap()
-                    .clone();
+                let job_result = dyn_result.into_any().downcast::<DoubleJobResult>().unwrap();
 
                 assert!(job_result.2 > prev.2);
 
@@ -529,7 +528,7 @@ mod tests {
                     .result()
                     .await?;
 
-                let job_result = result.as_any().downcast_ref::<DoubleJobResult>().unwrap();
+                let job_result = result.into_any().downcast::<DoubleJobResult>().unwrap();
 
                 assert_eq!(i, job_result.0);
                 assert_eq!(i * 2, job_result.1);

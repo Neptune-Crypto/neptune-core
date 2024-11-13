@@ -179,8 +179,8 @@ pub(crate) async fn prove_consensus_program(
 
     // obtain resulting proof.
     let result: Result<Proof, JobError> = result
-        .as_any()
-        .downcast_ref::<ConsensusProgramProverJobResult>()
+        .into_any()
+        .downcast::<ConsensusProgramProverJobResult>()
         .expect("downcast should succeed, else bug")
         .into();
 

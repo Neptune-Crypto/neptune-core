@@ -25,16 +25,13 @@ use crate::tasm_lib::maybe_write_debuggable_program_to_disk;
 use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum JobError {
     #[error("triton-vm program complexity limit exceeded.  result: {result},  limit: {limit}")]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
-    // note: this should be #[from VmProcessError].
-    // however JobError must be clonable and VmProcessError is
-    // not easily clonable, so this is a compromise.
     #[error("external proving process failed")]
-    TritonVmProverFailed(String),
+    TritonVmProverFailed(#[from] VmProcessError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,10 +61,13 @@ impl JobResult for ConsensusProgramProverJobResult {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
 }
-impl From<&ConsensusProgramProverJobResult> for Result<Proof, JobError> {
-    fn from(v: &ConsensusProgramProverJobResult) -> Self {
-        v.0.clone()
+impl From<Box<ConsensusProgramProverJobResult>> for Result<Proof, JobError> {
+    fn from(v: Box<ConsensusProgramProverJobResult>) -> Self {
+        (*v).0
     }
 }
 
@@ -140,9 +140,7 @@ impl ConsensusProgramProverJob {
         }
         #[cfg(not(test))]
         {
-            self.prove_out_of_process()
-                .await
-                .map_err(|e| JobError::TritonVmProverFailed(e.to_string()))
+            Ok(self.prove_out_of_process().await?)
         }
     }
 

@@ -12,6 +12,7 @@ pub(super) type JobResultSender = oneshot::Sender<JobCompletion>;
 /// represents a job result, which can be any type.
 pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
     fn as_any(&self) -> &dyn Any;
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
 }
 
 /// represents completion state of a job
