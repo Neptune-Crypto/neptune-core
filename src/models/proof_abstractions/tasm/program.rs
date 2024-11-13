@@ -184,12 +184,6 @@ pub(crate) async fn prove_consensus_program(
         .expect("downcast should succeed, else bug")
         .into();
 
-    // temporary: panic on any job error.
-    // todo: fix callers to handle errors.
-    if let Err(e) = result {
-        panic!("Proving job failed with error: {:?}", e);
-    }
-
     Ok(result?)
 }
 

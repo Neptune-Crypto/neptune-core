@@ -21,6 +21,7 @@ use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
+use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -485,7 +486,7 @@ pub(crate) async fn mine(
         };
 
         let compose = global_state_lock.cli().compose;
-        let composer_task = if !wait_for_confirmation
+        let mut composer_task = if !wait_for_confirmation
             && compose
             && guesser_task.is_none()
             && !is_syncing
@@ -499,13 +500,24 @@ pub(crate) async fn mine(
                 .spawn(compose_task)
                 .expect("Failed to spawn composer task.");
 
-            Some(task)
+            task
         } else {
-            None
+            tokio::spawn(async { Ok(()) })
         };
 
         // Await a message from either the worker task or from the main loop
         select! {
+            Ok(Err(e)) = &mut composer_task => {
+                match e.downcast_ref::<prover_job::ProverJobError>() {
+                    Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
+                        pause_mine = true;
+                        tracing::warn!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
+                    },
+                    // tbd: perhaps any composer error should pause mining rather than panic.
+                    _ => panic!("unexpected error while composing: {:?}", e),
+                }
+            },
+
             Some(main_message) = from_main.recv() => {
                 debug!("Miner received message type: {}", main_message.get_type());
 
@@ -517,8 +529,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
 
@@ -529,8 +541,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
 
@@ -542,8 +554,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
 
@@ -554,8 +566,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
 
@@ -571,8 +583,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
                     }
@@ -594,8 +606,8 @@ pub(crate) async fn mine(
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
                         }
-                        if let Some(ct) = composer_task {
-                            ct.abort();
+                        if !composer_task.is_finished() {
+                            composer_task.abort();
                             debug!("Abort-signal sent to composer worker.");
                         }
                     }
