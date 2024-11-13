@@ -173,19 +173,19 @@ pub struct Args {
     #[structopt(long, name = "tokio-console", default_value = "false")]
     pub tokio_console: bool,
 
-    /// Sets the maximum padded_height exponent for proof creation in Triton VM.
+    /// Sets the max program complexity limit for proof creation in Triton VM.
     ///
     /// Triton VM's prover complexity is a function of something called padded height
-    /// which is always a power of two.  A powerful machine in 2024 with 128 CPU cores
-    /// can handle a padded height of 2^23.
+    /// which is always a power of two. A basic proof has a complexity of 2^11.
+    /// A powerful machine in 2024 with 128 CPU cores can handle a padded height of 2^23.
     ///
     /// For such a machine, one would set a limit of 23.
     ///
-    /// if any operation requires a larger padded height than the limit it will either
-    /// be given to another node for processing, or rejected, or halt execution.
+    /// if the limit is reached while mining, a warning is logged and mining will pause.
+    /// non-mining operations may panic and halt neptune-core
     ///
     /// no limit is applied if unset.
-    #[structopt(long, short, value_parser = clap::value_parser!(u8).range(1..32))]
+    #[structopt(long, short, value_parser = clap::value_parser!(u8).range(10..32))]
     pub max_log2_padded_height_for_proofs: Option<u8>,
 }
 
