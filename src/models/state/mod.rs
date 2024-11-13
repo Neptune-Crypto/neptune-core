@@ -23,6 +23,8 @@ use blockchain_state::BlockchainState;
 use itertools::Itertools;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
+use mining_status::ComposingWorkInfo;
+use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
@@ -189,16 +191,18 @@ impl GlobalStateLock {
     }
 
     /// Indicate if we are guessing
-    pub async fn set_mining_status_to_guesing(&mut self) {
+    pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
         let now = SystemTime::now();
-        self.lock_mut(|s| s.mining_status = MiningStatus::Guessing(now))
+        let block_info = GuessingWorkInfo::new(now, block);
+        self.lock_mut(|s| s.mining_status = MiningStatus::Guessing(block_info))
             .await
     }
 
     /// Indicate if we are composing
     pub async fn set_mining_status_to_composing(&mut self) {
         let now = SystemTime::now();
-        self.lock_mut(|s| s.mining_status = MiningStatus::Composing(now))
+        let work_info = ComposingWorkInfo::new(now);
+        self.lock_mut(|s| s.mining_status = MiningStatus::Composing(work_info))
             .await
     }
 

@@ -471,22 +471,28 @@ pub(crate) async fn mine(
             && !pause_mine
         {
             let composer_utxos = maybe_proposal.composer_utxos();
-            global_state_lock.set_mining_status_to_guesing().await;
-            maybe_proposal.map(|proposal| {
-                let guesser_task = guess_nonce(
-                    proposal.to_owned(),
-                    latest_block.clone(),
-                    guesser_tx,
-                    composer_utxos,
-                    global_state_lock.cli().sleepy_guessing,
-                    None, // using default TARGET_BLOCK_INTERVAL
-                );
 
+            // safe because above `is_some`
+            let proposal = maybe_proposal.unwrap();
+            global_state_lock
+                .set_mining_status_to_guessing(proposal)
+                .await;
+
+            let guesser_task = guess_nonce(
+                proposal.to_owned(),
+                latest_block.clone(),
+                guesser_tx,
+                composer_utxos,
+                global_state_lock.cli().sleepy_guessing,
+                None, // using default TARGET_BLOCK_INTERVAL
+            );
+
+            Some(
                 tokio::task::Builder::new()
                     .name("guesser")
                     .spawn(guesser_task)
-                    .expect("Failed to spawn guesser task")
-            })
+                    .expect("Failed to spawn guesser task"),
+            )
         } else {
             None
         };

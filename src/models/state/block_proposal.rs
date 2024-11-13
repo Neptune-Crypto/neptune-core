@@ -38,6 +38,14 @@ impl BlockProposal {
         !matches!(self, BlockProposal::None)
     }
 
+    pub(crate) fn unwrap(&self) -> &Block {
+        match self {
+            BlockProposal::OwnComposition((block, _)) => block,
+            BlockProposal::ForeignComposition(block) => block,
+            BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
+        }
+    }
+
     /// Map the inner block (if any) to some result
     pub(crate) fn map<T, F: FnOnce(&Block) -> T>(&self, function: F) -> Option<T> {
         match self {
