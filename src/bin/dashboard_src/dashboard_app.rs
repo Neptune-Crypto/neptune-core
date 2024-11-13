@@ -48,6 +48,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use super::history_screen::HistoryScreen;
+use super::mempool_screen::MempoolScreen;
 use super::overview_screen::OverviewScreen;
 use super::peers_screen::PeersScreen;
 use super::receive_screen::ReceiveScreen;
@@ -61,6 +62,7 @@ enum MenuItem {
     History,
     Receive,
     Send,
+    Mempool,
     Quit,
 }
 
@@ -81,7 +83,8 @@ impl From<MenuItem> for usize {
             MenuItem::History => 2,
             MenuItem::Receive => 3,
             MenuItem::Send => 4,
-            MenuItem::Quit => 5,
+            MenuItem::Mempool => 5,
+            MenuItem::Quit => 6,
         }
     }
 }
@@ -105,6 +108,7 @@ impl fmt::Display for MenuItem {
             MenuItem::History => write!(f, "History"),
             MenuItem::Receive => write!(f, "Receive"),
             MenuItem::Send => write!(f, "Send"),
+            MenuItem::Mempool => write!(f, "Mempool"),
             MenuItem::Quit => write!(f, "Quit"),
         }
     }
@@ -136,6 +140,7 @@ pub struct DashboardApp {
     history_screen: Rc<RefCell<HistoryScreen>>,
     receive_screen: Rc<RefCell<ReceiveScreen>>,
     send_screen: Rc<RefCell<SendScreen>>,
+    mempool_screen: Rc<RefCell<MempoolScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
     console_io: Arc<Mutex<Vec<ConsoleIO>>>,
@@ -173,6 +178,10 @@ impl DashboardApp {
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
+        let mempool_screen = Rc::new(RefCell::new(MempoolScreen::new(rpc_server.clone())));
+        let mempool_screen_dyn = Rc::clone(&mempool_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Mempool, Rc::clone(&mempool_screen_dyn));
+
         let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, network)));
         let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
@@ -186,6 +195,7 @@ impl DashboardApp {
             history_screen,
             receive_screen,
             send_screen,
+            mempool_screen,
             screens,
             output: "".to_string(),
             console_io: Arc::new(Mutex::new(vec![])),
@@ -529,6 +539,12 @@ impl DashboardApp {
             }
             MenuItem::Send => {
                 f.render_widget::<SendScreen>(self.send_screen.borrow().to_owned(), screen_chunk);
+            }
+            MenuItem::Mempool => {
+                f.render_widget::<MempoolScreen>(
+                    self.mempool_screen.borrow().to_owned(),
+                    screen_chunk,
+                );
             }
             // MenuItem::Quit => todo!(),
             _ => {

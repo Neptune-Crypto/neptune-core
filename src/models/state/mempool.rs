@@ -103,8 +103,8 @@ impl TransactionOrigin {
 
 #[derive(Debug, GetSize, Clone, Serialize, Deserialize)]
 pub(crate) struct MempoolTransaction {
-    transaction: Transaction,
-    origin: TransactionOrigin,
+    pub(crate) transaction: Transaction,
+    pub(crate) origin: TransactionOrigin,
 }
 
 #[derive(Debug, GetSize)]

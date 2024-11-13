@@ -1,5 +1,6 @@
 pub mod dashboard_app;
 pub mod history_screen;
+pub mod mempool_screen;
 pub mod overview_screen;
 pub mod peers_screen;
 pub mod receive_screen;

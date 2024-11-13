@@ -12,6 +12,8 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use get_size::GetSize;
+use itertools::Itertools;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use systemstat::Platform;
@@ -29,6 +31,8 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
@@ -70,6 +74,54 @@ pub struct DashBoardOverviewDataFromClient {
 
     /// CPU temperature in degrees Celcius
     pub cpu_temp: Option<f32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, strum::Display)]
+pub enum TransactionProofType {
+    SingleProof,
+    ProofCollection,
+    PrimitiveWitness,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MempoolTransactionInfo {
+    pub id: TransactionKernelId,
+    pub proof_type: TransactionProofType,
+    pub num_inputs: usize,
+    pub num_outputs: usize,
+    pub balance_effect: NeptuneCoins,
+    pub fee: NeptuneCoins,
+    pub synced: bool,
+}
+
+impl From<&Transaction> for MempoolTransactionInfo {
+    fn from(mptx: &Transaction) -> Self {
+        MempoolTransactionInfo {
+            id: mptx.kernel.txid(),
+            proof_type: match mptx.proof {
+                TransactionProof::Witness(_) => TransactionProofType::PrimitiveWitness,
+                TransactionProof::SingleProof(_) => TransactionProofType::SingleProof,
+                TransactionProof::ProofCollection(_) => TransactionProofType::ProofCollection,
+            },
+            num_inputs: mptx.kernel.inputs.len(),
+            num_outputs: mptx.kernel.outputs.len(),
+            balance_effect: NeptuneCoins::zero(),
+            fee: mptx.kernel.fee,
+            synced: false,
+        }
+    }
+}
+
+impl MempoolTransactionInfo {
+    pub fn with_effect_on_balance(mut self, delta: NeptuneCoins) -> Self {
+        self.balance_effect = delta;
+        self
+    }
+
+    pub fn synced(mut self) -> Self {
+        self.synced = true;
+        self
+    }
 }
 
 #[tarpc::service]
@@ -139,6 +191,9 @@ pub trait RPC {
 
     // TODO: Change to return current size and max size
     async fn mempool_size() -> usize;
+
+    /// Return info about the transactions in the mempool
+    async fn mempool_overview(start_index: usize, number: usize) -> Vec<MempoolTransactionInfo>;
 
     /// Return the information used on the dashboard's overview tab
     async fn dashboard_overview_data() -> DashBoardOverviewDataFromClient;
@@ -947,6 +1002,60 @@ impl RPC for NeptuneRPCServer {
         let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
         Self::cpu_temp_inner()
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn mempool_overview(
+        self,
+        _context: ::tarpc::context::Context,
+        start_index: usize,
+        number: usize,
+    ) -> Vec<MempoolTransactionInfo> {
+        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+
+        let global_state = self.state.lock_guard().await;
+        let mempool_txkids = global_state
+            .mempool
+            .get_sorted_iter()
+            .skip(start_index)
+            .take(number)
+            .map(|(txkid, _)| txkid)
+            .collect_vec();
+
+        let balance_updating_txs: HashMap<_, _> = global_state
+            .wallet_state
+            .mempool_balance_updates()
+            .collect();
+
+        let tip_msah = global_state
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .hash();
+
+        let mempool_transactions = mempool_txkids
+            .iter()
+            .filter_map(|id| {
+                let mptxi = global_state
+                    .mempool
+                    .get(*id)
+                    .map(|tx| (MempoolTransactionInfo::from(tx), tx.kernel.mutator_set_hash))
+                    .map(|(mptxi, tx_msah)| {
+                        if tx_msah == tip_msah {
+                            mptxi.synced()
+                        } else {
+                            mptxi
+                        }
+                    });
+                if let Some(balance_update) = balance_updating_txs.get(id) {
+                    mptxi.map(|t| t.with_effect_on_balance(*balance_update))
+                } else {
+                    mptxi
+                }
+            })
+            .collect_vec();
+
+        mempool_transactions
     }
 }
 
