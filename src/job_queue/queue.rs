@@ -434,6 +434,8 @@ mod tests {
         //  1. jobs are run in priority order, highest priority first.
         //  2. when multiple jobs have the same priority, they run in FIFO order.
         pub(super) async fn run_jobs_by_priority(is_async: bool) -> anyhow::Result<()> {
+            let start_of_test = Instant::now();
+
             // create a job queue
             let job_queue = JobQueue::start();
 
@@ -501,8 +503,7 @@ mod tests {
             //   timestamp of each is greater than prev.
             //   input value of each is greater than prev, except every 9th item which should be < prev
             //     because there are nine jobs per level.
-            let one_day_ago = Instant::now() - std::time::Duration::from_secs(86400);
-            let mut prev = Box::new(DoubleJobResult(9999, 0, one_day_ago));
+            let mut prev = Box::new(DoubleJobResult(9999, 0, start_of_test));
             for (i, c) in results.into_iter().enumerate() {
                 let dyn_result = match c {
                     Ok(JobCompletion::Finished(r)) => r,
