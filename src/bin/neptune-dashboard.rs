@@ -1,8 +1,7 @@
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::process;
 
-use anyhow::bail;
-use anyhow::Result;
 use clap::Parser;
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_core::rpc_server::RPCClient;
@@ -21,7 +20,7 @@ pub struct Config {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     // Create connection to RPC server
     let args: Config = Config::parse();
     let server_socket = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), args.port);
@@ -30,10 +29,11 @@ async fn main() -> Result<()> {
         Ok(transp) => transp,
         Err(err) => {
             eprintln!("{err}");
-            bail!(
-                "Connection to neptune-core failed. Is a node running?  Or is the client still \
+            eprintln!(
+                "Connection to neptune-core failed. Is a node running? Or is the client still \
                 starting up?"
             );
+            process::exit(1);
         }
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
@@ -43,10 +43,11 @@ async fn main() -> Result<()> {
         Ok(nw) => nw,
         Err(err) => {
             eprintln!("{err}");
-            bail!(
+            eprintln!(
                 "Could not ping neptune-core. Do configurations match? Or is the client still \
                 starting up?"
             );
+            process::exit(1);
         }
     };
 
@@ -57,7 +58,8 @@ async fn main() -> Result<()> {
         Ok(la) => la,
         Err(err) => {
             eprintln!("{err}");
-            bail!("Could not get listen address from client.");
+            eprintln!("Could not get listen address from client.");
+            process::exit(1);
         }
     };
 
@@ -66,12 +68,11 @@ async fn main() -> Result<()> {
 
     match res {
         Err(err) => {
-            println!("{:?}", err);
+            eprintln!("{:?}", err);
+            process::exit(1);
         }
         Ok(output) => {
             print!("{}", output);
         }
     }
-
-    Ok(())
 }
