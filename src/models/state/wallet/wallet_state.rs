@@ -336,33 +336,36 @@ impl WalletState {
             .map(|au| &au.utxo)
     }
 
-    pub fn mempool_balance_updates(
+    pub(crate) fn mempool_balance_updates(
         &self,
-    ) -> impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + use<'_> {
-        self.mempool_spent_utxos
+    ) -> (
+        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + use<'_>,
+        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + use<'_>,
+    ) {
+        let incoming = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
+            (
+                *txkid,
+                sender_data
+                    .iter()
+                    .map(|(utxo, _ais, _)| utxo.get_native_currency_amount())
+                    .sum::<NeptuneCoins>(),
+            )
+        });
+
+        let outgoing = self
+            .mempool_unspent_utxos
             .iter()
-            .map(|(txkid, sender_data)| {
+            .map(|(txkid, announced_utxos)| {
                 (
                     *txkid,
-                    sender_data
+                    announced_utxos
                         .iter()
-                        .map(|(utxo, _ais, _)| -utxo.get_native_currency_amount())
+                        .map(|au| au.utxo.get_native_currency_amount())
                         .sum::<NeptuneCoins>(),
                 )
-            })
-            .chain(
-                self.mempool_unspent_utxos
-                    .iter()
-                    .map(|(txkid, announced_utxos)| {
-                        (
-                            *txkid,
-                            announced_utxos
-                                .iter()
-                                .map(|au| au.utxo.get_native_currency_amount())
-                                .sum::<NeptuneCoins>(),
-                        )
-                    }),
-            )
+            });
+
+        (incoming, outgoing)
     }
 
     pub async fn confirmed_balance(

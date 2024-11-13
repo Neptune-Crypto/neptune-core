@@ -76,20 +76,21 @@ pub struct DashBoardOverviewDataFromClient {
     pub cpu_temp: Option<f32>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, strum::Display)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, strum::Display)]
 pub enum TransactionProofType {
     SingleProof,
     ProofCollection,
     PrimitiveWitness,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct MempoolTransactionInfo {
     pub id: TransactionKernelId,
     pub proof_type: TransactionProofType,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub balance_effect: NeptuneCoins,
+    pub positive_balance_effect: NeptuneCoins,
+    pub negative_balance_effect: NeptuneCoins,
     pub fee: NeptuneCoins,
     pub synced: bool,
 }
@@ -105,7 +106,8 @@ impl From<&Transaction> for MempoolTransactionInfo {
             },
             num_inputs: mptx.kernel.inputs.len(),
             num_outputs: mptx.kernel.outputs.len(),
-            balance_effect: NeptuneCoins::zero(),
+            positive_balance_effect: NeptuneCoins::zero(),
+            negative_balance_effect: NeptuneCoins::zero(),
             fee: mptx.kernel.fee,
             synced: false,
         }
@@ -113,8 +115,19 @@ impl From<&Transaction> for MempoolTransactionInfo {
 }
 
 impl MempoolTransactionInfo {
-    pub fn with_effect_on_balance(mut self, delta: NeptuneCoins) -> Self {
-        self.balance_effect = delta;
+    pub(crate) fn with_positive_effect_on_balance(
+        mut self,
+        positive_balance_effect: NeptuneCoins,
+    ) -> Self {
+        self.positive_balance_effect = positive_balance_effect;
+        self
+    }
+
+    pub(crate) fn with_negative_effect_on_balance(
+        mut self,
+        negative_balance_effect: NeptuneCoins,
+    ) -> Self {
+        self.negative_balance_effect = negative_balance_effect;
         self
     }
 
@@ -1022,10 +1035,11 @@ impl RPC for NeptuneRPCServer {
             .map(|(txkid, _)| txkid)
             .collect_vec();
 
-        let balance_updating_txs: HashMap<_, _> = global_state
-            .wallet_state
-            .mempool_balance_updates()
-            .collect();
+        let (incoming, outgoing): (HashMap<_, _>, HashMap<_, _>) = {
+            let (incoming_iter, outgoing_iter) =
+                global_state.wallet_state.mempool_balance_updates();
+            (incoming_iter.collect(), outgoing_iter.collect())
+        };
 
         let tip_msah = global_state
             .chain
@@ -1036,7 +1050,7 @@ impl RPC for NeptuneRPCServer {
         let mempool_transactions = mempool_txkids
             .iter()
             .filter_map(|id| {
-                let mptxi = global_state
+                let mut mptxi = global_state
                     .mempool
                     .get(*id)
                     .map(|tx| (MempoolTransactionInfo::from(tx), tx.kernel.mutator_set_hash))
@@ -1047,11 +1061,16 @@ impl RPC for NeptuneRPCServer {
                             mptxi
                         }
                     });
-                if let Some(balance_update) = balance_updating_txs.get(id) {
-                    mptxi.map(|t| t.with_effect_on_balance(*balance_update))
-                } else {
-                    mptxi
+                if mptxi.is_some() {
+                    if let Some(pos_effect) = incoming.get(id) {
+                        mptxi = Some(mptxi.unwrap().with_positive_effect_on_balance(*pos_effect));
+                    }
+                    if let Some(neg_effect) = outgoing.get(id) {
+                        mptxi = Some(mptxi.unwrap().with_negative_effect_on_balance(*neg_effect));
+                    }
                 }
+
+                mptxi
             })
             .collect_vec();
 
@@ -1191,6 +1210,7 @@ mod rpc_server_tests {
             .clone()
             .validate_address(ctx, "Not a valid address".to_owned(), Network::Testnet)
             .await;
+        let _ = rpc_server.clone().mempool_overview(ctx, 0, 20).await;
         let _ = rpc_server.clone().clear_all_standings(ctx).await;
         let _ = rpc_server
             .clone()

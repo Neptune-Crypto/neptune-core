@@ -165,7 +165,8 @@ impl Widget for MempoolScreen {
             "proof type",
             "#inputs",
             "#outputs",
-            "effect on balance",
+            "positive effect on balance",
+            "negative effect on balance",
             "fee",
             "synced",
         ];
@@ -180,7 +181,8 @@ impl Widget for MempoolScreen {
                     mptxi.proof_type.to_string(),
                     mptxi.num_inputs.to_string(),
                     mptxi.num_outputs.to_string(),
-                    mptxi.balance_effect.to_string(),
+                    mptxi.positive_balance_effect.to_string(),
+                    mptxi.negative_balance_effect.to_string(),
                     mptxi.fee.to_string(),
                     if mptxi.synced {
                         "✓".to_string()
