@@ -10,8 +10,8 @@ use num_traits::Zero;
 
 use super::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::models::proof_abstractions::tasm::consensus_program_prover_job::JobSettings;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// The `neptune-core` command-line program starts a Neptune node.
@@ -242,7 +242,7 @@ impl Args {
     ) -> TritonVmProofJobOptions {
         TritonVmProofJobOptions {
             job_priority,
-            job_settings: JobSettings {
+            job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
             },
         }

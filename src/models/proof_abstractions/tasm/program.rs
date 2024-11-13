@@ -8,11 +8,11 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
 use tracing::debug;
 
-use super::consensus_program_prover_job::ConsensusProgramProverJob;
-use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
-use super::consensus_program_prover_job::JobError;
-use super::consensus_program_prover_job::JobSettings;
 use super::environment;
+use super::prover_job::ProverJob;
+use super::prover_job::ProverJobError;
+use super::prover_job::ProverJobResult;
+use super::prover_job::ProverJobSettings;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 
@@ -162,7 +162,7 @@ pub(crate) async fn prove_consensus_program(
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
-    let job = ConsensusProgramProverJob {
+    let job = ProverJob {
         program,
         claim,
         nondeterminism,
@@ -178,9 +178,9 @@ pub(crate) async fn prove_consensus_program(
         .await?;
 
     // obtain resulting proof.
-    let result: Result<Proof, JobError> = result
+    let result: Result<Proof, ProverJobError> = result
         .into_any()
-        .downcast::<ConsensusProgramProverJobResult>()
+        .downcast::<ProverJobResult>()
         .expect("downcast should succeed, else bug")
         .into();
 
@@ -196,7 +196,7 @@ pub(crate) async fn prove_consensus_program(
 #[derive(Clone, Debug, Default, Copy)]
 pub(crate) struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
-    pub job_settings: JobSettings,
+    pub job_settings: ProverJobSettings,
 }
 
 impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
@@ -204,7 +204,7 @@ impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
         let (job_priority, max_log2_padded_height_for_proofs) = v;
         Self {
             job_priority,
-            job_settings: JobSettings {
+            job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs,
             },
         }

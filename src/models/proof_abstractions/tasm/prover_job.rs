@@ -25,8 +25,9 @@ use crate::tasm_lib::maybe_write_debuggable_program_to_disk;
 use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
+/// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
-pub enum JobError {
+pub enum ProverJobError {
     #[error("triton-vm program complexity limit exceeded.  result: {result},  limit: {limit}")]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
@@ -34,6 +35,9 @@ pub enum JobError {
     TritonVmProverFailed(#[from] VmProcessError),
 }
 
+/// represents an error invoking external prover process
+///
+/// provides additional details for [JobError::TritonVmProverFailed]
 #[derive(Debug, thiserror::Error)]
 pub enum VmProcessError {
     #[error("parameter serialization failed")]
@@ -51,13 +55,21 @@ pub enum VmProcessError {
     #[error("proving process returned non-zero exit code: {0}")]
     NonZeroExitCode(i32),
 
+    // note: on unix an exit with no code indicates the process
+    // ended because of a signal, but this is not the case in
+    // windows, so cannot be relied upon.  there doesn't appear to
+    // be any good cross-platform heuristic to determine if a process
+    // ended normally or was killed.
+    //
+    // *if* we could determine the process was externally killed then
+    // it would be reasonable to retry the job.
     #[error("proving process did not return any exit code")]
     NoExitCode,
 }
 
 #[derive(Debug)]
-pub struct ConsensusProgramProverJobResult(pub Result<Proof, JobError>);
-impl JobResult for ConsensusProgramProverJobResult {
+pub struct ProverJobResult(pub Result<Proof, ProverJobError>);
+impl JobResult for ProverJobResult {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -65,32 +77,32 @@ impl JobResult for ConsensusProgramProverJobResult {
         self
     }
 }
-impl From<Box<ConsensusProgramProverJobResult>> for Result<Proof, JobError> {
-    fn from(v: Box<ConsensusProgramProverJobResult>) -> Self {
+impl From<Box<ProverJobResult>> for Result<Proof, ProverJobError> {
+    fn from(v: Box<ProverJobResult>) -> Self {
         (*v).0
     }
 }
 
 #[derive(Debug, Clone, Default, Copy)]
-pub(crate) struct JobSettings {
+pub(crate) struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ConsensusProgramProverJob {
+pub struct ProverJob {
     pub program: Program,
     pub claim: Claim,
     pub nondeterminism: NonDeterminism,
-    pub job_settings: JobSettings,
+    pub job_settings: ProverJobSettings,
 }
 
-impl ConsensusProgramProverJob {
+impl ProverJob {
     /// Run the program and generate a proof for it, assuming the Triton VM run
     /// halts gracefully.
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    async fn prove(&self) -> Result<Proof, JobError> {
+    async fn prove(&self) -> Result<Proof, ProverJobError> {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let mut vm_state = VMState::new(
@@ -122,7 +134,7 @@ impl ConsensusProgramProverJob {
         let padded_height = vm_state.cycle_count.next_power_of_two();
         match self.job_settings.max_log2_padded_height_for_proofs {
             Some(limit) if 2u32.pow(limit.into()) < padded_height => {
-                return Err(JobError::ProofComplexityLimitExceeded {
+                return Err(ProverJobError::ProofComplexityLimitExceeded {
                     result: padded_height,
                     limit: 2u32.pow(limit.into()),
                 })
@@ -140,6 +152,8 @@ impl ConsensusProgramProverJob {
         }
         #[cfg(not(test))]
         {
+            // todo:  perhaps we should retry once if process exits
+            // with non-zero or no exit code.
             Ok(self.prove_out_of_process().await?)
         }
     }
@@ -219,7 +233,7 @@ impl ConsensusProgramProverJob {
 }
 
 #[async_trait::async_trait]
-impl Job for ConsensusProgramProverJob {
+impl Job for ProverJob {
     // see trait doc-comment
     fn is_async(&self) -> bool {
         true
@@ -227,6 +241,6 @@ impl Job for ConsensusProgramProverJob {
 
     // see trait doc-comment
     async fn run_async(&self) -> Box<dyn JobResult> {
-        Box::new(ConsensusProgramProverJobResult(self.prove().await))
+        Box::new(ProverJobResult(self.prove().await))
     }
 }
