@@ -223,7 +223,8 @@ impl<T> AtomicRw<T> {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
     /// let year = atomic_car.lock_guard().await.year;
     /// # })
-    /// ```
+    ///```
+    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
     pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
         self.try_acquire_read_cb();
         let guard = self.inner.read().await;
@@ -274,6 +275,7 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock(|c| c.year).await;
     /// })
     /// ```
+    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
     pub async fn lock<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
@@ -328,6 +330,7 @@ impl<T> AtomicRw<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
+    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_read_cb();
         let inner_guard = self.inner.read().await;
@@ -393,6 +396,10 @@ impl<T> AtomicRw<T> {
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
+    #[cfg(feature = "log-slow-read-lock")]
+    location: &'static core::panic::Location<'static>,
+    #[cfg(feature = "log-slow-read-lock")]
+    timestamp: std::time::Instant,
 }
 
 impl<'a, T> AtomicRwReadGuard<'a, T> {
@@ -406,12 +413,33 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
         Self {
             guard,
             lock_callback_info,
+            #[cfg(feature = "log-slow-read-lock")]
+            location: core::panic::Location::caller(),
+            #[cfg(feature = "log-slow-read-lock")]
+            timestamp: std::time::Instant::now(),
         }
     }
 }
 
 impl<T> Drop for AtomicRwReadGuard<'_, T> {
     fn drop(&mut self) {
+        #[cfg(feature = "log-slow-read-lock")]
+        {
+            let duration = self.timestamp.elapsed();
+            let max_duration_secs = match std::env::var("LOG_SLOW_READ_LOCK_THRESHOLD") {
+                Ok(t) => t.parse().unwrap(),
+                Err(_) => 0.1,
+            };
+
+            if duration.as_secs_f32() > max_duration_secs {
+                tracing::warn!(
+                    "read-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
+                    duration.as_secs_f32(),
+                    max_duration_secs,
+                    self.location
+                );
+            }
+        }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {

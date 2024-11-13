@@ -11,6 +11,9 @@ publish = false
 # logs write-lock acquisitions that take over 100 millis.  requires nightly.
 # to enable: cargo +nightly build --features log-slow-write-lock
 log-slow-write-lock = []
+# logs read-lock acquisitions that take over 100 millis.  requires nightly.
+# to enable: cargo +nightly build --features log-slow-read-lock
+log-slow-read-lock = []
 
 [dependencies]
 aead = { version = "0.5", features = ["std"] }
