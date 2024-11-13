@@ -63,13 +63,13 @@ impl JobHandle {
 }
 
 /// messages that can be sent to job-queue inner task.
-enum JobQueueMsg<P: Ord> {
+enum JobQueueMsg<P> {
     AddJob(AddJobMsg<P>),
     Stop,
 }
 
 /// represents a msg to add a job to the queue.
-struct AddJobMsg<P: Ord> {
+struct AddJobMsg<P> {
     job: Box<dyn Job>,
     result_tx: JobResultSender,
     cancel_tx: JobCancelSender,
@@ -78,13 +78,13 @@ struct AddJobMsg<P: Ord> {
 }
 
 /// implements a job queue that sends result of each job to a listener.
-pub struct JobQueue<P: Ord> {
+pub struct JobQueue<P> {
     tx: mpsc::UnboundedSender<JobQueueMsg<P>>,
     tracker: TaskTracker,
     refs: Arc<()>,
 }
 
-impl<P: Ord> std::fmt::Debug for JobQueue<P> {
+impl<P> std::fmt::Debug for JobQueue<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobQueue")
             .field("tx", &"mpsc::Sender")
@@ -92,7 +92,7 @@ impl<P: Ord> std::fmt::Debug for JobQueue<P> {
     }
 }
 
-impl<P: Ord> Clone for JobQueue<P> {
+impl<P> Clone for JobQueue<P> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
@@ -102,7 +102,7 @@ impl<P: Ord> Clone for JobQueue<P> {
     }
 }
 
-impl<P: Ord> Drop for JobQueue<P> {
+impl<P> Drop for JobQueue<P> {
     // since JobQueue has impl Clone there can be other instances.
     // we must only send the Stop message when dropping the last instance.
     // if upgrade of a Weak Arc fails then we are the last one.
