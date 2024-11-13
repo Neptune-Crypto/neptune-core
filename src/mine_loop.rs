@@ -1,7 +1,9 @@
+use std::cmp::max;
 use std::time::Duration;
 
 use anyhow::bail;
 use anyhow::Result;
+use block_header::MINIMUM_BLOCK_TIME;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
 use rand::rngs::StdRng;
@@ -37,7 +39,11 @@ async fn compose_block(
     global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
 ) -> Result<()> {
-    let now = Timestamp::now();
+    // let now = Timestamp::now();
+    let now = max(
+        Timestamp::now(),
+        latest_block.header().timestamp + MINIMUM_BLOCK_TIME,
+    );
     let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
 
     let (transaction, composer_utxos) =
@@ -806,7 +812,7 @@ pub(crate) mod mine_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_template_is_valid() {
+    async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
         let mut alice = mock_genesis_global_state(
@@ -934,6 +940,51 @@ pub(crate) mod mine_loop_tests {
 
             alice.lock_guard_mut().await.mempool_clear().await;
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn block_proposal_for_height_two_is_valid() {
+        // Verify that a block template made with transaction from the mempool is a valid block
+        let network = Network::Main;
+        let alice = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+        assert!(
+            !alice
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_available_amount(now)
+                .is_zero(),
+            "Assumed to be premine-recipient"
+        );
+
+        // Verify constructed coinbase transaction and block template when mempool is empty
+        assert!(
+            alice.lock_guard().await.mempool.is_empty(),
+            "Mempool must be empty at start of loop"
+        );
+        let (sender_1, receiver_1) = oneshot::channel();
+        compose_block(genesis_block.clone(), alice.clone(), sender_1)
+            .await
+            .unwrap();
+        let (block_1, _) = receiver_1.await.unwrap();
+        assert!(block_1.is_valid(&genesis_block, Timestamp::now()));
+
+        let (sender_2, receiver_2) = oneshot::channel();
+        compose_block(block_1, alice.clone(), sender_2)
+            .await
+            .unwrap();
+        let (block_2, _) = receiver_2.await.unwrap();
+        assert!(block_2.is_valid(&genesis_block, Timestamp::now()));
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -1212,7 +1263,7 @@ pub(crate) mod mine_loop_tests {
             let mined_block_info = worker_task_rx.await.unwrap();
 
             // note: this assertion often fails prior to fix for #154.
-            // Also note that `is_valid` is a wrapper around `is_valid_extended`
+            // Also note that `is_valid` is a wrapper around `is_valid_internal`
             // which is the method we need here because it allows us to override
             // default values for the target block interval and the minimum
             // block interval.

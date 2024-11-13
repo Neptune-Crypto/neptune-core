@@ -548,13 +548,13 @@ impl Block {
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
     pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
-        self.is_valid_extended(previous_block, now, None, None)
+        self.is_valid_internal(previous_block, now, None, None)
     }
 
     /// Like `is_valid` but also allows specifying a custom
     /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
     /// these variabes take the default values.
-    pub(crate) fn is_valid_extended(
+    fn is_valid_internal(
         &self,
         previous_block: &Block,
         now: Timestamp,
