@@ -192,10 +192,7 @@ impl ProverJob {
                 .stderr(Stdio::null()) // ignore stderr
                 .spawn()?;
 
-            let mut child_stdin = child
-                .stdin
-                .take()
-                .ok_or_else(|| VmProcessError::StdinUnavailable)?;
+            let mut child_stdin = child.stdin.take().ok_or(VmProcessError::StdinUnavailable)?;
             child_stdin.write_all(inputs.join("\n").as_bytes()).await?;
 
             child
