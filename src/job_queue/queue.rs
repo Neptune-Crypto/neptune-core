@@ -124,16 +124,20 @@ impl<P: Ord> Drop for JobQueue<P> {
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
+        struct CurrentJob {
+            job_num: usize,
+            cancel_tx: JobCancelSender,
+        }
         struct Shared<P: Ord> {
             jobs: VecDeque<AddJobMsg<P>>,
-            curr_job_cancel_tx: Option<JobCancelSender>,
+            current_job: Option<CurrentJob>,
         }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
 
         let shared = Shared {
             jobs: VecDeque::new(),
-            curr_job_cancel_tx: None,
+            current_job: None,
         };
         let jobs: Arc<Mutex<Shared<P>>> = Arc::new(Mutex::new(shared));
 
@@ -147,12 +151,20 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             while let Some(msg) = rx.recv().await {
                 match msg {
                     JobQueueMsg::AddJob(m) => {
-                        let num_jobs = {
+                        let (num_jobs, job_running) = {
                             let mut guard = jobs_rc1.lock().unwrap();
                             guard.jobs.push_back(m);
-                            guard.jobs.len()
+                            let job_running = match &guard.current_job {
+                                Some(j) => format!("#{}", j.job_num),
+                                None => "none".to_string(),
+                            };
+                            (guard.jobs.len(), job_running)
                         };
-                        tracing::info!("JobQueue: job added.  {} queued job(s).", num_jobs);
+                        tracing::info!(
+                            "JobQueue: job added.  {} queued job(s).  job running: {}",
+                            num_jobs,
+                            job_running
+                        );
                         let _ = tx_deque.send(());
                     }
                     JobQueueMsg::Stop => {
@@ -161,9 +173,11 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
                         // if there is a presently executing job we need to cancel it.
                         let guard = jobs_rc1.lock().unwrap();
-                        if let Some(tx_cancel) = &guard.curr_job_cancel_tx {
-                            tx_cancel.send(()).unwrap();
-                            tracing::info!("JobQueue: notified current job to stop.");
+                        if let Some(current_job) = &guard.current_job {
+                            if !current_job.cancel_tx.is_closed() {
+                                current_job.cancel_tx.send(()).unwrap();
+                                tracing::info!("JobQueue: notified current job to stop.");
+                            }
                         }
                         break;
                     }
@@ -184,7 +198,10 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                         .make_contiguous()
                         .sort_by(|a, b| b.priority.cmp(&a.priority));
                     let job = guard.jobs.pop_front().unwrap();
-                    guard.curr_job_cancel_tx = Some(job.cancel_tx.clone());
+                    guard.current_job = Some(CurrentJob {
+                        job_num,
+                        cancel_tx: job.cancel_tx.clone(),
+                    });
                     (job, guard.jobs.len())
                 };
 
@@ -206,6 +223,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     timer.elapsed().as_secs_f32()
                 );
                 job_num += 1;
+
+                jobs_rc2.lock().unwrap().current_job = None;
 
                 let _ = msg.result_tx.send(job_completion);
             }
