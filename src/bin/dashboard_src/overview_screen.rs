@@ -399,8 +399,9 @@ impl Widget for OverviewScreen {
         lines = vec![];
         lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
         lines.push(format!(
-            "tx count: {}",
-            dashifnotset!(data.mempool_total_tx_count)
+            "tx count: {} ({} own)",
+            dashifnotset!(data.mempool_total_tx_count),
+            dashifnotset!(data.mempool_own_tx_count),
         ));
         Self::report(&lines, "Mempool")
             .style(style)
