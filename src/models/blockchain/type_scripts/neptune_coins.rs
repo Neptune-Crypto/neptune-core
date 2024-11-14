@@ -1,7 +1,6 @@
 use std::fmt::Display;
 use std::iter::Sum;
 use std::ops::Add;
-use std::ops::Mul;
 use std::ops::Neg;
 use std::ops::Sub;
 use std::str::FromStr;
@@ -12,6 +11,7 @@ use get_size::GetSize;
 use num_bigint::BigInt;
 use num_bigint::ToBigInt;
 use num_rational::BigRational;
+use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
 use num_traits::One;
@@ -46,18 +46,27 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 pub struct NeptuneCoins(u128);
 
 impl NeptuneCoins {
+    const MAX_NAU: u128 = 42000000 * Self::conversion_factor();
+
     /// The conversion factor is 10^30 * 2^2.
-    /// It is such that 42 000 000 * 10^30 * 2^4 is just one bit shy of being 128 bits
+    /// It is such that 42 000 000 * 10^30 * 2^2 is just one bit shy of being 128 bits
     /// wide. The one shy bit is used for the sign.
-    fn conversion_factor() -> u128 {
+    const fn conversion_factor() -> u128 {
         let mut product = 1u128;
         let ten = 10u128;
-        for _ in 0..30 {
-            product = product.mul(ten)
+        // for _ in 0..30 {
+        let mut i = 0;
+        while i < 30 {
+            product *= ten;
+            i += 1;
         }
+
         let two = 2u128;
-        for _ in 0..2 {
-            product = product.mul(two);
+        // for _ in 0..2 {
+        i = 0;
+        while i < 2 {
+            product *= two;
+            i += 1;
         }
         product
     }
@@ -184,6 +193,40 @@ impl NeptuneCoins {
             .clamp(BigInt::from(0u32), BigInt::from(self.0));
         Self::from_nau(as_bigint)
     }
+
+    /// Generate an iterator for the running balance, updated with each item.
+    ///
+    /// Note that balances cannot be negative, so this method clamps at zero.
+    pub fn scan_balance<I: IntoIterator<Item = Self> + Clone>(
+        balance_update_itr: &I,
+        initial_balance: Self,
+    ) -> impl Iterator<Item = Self> + '_ {
+        balance_update_itr.clone().into_iter().scan(
+            initial_balance,
+            |current_balance, new_update| {
+                *current_balance = if new_update.is_negative() {
+                    current_balance
+                        .checked_add_negative(&new_update)
+                        .unwrap_or(Self::zero())
+                } else {
+                    *current_balance + new_update
+                };
+                Some(*current_balance)
+            },
+        )
+    }
+
+    /// Add two [`NeptuneCoin`]s, of which at least one is negative. If the
+    /// result is negative, or if it is larger than the maximum number of nau,
+    /// return `None`. Otherwise, return the result wrapped in a `Some`.
+    pub(crate) fn checked_add_negative(&self, rhs: &Self) -> Option<Self> {
+        let value = self.0.wrapping_add(rhs.0);
+        if value > Self::MAX_NAU {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
 }
 
 impl GetSize for NeptuneCoins {
@@ -232,6 +275,20 @@ impl CheckedSub for NeptuneCoins {
     fn checked_sub(&self, v: &Self) -> Option<Self> {
         if self >= v {
             Some(NeptuneCoins(self.0 - v.0))
+        } else {
+            None
+        }
+    }
+}
+
+impl CheckedAdd for NeptuneCoins {
+    fn checked_add(&self, v: &Self) -> Option<Self> {
+        if let Some(value) = self.0.checked_add(v.0) {
+            if value > Self::MAX_NAU {
+                None
+            } else {
+                Some(Self(value))
+            }
         } else {
             None
         }
@@ -628,5 +685,25 @@ mod amount_tests {
         let a0 = NeptuneCoins(1u128 << 126);
         let a1 = NeptuneCoins(1u128 << 126);
         assert!(a0.safe_add(a1).is_none());
+    }
+
+    #[test]
+    fn scan_balance_returns_sane_result() {
+        let balance_updates =
+            [64, 32, 32, 64, 32, 32, 64, 32, 32, -64, 53, 64, 32, 32].map(|i: i32| {
+                if i.is_negative() {
+                    -NeptuneCoins::new((-i) as u32)
+                } else {
+                    NeptuneCoins::new(i as u32)
+                }
+            });
+        let expected_balances = [
+            64, 96, 128, 192, 224, 256, 320, 352, 384, 320, 373, 437, 469, 501,
+        ]
+        .map(NeptuneCoins::new)
+        .to_vec();
+        let computed_balances =
+            NeptuneCoins::scan_balance(&balance_updates, NeptuneCoins::zero()).collect_vec();
+        assert_eq!(expected_balances, computed_balances);
     }
 }

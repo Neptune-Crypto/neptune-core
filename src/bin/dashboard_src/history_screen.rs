@@ -12,7 +12,6 @@ use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::proof_abstractions::timestamp::Timestamp;
 use neptune_core::rpc_server::RPCClient;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -160,15 +159,10 @@ impl HistoryScreen {
                 _ = &mut balance_history => {
                     let bh = rpc_client.history(context::current()).await.unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
-                    let mut balance = NeptuneCoins::zero();
-                    for (_, block_height, timestamp, amount) in bh.iter() {
-                        if amount.is_negative() {
-                            balance = match balance.checked_sub(amount) {
-                                Some(b) => b,
-                                None => NeptuneCoins::zero(),
-                            };
-                        }
-                        else { balance = balance + *amount; }
+                    let initial_balance = NeptuneCoins::zero();
+                    let updates = bh.iter().map(|(_,_,_, delta)| *delta);
+                    let balances = NeptuneCoins::scan_balance(&updates, initial_balance);
+                    for ((_, block_height, timestamp, amount), balance) in bh.iter().zip(balances) {
                         history_builder.push((*block_height, *timestamp, *amount, balance));
                     }
                     *balance_updates.lock().unwrap() = history_builder;
