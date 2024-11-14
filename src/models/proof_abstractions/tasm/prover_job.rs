@@ -116,11 +116,10 @@ impl ProverJob {
 
         // run program in VM
         //
-        // for now this seems to run fast enough it does not need to be in a spawn-blocking
-        // or even in external process.  But we use log_slow_scope!() to log a warning
-        // if a slower run is encountered.
+        // we may need to put this in a spawn-blocking or even in the external process.
+        // We use log_slow_scope!() to log a warning if its too slow for async code.
         let vm_output = {
-            log_slow_scope!(fn_name!(), 0.00001);
+            log_slow_scope!(fn_name!() + "::vm_state.run()", 0.0001);
 
             if let Err(e) = vm_state.run() {
                 panic!("VM run prior to proving should halt gracefully.\n{e}");
