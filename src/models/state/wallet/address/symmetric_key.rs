@@ -142,17 +142,16 @@ impl SymmetricKey {
     /// encrypts utxo secrets (utxo, sender_randomness) into ciphertext
     ///
     /// The output of `encrypt()` should be used as the input to `decrypt()`.
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
+    pub(crate) fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
         // 1. init randomness
-        let (_randomness, nonce_bfe) =
-            deterministically_derive_seed_and_nonce(utxo, sender_randomness);
+        let (_randomness, nonce_bfe) = deterministically_derive_seed_and_nonce(payload);
 
         // 2. generate random nonce
         let nonce_as_bytes = [&nonce_bfe.value().to_be_bytes(), [0u8; 4].as_slice()].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
 
         // 3. convert secrets to plaintext bytes
-        let plaintext = bincode::serialize(&(utxo, sender_randomness)).unwrap();
+        let plaintext = bincode::serialize(payload).unwrap();
 
         // 4. encrypt plaintext to symmetric ciphertext bytes
         let cipher = Aes256Gcm::new(&self.secret_key());
@@ -189,15 +188,11 @@ impl SymmetricKey {
 
     pub(crate) fn generate_public_announcement(
         &self,
-        utxo_notification_payload: UtxoNotificationPayload,
+        utxo_notification_payload: &UtxoNotificationPayload,
     ) -> PublicAnnouncement {
         let ciphertext = [
             &[SYMMETRIC_KEY_FLAG_U8.into(), self.receiver_identifier()],
-            self.encrypt(
-                &utxo_notification_payload.utxo(),
-                utxo_notification_payload.sender_randomness(),
-            )
-            .as_slice(),
+            self.encrypt(utxo_notification_payload).as_slice(),
         ]
         .concat();
 

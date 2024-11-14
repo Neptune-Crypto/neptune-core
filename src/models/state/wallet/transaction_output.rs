@@ -51,10 +51,10 @@ pub(crate) enum UtxoNotifyMethod {
 /// we should consider adding functionality that would facilitate passing
 /// these payloads from sender to receiver off-chain for lower-fee transfers
 /// between trusted parties or eg wallets owned by the same person/org.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct UtxoNotificationPayload {
-    utxo: Utxo,
-    sender_randomness: Digest,
+    pub(crate) utxo: Utxo,
+    pub(crate) sender_randomness: Digest,
 }
 
 impl UtxoNotificationPayload {
@@ -65,14 +65,6 @@ impl UtxoNotificationPayload {
             utxo,
             sender_randomness,
         }
-    }
-
-    pub(crate) fn utxo(&self) -> Utxo {
-        self.utxo.clone()
-    }
-
-    pub(crate) fn sender_randomness(&self) -> Digest {
-        self.sender_randomness
     }
 }
 

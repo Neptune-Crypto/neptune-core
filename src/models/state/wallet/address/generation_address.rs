@@ -173,13 +173,12 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
-        let (randomness, nonce_bfe) =
-            deterministically_derive_seed_and_nonce(utxo, sender_randomness);
+    pub(crate) fn encrypt(&self, payload: &UtxoNotificationPayload) -> Vec<BFieldElement> {
+        let (randomness, nonce_bfe) = deterministically_derive_seed_and_nonce(payload);
         let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key, randomness);
 
         // convert payload to bytes
-        let plaintext = bincode::serialize(&(utxo, sender_randomness)).unwrap();
+        let plaintext = bincode::serialize(payload).unwrap();
 
         // generate symmetric ciphertext
         let cipher = Aes256Gcm::new(&shared_key.into());
@@ -254,15 +253,11 @@ impl GenerationReceivingAddress {
 
     pub(crate) fn generate_public_announcement(
         &self,
-        utxo_notification_payload: UtxoNotificationPayload,
+        utxo_notification_payload: &UtxoNotificationPayload,
     ) -> PublicAnnouncement {
         let ciphertext = [
             &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
-            self.encrypt(
-                &utxo_notification_payload.utxo(),
-                utxo_notification_payload.sender_randomness(),
-            )
-            .as_slice(),
+            self.encrypt(utxo_notification_payload).as_slice(),
         ]
         .concat();
 

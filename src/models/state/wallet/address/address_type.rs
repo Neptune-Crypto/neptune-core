@@ -160,10 +160,11 @@ impl ReceivingAddress {
     ) -> PublicAnnouncement {
         match self {
             ReceivingAddress::Generation(generation_receiving_address) => {
-                generation_receiving_address.generate_public_announcement(utxo_notification_payload)
+                generation_receiving_address
+                    .generate_public_announcement(&utxo_notification_payload)
             }
             ReceivingAddress::Symmetric(symmetric_key) => {
-                symmetric_key.generate_public_announcement(utxo_notification_payload)
+                symmetric_key.generate_public_announcement(&utxo_notification_payload)
             }
         }
     }
@@ -186,10 +187,14 @@ impl ReceivingAddress {
     }
 
     /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
-    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Vec<BFieldElement> {
+    #[cfg(test)]
+    pub(crate) fn encrypt(
+        &self,
+        utxo_notification_payload: &UtxoNotificationPayload,
+    ) -> Vec<BFieldElement> {
         match self {
-            Self::Generation(a) => a.encrypt(utxo, sender_randomness),
-            Self::Symmetric(a) => a.encrypt(utxo, sender_randomness),
+            Self::Generation(a) => a.encrypt(utxo_notification_payload),
+            Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
         }
     }
 
@@ -521,7 +526,9 @@ mod test {
             let sender_randomness: Digest = random();
 
             // 3. encrypt secrets (utxo, sender_randomness)
-            let ciphertext = key.to_address().encrypt(&utxo, sender_randomness);
+            let notification_payload =
+                UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+            let ciphertext = key.to_address().encrypt(&notification_payload);
             println!("ciphertext.get_size() = {}", ciphertext.len() * 8);
 
             // 4. decrypt secrets
