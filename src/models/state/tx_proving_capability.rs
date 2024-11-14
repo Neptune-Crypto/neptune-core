@@ -3,11 +3,14 @@ use std::str::FromStr;
 
 use clap::error::ErrorKind;
 use clap::Parser;
+use serde::Deserialize;
+use serde::Serialize;
 
-#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Parser, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TxProvingCapability {
-    PrimitiveWitness,
+    #[default]
     LockScript,
+    PrimitiveWitness,
     ProofCollection,
     SingleProof,
 }

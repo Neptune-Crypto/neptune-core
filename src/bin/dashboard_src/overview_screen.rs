@@ -12,6 +12,7 @@ use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::mining_status::MiningStatus;
+use neptune_core::models::state::tx_proving_capability::TxProvingCapability;
 use neptune_core::prelude::twenty_first;
 use neptune_core::rpc_server::RPCClient;
 use ratatui::layout::Margin;
@@ -62,6 +63,7 @@ pub struct OverviewData {
     up_since: Option<u64>,
     cpu_load: Option<f64>,
     cpu_capacity: Option<f64>,
+    proving_capability: TxProvingCapability,
 
     /// CPU temperature in degrees Celcius
     cpu_temperature: Option<f32>,
@@ -156,6 +158,7 @@ impl OverviewScreen {
                                 own_overview_data.mining_status = resp.mining_status;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
+                                own_overview_data.proving_capability = resp.proving_capability;
                             }
 
                             *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
@@ -454,6 +457,7 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.ram_available),
             dashifnotset!(data.ram_total)
         ));
+        lines.push(format!("proving capability: {}", data.proving_capability));
         Self::report(&lines, "Machine")
             .style(style)
             .render(vrecter.next(2 + lines.len() as u16), buf);

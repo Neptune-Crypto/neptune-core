@@ -198,7 +198,7 @@ pub(crate) async fn mock_genesis_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state =
-        NetworkingState::new(peer_map, peer_db, syncing, cli.tx_proving_capability);
+        NetworkingState::new(peer_map, peer_db, syncing, cli.proving_capability());
     let genesis_block = archival_state.get_tip().await;
 
     // Sanity check

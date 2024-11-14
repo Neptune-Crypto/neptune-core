@@ -7,6 +7,7 @@ use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
 use num_traits::Zero;
+use sysinfo::System;
 
 use super::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -153,8 +154,10 @@ pub struct Args {
     /// If no value is set, this parameter is estimated. For privacy, this level
     /// must not be set to [`TxProvingCapability::LockScript`], as this leaks
     /// information about amounts and input/output UTXOs.
+    ///
     /// Proving the lockscripts is mandatory, since this is what prevents others
     /// from spending your coins.
+    ///
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
@@ -247,6 +250,43 @@ impl Args {
             },
         }
     }
+
+    /// Get the proving capability CLI argument or estimate it if it is not set.
+    pub(crate) fn proving_capability(&self) -> TxProvingCapability {
+        if let Some(proving_capability) = self.tx_proving_capability {
+            proving_capability
+        } else if self.compose {
+            TxProvingCapability::SingleProof
+        } else {
+            Self::estimate_proving_capability()
+        }
+    }
+
+    fn estimate_proving_capability() -> TxProvingCapability {
+        const SINGLE_PROOF_CORE_REQ: usize = 19;
+        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 128;
+        const PROOF_COLLECTION_CORE_REQ: usize = 2;
+        const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
+
+        let s = System::new_all();
+        let total_memory = s.total_memory();
+        assert!(
+            !total_memory.is_zero(),
+            "Total memory reported illegal value of 0"
+        );
+
+        let physical_core_count = s.physical_core_count().unwrap_or(1);
+
+        if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
+            TxProvingCapability::SingleProof
+        } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
+            && physical_core_count > PROOF_COLLECTION_CORE_REQ
+        {
+            TxProvingCapability::ProofCollection
+        } else {
+            TxProvingCapability::LockScript
+        }
+    }
 }
 
 #[cfg(test)]
@@ -287,5 +327,10 @@ mod cli_args_tests {
             ..Default::default()
         };
         assert!(args.disallow_all_incoming_peer_connections());
+    }
+
+    #[test]
+    fn estimate_proving_power_doesnt_crash() {
+        Args::estimate_proving_capability();
     }
 }

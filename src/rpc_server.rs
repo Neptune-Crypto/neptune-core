@@ -70,6 +70,8 @@ pub struct DashBoardOverviewDataFromClient {
     // `None` symbolizes failure to get mining status
     pub mining_status: Option<MiningStatus>,
 
+    pub proving_capability: TxProvingCapability,
+
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
@@ -810,6 +812,9 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .unconfirmed_balance(tip_digest, now)
             .await;
+        let proving_capability = state.cli().proving_capability();
+
+        info!("proving capability: {proving_capability}");
 
         let peer_count = Some(state.net.peer_map.len());
 
@@ -830,6 +835,7 @@ impl RPC for NeptuneRPCServer {
             mempool_own_tx_count,
             peer_count,
             mining_status,
+            proving_capability,
             confirmations,
             cpu_temp,
         }

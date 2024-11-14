@@ -154,7 +154,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         peer_map,
         peer_databases,
         syncing,
-        cli_args.tx_proving_capability,
+        cli_args.proving_capability(),
     );
 
     let light_state: LightState = LightState::from(latest_block.clone());

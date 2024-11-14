@@ -4,8 +4,6 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use num_traits::Zero;
-use sysinfo::System;
 use tracing::info;
 
 use super::tx_proving_capability::TxProvingCapability;
@@ -55,10 +53,8 @@ impl NetworkingState {
         peer_map: PeerMap,
         peer_databases: PeerDatabases,
         syncing: bool,
-        tx_proving_capability: Option<TxProvingCapability>,
+        tx_proving_capability: TxProvingCapability,
     ) -> Self {
-        let tx_proving_capability =
-            tx_proving_capability.unwrap_or_else(Self::estimate_proving_power);
         info!("transaction proving capability set to {tx_proving_capability:?}");
         Self {
             peer_map,
@@ -70,32 +66,6 @@ impl NetworkingState {
             // Initialize to now to prevent tx proof upgrade to run immediately
             // after startup of the client.
             last_tx_proof_upgrade_attempt: SystemTime::now(),
-        }
-    }
-
-    pub(crate) fn estimate_proving_power() -> TxProvingCapability {
-        const SINGLE_PROOF_CORE_REQ: usize = 19;
-        const SINGLE_PROOF_MEMORY_USAGE: u64 = (1u64 << 30) * 128;
-        const PROOF_COLLECTION_CORE_REQ: usize = 2;
-        const PROOF_COLLECTION_MEMORY_USAGE: u64 = (1u64 << 30) * 16;
-
-        let s = System::new_all();
-        let total_memory = s.total_memory();
-        assert!(
-            !total_memory.is_zero(),
-            "Total memory reported illegal value of 0"
-        );
-
-        let physical_core_count = s.physical_core_count().unwrap_or(1);
-
-        if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
-            TxProvingCapability::SingleProof
-        } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
-            && physical_core_count > PROOF_COLLECTION_CORE_REQ
-        {
-            TxProvingCapability::ProofCollection
-        } else {
-            TxProvingCapability::LockScript
         }
     }
 
@@ -176,15 +146,5 @@ impl NetworkingState {
                 .put(ip, current_standing)
                 .await
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn estimate_proving_power_doesnt_crash() {
-        NetworkingState::estimate_proving_power();
     }
 }
