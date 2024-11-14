@@ -450,16 +450,20 @@ pub struct ScopeDurationLogger<'a> {
     start: Instant,
     description: &'a str,
     log_slow_fn_threshold: f64,
+    location: &'static std::panic::Location<'static>,
 }
 impl<'a> ScopeDurationLogger<'a> {
+    #[track_caller]
     pub fn new_with_threshold(description: &'a str, log_slow_fn_threshold: f64) -> Self {
         Self {
             start: Instant::now(),
             description,
             log_slow_fn_threshold,
+            location: std::panic::Location::caller(),
         }
     }
 
+    #[track_caller]
     pub fn new(description: &'a str) -> Self {
         Self::new_with_threshold(
             description,
@@ -478,8 +482,8 @@ impl Drop for ScopeDurationLogger<'_> {
 
         if duration >= self.log_slow_fn_threshold {
             let msg = format!(
-                "executed {} in {} secs.  exceeds slow fn threshold of {} secs",
-                self.description, duration, self.log_slow_fn_threshold,
+                "executed {} in {} secs.  exceeds slow fn threshold of {} secs.  location: {}",
+                self.description, duration, self.log_slow_fn_threshold, self.location,
             );
 
             tracing::warn!("{}", msg);
