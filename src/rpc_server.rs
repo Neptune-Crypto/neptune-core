@@ -351,6 +351,8 @@ impl NeptuneRPCServer {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
 
+        tracing::debug!("stmi: step 1. get change key. need write-lock");
+
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
@@ -360,6 +362,8 @@ impl NeptuneRPCServer {
             s.persist_wallet().await.expect("flushed");
             key
         };
+
+        tracing::debug!("stmi: step 2. generate outputs. need read-lock");
 
         let state = self.state.lock_guard().await;
         let tx_outputs = state.generate_tx_outputs(outputs, owned_utxo_notification_medium);
@@ -372,6 +376,8 @@ impl NeptuneRPCServer {
                 .send(RPCServerToMain::PauseMiner)
                 .await;
         }
+
+        tracing::debug!("stmi: step 3. create tx. have read-lock");
 
         // Create the transaction
         //
@@ -401,6 +407,8 @@ impl NeptuneRPCServer {
         };
         drop(state);
 
+        tracing::debug!("stmi: step 4. extract expected utxo. need read-lock");
+
         let utxos_sent_to_self = self
             .state
             .lock_guard()
@@ -413,6 +421,8 @@ impl NeptuneRPCServer {
 
         // if the tx created offchain expected_utxos we must inform wallet.
         if !utxos_sent_to_self.is_empty() {
+            tracing::debug!("stmi: step 5. add expected utxos. need write-lock");
+
             // acquire write-lock
             let mut gsm = self.state.lock_guard_mut().await;
 
@@ -425,6 +435,8 @@ impl NeptuneRPCServer {
             // ensure we write new wallet state out to disk.
             gsm.persist_wallet().await.expect("flushed wallet");
         }
+
+        tracing::debug!("stmi: step 6. send messges. no lock needed");
 
         // Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = self
@@ -440,15 +452,20 @@ impl NeptuneRPCServer {
                 .await;
         }
 
+        tracing::debug!("stmi: step 7. flush dbs.  need write-lock");
+
         self.state.flush_databases().await.expect("flushed DBs");
 
-        match response {
+        let option = match response {
             Ok(_) => Some(transaction.kernel.txid()),
             Err(e) => {
                 tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
                 None
             }
-        }
+        };
+
+        tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
+        option
     }
 }
 
@@ -899,13 +916,9 @@ impl RPC for NeptuneRPCServer {
     ) -> Option<TransactionKernelId> {
         let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
 
-        if self
-            .state
-            .lock_guard()
-            .await
-            .cli()
-            .no_transaction_initiation
-        {
+        tracing::debug!("stm: entered fn");
+
+        if self.state.cli().no_transaction_initiation {
             warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
             return None;
         }
