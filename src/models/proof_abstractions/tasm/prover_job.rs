@@ -116,18 +116,36 @@ impl ProverJob {
 
         // run program in VM
         //
-        // we may need to put this in a spawn-blocking or even in the external process.
-        // We use log_slow_scope!() to log a warning if its too slow for async code.
-        let vm_output = {
-            log_slow_scope!(fn_name!() + "::vm_state.run()", 0.0001);
+        // this is sometimes fast enough for async, but other times takes 1+ seconds.
+        // As such we run it in spawn-blocking. Eventually it might make sense
+        // to move into the external process.
+        vm_state = {
+            let join_result = tokio::task::spawn_blocking(move || {
+                log_slow_scope!(fn_name!() + "::vm_state.run()");
+                let r = vm_state.run();
+                (vm_state, r)
+            })
+            .await;
 
-            if let Err(e) = vm_state.run() {
+            let (vm_state_moved, run_result) = match join_result {
+                Ok(r) => r,
+                Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+                Err(e) if e.is_cancelled() => {
+                    panic!("VM::run() task was cancelled unexpectedlly. error: {}", e)
+                }
+                Err(e) => panic!(
+                    "unexpected error from VM::run() spawn-blocking task.  {}",
+                    e
+                ),
+            };
+
+            if let Err(e) = run_result {
                 panic!("VM run prior to proving should halt gracefully.\n{e}");
             }
-            vm_state.public_output
+            vm_state_moved
         };
         assert_eq!(self.claim.program_digest, self.program.hash());
-        assert_eq!(self.claim.output, vm_output);
+        assert_eq!(self.claim.output, vm_state.public_output);
 
         tracing::debug!("job settings: {:?}", self.job_settings);
 
