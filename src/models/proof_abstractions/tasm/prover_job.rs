@@ -17,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
-use crate::macros::log_slow_scope;
+use crate::macros::log_scope_duration;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -121,7 +121,7 @@ impl ProverJob {
         // to move into the external process.
         vm_state = {
             let join_result = tokio::task::spawn_blocking(move || {
-                log_slow_scope!(fn_name!() + "::vm_state.run()");
+                log_scope_duration!(fn_name!() + "::vm_state.run()");
                 let r = vm_state.run();
                 (vm_state, r)
             })

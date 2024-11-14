@@ -24,12 +24,21 @@ macro_rules! fn_name {
 macro_rules! log_slow_scope {
     ($description: expr) => {
         let log_slow_scope_desc = $description;
-        let _____x = $crate::ScopeDurationLogger::new(&log_slow_scope_desc);
+        let _____x = $crate::ScopeDurationLogger::new_default_threshold(&log_slow_scope_desc);
     };
     ($description: expr, $threshold: expr) => {
         let log_slow_scope_desc = $description;
         let _____x =
             $crate::ScopeDurationLogger::new_with_threshold(&log_slow_scope_desc, $threshold);
+    };
+}
+
+/// logs a warning if scope duration exceeds a threshold.
+/// See [crate::ScopeDurationLogger]
+macro_rules! log_scope_duration {
+    ($description: expr) => {
+        let log_scope_desc = $description;
+        let _____x = $crate::ScopeDurationLogger::new_without_threshold(&log_scope_desc);
     };
 }
 
@@ -41,6 +50,8 @@ macro_rules! log_slow_scope {
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
 ///   duration!(myfunc(), message, trace_level)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration {
     ($target: expr, $message: expr, $lvl: expr) => {{
@@ -79,6 +90,8 @@ macro_rules! duration {
 /// Accepts arguments in 2 forms:
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration_info {
     ($target: expr) => {
@@ -94,6 +107,8 @@ macro_rules! duration_info {
 /// Accepts arguments in 2 forms:
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration_debug {
     ($target: expr) => {
@@ -110,6 +125,8 @@ macro_rules! duration_debug {
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
 ///   duration!(myfunc(), message, trace_level)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration_async {
     ($target: expr, $message: expr, $lvl: expr) => {{
@@ -148,6 +165,8 @@ macro_rules! duration_async {
 /// Accepts arguments in 2 forms:
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration_async_info {
     ($target: expr) => {
@@ -163,6 +182,8 @@ macro_rules! duration_async_info {
 /// Accepts arguments in 2 forms:
 ///   duration!(myfunc())
 ///   duration!(myfunc(), message)
+///
+/// note: deprecated: see log_scope_duration, log_slow_scope
 #[allow(unused_macros)]
 macro_rules! duration_async_debug {
     ($target: expr) => {
@@ -194,6 +215,8 @@ pub(crate) use duration_info;
 pub(crate) use fn_name;
 #[allow(unused_imports)]
 pub(crate) use fn_name_bare;
+#[allow(unused_imports)]
+pub(crate) use log_scope_duration;
 #[allow(unused_imports)]
 pub(crate) use log_slow_scope;
 

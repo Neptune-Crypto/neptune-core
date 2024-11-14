@@ -446,15 +446,27 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
 
+/// for logging how long a scope takes to execute.
+///
+/// If an optional threshold value is provided then nothing will be
+/// logged unless execution duration exceeds the threshold.
+/// In that case a tracing::warn!() is logged.
+///
+/// If no threshold value is provided then a tracing::debug!()
+/// is always logged with the duration.
+///
+/// for convenience see macros:
+///  crate::macros::log_slow_scope,
+///  crate::macros::log_scope_duration,
 pub struct ScopeDurationLogger<'a> {
     start: Instant,
     description: &'a str,
-    log_slow_fn_threshold: f64,
+    log_slow_fn_threshold: Option<f64>,
     location: &'static std::panic::Location<'static>,
 }
 impl<'a> ScopeDurationLogger<'a> {
     #[track_caller]
-    pub fn new_with_threshold(description: &'a str, log_slow_fn_threshold: f64) -> Self {
+    pub fn new(description: &'a str, log_slow_fn_threshold: Option<f64>) -> Self {
         Self {
             start: Instant::now(),
             description,
@@ -464,7 +476,12 @@ impl<'a> ScopeDurationLogger<'a> {
     }
 
     #[track_caller]
-    pub fn new(description: &'a str) -> Self {
+    pub fn new_with_threshold(description: &'a str, log_slow_fn_threshold: f64) -> Self {
+        Self::new(description, Some(log_slow_fn_threshold))
+    }
+
+    #[track_caller]
+    pub fn new_default_threshold(description: &'a str) -> Self {
         Self::new_with_threshold(
             description,
             match env::var("LOG_SLOW_SCOPE_THRESHOLD") {
@@ -473,6 +490,11 @@ impl<'a> ScopeDurationLogger<'a> {
             },
         )
     }
+
+    #[track_caller]
+    pub fn new_without_threshold(description: &'a str) -> Self {
+        Self::new(description, None)
+    }
 }
 
 impl Drop for ScopeDurationLogger<'_> {
@@ -480,13 +502,22 @@ impl Drop for ScopeDurationLogger<'_> {
         let elapsed = self.start.elapsed();
         let duration = elapsed.as_secs_f64();
 
-        if duration >= self.log_slow_fn_threshold {
+        if let Some(threshold) = self.log_slow_fn_threshold {
+            if duration >= threshold {
+                let msg = format!(
+                    "executed {} in {} secs.  exceeds slow fn threshold of {} secs.  location: {}",
+                    self.description, duration, threshold, self.location,
+                );
+
+                tracing::warn!("{}", msg);
+            }
+        } else {
             let msg = format!(
-                "executed {} in {} secs.  exceeds slow fn threshold of {} secs.  location: {}",
-                self.description, duration, self.log_slow_fn_threshold, self.location,
+                "executed {} in {} secs.  location: {}",
+                self.description, duration, self.location,
             );
 
-            tracing::warn!("{}", msg);
+            tracing::debug!("{}", msg);
         }
     }
 }
