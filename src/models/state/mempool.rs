@@ -813,9 +813,6 @@ mod tests {
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::transaction_output::TxOutput;
-    use crate::models::blockchain::transaction::transaction_output::TxOutputList;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -823,6 +820,9 @@ mod tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::transaction_output::TxOutputList;
+    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::GlobalStateLock;
     use crate::models::state::TritonVmJobQueue;

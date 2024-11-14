@@ -35,9 +35,9 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-use crate::models::blockchain::transaction::transaction_output::UtxoNotificationPayload;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;

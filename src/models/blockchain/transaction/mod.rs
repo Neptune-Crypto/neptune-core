@@ -11,7 +11,6 @@ use crate::prelude::twenty_first;
 pub mod lock_script;
 pub mod primitive_witness;
 pub mod transaction_kernel;
-pub mod transaction_output;
 pub mod utxo;
 pub mod validity;
 

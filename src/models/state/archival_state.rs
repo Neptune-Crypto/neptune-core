@@ -995,15 +995,15 @@ mod archival_state_tests {
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
-    use crate::models::blockchain::transaction::transaction_output::TxOutput;
-    use crate::models::blockchain::transaction::transaction_output::TxOutputList;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::transaction_output::TxOutputList;
+    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;

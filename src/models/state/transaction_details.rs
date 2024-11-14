@@ -4,9 +4,9 @@ use num_traits::Zero;
 use tracing::error;
 
 use super::wallet::unlocked_utxo::UnlockedUtxo;
-use crate::models::blockchain::transaction::transaction_output::TxOutputList;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 /// Information, fetched from the state of the node, required to generate a

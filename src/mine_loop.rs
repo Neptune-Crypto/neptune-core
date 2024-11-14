@@ -14,7 +14,6 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::*;
-use transaction_output::TxOutput;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -30,6 +29,7 @@ use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -691,8 +691,6 @@ pub(crate) mod mine_loop_tests {
     use num_traits::Pow;
     use num_traits::Zero;
     use tracing_test::traced_test;
-    use transaction_output::TxOutput;
-    use transaction_output::UtxoNotificationMedium;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -701,6 +699,8 @@ pub(crate) mod mine_loop_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;

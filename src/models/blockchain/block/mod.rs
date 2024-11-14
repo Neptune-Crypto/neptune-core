@@ -955,9 +955,9 @@ mod block_tests {
     use crate::database::NeptuneLevelDb;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-    use crate::models::blockchain::transaction::transaction_output::TxOutput;
-    use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;

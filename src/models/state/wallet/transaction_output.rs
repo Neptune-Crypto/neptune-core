@@ -7,9 +7,9 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::PublicAnnouncement;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_state::WalletState;
@@ -80,7 +80,7 @@ impl UtxoNotificationPayload {
 /// [GlobalState::create_transaction()](crate::models::state::GlobalState::create_transaction())
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
-/// and claim a given UTXO
+/// and claim a given UTXO.
 #[derive(Debug, Clone)]
 pub struct TxOutput {
     utxo: Utxo,
