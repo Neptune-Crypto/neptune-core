@@ -403,6 +403,7 @@ pub struct AtomicRwReadGuard<'a, T> {
 }
 
 impl<'a, T> AtomicRwReadGuard<'a, T> {
+    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
     fn new(guard: RwLockReadGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
