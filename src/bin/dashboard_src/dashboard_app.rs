@@ -320,7 +320,7 @@ impl DashboardApp {
             }
 
             // note: setting a low duration like 100 can cause high CPU usage
-            if event::poll(Duration::from_millis(100))? {
+            if event::poll(Duration::from_millis(200))? {
                 if let Ok(event) = event::read() {
                     app.handle(&mut terminal, DashboardEvent::ConsoleEvent(event))
                         .await?;
@@ -548,18 +548,17 @@ impl DashboardApp {
             }
             // MenuItem::Quit => todo!(),
             _ => {
-                let messages: Vec<ListItem> =
-                    [ListItem::new(Line::from(Span::raw("-placeholder-")))].to_vec();
+                let messages: Vec<ListItem> = [
+                    ListItem::new(Line::from(Span::raw("Press enter, `q`, or Esc to quit."))),
+                    ListItem::new(Line::from(Span::raw("🌊"))),
+                ]
+                .to_vec();
                 let messages = List::new(messages)
                     .style(match self.menu_in_focus {
                         true => default_style,
                         false => focus_style,
                     })
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("Generic Screen"),
-                    );
+                    .block(Block::default().borders(Borders::ALL).title("Quit"));
 
                 f.render_widget(messages, screen_chunk);
             }

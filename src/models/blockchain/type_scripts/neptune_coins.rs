@@ -272,6 +272,8 @@ impl Sub for NeptuneCoins {
 }
 
 impl CheckedSub for NeptuneCoins {
+    /// Return Some(self-other) if the result is positive (or zero); otherwise
+    /// return None.
     fn checked_sub(&self, v: &Self) -> Option<Self> {
         if self >= v {
             Some(NeptuneCoins(self.0 - v.0))
@@ -282,6 +284,8 @@ impl CheckedSub for NeptuneCoins {
 }
 
 impl CheckedAdd for NeptuneCoins {
+    /// Return Some(self+other) if (there is no u128-overflow and) the result is
+    /// smaller than the maximum number of nau.
     fn checked_add(&self, v: &Self) -> Option<Self> {
         if let Some(value) = self.0.checked_add(v.0) {
             if value > Self::MAX_NAU {

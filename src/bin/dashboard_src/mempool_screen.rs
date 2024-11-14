@@ -7,6 +7,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use neptune_core::rpc_server::MempoolTransactionInfo;
 use neptune_core::rpc_server::RPCClient;
+use num_traits::CheckedSub;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -165,8 +166,9 @@ impl Widget for MempoolScreen {
             "proof type",
             "#inputs",
             "#outputs",
-            "positive effect on balance",
-            "negative effect on balance",
+            "+ effect on balance",
+            "- effect on balance",
+            "Δ balance",
             "fee",
             "synced",
         ];
@@ -176,6 +178,18 @@ impl Widget for MempoolScreen {
             .unwrap()
             .iter()
             .map(|mptxi| {
+                let balance_delta = if mptxi.positive_balance_effect > mptxi.negative_balance_effect
+                {
+                    mptxi
+                        .positive_balance_effect
+                        .checked_sub(&mptxi.negative_balance_effect)
+                        .unwrap()
+                } else {
+                    -mptxi
+                        .negative_balance_effect
+                        .checked_sub(&mptxi.positive_balance_effect)
+                        .unwrap()
+                };
                 vec![
                     mptxi.id.to_string(),
                     mptxi.proof_type.to_string(),
@@ -183,6 +197,7 @@ impl Widget for MempoolScreen {
                     mptxi.num_outputs.to_string(),
                     mptxi.positive_balance_effect.to_string(),
                     mptxi.negative_balance_effect.to_string(),
+                    balance_delta.to_string(),
                     mptxi.fee.to_string(),
                     if mptxi.synced {
                         "✓".to_string()
