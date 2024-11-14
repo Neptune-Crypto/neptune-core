@@ -26,6 +26,8 @@ use tracing::warn;
 use twenty_first::math::digest::Digest;
 
 use crate::config_models::network::Network;
+use crate::macros::fn_name;
+use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
@@ -472,13 +474,13 @@ impl NeptuneRPCServer {
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn network(self, _: context::Context) -> Network {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         self.state.cli().network
     }
 
     // documented in trait. do not add doc-comment.
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         let listen_port = self.state.cli().own_listen_port();
         let listen_for_peers_ip = self.state.cli().listen_addr;
         listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port))
@@ -486,13 +488,13 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn own_instance_id(self, _context: context::Context) -> InstanceId {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         self.state.lock_guard().await.net.instance_id
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_height(self, _: context::Context) -> BlockHeight {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         self.state
             .lock_guard()
             .await
@@ -505,13 +507,13 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         self.confirmations_internal().await
     }
 
     // documented in trait. do not add doc-comment.
     async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
@@ -527,7 +529,7 @@ impl RPC for NeptuneRPCServer {
         _: context::Context,
         block_selector: BlockSelector,
     ) -> Option<Digest> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
@@ -545,7 +547,7 @@ impl RPC for NeptuneRPCServer {
         _: context::Context,
         block_selector: BlockSelector,
     ) -> Option<BlockInfo> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let state = self.state.lock_guard().await;
         let digest = block_selector.as_digest(&state).await?;
@@ -561,7 +563,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let state = self.state.lock_guard().await;
 
@@ -576,7 +578,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
@@ -593,7 +595,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> HashMap<IpAddr, PeerStanding> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let mut sanctions_in_memory = HashMap::default();
 
@@ -627,7 +629,7 @@ impl RPC for NeptuneRPCServer {
         address_string: String,
         network: Network,
     ) -> Option<ReceivingAddress> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
             Some(address)
@@ -647,7 +649,7 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         amount_string: String,
     ) -> Option<NeptuneCoins> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         // parse string
         let amount = if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
@@ -662,7 +664,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let now = Timestamp::now();
         // test inequality
@@ -677,7 +679,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let now = Timestamp::now();
         let wallet_status = self
@@ -691,7 +693,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn synced_balance_unconfirmed(self, _context: tarpc::context::Context) -> NeptuneCoins {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let gs = self.state.lock_guard().await;
 
@@ -702,7 +704,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
@@ -717,7 +719,7 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         block_selector: BlockSelector,
     ) -> Option<BlockHeader> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let state = self.state.lock_guard().await;
         let block_digest = block_selector.as_digest(&state).await?;
@@ -738,7 +740,7 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         key_type: KeyType,
     ) -> ReceivingAddress {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
 
@@ -755,14 +757,14 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.state.lock_guard().await.mempool.len()
     }
 
     // documented in trait. do not add doc-comment.
     async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.state.lock_guard().await.mempool.get_size()
     }
@@ -772,7 +774,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let history = self.state.lock_guard().await.get_balance_history().await;
 
@@ -792,7 +794,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
@@ -839,7 +841,7 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn clear_all_standings(mut self, _: context::Context) {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -864,7 +866,7 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn clear_standing_by_ip(mut self, _: context::Context, ip: IpAddr) {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -895,7 +897,7 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notify_method: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<TransactionKernelId> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
             .await
@@ -914,7 +916,7 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
     ) -> Option<TransactionKernelId> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         tracing::debug!("stm: entered fn");
 
@@ -940,7 +942,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn shutdown(self, _: context::Context) -> bool {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         // 1. Send shutdown message to main
         let response = self
@@ -954,7 +956,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn pause_miner(self, _context: tarpc::context::Context) {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         if self.state.cli().mine() {
             let _ = self
@@ -968,7 +970,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn restart_miner(self, _context: tarpc::context::Context) {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         if self.state.cli().mine() {
             let _ = self
@@ -982,7 +984,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn prune_abandoned_monitored_utxos(mut self, _context: tarpc::context::Context) -> usize {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
@@ -1013,7 +1015,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: ::tarpc::context::Context,
     ) -> Vec<CoinWithPossibleTimeLock> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
@@ -1025,7 +1027,7 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f32> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         Self::cpu_temp_inner()
     }
@@ -1037,7 +1039,7 @@ impl RPC for NeptuneRPCServer {
         start_index: usize,
         number: usize,
     ) -> Vec<MempoolTransactionInfo> {
-        let _ = crate::ScopeDurationLogger::new(&crate::macros::fn_name!());
+        log_slow_scope!(fn_name!());
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state

@@ -30,6 +30,8 @@ use crate::connect_to_peers::answer_peer_wrapper;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::macros::fn_name;
+use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
@@ -436,9 +438,7 @@ impl MainLoopHandler {
     ) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MinerToMain::NewBlockFound"),
-                );
+                log_slow_scope!(fn_name!() + "::MinerToMain::NewBlockFound");
 
                 let new_block = new_block_info.block;
 
@@ -534,9 +534,7 @@ impl MainLoopHandler {
         debug!("Received {} from a peer task", msg.get_type());
         match msg {
             PeerTaskToMain::NewBlocks(blocks) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::NewBlocks"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
 
                 let last_block = blocks.last().unwrap().to_owned();
                 let update_jobs = {
@@ -625,9 +623,7 @@ impl MainLoopHandler {
                 claimed_max_height,
                 claimed_max_pow_family,
             )) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
 
                 let claimed_state =
                     PeerSynchronizationState::new(claimed_max_height, claimed_max_pow_family);
@@ -657,9 +653,7 @@ impl MainLoopHandler {
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::RemovePeerMaxBlockHeight"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::RemovePeerMaxBlockHeight");
 
                 debug!(
                     "Removing max block height from sync data structure for peer {}",
@@ -686,9 +680,7 @@ impl MainLoopHandler {
                 }
             }
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
 
                 let max_peers = self.global_state_lock.cli().max_peers;
                 for pot_peer in pot_peers {
@@ -702,9 +694,7 @@ impl MainLoopHandler {
                 }
             }
             PeerTaskToMain::Transaction(pt2m_transaction) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::Transaction"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::Transaction");
 
                 debug!(
                     "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
@@ -738,9 +728,7 @@ impl MainLoopHandler {
                     ))?;
             }
             PeerTaskToMain::BlockProposal(block) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerTaskToMain::BlockProposal"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");
 
                 debug!("main loop received block proposal from peer loop");
 
@@ -1338,7 +1326,7 @@ impl MainLoopHandler {
 
                 // Handle peer discovery
                 _ = &mut peer_discovery_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::peer_discovery_timer"));
+                    log_slow_scope!(fn_name!() + "::select::peer_discovery_timer");
 
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
@@ -1351,7 +1339,7 @@ impl MainLoopHandler {
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut block_sync_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::block_sync_timer"));
+                    log_slow_scope!(fn_name!() + "::select::block_sync_timer");
 
                     trace!("Timer: block-synchronization job");
                     self.block_sync(&mut main_loop_state).await?;
@@ -1362,7 +1350,7 @@ impl MainLoopHandler {
 
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::mempool_cleanup_timer"));
+                    log_slow_scope!(fn_name!() + "::select::mempool_cleanup_timer");
 
                     debug!("Timer: mempool-cleaner job");
                     self.global_state_lock.lock_guard_mut().await.mempool_prune_stale_transactions().await;
@@ -1373,7 +1361,7 @@ impl MainLoopHandler {
 
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::utxo_notification_cleanup_timer"));
+                    log_slow_scope!(fn_name!() + "::select::utxo_notification_cleanup_timer");
 
                     debug!("Timer: UTXO notification pool cleanup job");
 
@@ -1391,7 +1379,7 @@ impl MainLoopHandler {
 
                 // Handle membership proof resynchronization
                 _ = &mut mp_resync_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::mp_resync_timer"));
+                    log_slow_scope!(fn_name!() + "::select::mp_resync_timer");
 
                     debug!("Timer: Membership proof resync job");
                     self.global_state_lock.resync_membership_proofs().await?;
@@ -1401,7 +1389,7 @@ impl MainLoopHandler {
 
                 // Check if it's time to run the proof upgrader
                 _ = &mut tx_proof_upgrade_timer => {
-                    let _ = crate::ScopeDurationLogger::new(&(crate::macros::fn_name!() + "::select::tx_upgrade_proof_timer"));
+                    log_slow_scope!(fn_name!() + "::select::tx_upgrade_proof_timer");
 
                     trace!("Timer: tx-proof-upgrader");
                     self.proof_upgrader(&mut main_loop_state).await?;

@@ -16,6 +16,8 @@ use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
+use crate::macros::fn_name;
+use crate::macros::log_slow_scope;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -115,11 +117,10 @@ impl ProverJob {
         // run program in VM
         //
         // for now this seems to run fast enough it does not need to be in a spawn-blocking
-        // or even in external process.  But we use ScopeDurationLogger to log a warning
+        // or even in external process.  But we use log_slow_scope!() to log a warning
         // if a slower run is encountered.
         let vm_output = {
-            let _ =
-                crate::ScopeDurationLogger::new_with_threshold(&crate::macros::fn_name!(), 0.00001);
+            log_slow_scope!(fn_name!(), 0.00001);
 
             if let Err(e) = vm_state.run() {
                 panic!("VM run prior to proving should halt gracefully.\n{e}");

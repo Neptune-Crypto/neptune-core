@@ -19,6 +19,20 @@ macro_rules! fn_name {
     }};
 }
 
+/// logs a warning if scope duration exceeds a threshold.
+/// See [crate::ScopeDurationLogger]
+macro_rules! log_slow_scope {
+    ($description: expr) => {
+        let log_slow_scope_desc = $description;
+        let _____x = $crate::ScopeDurationLogger::new(&log_slow_scope_desc);
+    };
+    ($description: expr, $threshold: expr) => {
+        let log_slow_scope_desc = $description;
+        let _____x =
+            $crate::ScopeDurationLogger::new_with_threshold(&log_slow_scope_desc, $threshold);
+    };
+}
+
 /// executes an expression, times duration, and emits trace! message
 ///
 /// The trace level is `tracing::Level::TRACE` by default.
@@ -180,6 +194,8 @@ pub(crate) use duration_info;
 pub(crate) use fn_name;
 #[allow(unused_imports)]
 pub(crate) use fn_name_bare;
+#[allow(unused_imports)]
+pub(crate) use log_slow_scope;
 
 #[cfg(test)]
 mod test {

@@ -20,6 +20,8 @@ use tracing::info;
 use tracing::warn;
 
 use crate::connect_to_peers::close_peer_connected_callback;
+use crate::macros::fn_name;
+use crate::macros::log_slow_scope;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
@@ -476,9 +478,7 @@ impl PeerLoopHandler {
                 Ok(DISCONNECT_CONNECTION)
             }
             PeerMessage::PeerListRequest => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::PeerListRequest"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::PeerListRequest");
 
                 // We are interested in the address on which peers accept ingoing connections,
                 // not in the address in which they are connected to us. We are only interested in
@@ -509,9 +509,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::PeerListResponse(peers) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::PeerListResponse"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::PeerListResponse");
 
                 if peers.len() > MAX_PEER_LIST_LENGTH {
                     self.punish(NegativePeerSanction::FloodPeerListResponse)
@@ -528,9 +526,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Block(t_block) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::Block"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::Block");
 
                 info!(
                     "Got new block from peer {}, height {}, mined {}",
@@ -558,9 +554,7 @@ impl PeerLoopHandler {
                 known_blocks,
                 max_response_len,
             }) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockRequestBatch"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestBatch");
 
                 // Find the block that the peer is requesting to start from
                 let mut peers_preferred_canonical_block: Option<Block> = None;
@@ -684,9 +678,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockResponseBatch(t_blocks) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockResponseBatch"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockResponseBatch");
 
                 debug!(
                     "handling block response batch with {} blocks",
@@ -748,9 +740,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockNotificationRequest"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
 
                 debug!("Got BlockNotificationRequest");
 
@@ -770,9 +760,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotification(block_notification) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockNotification"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
 
                 debug!(
                     "Got BlockNotification of height {}",
@@ -832,9 +820,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockRequestByHash"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
 
                 match self
                     .global_state_lock
@@ -858,9 +844,7 @@ impl PeerLoopHandler {
                 }
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockRequestByHeight"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
@@ -916,9 +900,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Handshake(_) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::Handshake"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::Handshake");
 
                 // The handshake should have been sent during connection
                 // initalization. Here it is out of order at best, malicious at
@@ -927,9 +909,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::ConnectionStatus(_) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::ConnectionStatus"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::ConnectionStatus");
 
                 // The connection status should have been sent during connection
                 // initalization. Here it is out of order at best, malicious at
@@ -939,9 +919,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Transaction(transaction) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::Transaction"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
                 debug!(
                     "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
@@ -1042,9 +1020,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(tx_notification) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::TransactionNotification"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
                 // 1. Ignore if we already know this transaction, and
                 // the proof quality is not higher than what we already know.
@@ -1080,9 +1056,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::TransasctionRequest"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::TransasctionRequest");
 
                 if let Some(transaction) = self
                     .global_state_lock
@@ -1102,9 +1076,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalNotification"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalNotification");
 
                 let request = self
                     .global_state_lock
@@ -1130,9 +1102,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposalRequest"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalRequest");
 
                 let matching_proposal = self
                     .global_state_lock
@@ -1152,9 +1122,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposal(block) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::PeerMessage::BlockProposal"),
-                );
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposal");
 
                 info!("Got block proposal from peer.");
                 if !self
@@ -1218,9 +1186,7 @@ impl PeerLoopHandler {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
             MainToPeerTask::Block(block) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::Block"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::Block");
 
                 // We don't currently differentiate whether a new block came from a peer, or from our
                 // own miner. It's always shared through this logic.
@@ -1235,9 +1201,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::RequestBlockBatch(batch_block_request) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::RequestBlockBatch"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::RequestBlockBatch");
 
                 // Only ask one of the peers about the batch of blocks
                 if batch_block_request.peer_addr_target != self.peer_address {
@@ -1260,9 +1224,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::PeerSynchronizationTimeout(socket_addr) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::PeerSynchronizationTimeout"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::PeerSynchronizationTimeout");
 
                 if self.peer_address != socket_addr {
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1276,17 +1238,13 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::MakePeerDiscoveryRequest => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::MakePeerDiscoveryRequest"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::MakePeerDiscoveryRequest");
 
                 peer.send(PeerMessage::PeerListRequest).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::Disconnect(target_socket_addr) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::Disconnect"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
                 // Disconnect from this peer if its address matches that which the main
                 // task requested to disconnect from.
@@ -1295,9 +1253,9 @@ impl PeerLoopHandler {
             // Disconnect from this peer, no matter what.
             MainToPeerTask::DisconnectAll() => Ok(true),
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!()
-                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest"),
+                log_slow_scope!(
+                    (crate::macros::fn_name!()
+                        + "::MainToPeerTask::MakeSpecificPeerDiscoveryRequest")
                 );
 
                 if target_socket_addr == self.peer_address {
@@ -1306,9 +1264,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::TransactionNotification"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::TransactionNotification");
 
                 debug!("Sending PeerMessage::TransactionNotification");
                 peer.send(PeerMessage::TransactionNotification(
@@ -1319,9 +1275,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
-                let _ = crate::ScopeDurationLogger::new(
-                    &(crate::macros::fn_name!() + "::MainToPeerTask::BlockProposalNotification"),
-                );
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::BlockProposalNotification");
 
                 debug!("Sending PeerMessage::BlockProposalNotification");
                 peer.send(PeerMessage::BlockProposalNotification(
