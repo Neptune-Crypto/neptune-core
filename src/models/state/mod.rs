@@ -982,8 +982,14 @@ impl GlobalState {
         let asm_sync_label = ams_ref.get_sync_label().await;
         assert_eq!(
             tip_hash, asm_sync_label,
-            "Archival mutator set must be synced to tip for successful MUTXO recovery.\
-            Tip was:\n{tip_hash};\n but mutator set was synced to:\n{asm_sync_label}"
+            "Error: sync label in archival mutator set database disagrees with \
+            block tip. Archival mutator set must be synced to tip for successful \
+            MUTXO recovery.\n\
+            Possible causes: different or new genesis block; corrupt file system.\n\
+            Possible solution: try deleting the database at `DATA_DIR/databases/`. \
+            Get the value of `DATA_DIR` from the first message in the log, and \
+            *do not* delete the wallet file or directory.\n\n\
+            Tip:\n{tip_hash};\nsync label:\n{asm_sync_label}"
         );
 
         // Fetch all incoming UTXOs from recovery data
