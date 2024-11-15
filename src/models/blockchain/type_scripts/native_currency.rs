@@ -809,7 +809,7 @@ pub mod test {
     fn native_currency_derived_witness_generates_accepting_tasm_program_empty_tx() {
         // Generate a tx with coinbase input, no outputs, fee-size is the same
         // as the coinbase, so tx is valid.
-        let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 0))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(0, 0, 0)
             .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();
@@ -823,7 +823,7 @@ pub mod test {
 
     #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_unittest() {
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
             .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();
@@ -840,11 +840,7 @@ pub mod test {
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((
-            #_num_inputs,
-            #_num_outputs,
-            #_num_public_announcements),
-        ))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(#_num_inputs, #_num_outputs, #_num_public_announcements))]
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
@@ -953,7 +949,7 @@ pub mod test {
 
     #[tokio::test]
     async fn native_currency_failing_proof() {
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
             .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();

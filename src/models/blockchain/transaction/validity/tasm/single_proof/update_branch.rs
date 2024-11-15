@@ -706,7 +706,6 @@ impl BasicSnippet for UpdateBranch {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
-    use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -799,11 +798,14 @@ pub(crate) mod test {
         // Should also test for removed records in the new mutator set
         // accumulator.
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness =
-            PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, num_pub_announcements))
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
+            num_inputs,
+            num_outputs,
+            num_pub_announcements,
+        )
+        .new_tree(&mut test_runner)
+        .unwrap()
+        .current();
         let newly_confirmed_records = vec(arb::<Digest>(), 0usize..100)
             .new_tree(&mut test_runner)
             .unwrap()

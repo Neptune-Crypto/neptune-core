@@ -140,7 +140,6 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 mod tests {
     use std::collections::HashMap;
 
-    use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::Rng;
@@ -192,7 +191,7 @@ mod tests {
             let mut rng = test_runner.new_rng();
 
             let num_inputs = rng.gen_range(0usize..4);
-            let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
+            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, 2, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();

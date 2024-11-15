@@ -377,13 +377,12 @@ impl PrimitiveWitness {
 
         true
     }
-}
 
-impl Arbitrary for PrimitiveWitness {
-    type Parameters = (usize, usize, usize);
-    fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-        let (num_inputs, num_outputs, num_public_announcements) = parameters;
-
+    pub fn arbitrary_with_size_numbers(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_public_announcements: usize,
+    ) -> BoxedStrategy<Self> {
         // unwrap:
         //  - lock script preimages (inputs)
         //  - amounts (inputs)
@@ -497,10 +496,6 @@ impl Arbitrary for PrimitiveWitness {
             .boxed()
     }
 
-    type Strategy = BoxedStrategy<Self>;
-}
-
-impl PrimitiveWitness {
     pub fn arbitrary_primitive_witness_with(
         input_utxos: &[Utxo],
         input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
@@ -1127,7 +1122,7 @@ mod test {
         #[strategy(1usize..3)] _num_inputs: usize,
         #[strategy(1usize..3)] _num_outputs: usize,
         #[strategy(0usize..3)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(#_num_inputs, #_num_outputs, #_num_public_announcements
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1188,7 +1183,8 @@ mod test {
 
     #[proptest(cases = 5)]
     fn total_amount_is_valid(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2))]
+        primitive_witness: PrimitiveWitness,
     ) {
         println!("generated primitive witness.");
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {

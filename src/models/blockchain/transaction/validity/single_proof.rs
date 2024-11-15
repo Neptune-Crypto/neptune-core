@@ -684,7 +684,6 @@ impl ConsensusProgram for SingleProof {
 #[cfg(test)]
 mod test {
     use assert2::let_assert;
-    use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -699,7 +698,6 @@ mod test {
     use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
-    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -738,7 +736,7 @@ mod test {
     #[tokio::test]
     async fn can_verify_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
