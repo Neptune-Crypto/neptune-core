@@ -437,7 +437,7 @@ pub mod test {
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
-        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));

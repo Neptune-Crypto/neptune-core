@@ -27,7 +27,6 @@ mod transaction {
     use neptune_cash::models::proof_abstractions::tasm::program::ConsensusProgram;
     use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
     use neptune_cash::models::proof_abstractions::SecretWitness;
-    use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -104,10 +103,11 @@ mod transaction {
     fn removal_records_integrity(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
 
@@ -183,10 +183,11 @@ mod transaction {
     fn collect_lock_scripts(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
         bench_and_profile_consensus_program(
             CollectLockScripts,
@@ -228,10 +229,11 @@ mod transaction {
     fn kernel_to_outputs(args: (usize, usize)) {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, 2))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
         bench_and_profile_consensus_program(
             KernelToOutputs,

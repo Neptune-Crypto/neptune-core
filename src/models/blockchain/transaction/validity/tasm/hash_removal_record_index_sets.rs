@@ -66,7 +66,6 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::ConstZero;
-    use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::test_runner::RngAlgorithm;
     use proptest::test_runner::TestRng;
@@ -159,17 +158,22 @@ mod tests {
                     rng.gen_range(0..10),
                 ),
             };
+            let (num_inputs, num_outputs, num_public_announcements) = arb_params;
 
             let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
             let mut removal_records = vec![];
             for _ in 0..N {
-                let removal_record = PrimitiveWitness::arbitrary_with(arb_params)
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current()
-                    .kernel
-                    .inputs
-                    .clone();
+                let removal_record = PrimitiveWitness::arbitrary_with_size_numbers(
+                    num_inputs,
+                    num_outputs,
+                    num_public_announcements,
+                )
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+                .kernel
+                .inputs
+                .clone();
                 removal_records.push(removal_record);
             }
             let removal_records = removal_records.try_into().unwrap();

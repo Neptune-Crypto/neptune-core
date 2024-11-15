@@ -393,7 +393,6 @@ impl From<&PrimitiveWitness> for CollectTypeScriptsWitness {
 
 #[cfg(test)]
 mod test {
-    use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -440,7 +439,7 @@ mod test {
     fn derived_witness_generates_accepting_program_proptest(
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs,#_num_outputs,2)))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(#_num_inputs,#_num_outputs,2))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
@@ -460,7 +459,7 @@ mod test {
     #[test]
     fn derived_edge_case_witnesses_generate_accepting_programs_unit() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 2))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(0, 0, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -485,7 +484,7 @@ mod test {
     #[test]
     fn collect_type_scripts_proof_generation() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();

@@ -168,7 +168,6 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
-    use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -227,7 +226,7 @@ mod tests {
 
             let num_inputs = 2;
             let primitive_witness = if rng.gen_bool(0.5) {
-                PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
+                PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, 2, 2)
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current()
