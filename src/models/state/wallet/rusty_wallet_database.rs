@@ -32,7 +32,7 @@ impl RustyWalletDatabase {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyWalletDatabase-Schema",
-            crate::LOG_LOCK_EVENT_CB,
+            crate::LOG_TOKIO_LOCK_EVENT_CB,
         );
 
         let monitored_utxos = storage

@@ -12,18 +12,27 @@ publish = false
 # to enable: cargo +nightly build --features log-slow-write-lock
 # note: nothing logged until lock is released (guard dropped)
 # alternative: run tokio-console
-log-slow-write-lock = []
+log-slow-write-lock = ["track-lock-location", "track-lock-time"]
 
 # logs read-lock acquisitions that are held over 100 millis.  requires nightly.
 # to enable: cargo +nightly build --features log-slow-read-lock
 # note: nothing logged until lock is released (guard dropped)
 # alternative: run tokio-console
-log-slow-read-lock = []
+log-slow-read-lock = ["track-lock-location", "track-lock-time"]
 
 # logs all lock events (try_acquire, acquire, release).
 # useful for debugging deadlocks, or if a lock is never being released.
+# includes acquisition location if track-lock-location feature is enabled.
 # alternative: run tokio-console
 log-lock_events = []
+
+# locks::sync::tokio support for tracking location of lock acquisition
+# requires nightly.  not generally useful by itself.
+track-lock-location = []
+
+# locks::sync::tokio support for tracking instant of lock acquisition
+# not generally useful by itself.
+track-lock-time = []
 
 [dependencies]
 aead = { version = "0.5", features = ["std"] }

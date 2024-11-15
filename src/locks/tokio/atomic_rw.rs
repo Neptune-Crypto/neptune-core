@@ -4,7 +4,7 @@
 // [track_caller] is not (yet?) available for async fn in stable rust.
 // it is available in nightly rust with the async_fn_track_caller
 // feature flag.  To enable the feature in neptune build with
-// cargo +nightly build --features log-slow-write-lock
+// cargo +nightly build --features track-lock-location
 
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -50,9 +50,9 @@ use super::LockType;
 /// pub fn log_lock_event(lock_event: LockEvent) {
 ///     let (event, info, acquisition) =
 ///     match lock_event {
-///         LockEvent::TryAcquire{info, acquisition} => ("TryAcquire", info, acquisition),
-///         LockEvent::Acquire{info, acquisition} => ("Acquire", info, acquisition),
-///         LockEvent::Release{info, acquisition} => ("Release", info, acquisition),
+///         LockEvent::TryAcquire{info, acquisition, ..} => ("TryAcquire", info, acquisition),
+///         LockEvent::Acquire{info, acquisition, ..} => ("Acquire", info, acquisition),
+///         LockEvent::Release{info, acquisition, ..} => ("Release", info, acquisition),
 ///     };
 ///
 ///     println!(
@@ -65,10 +65,10 @@ use super::LockType;
 ///         std::thread::current().id(),
 ///     );
 /// }
-/// const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+/// const LOG_TOKIO_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 ///
 /// # tokio_test::block_on(async {
-/// let mut atomic_car = AtomicRw::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_EVENT_CB)));
+/// let mut atomic_car = AtomicRw::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
@@ -110,7 +110,7 @@ impl<T> From<T> for AtomicRw<T> {
     fn from(t: T) -> Self {
         Self {
             inner: Arc::new(RwLock::new(t)),
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
         }
     }
 }
@@ -121,7 +121,7 @@ impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     fn from(v: (T, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(RwLock::new(v.0)),
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
         }
     }
 }
@@ -133,7 +133,7 @@ impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicRw<T> {
         Self {
             inner: Arc::new(RwLock::new(v.0)),
             lock_callback_info: LockCallbackInfo::new(
-                LockType::Mutex,
+                LockType::RwLock,
                 v.1.map(|s| s.to_owned()),
                 v.2,
             ),
@@ -155,7 +155,7 @@ impl<T> From<RwLock<T>> for AtomicRw<T> {
     fn from(t: RwLock<T>) -> Self {
         Self {
             inner: Arc::new(t),
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
         }
     }
 }
@@ -167,7 +167,7 @@ impl<T> From<(RwLock<T>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T
     fn from(v: (RwLock<T>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(v.0),
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
         }
     }
 }
@@ -184,7 +184,7 @@ impl<T> From<Arc<RwLock<T>>> for AtomicRw<T> {
     fn from(t: Arc<RwLock<T>>) -> Self {
         Self {
             inner: t,
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
         }
     }
 }
@@ -196,7 +196,7 @@ impl<T> From<(Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)> for Atomi
     fn from(v: (Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: v.0,
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, v.1, v.2),
         }
     }
 }
@@ -224,7 +224,7 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock_guard().await.year;
     /// # })
     ///```
-    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
         self.try_acquire_read_cb();
         let guard = self.inner.read().await;
@@ -244,7 +244,7 @@ impl<T> AtomicRw<T> {
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<T> {
         self.try_acquire_write_cb();
         let guard = self.inner.write().await;
@@ -254,7 +254,7 @@ impl<T> AtomicRw<T> {
     /// Attempt to acquire write lock immediately.
     ///
     /// If the lock cannot be acquired without waiting, an error is returned.
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
         self.try_acquire_write_cb();
         let guard = self.inner.try_write()?;
@@ -275,7 +275,7 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock(|c| c.year).await;
     /// })
     /// ```
-    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
@@ -300,7 +300,7 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
     /// ```
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut<R, F>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
@@ -330,7 +330,7 @@ impl<T> AtomicRw<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
-    #[cfg_attr(feature = "log-slow-read-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_read_cb();
         let inner_guard = self.inner.read().await;
@@ -357,7 +357,7 @@ impl<T> AtomicRw<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
         let inner_guard = self.inner.write().await;
@@ -371,20 +371,32 @@ impl<T> AtomicRw<T> {
         self.lock_callback_info.lock_info_owned.name.as_deref()
     }
 
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn try_acquire_read_cb(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
                 info: self.lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
             });
         }
     }
 
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn try_acquire_write_cb(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
                 info: self.lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
             });
         }
     }
@@ -396,56 +408,66 @@ impl<T> AtomicRw<T> {
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
-    #[cfg(feature = "log-slow-read-lock")]
-    location: &'static core::panic::Location<'static>,
-    #[cfg(feature = "log-slow-read-lock")]
-    timestamp: std::time::Instant,
+    acquired_at: Option<std::time::Instant>,
+    location: Option<&'static core::panic::Location<'static>>,
 }
 
 impl<'a, T> AtomicRwReadGuard<'a, T> {
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn new(guard: RwLockReadGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+        let my_guard = Self {
+            guard,
+            lock_callback_info,
+
+            #[cfg(feature = "track-lock-time")]
+            acquired_at: Some(std::time::Instant::now()),
+            #[cfg(not(feature = "track-lock-time"))]
+            acquired_at: None,
+
+            #[cfg(feature = "track-lock-location")]
+            location: Some(core::panic::Location::caller()),
+            #[cfg(not(feature = "track-lock-location"))]
+            location: None,
+        };
+
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
+                acquired_at: my_guard.acquired_at,
+                location: my_guard.location,
             });
         }
-        Self {
-            guard,
-            lock_callback_info,
-            #[cfg(feature = "log-slow-read-lock")]
-            location: core::panic::Location::caller(),
-            #[cfg(feature = "log-slow-read-lock")]
-            timestamp: std::time::Instant::now(),
-        }
+        my_guard
     }
 }
 
 impl<T> Drop for AtomicRwReadGuard<'_, T> {
     fn drop(&mut self) {
-        #[cfg(feature = "log-slow-read-lock")]
-        {
-            let duration = self.timestamp.elapsed();
-            let max_duration_secs = match std::env::var("LOG_SLOW_READ_LOCK_THRESHOLD") {
-                Ok(t) => t.parse().unwrap(),
-                Err(_) => 0.1,
-            };
+        // #[cfg(feature = "track-lock-location")]
+        // {
+        //     let duration = self.acquired_at.elapsed();
+        //     let max_duration_secs = match std::env::var("LOG_SLOW_READ_LOCK_THRESHOLD") {
+        //         Ok(t) => t.parse().unwrap(),
+        //         Err(_) => 0.1,
+        //     };
 
-            if duration.as_secs_f32() > max_duration_secs {
-                tracing::warn!(
-                    "read-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
-                    duration.as_secs_f32(),
-                    max_duration_secs,
-                    self.location
-                );
-            }
-        }
+        //     if duration.as_secs_f32() > max_duration_secs {
+        //         tracing::warn!(
+        //             "read-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
+        //             duration.as_secs_f32(),
+        //             max_duration_secs,
+        //             self.location
+        //         );
+        //     }
+        // }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
+                acquired_at: self.acquired_at,
+                location: self.location,
             });
         }
     }
@@ -464,56 +486,67 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
-    #[cfg(feature = "log-slow-write-lock")]
-    location: &'static core::panic::Location<'static>,
-    #[cfg(feature = "log-slow-write-lock")]
-    timestamp: std::time::Instant,
+    acquired_at: Option<std::time::Instant>,
+    location: Option<&'static core::panic::Location<'static>>,
 }
 
 impl<'a, T> AtomicRwWriteGuard<'a, T> {
-    #[cfg_attr(feature = "log-slow-write-lock", track_caller)]
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn new(guard: RwLockWriteGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+        let my_guard = Self {
+            guard,
+            lock_callback_info,
+
+            #[cfg(feature = "track-lock-time")]
+            acquired_at: Some(std::time::Instant::now()),
+            #[cfg(not(feature = "track-lock-time"))]
+            acquired_at: None,
+
+            #[cfg(feature = "track-lock-location")]
+            location: Some(core::panic::Location::caller()),
+            #[cfg(not(feature = "track-lock-location"))]
+            location: None,
+        };
+
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
+                acquired_at: my_guard.acquired_at,
+                location: my_guard.location,
             });
         }
-        Self {
-            guard,
-            lock_callback_info,
-            #[cfg(feature = "log-slow-write-lock")]
-            location: core::panic::Location::caller(),
-            #[cfg(feature = "log-slow-write-lock")]
-            timestamp: std::time::Instant::now(),
-        }
+
+        my_guard
     }
 }
 
 impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     fn drop(&mut self) {
-        #[cfg(feature = "log-slow-write-lock")]
-        {
-            let duration = self.timestamp.elapsed();
-            let max_duration_secs = match std::env::var("LOG_SLOW_WRITE_LOCK_THRESHOLD") {
-                Ok(t) => t.parse().unwrap(),
-                Err(_) => 0.1,
-            };
+        // #[cfg(feature = "track-lock-location")]
+        // {
+        //     let duration = self.acquired_at.elapsed();
+        //     let max_duration_secs = match std::env::var("LOG_SLOW_WRITE_LOCK_THRESHOLD") {
+        //         Ok(t) => t.parse().unwrap(),
+        //         Err(_) => 0.1,
+        //     };
 
-            if duration.as_secs_f32() > max_duration_secs {
-                tracing::warn!(
-                    "write-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
-                    duration.as_secs_f32(),
-                    max_duration_secs,
-                    self.location
-                );
-            }
-        }
+        //     if duration.as_secs_f32() > max_duration_secs {
+        //         tracing::warn!(
+        //             "write-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
+        //             duration.as_secs_f32(),
+        //             max_duration_secs,
+        //             self.location
+        //         );
+        //     }
+        // }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
+                acquired_at: self.acquired_at,
+                location: self.location,
             });
         }
     }

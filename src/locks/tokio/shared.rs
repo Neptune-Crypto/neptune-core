@@ -94,15 +94,44 @@ pub enum LockEvent<'a> {
     TryAcquire {
         info: LockInfo<'a>,
         acquisition: LockAcquisition,
+        location: Option<&'static core::panic::Location<'static>>,
     },
     Acquire {
         info: LockInfo<'a>,
         acquisition: LockAcquisition,
+        acquired_at: Option<std::time::Instant>,
+        location: Option<&'static core::panic::Location<'static>>,
     },
     Release {
         info: LockInfo<'a>,
         acquisition: LockAcquisition,
+        acquired_at: Option<std::time::Instant>,
+        location: Option<&'static core::panic::Location<'static>>,
     },
+}
+
+impl LockEvent<'_> {
+    pub fn location(&self) -> Option<&'static core::panic::Location<'static>> {
+        match self {
+            Self::TryAcquire { location, .. } => *location,
+            Self::Acquire { location, .. } => *location,
+            Self::Release { location, .. } => *location,
+        }
+    }
+    pub fn acquired_at(&self) -> Option<std::time::Instant> {
+        match self {
+            Self::TryAcquire { .. } => None,
+            Self::Acquire { acquired_at, .. } => *acquired_at,
+            Self::Release { acquired_at, .. } => *acquired_at,
+        }
+    }
+    pub fn acquisition(&self) -> LockAcquisition {
+        match self {
+            Self::TryAcquire { acquisition, .. } => *acquisition,
+            Self::Acquire { acquisition, .. } => *acquisition,
+            Self::Release { acquisition, .. } => *acquisition,
+        }
+    }
 }
 
 /// A callback fn for receiving [LockEvent] event

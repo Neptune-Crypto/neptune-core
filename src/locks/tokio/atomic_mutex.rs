@@ -41,9 +41,9 @@ use super::LockType;
 /// pub fn log_lock_event(lock_event: LockEvent) {
 ///     let (event, info, acquisition) =
 ///     match lock_event {
-///         LockEvent::TryAcquire{info, acquisition} => ("TryAcquire", info, acquisition),
-///         LockEvent::Acquire{info, acquisition} => ("Acquire", info, acquisition),
-///         LockEvent::Release{info, acquisition} => ("Release", info, acquisition),
+///         LockEvent::TryAcquire{info, acquisition, ..} => ("TryAcquire", info, acquisition),
+///         LockEvent::Acquire{info, acquisition, ..} => ("Acquire", info, acquisition),
+///         LockEvent::Release{info, acquisition, ..} => ("Release", info, acquisition),
 ///     };
 ///
 ///     println!(
@@ -56,10 +56,10 @@ use super::LockType;
 ///         std::thread::current().id(),
 ///     );
 /// }
-/// const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+/// const LOG_TOKIO_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 ///
 /// # tokio_test::block_on(async {
-/// let mut atomic_car = AtomicMutex::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_EVENT_CB)));
+/// let mut atomic_car = AtomicMutex::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
@@ -215,6 +215,7 @@ impl<T> AtomicMutex<T> {
     /// let year = atomic_car.lock_guard().await.year;
     /// # })
     /// ```
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard(&self) -> AtomicMutexGuard<T> {
         self.try_acquire_read_cb();
         let guard = self.inner.lock().await;
@@ -223,6 +224,7 @@ impl<T> AtomicMutex<T> {
 
     /// Attempt to return a read lock and return an `AtomicMutextGuard`. Returns
     /// an error if the lock is already held, otherwise returns Ok(lock).
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<T>, tokio::sync::TryLockError> {
         self.try_acquire_try_acquire();
         let guard = self.inner.try_lock()?;
@@ -246,6 +248,7 @@ impl<T> AtomicMutex<T> {
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<T> {
         self.try_acquire_write_cb();
         let guard = self.inner.lock().await;
@@ -266,6 +269,7 @@ impl<T> AtomicMutex<T> {
     /// let year = atomic_car.lock(|c| c.year).await;
     /// })
     /// ```
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
@@ -291,6 +295,7 @@ impl<T> AtomicMutex<T> {
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
     /// ```
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut<R, F>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
@@ -324,6 +329,7 @@ impl<T> AtomicMutex<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_read_cb();
         let inner_guard = self.inner.lock().await;
@@ -351,6 +357,7 @@ impl<T> AtomicMutex<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
         let inner_guard = self.inner.lock().await;
@@ -362,29 +369,47 @@ impl<T> AtomicMutex<T> {
         f(&mut guard).await
     }
 
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn try_acquire_try_acquire(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
                 info: self.lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::TryAcquire,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
             });
         }
     }
 
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn try_acquire_read_cb(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
                 info: self.lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
             });
         }
     }
 
+    #[cfg_attr(feature = "track-lock-location", track_caller)]
     fn try_acquire_write_cb(&self) {
         if let Some(cb) = self.lock_callback_info.lock_callback_fn {
             cb(LockEvent::TryAcquire {
                 info: self.lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
+
+                #[cfg(feature = "track-lock-location")]
+                location: Some(core::panic::Location::caller()),
+                #[cfg(not(feature = "track-lock-location"))]
+                location: None,
             });
         }
     }
@@ -397,6 +422,8 @@ pub struct AtomicMutexGuard<'a, T> {
     guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
     acquisition: LockAcquisition,
+    acquired_at: Option<std::time::Instant>,
+    location: Option<&'static core::panic::Location<'static>>,
 }
 
 impl<'a, T> AtomicMutexGuard<'a, T> {
@@ -405,17 +432,32 @@ impl<'a, T> AtomicMutexGuard<'a, T> {
         lock_callback_info: &'a LockCallbackInfo,
         acquisition: LockAcquisition,
     ) -> Self {
+        let my_guard = Self {
+            guard,
+            lock_callback_info,
+            acquisition,
+
+            #[cfg(feature = "track-lock-time")]
+            acquired_at: Some(std::time::Instant::now()),
+            #[cfg(not(feature = "track-lock-time"))]
+            acquired_at: None,
+
+            #[cfg(feature = "track-lock-location")]
+            location: Some(core::panic::Location::caller()),
+            #[cfg(not(feature = "track-lock-location"))]
+            location: None,
+        };
+
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition,
+                acquired_at: my_guard.acquired_at,
+                location: my_guard.location,
             });
         }
-        Self {
-            guard,
-            lock_callback_info,
-            acquisition,
-        }
+
+        my_guard
     }
 }
 
@@ -426,6 +468,8 @@ impl<T> Drop for AtomicMutexGuard<'_, T> {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: self.acquisition,
+                acquired_at: self.acquired_at,
+                location: self.location,
             });
         }
     }
@@ -507,9 +551,15 @@ mod tests {
     async fn try_acquire_with_log() {
         pub fn log_lock_event(lock_event: LockEvent) {
             let (event, info, acquisition) = match lock_event {
-                LockEvent::TryAcquire { info, acquisition } => ("TryAcquire", info, acquisition),
-                LockEvent::Acquire { info, acquisition } => ("Acquire", info, acquisition),
-                LockEvent::Release { info, acquisition } => ("Release", info, acquisition),
+                LockEvent::TryAcquire {
+                    info, acquisition, ..
+                } => ("TryAcquire", info, acquisition),
+                LockEvent::Acquire {
+                    info, acquisition, ..
+                } => ("Acquire", info, acquisition),
+                LockEvent::Release {
+                    info, acquisition, ..
+                } => ("Release", info, acquisition),
             };
 
             println!(
@@ -523,10 +573,10 @@ mod tests {
             );
         }
 
-        const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+        const LOG_TOKIO_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
         let name = "Jim".to_string();
         let atomic_name =
-            AtomicMutex::<String>::from((name, Some("name"), Some(LOG_LOCK_EVENT_CB)));
+            AtomicMutex::<String>::from((name, Some("name"), Some(LOG_TOKIO_LOCK_EVENT_CB)));
         assert!(
             atomic_name.try_lock_guard().is_ok(),
             "Must succeed when no lock is held"

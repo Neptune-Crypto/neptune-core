@@ -27,7 +27,7 @@ impl RustyArchivalMutatorSet {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyArchivalMutatorSet-Schema",
-            crate::LOG_LOCK_EVENT_CB,
+            crate::LOG_TOKIO_LOCK_EVENT_CB,
         );
 
         let aocl = storage.schema.new_vec::<Digest>("aocl").await;

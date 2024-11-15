@@ -4,7 +4,7 @@
 // enables nightly feature async_fn_track_caller for crate feature log-slow-write-lock
 // log-slow-write-lock logs warning when a write-lock is held longer than 100 millis.
 // to enable: cargo +nightly build --features log-slow-write-lock
-#![cfg_attr(feature = "log-slow-write-lock", feature(async_fn_track_caller))]
+#![cfg_attr(feature = "track-lock-location", feature(async_fn_track_caller))]
 
 // danda: making all of these pub for now, so docs are generated.
 // later maybe we ought to split some stuff out into re-usable crate(s)...?
@@ -59,8 +59,6 @@ use triton_vm::prelude::BFieldElement;
 use crate::config_models::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::locks::tokio as sync_tokio;
-use crate::locks::tokio::LockCallbackFn;
-use crate::locks::tokio::LockEvent;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::MainToMiner;
 use crate::models::channel::MainToPeerTask;
@@ -334,54 +332,6 @@ where
     DateTime::from(utc)
 }
 
-// This is a callback fn passed to AtomicRw, AtomicMutex
-// and called when a lock event occurs.  This way
-// we can track which threads+tasks are acquiring
-// which locks for reads and/or mutations.
-#[cfg(feature = "log-lock_events")]
-pub(crate) fn log_lock_event(lock_event: LockEvent) {
-    // notes:
-    //   1. this feature is very verbose in the logs.
-    //   2. It's not really needed except when debugging lock acquisitions
-    //   3. tracing-tests causes a big mem-leak for tests with this.
-    {
-        let tokio_id = match tokio::task::try_id() {
-            Some(id) => format!("{}", id),
-            None => "?".to_string(),
-        };
-
-        let (event_type, info, acquisition) = match lock_event {
-            LockEvent::TryAcquire {
-                ref info,
-                acquisition,
-            } => ("TryAcquire", info, acquisition),
-            LockEvent::Acquire {
-                ref info,
-                acquisition,
-            } => ("Acquire", info, acquisition),
-            LockEvent::Release {
-                ref info,
-                acquisition,
-            } => ("Release", info, acquisition),
-        };
-        tracing::trace!(
-                ?lock_event,
-                "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-                event_type,
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquisition,
-                current_thread_id(),
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-        );
-    }
-}
-#[cfg(not(feature = "log-lock_events"))]
-pub(crate) fn log_lock_event(lock_event: LockEvent) {}
-
-const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
-
 #[cfg(feature = "log-lock_events")]
 pub(crate) fn current_thread_id() -> u64 {
     // workaround: parse thread_id debug output into a u64.
@@ -406,49 +356,94 @@ pub(crate) fn current_thread_id() -> u64 {
 // and called when a lock event occurs.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
-#[cfg(feature = "log-lock_events")]
-pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
-    // notes:
-    //   1. this feature is very verbose in the logs.
-    //   2. It's not really needed except when debugging lock acquisitions
-    //   3. tracing-tests causes a big mem-leak for tests with this.
-    {
-        let tokio_id = match tokio::task::try_id() {
-            Some(id) => format!("{}", id),
-            None => "?".to_string(),
-        };
+pub(crate) fn log_tokio_lock_event_cb(lock_event: sync_tokio::LockEvent) {
+    #[cfg(feature = "log-lock_events")]
+    log_tokio_lock_event(&lock_event);
 
-        let (event_type, info, acquisition) = match lock_event {
-            sync_tokio::LockEvent::TryAcquire {
-                ref info,
-                acquisition,
-            } => ("TryAcquire", info, acquisition),
-            sync_tokio::LockEvent::Acquire {
-                ref info,
-                acquisition,
-            } => ("Acquire", info, acquisition),
-            sync_tokio::LockEvent::Release {
-                ref info,
-                acquisition,
-            } => ("Release", info, acquisition),
-        };
-        tracing::trace!(
-                ?lock_event,
-                "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-                event_type,
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquisition,
-                current_thread_id(),
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-        );
+    match lock_event.acquisition() {
+        #[cfg(feature = "log-slow-read-lock")]
+        sync_tokio::LockAcquisition::Read => log_slow_locks(&lock_event, "read"),
+        #[cfg(feature = "log-slow-write-lock")]
+        sync_tokio::LockAcquisition::Write => log_slow_locks(&lock_event, "write"),
+
+        _ => {}
     }
 }
-#[cfg(not(feature = "log-lock_events"))]
-pub(crate) fn log_tokio_lock_event(_lock_event: sync_tokio::LockEvent) {}
 
-const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
+// notes:
+//   1. this feature is very verbose in the logs.
+//   2. It's not really needed except when debugging lock acquisitions
+//   3. tracing-tests causes a big mem-leak for tests with this.
+#[cfg(feature = "log-lock_events")]
+pub(crate) fn log_tokio_lock_event(lock_event: &sync_tokio::LockEvent) {
+    let tokio_id = match tokio::task::try_id() {
+        Some(id) => format!("{}", id),
+        None => "?".to_string(),
+    };
+
+    let (event_type, info, acquisition, location) = match lock_event {
+        sync_tokio::LockEvent::TryAcquire {
+            ref info,
+            acquisition,
+            location,
+            ..
+        } => ("TryAcquire", info, acquisition, location),
+        sync_tokio::LockEvent::Acquire {
+            ref info,
+            acquisition,
+            location,
+            ..
+        } => ("Acquire", info, acquisition, location),
+        sync_tokio::LockEvent::Release {
+            ref info,
+            acquisition,
+            location,
+            ..
+        } => ("Release", info, acquisition, location),
+    };
+
+    let location_str = match location {
+        Some(l) => format!("\n\t|-- acquired: {}", l),
+        None => String::default(),
+    };
+
+    tracing::trace!(
+            ?lock_event,
+            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}{}\n\t|--",
+            event_type,
+            info.name().unwrap_or("?"),
+            info.lock_type(),
+            acquisition,
+            current_thread_id(),
+            std::thread::current().name().unwrap_or("?"),
+            tokio_id,
+            location_str,
+    );
+}
+
+#[cfg(any(feature = "log-slow-read-lock", feature = "log-slow-write-lock"))]
+pub(crate) fn log_slow_locks(event: &sync_tokio::LockEvent, read_or_write: &str) {
+    if let (Some(acquired_at), Some(location)) = (event.acquired_at(), event.location()) {
+        let duration = acquired_at.elapsed();
+        let env_var = format!("LOG_SLOW_{}_LOCK_THRESHOLD", read_or_write.to_uppercase());
+        let max_duration_secs = match std::env::var(env_var) {
+            Ok(t) => t.parse().unwrap(),
+            Err(_) => 0.1,
+        };
+
+        if duration.as_secs_f32() > max_duration_secs {
+            tracing::warn!(
+                "{}-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
+                read_or_write,
+                duration.as_secs_f32(),
+                max_duration_secs,
+                location
+            );
+        }
+    }
+}
+
+const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event_cb;
 
 /// for logging how long a scope takes to execute.
 ///
