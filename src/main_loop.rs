@@ -70,13 +70,36 @@ const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 
+/// Wraps a transmission channel.
+///
+/// To be used for the transmission channel to the miner, because
+///  a) the miner might not exist in which case there would be no-one to empty
+///     the channel; and
+///  b) contrary to other channels, transmission failures here are not critical.
+struct MainToMinerChannel(Option<mpsc::Sender<MainToMiner>>);
+
+impl MainToMinerChannel {
+    /// Send a message to the miner task (if any).
+    fn send(&self, message: MainToMiner) {
+        // Do no use the async `send` function because it blocks until there
+        // is spare capacity on the channel. Messages to the miner are not
+        // critical so if there is no capacity left, just log an error
+        // message.
+        if let Some(channel) = &self.0 {
+            if let Err(e) = channel.try_send(message) {
+                error!("Failed to send pause message to miner thread:\n{e}");
+            }
+        }
+    }
+}
+
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
     global_state_lock: GlobalStateLock,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    main_to_miner_tx: mpsc::Sender<MainToMiner>,
+    main_to_miner_tx: MainToMinerChannel,
 
     #[cfg(test)]
     mock_now: Option<SystemTime>,
@@ -337,10 +360,15 @@ impl MainLoopHandler {
         peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         main_to_miner_tx: mpsc::Sender<MainToMiner>,
     ) -> Self {
+        let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {
+            Some(main_to_miner_tx)
+        } else {
+            None
+        };
         Self {
             incoming_peer_listener,
             global_state_lock,
-            main_to_miner_tx,
+            main_to_miner_tx: MainToMinerChannel(maybe_main_to_miner_tx),
             main_to_peer_broadcast_tx,
             peer_task_to_main_tx,
             #[cfg(test)]
@@ -423,10 +451,7 @@ impl MainLoopHandler {
         }
 
         // Tell miner that it can now start composing next block.
-        self.main_to_miner_tx
-            .send(MainToMiner::Continue)
-            .await
-            .expect("channel to miner must still be open");
+        self.main_to_miner_tx.send(MainToMiner::Continue);
     }
 
     /// Locking:
@@ -515,10 +540,7 @@ impl MainLoopHandler {
 
                 // Indicate to miner that block proposal was successfully
                 // received by main-loop.
-                self.main_to_miner_tx
-                    .send(MainToMiner::Continue)
-                    .await
-                    .expect("Could not reach miner task. This should never happen.");
+                self.main_to_miner_tx.send(MainToMiner::Continue);
             }
         }
         Ok(())
@@ -557,9 +579,7 @@ impl MainLoopHandler {
                     }
 
                     // Ask miner to stop work until state update is completed
-                    self.main_to_miner_tx
-                        .send(MainToMiner::WaitForContinue)
-                        .await?;
+                    self.main_to_miner_tx.send(MainToMiner::WaitForContinue);
 
                     // Get out of sync mode if needed
                     if global_state_mut.net.syncing {
@@ -571,7 +591,7 @@ impl MainLoopHandler {
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
                             global_state_mut.net.syncing = false;
-                            self.main_to_miner_tx.send(MainToMiner::StopSyncing).await?;
+                            self.main_to_miner_tx.send(MainToMiner::StopSyncing);
                         }
                     }
 
@@ -612,11 +632,8 @@ impl MainLoopHandler {
                     .await;
 
                 // Inform miner about new block.
-                if self.global_state_lock.cli().mine() {
-                    self.main_to_miner_tx
-                        .send(MainToMiner::NewBlock(Box::new(last_block)))
-                        .await?;
-                }
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlock(Box::new(last_block)));
             }
             PeerTaskToMain::AddPeerMaxBlockHeight((
                 socket_addr,
@@ -647,9 +664,7 @@ impl MainLoopHandler {
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
                     global_state_mut.net.syncing = true;
-                    self.main_to_miner_tx
-                        .send(MainToMiner::StartSyncing)
-                        .await?;
+                    self.main_to_miner_tx.send(MainToMiner::StartSyncing);
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -757,10 +772,7 @@ impl MainLoopHandler {
                     global_state_mut.block_proposal = BlockProposal::foreign_proposal(*block);
                 }
 
-                self.main_to_miner_tx
-                    .send(MainToMiner::NewBlockProposal)
-                    .await
-                    .expect("Channel to miner must still be open");
+                self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
         }
 
@@ -1478,12 +1490,12 @@ impl MainLoopHandler {
             RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
-                self.main_to_miner_tx.send(MainToMiner::StopMining).await?;
+                self.main_to_miner_tx.send(MainToMiner::StopMining);
                 Ok(false)
             }
             RPCServerToMain::RestartMiner => {
                 info!("Received RPC request to start miner");
-                self.main_to_miner_tx.send(MainToMiner::StartMining).await?;
+                self.main_to_miner_tx.send(MainToMiner::StartMining);
                 Ok(false)
             }
             RPCServerToMain::Shutdown => {
@@ -1499,7 +1511,7 @@ impl MainLoopHandler {
         info!("Shutdown initiated.");
 
         // Stop mining
-        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+        self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
         // Send 'bye' message to all peers.
         let _result = self
