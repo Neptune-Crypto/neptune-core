@@ -395,8 +395,10 @@ pub(crate) fn log_tokio_lock_event(lock_event: &sync_tokio::LockEvent) {
         _ => String::default(),
     };
     let held_str = match lock_event.acquire_at() {
-        Some(t) => format!("\n\t|-- held: {} secs", t.elapsed().as_secs_f32()),
-        None => String::default(),
+        Some(t) if matches!(lock_event, sync_tokio::LockEvent::Release { .. }) => {
+            format!("\n\t|-- held: {} secs", t.elapsed().as_secs_f32())
+        }
+        _ => String::default(),
     };
 
     let info = lock_event.info();
