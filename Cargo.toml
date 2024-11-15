@@ -8,12 +8,22 @@ publish = false
 
 [features]
 
-# logs write-lock acquisitions that take over 100 millis.  requires nightly.
+# logs write-lock acquisitions that are held over 100 millis.  requires nightly.
 # to enable: cargo +nightly build --features log-slow-write-lock
+# note: nothing logged until lock is released (guard dropped)
+# alternative: run tokio-console
 log-slow-write-lock = []
-# logs read-lock acquisitions that take over 100 millis.  requires nightly.
+
+# logs read-lock acquisitions that are held over 100 millis.  requires nightly.
 # to enable: cargo +nightly build --features log-slow-read-lock
+# note: nothing logged until lock is released (guard dropped)
+# alternative: run tokio-console
 log-slow-read-lock = []
+
+# logs all lock events (try_acquire, acquire, release).
+# useful for debugging deadlocks, or if a lock is never being released.
+# alternative: run tokio-console
+log-lock_events = []
 
 [dependencies]
 aead = { version = "0.5", features = ["std"] }

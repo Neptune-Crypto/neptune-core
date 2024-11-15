@@ -54,7 +54,6 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::info;
-use tracing::trace;
 use triton_vm::prelude::BFieldElement;
 
 use crate::config_models::data_directory::DataDirectory;
@@ -339,14 +338,13 @@ where
 // and called when a lock event occurs.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
+#[cfg(feature = "log-lock_events")]
 pub(crate) fn log_lock_event(lock_event: LockEvent) {
-    // Disabling lock-event logging for now.
-    // Reasons:
-    //    1. It is very verbose in the logs.
-    //    2. It's not really needed right now.
-    //    3. tracing-tests is causing a big mem-leak for tests.
-    //    4. We can re-enable if needed by toggling false/true.
-    if false {
+    // notes:
+    //   1. this feature is very verbose in the logs.
+    //   2. It's not really needed except when debugging lock acquisitions
+    //   3. tracing-tests causes a big mem-leak for tests with this.
+    {
         let tokio_id = match tokio::task::try_id() {
             Some(id) => format!("{}", id),
             None => "?".to_string(),
@@ -366,7 +364,7 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
                 acquisition,
             } => ("Release", info, acquisition),
         };
-        trace!(
+        tracing::trace!(
                 ?lock_event,
                 "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
                 event_type,
@@ -379,8 +377,12 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
         );
     }
 }
+#[cfg(not(feature = "log-lock_events"))]
+pub(crate) fn log_lock_event(lock_event: LockEvent) {}
+
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
+#[cfg(feature = "log-lock_events")]
 pub(crate) fn current_thread_id() -> u64 {
     // workaround: parse thread_id debug output into a u64.
     // (because ThreadId::as_u64() is unstable)
@@ -404,14 +406,13 @@ pub(crate) fn current_thread_id() -> u64 {
 // and called when a lock event occurs.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
+#[cfg(feature = "log-lock_events")]
 pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
-    // Disabling lock-event logging for now.
-    // Reasons:
-    //    1. It is very verbose in the logs.
-    //    2. It's not really needed right now.
-    //    3. tracing-tests is causing a big mem-leak for tests.
-    //    4. We can re-enable if needed by toggling false/true.
-    if false {
+    // notes:
+    //   1. this feature is very verbose in the logs.
+    //   2. It's not really needed except when debugging lock acquisitions
+    //   3. tracing-tests causes a big mem-leak for tests with this.
+    {
         let tokio_id = match tokio::task::try_id() {
             Some(id) => format!("{}", id),
             None => "?".to_string(),
@@ -431,7 +432,7 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
                 acquisition,
             } => ("Release", info, acquisition),
         };
-        trace!(
+        tracing::trace!(
                 ?lock_event,
                 "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
                 event_type,
@@ -444,6 +445,9 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
         );
     }
 }
+#[cfg(not(feature = "log-lock_events"))]
+pub(crate) fn log_tokio_lock_event(_lock_event: sync_tokio::LockEvent) {}
+
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
 
 /// for logging how long a scope takes to execute.
