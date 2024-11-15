@@ -1389,6 +1389,7 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        let cli_args = self.global_state_lock.cli().clone();
         let global_state = self.global_state_lock.lock_guard().await;
 
         let standing = global_state
@@ -1397,7 +1398,7 @@ impl PeerLoopHandler {
             .peer_standings
             .get(self.peer_address.ip())
             .await
-            .unwrap_or_else(|| PeerStanding::new(global_state.cli().peer_tolerance));
+            .unwrap_or_else(|| PeerStanding::new(cli_args.peer_tolerance));
 
         // Add peer to peer map
         let peer_connection_info = PeerConnectionInfo::new(
@@ -1411,7 +1412,7 @@ impl PeerLoopHandler {
             SystemTime::now(),
             self.peer_handshake_data.version.clone(),
             self.peer_handshake_data.is_archival_node,
-            global_state.cli().peer_tolerance,
+            cli_args.peer_tolerance,
         )
         .with_standing(standing);
 
@@ -1428,7 +1429,7 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if global_state.net.peer_map.len() >= global_state.cli().max_peers as usize {
+        if global_state.net.peer_map.len() >= cli_args.max_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
 

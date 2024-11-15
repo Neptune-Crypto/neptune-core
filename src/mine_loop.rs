@@ -453,6 +453,7 @@ pub(crate) async fn mine(
     // be orphaned.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    let cli_args = global_state_lock.cli().clone();
 
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
@@ -464,7 +465,7 @@ pub(crate) async fn mine(
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
-        let guess = global_state_lock.cli().guess;
+        let guess = cli_args.guess;
         let guesser_task: Option<JoinHandle<()>> = if !wait_for_confirmation
             && guess
             && maybe_proposal.is_some()
@@ -484,7 +485,7 @@ pub(crate) async fn mine(
                 latest_block.clone(),
                 guesser_tx,
                 composer_utxos,
-                global_state_lock.cli().sleepy_guessing,
+                cli_args.sleepy_guessing,
                 None, // using default TARGET_BLOCK_INTERVAL
             );
 
@@ -498,7 +499,7 @@ pub(crate) async fn mine(
             None
         };
 
-        let compose = global_state_lock.cli().compose;
+        let compose = cli_args.compose;
         let mut composer_task = if !wait_for_confirmation
             && compose
             && guesser_task.is_none()
@@ -564,7 +565,7 @@ pub(crate) async fn mine(
                         }
 
                         latest_block = *block;
-                        info!("Miner task received {} block height {}", global_state_lock.lock(|s| s.cli().network).await, latest_block.kernel.header.height);
+                        info!("Miner task received {} block height {}", cli_args.network, latest_block.kernel.header.height);
                     }
                     MainToMiner::NewBlockProposal => {
                         if let Some(gt) = guesser_task {

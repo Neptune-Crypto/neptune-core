@@ -812,7 +812,7 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .unconfirmed_balance(tip_digest, now)
             .await;
-        let proving_capability = state.cli().proving_capability();
+        let proving_capability = self.state.cli().proving_capability();
 
         info!("proving capability: {proving_capability}");
 

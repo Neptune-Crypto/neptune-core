@@ -54,6 +54,7 @@ async fn check_if_connection_is_allowed(
     other_handshake: &HandshakeData,
     peer_address: &SocketAddr,
 ) -> ConnectionStatus {
+    let cli_arguments = global_state_lock.cli();
     let global_state = global_state_lock.lock_guard().await;
     fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
         let own_version = semver::Version::parse(own_version)
@@ -78,7 +79,7 @@ async fn check_if_connection_is_allowed(
     }
 
     // Disallow connection if peer is banned via CLI arguments
-    if global_state.cli().ban.contains(&peer_address.ip()) {
+    if cli_arguments.ban.contains(&peer_address.ip()) {
         warn!(
             "Banned peer {} attempted to connect. Disallowing.",
             peer_address.ip()
@@ -92,15 +93,13 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some()
-        && standing.unwrap().standing < -(global_state.cli().peer_tolerance as i32)
-    {
+    if standing.is_some() && standing.unwrap().standing < -(cli_arguments.peer_tolerance as i32) {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
-        if (global_state.cli().max_peers as usize) <= global_state.net.peer_map.len() {
+        if (cli_arguments.max_peers as usize) <= global_state.net.peer_map.len() {
             Some(ConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
@@ -437,11 +436,12 @@ pub(crate) async fn close_peer_connected_callback(
     peer_address: SocketAddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) -> Result<()> {
+    let cli_arguments = global_state_lock.cli().clone();
     let mut global_state_mut = global_state_lock.lock_guard_mut().await;
     // Store any new peer-standing to database
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_address);
 
-    let peer_tolerance = global_state_mut.cli().peer_tolerance;
+    let peer_tolerance = cli_arguments.peer_tolerance;
     let new_standing = match peer_info_writeback {
         Some(new) => new.standing(),
         None => {

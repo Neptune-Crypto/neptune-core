@@ -1521,7 +1521,7 @@ impl GlobalState {
     }
 
     #[inline]
-    pub fn cli(&self) -> &cli_args::Args {
+    fn cli(&self) -> &cli_args::Args {
         &self.cli
     }
 
