@@ -99,18 +99,34 @@ pub enum LockEvent<'a> {
     Acquire {
         info: LockInfo<'a>,
         acquisition: LockAcquisition,
-        acquired_at: Option<std::time::Instant>,
+        try_acquire_at: Option<std::time::Instant>,
+        acquire_at: Option<std::time::Instant>,
         location: Option<&'static core::panic::Location<'static>>,
     },
     Release {
         info: LockInfo<'a>,
         acquisition: LockAcquisition,
-        acquired_at: Option<std::time::Instant>,
+        try_acquire_at: Option<std::time::Instant>,
+        acquire_at: Option<std::time::Instant>,
         location: Option<&'static core::panic::Location<'static>>,
     },
 }
 
 impl LockEvent<'_> {
+    pub fn event_type_name(&self) -> &str {
+        match self {
+            Self::TryAcquire { .. } => "TryAcquire",
+            Self::Acquire { .. } => "Acquire",
+            Self::Release { .. } => "Release",
+        }
+    }
+    pub fn info(&self) -> &LockInfo<'_> {
+        match self {
+            Self::TryAcquire { info, .. } => info,
+            Self::Acquire { info, .. } => info,
+            Self::Release { info, .. } => info,
+        }
+    }
     pub fn location(&self) -> Option<&'static core::panic::Location<'static>> {
         match self {
             Self::TryAcquire { location, .. } => *location,
@@ -118,11 +134,18 @@ impl LockEvent<'_> {
             Self::Release { location, .. } => *location,
         }
     }
-    pub fn acquired_at(&self) -> Option<std::time::Instant> {
+    pub fn try_acquire_at(&self) -> Option<std::time::Instant> {
         match self {
             Self::TryAcquire { .. } => None,
-            Self::Acquire { acquired_at, .. } => *acquired_at,
-            Self::Release { acquired_at, .. } => *acquired_at,
+            Self::Acquire { try_acquire_at, .. } => *try_acquire_at,
+            Self::Release { try_acquire_at, .. } => *try_acquire_at,
+        }
+    }
+    pub fn acquire_at(&self) -> Option<std::time::Instant> {
+        match self {
+            Self::TryAcquire { .. } => None,
+            Self::Acquire { acquire_at, .. } => *acquire_at,
+            Self::Release { acquire_at, .. } => *acquire_at,
         }
     }
     pub fn acquisition(&self) -> LockAcquisition {
@@ -137,3 +160,13 @@ impl LockEvent<'_> {
 /// A callback fn for receiving [LockEvent] event
 /// each time a lock is acquired or released.
 pub type LockCallbackFn = fn(lock_event: LockEvent);
+
+#[cfg(feature = "track-lock-time")]
+pub fn now() -> Option<std::time::Instant> {
+    Some(std::time::Instant::now())
+}
+
+#[cfg(not(feature = "track-lock-time"))]
+pub fn now() -> Option<std::time::Instant> {
+    None
+}

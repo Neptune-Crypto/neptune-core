@@ -376,59 +376,77 @@ pub(crate) fn log_tokio_lock_event_cb(lock_event: sync_tokio::LockEvent) {
 //   3. tracing-tests causes a big mem-leak for tests with this.
 #[cfg(feature = "log-lock_events")]
 pub(crate) fn log_tokio_lock_event(lock_event: &sync_tokio::LockEvent) {
+    use std::ops::Sub;
+
     let tokio_id = match tokio::task::try_id() {
         Some(id) => format!("{}", id),
         None => "?".to_string(),
     };
 
-    let (event_type, info, acquisition, location, acquired_at) = match lock_event {
-        sync_tokio::LockEvent::TryAcquire {
-            ref info,
-            acquisition,
-            location,
-            ..
-        } => ("TryAcquire", info, acquisition, location, None),
-        sync_tokio::LockEvent::Acquire {
-            ref info,
-            acquisition,
-            location,
-            ..
-        } => ("Acquire", info, acquisition, location, None),
-        sync_tokio::LockEvent::Release {
-            ref info,
-            acquisition,
-            location,
-            acquired_at,
-        } => ("Release", info, acquisition, location, *acquired_at),
-    };
-
-    let location_str = match location {
+    let location_str = match lock_event.location() {
         Some(l) => format!("\n\t|-- acquirer: {}", l),
         None => String::default(),
     };
-    let held_str = match acquired_at {
+    let waited_for_acquire_str = match (lock_event.try_acquire_at(), lock_event.acquire_at()) {
+        (Some(t), Some(a)) => format!(
+            "\n\t|-- waited for acquire: {} secs",
+            a.sub(t).as_secs_f32()
+        ),
+        _ => String::default(),
+    };
+    let held_str = match lock_event.acquire_at() {
         Some(t) => format!("\n\t|-- held: {} secs", t.elapsed().as_secs_f32()),
         None => String::default(),
     };
 
+    let info = lock_event.info();
+
     tracing::trace!(
             ?lock_event,
-            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}{}{}\n\t|--",
-            event_type,
+            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}{}{}{}\n\t|--",
+            lock_event.event_type_name(),
             info.name().unwrap_or("?"),
             info.lock_type(),
-            acquisition,
+            lock_event.acquisition(),
             current_thread_id(),
             std::thread::current().name().unwrap_or("?"),
             tokio_id,
             location_str,
+            waited_for_acquire_str,
             held_str,
     );
 }
 
 #[cfg(any(feature = "log-slow-read-lock", feature = "log-slow-write-lock"))]
 pub(crate) fn log_slow_locks(event: &sync_tokio::LockEvent, read_or_write: &str) {
-    if let (Some(acquired_at), Some(location)) = (event.acquired_at(), event.location()) {
+    use std::ops::Sub;
+    if matches!(event, sync_tokio::LockEvent::Acquire { .. }) {
+        if let (Some(try_acquire_at), Some(acquire_at), Some(location)) =
+            (event.try_acquire_at(), event.acquire_at(), event.location())
+        {
+            let duration = acquire_at.sub(try_acquire_at);
+            let env_var = format!(
+                "LOG_SLOW_{}_LOCK_ACQUIRE_THRESHOLD",
+                read_or_write.to_uppercase()
+            );
+            let max_duration_secs = match std::env::var(env_var) {
+                Ok(t) => t.parse().unwrap(),
+                Err(_) => 0.1,
+            };
+
+            if duration.as_secs_f32() > max_duration_secs {
+                tracing::warn!(
+                    "{}-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
+                    read_or_write,
+                    duration.as_secs_f32(),
+                    max_duration_secs,
+                    location
+                );
+            }
+        }
+    }
+
+    if let (Some(acquired_at), Some(location)) = (event.acquire_at(), event.location()) {
         let duration = acquired_at.elapsed();
         let env_var = format!("LOG_SLOW_{}_LOCK_THRESHOLD", read_or_write.to_uppercase());
         let max_duration_secs = match std::env::var(env_var) {

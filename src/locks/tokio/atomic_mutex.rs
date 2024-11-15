@@ -6,6 +6,7 @@ use futures::future::BoxFuture;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 
+use super::now;
 use super::LockAcquisition;
 use super::LockCallbackFn;
 use super::LockCallbackInfo;
@@ -218,8 +219,15 @@ impl<T> AtomicMutex<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard(&self) -> AtomicMutexGuard<T> {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let guard = self.inner.lock().await;
-        AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Read)
+        AtomicMutexGuard::new(
+            guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        )
     }
 
     /// Attempt to return a read lock and return an `AtomicMutextGuard`. Returns
@@ -227,11 +235,14 @@ impl<T> AtomicMutex<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub fn try_lock_guard(&self) -> Result<AtomicMutexGuard<T>, tokio::sync::TryLockError> {
         self.try_acquire_try_acquire();
+
+        let try_acquire_at = now();
         let guard = self.inner.try_lock()?;
         Ok(AtomicMutexGuard::new(
             guard,
             &self.lock_callback_info,
             LockAcquisition::TryAcquire,
+            try_acquire_at,
         ))
     }
 
@@ -251,8 +262,15 @@ impl<T> AtomicMutex<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard_mut(&mut self) -> AtomicMutexGuard<T> {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let guard = self.inner.lock().await;
-        AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Write)
+        AtomicMutexGuard::new(
+            guard,
+            &self.lock_callback_info,
+            LockAcquisition::Write,
+            try_acquire_at,
+        )
     }
 
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`
@@ -275,9 +293,15 @@ impl<T> AtomicMutex<T> {
         F: FnOnce(&T) -> R,
     {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.lock().await;
-        let guard =
-            AtomicMutexGuard::new(inner_guard, &self.lock_callback_info, LockAcquisition::Read);
+        let guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        );
         f(&guard)
     }
 
@@ -301,11 +325,14 @@ impl<T> AtomicMutex<T> {
         F: FnOnce(&mut T) -> R,
     {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.lock().await;
         let mut guard = AtomicMutexGuard::new(
             inner_guard,
             &self.lock_callback_info,
             LockAcquisition::Write,
+            try_acquire_at,
         );
         f(&mut guard)
     }
@@ -332,9 +359,15 @@ impl<T> AtomicMutex<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.lock().await;
-        let guard =
-            AtomicMutexGuard::new(inner_guard, &self.lock_callback_info, LockAcquisition::Read);
+        let guard = AtomicMutexGuard::new(
+            inner_guard,
+            &self.lock_callback_info,
+            LockAcquisition::Read,
+            try_acquire_at,
+        );
         f(&guard).await
     }
 
@@ -360,11 +393,14 @@ impl<T> AtomicMutex<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.lock().await;
         let mut guard = AtomicMutexGuard::new(
             inner_guard,
             &self.lock_callback_info,
             LockAcquisition::Write,
+            try_acquire_at,
         );
         f(&mut guard).await
     }
@@ -422,7 +458,8 @@ pub struct AtomicMutexGuard<'a, T> {
     guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
     acquisition: LockAcquisition,
-    acquired_at: Option<std::time::Instant>,
+    try_acquire_at: Option<std::time::Instant>,
+    acquire_at: Option<std::time::Instant>,
     location: Option<&'static core::panic::Location<'static>>,
 }
 
@@ -431,16 +468,18 @@ impl<'a, T> AtomicMutexGuard<'a, T> {
         guard: MutexGuard<'a, T>,
         lock_callback_info: &'a LockCallbackInfo,
         acquisition: LockAcquisition,
+        try_acquire_at: Option<std::time::Instant>,
     ) -> Self {
         let my_guard = Self {
             guard,
             lock_callback_info,
             acquisition,
+            try_acquire_at,
 
             #[cfg(feature = "track-lock-time")]
-            acquired_at: Some(std::time::Instant::now()),
+            acquire_at: Some(std::time::Instant::now()),
             #[cfg(not(feature = "track-lock-time"))]
-            acquired_at: None,
+            acquire_at: None,
 
             #[cfg(feature = "track-lock-location")]
             location: Some(core::panic::Location::caller()),
@@ -452,7 +491,8 @@ impl<'a, T> AtomicMutexGuard<'a, T> {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition,
-                acquired_at: my_guard.acquired_at,
+                try_acquire_at: my_guard.try_acquire_at,
+                acquire_at: my_guard.acquire_at,
                 location: my_guard.location,
             });
         }
@@ -468,7 +508,8 @@ impl<T> Drop for AtomicMutexGuard<'_, T> {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: self.acquisition,
-                acquired_at: self.acquired_at,
+                try_acquire_at: self.try_acquire_at,
+                acquire_at: self.acquire_at,
                 location: self.location,
             });
         }

@@ -17,6 +17,7 @@ pub use atomic_mutex::AtomicMutexGuard;
 pub use atomic_rw::AtomicRw;
 pub use atomic_rw::AtomicRwReadGuard;
 pub use atomic_rw::AtomicRwWriteGuard;
+use shared::now;
 pub use shared::LockAcquisition;
 pub use shared::LockCallbackFn;
 use shared::LockCallbackInfo;

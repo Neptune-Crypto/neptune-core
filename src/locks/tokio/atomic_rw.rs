@@ -16,6 +16,7 @@ use tokio::sync::RwLockReadGuard;
 use tokio::sync::RwLockWriteGuard;
 use tokio::sync::TryLockError;
 
+use super::now;
 use super::LockAcquisition;
 use super::LockCallbackFn;
 use super::LockCallbackInfo;
@@ -227,8 +228,10 @@ impl<T> AtomicRw<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let guard = self.inner.read().await;
-        AtomicRwReadGuard::new(guard, &self.lock_callback_info)
+        AtomicRwReadGuard::new(guard, &self.lock_callback_info, try_acquire_at)
     }
 
     /// Acquire write lock and return an `AtomicRwWriteGuard`
@@ -247,8 +250,10 @@ impl<T> AtomicRw<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<T> {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let guard = self.inner.write().await;
-        AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
+        AtomicRwWriteGuard::new(guard, &self.lock_callback_info, try_acquire_at)
     }
 
     /// Attempt to acquire write lock immediately.
@@ -257,8 +262,14 @@ impl<T> AtomicRw<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let guard = self.inner.try_write()?;
-        Ok(AtomicRwWriteGuard::new(guard, &self.lock_callback_info))
+        Ok(AtomicRwWriteGuard::new(
+            guard,
+            &self.lock_callback_info,
+            try_acquire_at,
+        ))
     }
 
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`
@@ -281,8 +292,10 @@ impl<T> AtomicRw<T> {
         F: FnOnce(&T) -> R,
     {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.read().await;
-        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
+        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
         f(&guard)
     }
 
@@ -306,8 +319,11 @@ impl<T> AtomicRw<T> {
         F: FnOnce(&mut T) -> R,
     {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.write().await;
-        let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
+        let mut guard =
+            AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
         f(&mut guard)
     }
 
@@ -333,8 +349,10 @@ impl<T> AtomicRw<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_read_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.read().await;
-        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
+        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
         f(&guard).await
     }
 
@@ -360,8 +378,11 @@ impl<T> AtomicRw<T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
     pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
+
+        let try_acquire_at = now();
         let inner_guard = self.inner.write().await;
-        let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
+        let mut guard =
+            AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info, try_acquire_at);
         f(&mut guard).await
     }
 
@@ -408,21 +429,27 @@ impl<T> AtomicRw<T> {
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
-    acquired_at: Option<std::time::Instant>,
+    try_acquire_at: Option<std::time::Instant>,
+    acquire_at: Option<std::time::Instant>,
     location: Option<&'static core::panic::Location<'static>>,
 }
 
 impl<'a, T> AtomicRwReadGuard<'a, T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    fn new(guard: RwLockReadGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+    fn new(
+        guard: RwLockReadGuard<'a, T>,
+        lock_callback_info: &'a LockCallbackInfo,
+        try_acquire_at: Option<std::time::Instant>,
+    ) -> Self {
         let my_guard = Self {
             guard,
             lock_callback_info,
+            try_acquire_at,
 
             #[cfg(feature = "track-lock-time")]
-            acquired_at: Some(std::time::Instant::now()),
+            acquire_at: Some(std::time::Instant::now()),
             #[cfg(not(feature = "track-lock-time"))]
-            acquired_at: None,
+            acquire_at: None,
 
             #[cfg(feature = "track-lock-location")]
             location: Some(core::panic::Location::caller()),
@@ -434,7 +461,8 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
-                acquired_at: my_guard.acquired_at,
+                try_acquire_at: my_guard.try_acquire_at,
+                acquire_at: my_guard.acquire_at,
                 location: my_guard.location,
             });
         }
@@ -444,29 +472,13 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
 
 impl<T> Drop for AtomicRwReadGuard<'_, T> {
     fn drop(&mut self) {
-        // #[cfg(feature = "track-lock-location")]
-        // {
-        //     let duration = self.acquired_at.elapsed();
-        //     let max_duration_secs = match std::env::var("LOG_SLOW_READ_LOCK_THRESHOLD") {
-        //         Ok(t) => t.parse().unwrap(),
-        //         Err(_) => 0.1,
-        //     };
-
-        //     if duration.as_secs_f32() > max_duration_secs {
-        //         tracing::warn!(
-        //             "read-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
-        //             duration.as_secs_f32(),
-        //             max_duration_secs,
-        //             self.location
-        //         );
-        //     }
-        // }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Read,
-                acquired_at: self.acquired_at,
+                try_acquire_at: self.try_acquire_at,
+                acquire_at: self.acquire_at,
                 location: self.location,
             });
         }
@@ -486,21 +498,27 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
-    acquired_at: Option<std::time::Instant>,
+    try_acquire_at: Option<std::time::Instant>,
+    acquire_at: Option<std::time::Instant>,
     location: Option<&'static core::panic::Location<'static>>,
 }
 
 impl<'a, T> AtomicRwWriteGuard<'a, T> {
     #[cfg_attr(feature = "track-lock-location", track_caller)]
-    fn new(guard: RwLockWriteGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+    fn new(
+        guard: RwLockWriteGuard<'a, T>,
+        lock_callback_info: &'a LockCallbackInfo,
+        try_acquire_at: Option<std::time::Instant>,
+    ) -> Self {
         let my_guard = Self {
             guard,
             lock_callback_info,
+            try_acquire_at,
 
             #[cfg(feature = "track-lock-time")]
-            acquired_at: Some(std::time::Instant::now()),
+            acquire_at: Some(std::time::Instant::now()),
             #[cfg(not(feature = "track-lock-time"))]
-            acquired_at: None,
+            acquire_at: None,
 
             #[cfg(feature = "track-lock-location")]
             location: Some(core::panic::Location::caller()),
@@ -512,7 +530,8 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
-                acquired_at: my_guard.acquired_at,
+                try_acquire_at: my_guard.try_acquire_at,
+                acquire_at: my_guard.acquire_at,
                 location: my_guard.location,
             });
         }
@@ -523,29 +542,13 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
 
 impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     fn drop(&mut self) {
-        // #[cfg(feature = "track-lock-location")]
-        // {
-        //     let duration = self.acquired_at.elapsed();
-        //     let max_duration_secs = match std::env::var("LOG_SLOW_WRITE_LOCK_THRESHOLD") {
-        //         Ok(t) => t.parse().unwrap(),
-        //         Err(_) => 0.1,
-        //     };
-
-        //     if duration.as_secs_f32() > max_duration_secs {
-        //         tracing::warn!(
-        //             "write-lock held for {} seconds. (exceeds max: {} secs)  location: {}",
-        //             duration.as_secs_f32(),
-        //             max_duration_secs,
-        //             self.location
-        //         );
-        //     }
-        // }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
                 acquisition: LockAcquisition::Write,
-                acquired_at: self.acquired_at,
+                try_acquire_at: self.try_acquire_at,
+                acquire_at: self.acquire_at,
                 location: self.location,
             });
         }
