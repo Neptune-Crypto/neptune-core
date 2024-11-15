@@ -1411,101 +1411,84 @@ impl GlobalState {
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-        // note: we make this fn internal so we can log its duration and ensure it will
-        // never be called directly by another fn, without the timings.
-        async fn set_new_tip_internal_worker(
-            myself: &mut GlobalState,
-            new_block: Block,
-            miner_reward_utxo_infos: Vec<ExpectedUtxo>,
-        ) -> Result<Vec<UpdateMutatorSetDataJob>> {
-            // Apply the updates
-            myself
-                .chain
-                .archival_state_mut()
-                .write_block_as_tip(&new_block)
-                .await?;
+        crate::macros::log_scope_duration!();
 
-            // update the mutator set with the UTXOs from this block
-            myself
-                .chain
-                .archival_state_mut()
-                .update_mutator_set(&new_block)
-                .await
-                .expect("Updating mutator set must succeed");
+        // Apply the updates
+        self.chain
+            .archival_state_mut()
+            .write_block_as_tip(&new_block)
+            .await?;
 
-            for miner_reward_utxo_info in miner_reward_utxo_infos {
-                // Notify wallet to expect the coinbase UTXO, as we mined this block
-                myself
-                    .wallet_state
-                    .add_expected_utxo(ExpectedUtxo::new(
-                        miner_reward_utxo_info.utxo,
-                        miner_reward_utxo_info.sender_randomness,
-                        miner_reward_utxo_info.receiver_preimage,
-                        UtxoNotifier::OwnMinerComposeBlock,
-                    ))
-                    .await;
-            }
+        // update the mutator set with the UTXOs from this block
+        self.chain
+            .archival_state_mut()
+            .update_mutator_set(&new_block)
+            .await
+            .expect("Updating mutator set must succeed");
 
-            // Get parent of tip for mutator-set data needed for various updates. Parent of the
-            // stored block will always exist since all blocks except the genesis block have a
-            // parent, and the genesis block is considered code, not data, so the genesis block
-            // will never be changed or updated through this method.
-            let tip_parent = myself
-                .chain
-                .archival_state()
-                .get_tip_parent()
-                .await
-                .expect("Parent must exist when storing a new block");
-
-            // Sanity check that must always be true for a valid block
-            assert_eq!(
-                tip_parent.hash(),
-                new_block.header().prev_block_digest,
-                "Tip parent has must match indicated parent hash"
-            );
-            let previous_ms_accumulator = tip_parent.mutator_set_accumulator_after().clone();
-
-            // Update mempool with UTXOs from this block. This is done by
-            // removing all transaction that became invalid/was mined by this
-            // block. Also returns the list of update-jobs that should be
-            // performed by this client.
-            let (mempool_events, update_jobs) = myself
-                .mempool
-                .update_with_block_and_predecessor(
-                    &new_block,
-                    &tip_parent,
-                    myself.net.tx_proving_capability,
-                    myself.cli().compose,
-                )
+        for miner_reward_utxo_info in miner_reward_utxo_infos {
+            // Notify wallet to expect the coinbase UTXO, as we mined this block
+            self.wallet_state
+                .add_expected_utxo(ExpectedUtxo::new(
+                    miner_reward_utxo_info.utxo,
+                    miner_reward_utxo_info.sender_randomness,
+                    miner_reward_utxo_info.receiver_preimage,
+                    UtxoNotifier::OwnMinerComposeBlock,
+                ))
                 .await;
-
-            // update wallet state with relevant UTXOs from this block
-            myself
-                .wallet_state
-                .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
-                .await?;
-            myself
-                .wallet_state
-                .handle_mempool_events(mempool_events)
-                .await;
-
-            myself.chain.light_state_mut().set_block(new_block);
-
-            // Reset block proposal, as that field pertains to the block that
-            // was just set as new tip.
-            myself.block_proposal = BlockProposal::none();
-
-            // Flush databases
-            myself.flush_databases().await?;
-
-            Ok(update_jobs)
         }
 
-        crate::macros::duration_async_info!(set_new_tip_internal_worker(
-            self,
-            new_block,
-            miner_reward_utxo_infos,
-        ))
+        // Get parent of tip for mutator-set data needed for various updates. Parent of the
+        // stored block will always exist since all blocks except the genesis block have a
+        // parent, and the genesis block is considered code, not data, so the genesis block
+        // will never be changed or updated through this method.
+        let tip_parent = self
+            .chain
+            .archival_state()
+            .get_tip_parent()
+            .await
+            .expect("Parent must exist when storing a new block");
+
+        // Sanity check that must always be true for a valid block
+        assert_eq!(
+            tip_parent.hash(),
+            new_block.header().prev_block_digest,
+            "Tip parent has must match indicated parent hash"
+        );
+        let previous_ms_accumulator = tip_parent.mutator_set_accumulator_after().clone();
+
+        // Update mempool with UTXOs from this block. This is done by
+        // removing all transaction that became invalid/was mined by this
+        // block. Also returns the list of update-jobs that should be
+        // performed by this client.
+        let (mempool_events, update_jobs) = self
+            .mempool
+            .update_with_block_and_predecessor(
+                &new_block,
+                &tip_parent,
+                self.net.tx_proving_capability,
+                self.cli().compose,
+            )
+            .await;
+
+        // update wallet state with relevant UTXOs from this block
+        self.wallet_state
+            .update_wallet_state_with_new_block(&previous_ms_accumulator, &new_block)
+            .await?;
+        self.wallet_state
+            .handle_mempool_events(mempool_events)
+            .await;
+
+        self.chain.light_state_mut().set_block(new_block);
+
+        // Reset block proposal, as that field pertains to the block that
+        // was just set as new tip.
+        self.block_proposal = BlockProposal::none();
+
+        // Flush databases
+        self.flush_databases().await?;
+
+        Ok(update_jobs)
     }
 
     /// resync membership proofs
