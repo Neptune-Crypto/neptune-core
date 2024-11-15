@@ -381,35 +381,39 @@ pub(crate) fn log_tokio_lock_event(lock_event: &sync_tokio::LockEvent) {
         None => "?".to_string(),
     };
 
-    let (event_type, info, acquisition, location) = match lock_event {
+    let (event_type, info, acquisition, location, acquired_at) = match lock_event {
         sync_tokio::LockEvent::TryAcquire {
             ref info,
             acquisition,
             location,
             ..
-        } => ("TryAcquire", info, acquisition, location),
+        } => ("TryAcquire", info, acquisition, location, None),
         sync_tokio::LockEvent::Acquire {
             ref info,
             acquisition,
             location,
             ..
-        } => ("Acquire", info, acquisition, location),
+        } => ("Acquire", info, acquisition, location, None),
         sync_tokio::LockEvent::Release {
             ref info,
             acquisition,
             location,
-            ..
-        } => ("Release", info, acquisition, location),
+            acquired_at,
+        } => ("Release", info, acquisition, location, *acquired_at),
     };
 
     let location_str = match location {
-        Some(l) => format!("\n\t|-- acquired: {}", l),
+        Some(l) => format!("\n\t|-- acquirer: {}", l),
+        None => String::default(),
+    };
+    let held_str = match acquired_at {
+        Some(t) => format!("\n\t|-- held: {} secs", t.elapsed().as_secs_f32()),
         None => String::default(),
     };
 
     tracing::trace!(
             ?lock_event,
-            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}{}\n\t|--",
+            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}{}{}\n\t|--",
             event_type,
             info.name().unwrap_or("?"),
             info.lock_type(),
@@ -418,6 +422,7 @@ pub(crate) fn log_tokio_lock_event(lock_event: &sync_tokio::LockEvent) {
             std::thread::current().name().unwrap_or("?"),
             tokio_id,
             location_str,
+            held_str,
     );
 }
 
