@@ -49,6 +49,7 @@ use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleT
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_status::WalletStatus;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 
@@ -305,9 +306,7 @@ pub struct NeptuneRPCServer {
 }
 
 impl NeptuneRPCServer {
-    async fn confirmations_internal(&self) -> Option<BlockHeight> {
-        let state = self.state.lock_guard().await;
-
+    async fn confirmations_internal(&self, state: &GlobalState) -> Option<BlockHeight> {
         match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
                 let tip_block_header = state.chain.light_state().header();
@@ -510,7 +509,8 @@ impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
         log_slow_scope!(fn_name!());
-        self.confirmations_internal().await
+        let guard = self.state.lock_guard().await;
+        self.confirmations_internal(&guard).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -819,9 +819,8 @@ impl RPC for NeptuneRPCServer {
         let peer_count = Some(state.net.peer_map.len());
 
         let mining_status = Some(state.mining_status.clone());
-        drop(state);
 
-        let confirmations = self.confirmations_internal().await;
+        let confirmations = self.confirmations_internal(&state).await;
 
         DashBoardOverviewDataFromClient {
             tip_digest,
