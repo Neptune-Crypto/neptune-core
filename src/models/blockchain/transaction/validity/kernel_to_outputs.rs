@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use field_count::FieldCount;
 use get_size::GetSize;
@@ -113,6 +114,13 @@ impl SecretWitness for KernelToOutputsWitness {
 pub struct KernelToOutputs;
 
 impl ConsensusProgram for KernelToOutputs {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;

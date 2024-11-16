@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use itertools::Itertools;
 use tasm_lib::data_type::DataType;
@@ -306,6 +307,13 @@ impl SingleProof {
 }
 
 impl ConsensusProgram for SingleProof {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         let stark: Stark = Stark::default();
         let own_program_digest: Digest = tasmlib::own_program_digest();

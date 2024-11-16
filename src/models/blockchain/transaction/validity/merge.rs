@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::sync::OnceLock;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
@@ -210,6 +211,13 @@ impl SecretWitness for MergeWitness {
 pub struct Merge;
 
 impl ConsensusProgram for Merge {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest = tasmlib::tasmlib_io_read_stdin___digest();

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use strum::EnumCount;
 use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::field;
@@ -180,6 +182,13 @@ impl SecretWitness for UpdateWitness {
 pub struct Update;
 
 impl ConsensusProgram for Update {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();

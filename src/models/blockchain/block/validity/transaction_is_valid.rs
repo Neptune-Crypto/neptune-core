@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use strum::EnumCount;
 use tasm_lib::field;
@@ -100,10 +100,6 @@ impl SecretWitness for TransactionIsValidWitness {
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionIsValid;
 
-/// Cache for program hash, for faster claim production.
-static TRANSACTION_IS_VALID_HASH: LazyLock<Digest> =
-    LazyLock::new(|| TransactionIsValid.program().hash());
-
 impl TransactionIsValid {
     pub(crate) fn claim(block_body_mast_hash: Digest) -> Claim {
         let input = block_body_mast_hash.reversed().values().to_vec();
@@ -113,8 +109,11 @@ impl TransactionIsValid {
 }
 
 impl ConsensusProgram for TransactionIsValid {
+    /// Get the program hash digest.
     fn hash(&self) -> Digest {
-        *TRANSACTION_IS_VALID_HASH
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 
     fn source(&self) {

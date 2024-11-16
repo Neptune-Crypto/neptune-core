@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -35,6 +37,13 @@ pub struct CoinbaseIsValid {
 }
 
 impl ConsensusProgram for CoinbaseIsValid {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         todo!()
     }

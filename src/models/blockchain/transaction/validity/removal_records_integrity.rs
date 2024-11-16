@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use arbitrary::Arbitrary;
 use field_count::FieldCount;
@@ -366,6 +367,13 @@ impl RemovalRecordsIntegrityWitness {
 }
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
