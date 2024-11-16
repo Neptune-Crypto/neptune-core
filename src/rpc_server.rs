@@ -807,7 +807,7 @@ impl RPC for NeptuneRPCServer {
         let mempool_size = state.mempool.get_size();
         let mempool_total_tx_count = state.mempool.len();
         let mempool_own_tx_count = state.mempool.num_own_txs();
-        let cpu_temp = Self::cpu_temp_inner();
+        let cpu_temp = None; // disable for now.  call is too slow.
         let unconfirmed_balance = state
             .wallet_state
             .unconfirmed_balance(tip_digest, now)
