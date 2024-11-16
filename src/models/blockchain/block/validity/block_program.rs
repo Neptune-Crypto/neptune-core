@@ -42,6 +42,12 @@ impl BlockProgram {
 }
 
 impl ConsensusProgram for BlockProgram {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| BlockProgram.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         let _block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;

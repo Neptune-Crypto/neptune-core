@@ -210,6 +210,12 @@ impl SecretWitness for MergeWitness {
 pub struct Merge;
 
 impl ConsensusProgram for Merge {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| Merge.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest = tasmlib::tasmlib_io_read_stdin___digest();

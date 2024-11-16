@@ -74,6 +74,12 @@ impl SecretWitness for CollectLockScriptsWitness {
 pub struct CollectLockScripts;
 
 impl ConsensusProgram for CollectLockScripts {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| CollectLockScripts.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;

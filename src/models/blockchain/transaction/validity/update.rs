@@ -180,6 +180,12 @@ impl SecretWitness for UpdateWitness {
 pub struct Update;
 
 impl ConsensusProgram for Update {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| Update.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();

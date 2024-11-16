@@ -306,6 +306,12 @@ impl SingleProof {
 }
 
 impl ConsensusProgram for SingleProof {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| SingleProof.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         let stark: Stark = Stark::default();
         let own_program_digest: Digest = tasmlib::own_program_digest();

@@ -90,6 +90,12 @@ impl SecretWitness for CollectTypeScriptsWitness {
 pub struct CollectTypeScripts;
 
 impl ConsensusProgram for CollectTypeScripts {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| CollectTypeScripts.program().hash());
+        *PROGRAM_HASH
+    }
+
     fn source(&self) {
         let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let sou_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();

@@ -49,6 +49,12 @@ use crate::models::proof_abstractions::SecretWitness;
 pub struct NativeCurrency;
 
 impl ConsensusProgram for NativeCurrency {
+    fn hash(&self) -> Digest {
+        static PROGRAM_HASH: std::sync::LazyLock<Digest> =
+            std::sync::LazyLock::new(|| NativeCurrency.program().hash());
+        *PROGRAM_HASH
+    }
+
     #[allow(clippy::needless_return)]
     fn source(&self) {
         // get in the current program's hash digest
