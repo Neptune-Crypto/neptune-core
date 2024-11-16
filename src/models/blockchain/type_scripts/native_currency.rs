@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use get_size::GetSize;
 use serde::Deserialize;
@@ -49,6 +50,13 @@ use crate::models::proof_abstractions::SecretWitness;
 pub struct NativeCurrency;
 
 impl ConsensusProgram for NativeCurrency {
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+
     #[allow(clippy::needless_return)]
     fn source(&self) {
         // get in the current program's hash digest
