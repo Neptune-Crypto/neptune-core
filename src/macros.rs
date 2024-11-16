@@ -23,7 +23,7 @@ macro_rules! fn_name {
 /// See [crate::ScopeDurationLogger]
 macro_rules! log_slow_scope {
     () => {
-        let log_slow_scope_desc = fn_name!();
+        let log_slow_scope_desc = $crate::macros::fn_name!();
         let _____x = $crate::ScopeDurationLogger::new_default_threshold(&log_slow_scope_desc);
     };
     ($description: expr) => {
