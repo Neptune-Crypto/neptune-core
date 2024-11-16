@@ -800,18 +800,36 @@ impl RPC for NeptuneRPCServer {
 
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
-        let tip_digest = state.chain.light_state().hash();
+        let tip_digest = {
+            log_slow_scope!(fn_name!() + "::hash() tip digest");
+            state.chain.light_state().hash()
+        };
         let tip_header = state.chain.light_state().header().clone();
-        let wallet_status = state.get_wallet_status_for_tip().await;
+        let wallet_status = {
+            log_slow_scope!(fn_name!() + "::get_wallet_status_for_tip()");
+            state.get_wallet_status_for_tip().await
+        };
         let syncing = state.net.syncing;
-        let mempool_size = state.mempool.get_size();
-        let mempool_total_tx_count = state.mempool.len();
-        let mempool_own_tx_count = state.mempool.num_own_txs();
+        let mempool_size = {
+            log_slow_scope!(fn_name!() + "::mempool.get_size()");
+            state.mempool.get_size()
+        };
+        let mempool_total_tx_count = {
+            log_slow_scope!(fn_name!() + "::mempool.len()");
+            state.mempool.len()
+        };
+        let mempool_own_tx_count = {
+            log_slow_scope!(fn_name!() + "::mempool.num_own_txs()");
+            state.mempool.num_own_txs()
+        };
         let cpu_temp = None; // disable for now.  call is too slow.
-        let unconfirmed_balance = state
-            .wallet_state
-            .unconfirmed_balance(tip_digest, now)
-            .await;
+        let unconfirmed_balance = {
+            log_slow_scope!(fn_name!() + "::unconfirmed_balance()");
+            state
+                .wallet_state
+                .unconfirmed_balance(tip_digest, now)
+                .await
+        };
         let proving_capability = self.state.cli().proving_capability();
 
         info!("proving capability: {proving_capability}");
@@ -820,14 +838,26 @@ impl RPC for NeptuneRPCServer {
 
         let mining_status = Some(state.mining_status.clone());
 
-        let confirmations = self.confirmations_internal(&state).await;
+        let confirmations = {
+            log_slow_scope!(fn_name!() + "::confirmations_internal()");
+            self.confirmations_internal(&state).await
+        };
+
+        let available_balance = {
+            log_slow_scope!(fn_name!() + "::synced_unspent_available_amount()");
+            wallet_status.synced_unspent_available_amount(now)
+        };
+        let timelocked_balance = {
+            log_slow_scope!(fn_name!() + "::synced_unspent_timelocked_amount()");
+            wallet_status.synced_unspent_timelocked_amount(now)
+        };
 
         DashBoardOverviewDataFromClient {
             tip_digest,
             tip_header,
             syncing,
-            available_balance: wallet_status.synced_unspent_available_amount(now),
-            timelocked_balance: wallet_status.synced_unspent_timelocked_amount(now),
+            available_balance,
+            timelocked_balance,
             available_unconfirmed_balance: unconfirmed_balance,
             mempool_size,
             mempool_total_tx_count,

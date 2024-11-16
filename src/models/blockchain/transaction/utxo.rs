@@ -127,6 +127,7 @@ impl Utxo {
     /// regardless of which other coins are present. (Even if that makes the
     /// Neptune coins unspendable.)
     pub fn get_native_currency_amount(&self) -> NeptuneCoins {
+        crate::macros::log_slow_scope!();
         self.coins
             .iter()
             .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
@@ -162,6 +163,7 @@ impl Utxo {
     /// whether it has a time lock and if it does, verifying that the release
     /// date is in the past.
     pub fn can_spend_at(&self, timestamp: Timestamp) -> bool {
+        crate::macros::log_slow_scope!();
         // unknown type script
         if !self.has_known_type_scripts() {
             return false;
