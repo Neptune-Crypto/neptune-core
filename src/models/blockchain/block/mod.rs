@@ -78,6 +78,12 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 /// blocks with many outputs.
 pub(crate) const MAX_BLOCK_SIZE: usize = 250_000;
 
+/// Duration of timelock for half the block subsidy.
+///
+/// Half the block subsidy is liquid immediately. Half of it is locked for this
+/// time period.
+pub(crate) const COINBASE_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 pub enum BlockProof {

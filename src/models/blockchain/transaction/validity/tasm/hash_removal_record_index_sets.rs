@@ -164,7 +164,7 @@ mod tests {
             let mut removal_records = vec![];
             for _ in 0..N {
                 let removal_record = PrimitiveWitness::arbitrary_with_size_numbers(
-                    num_inputs,
+                    Some(num_inputs),
                     num_outputs,
                     num_public_announcements,
                 )

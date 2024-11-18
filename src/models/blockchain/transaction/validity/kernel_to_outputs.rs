@@ -362,7 +362,7 @@ mod test {
         #[strategy(0usize..5)] _num_outputs: usize,
         #[strategy(0usize..5)] _num_inputs: usize,
         #[strategy(0usize..5)] _num_pub_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(#_num_inputs,#_num_outputs,#_num_pub_announcements))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs),#_num_outputs,#_num_pub_announcements))]
         primitive_witness: PrimitiveWitness,
     ) {
         let kernel_to_outputs_witness = KernelToOutputsWitness::from(&primitive_witness);
@@ -388,7 +388,7 @@ mod test {
     #[test]
     fn kernel_to_outputs_unittest() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -410,7 +410,7 @@ mod test {
     #[test]
     fn kernel_to_outputs_failing_proof() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
