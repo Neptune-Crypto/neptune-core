@@ -311,7 +311,7 @@ impl PrimitiveWitness {
 
         // verify type scripts
         for type_script_hash in type_script_hashes {
-            let type_script = type_script_dictionary[&type_script_hash].program.clone();
+            let type_script = type_script_dictionary[&type_script_hash].program().clone();
             let public_input = self.kernel.mast_hash().encode().into();
             let secret_input = self
                 .kernel

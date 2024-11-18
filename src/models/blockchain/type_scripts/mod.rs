@@ -29,29 +29,25 @@ use crate::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {
-    pub program: Program,
+    program: Program,
 }
 
 // Standard hash needed for filtering out duplicates.
 impl StdHash for TypeScript {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        self.program.instructions.hash(state);
+        StdHash::hash(&self.encode(), state);
     }
 }
 
 impl From<Vec<LabelledInstruction>> for TypeScript {
     fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
+        Self::new(Program::new(&instrs))
     }
 }
 
 impl From<&[LabelledInstruction]> for TypeScript {
     fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
+        Self::new(Program::new(instrs))
     }
 }
 
@@ -60,14 +56,17 @@ impl TypeScript {
         Self { program }
     }
 
+    #[cfg(test)]
     pub fn hash(&self) -> Digest {
         self.program.hash()
     }
 
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
     pub fn native_currency() -> Self {
-        Self {
-            program: NativeCurrency.program(),
-        }
+        Self::new(NativeCurrency.program())
     }
 }
 
@@ -104,17 +103,13 @@ pub struct TypeScriptAndWitness {
 
 impl From<TypeScriptAndWitness> for TypeScript {
     fn from(type_script_and_witness: TypeScriptAndWitness) -> Self {
-        Self {
-            program: type_script_and_witness.program,
-        }
+        Self::new(type_script_and_witness.program)
     }
 }
 
 impl From<&TypeScriptAndWitness> for TypeScript {
     fn from(type_script_and_witness: &TypeScriptAndWitness) -> Self {
-        Self {
-            program: type_script_and_witness.program.clone(),
-        }
+        Self::new(type_script_and_witness.program.clone())
     }
 }
 
