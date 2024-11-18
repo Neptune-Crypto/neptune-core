@@ -168,7 +168,8 @@ mod tests {
                     .unwrap()
                     .current()
                     .kernel
-                    .inputs;
+                    .inputs
+                    .clone();
                 removal_records.push(removal_record);
             }
             let removal_records = removal_records.try_into().unwrap();

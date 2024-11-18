@@ -32,7 +32,6 @@ use crate::models::proof_abstractions::SecretWitness;
 use crate::tasm_lib::memory::encode_to_memory;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use super::single_proof::SingleProof;
 
@@ -251,10 +250,10 @@ impl ConsensusProgram for Update {
         // verify update ...
 
         // authenticate inputs
-        let old_inputs: Vec<RemovalRecord> = uw.old_kernel.inputs;
-        let new_inputs: Vec<RemovalRecord> = uw.new_kernel.inputs;
-        let old_inputs_hash: Digest = Hash::hash(&old_inputs);
-        let new_inputs_hash: Digest = Hash::hash(&new_inputs);
+        let old_inputs = &uw.old_kernel.inputs;
+        let new_inputs = &uw.new_kernel.inputs;
+        let old_inputs_hash: Digest = Hash::hash(old_inputs);
+        let new_inputs_hash: Digest = Hash::hash(new_inputs);
         tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Inputs as u32,
@@ -728,6 +727,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
+    use crate::models::blockchain::transaction::TransactionKernelModifier;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -778,7 +778,7 @@ pub(crate) mod test {
         );
 
         let mut new_mutator_set_accumulator = old_pw.mutator_set_accumulator.clone();
-        MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs)
+        MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone())
             .apply_to_accumulator(&mut new_mutator_set_accumulator)
             .unwrap();
         let old_proof = SingleProof::produce(
@@ -789,7 +789,10 @@ pub(crate) mod test {
         .await
         .unwrap();
         let num_seconds = (0u64..=10).new_tree(&mut test_runner).unwrap().current();
-        updated.kernel.timestamp += Timestamp::seconds(num_seconds);
+
+        updated.kernel = TransactionKernelModifier::default()
+            .timestamp(updated.kernel.timestamp + Timestamp::seconds(num_seconds))
+            .modify(updated.kernel);
 
         UpdateWitness::from_old_transaction(
             old_pw.kernel,
@@ -827,10 +830,11 @@ pub(crate) mod test {
             new_msa.add(&AdditionRecord::new(canonical_commitment));
         }
 
-        let mut new_kernel = primitive_witness.kernel.clone();
-        new_kernel.mutator_set_hash = new_msa.hash();
+        let new_kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(new_msa.hash())
+            .timestamp(primitive_witness.kernel.timestamp + Timestamp::days(1))
+            .clone_modify(&primitive_witness.kernel);
 
-        new_kernel.timestamp += Timestamp::days(1);
         assert_ne!(
             new_msa, primitive_witness.mutator_set_accumulator,
             "must update mutator set too in order for test to be meaningful"
@@ -902,7 +906,10 @@ pub(crate) mod test {
 
     fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
         let mut bad_witness = good_witness.to_owned();
-        bad_witness.new_kernel.timestamp = bad_witness.old_kernel.timestamp - Timestamp::hours(1);
+
+        bad_witness.new_kernel = TransactionKernelModifier::default()
+            .timestamp(bad_witness.old_kernel.timestamp - Timestamp::hours(1))
+            .modify(bad_witness.new_kernel);
 
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
@@ -965,9 +972,16 @@ pub(crate) mod test {
 
     fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
         let mut bad_witness = good_witness.clone();
-        bad_witness.new_kernel.inputs[0]
+
+        let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+        new_inputs[0]
             .absolute_indices
             .decrement_bloom_filter_index(10);
+
+        bad_witness.new_kernel = TransactionKernelModifier::default()
+            .inputs(new_inputs)
+            .modify(bad_witness.new_kernel);
+
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
@@ -982,7 +996,13 @@ pub(crate) mod test {
 
     fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
         let mut bad_witness = good_witness.clone();
-        bad_witness.new_kernel.inputs.remove(0);
+
+        let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+        new_inputs.remove(0);
+        bad_witness.new_kernel = TransactionKernelModifier::default()
+            .inputs(new_inputs)
+            .modify(bad_witness.new_kernel);
+
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
@@ -998,10 +1018,14 @@ pub(crate) mod test {
     fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
         let mut rng = StdRng::seed_from_u64(0);
         let mut bad_witness = good_witness.clone();
-        bad_witness
-            .new_kernel
-            .inputs
-            .push(pseudorandom_removal_record(rng.gen()));
+
+        let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+        new_inputs.push(pseudorandom_removal_record(rng.gen()));
+
+        bad_witness.new_kernel = TransactionKernelModifier::default()
+            .inputs(new_inputs)
+            .modify(bad_witness.new_kernel);
+
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();

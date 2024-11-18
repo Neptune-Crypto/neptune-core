@@ -27,6 +27,7 @@ use tracing::warn;
 use super::lock_script::LockScript;
 use super::lock_script::LockScriptAndWitness;
 use super::transaction_kernel::TransactionKernel;
+use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
@@ -642,7 +643,7 @@ impl PrimitiveWitness {
             })
             .collect_vec();
 
-        let kernel = TransactionKernel {
+        let kernel = TransactionKernelProxy {
             inputs: input_removal_records.clone(),
             outputs: output_commitments.clone(),
             public_announcements: public_announcements.to_vec(),
@@ -650,7 +651,8 @@ impl PrimitiveWitness {
             coinbase,
             timestamp,
             mutator_set_hash: mutator_set_accumulator.hash(),
-        };
+        }
+        .into_kernel();
 
         let salted_input_utxos = SaltedUtxos {
             utxos: input_utxos.clone(),
@@ -1085,7 +1087,7 @@ mod test {
                         .map(|(utxo, sr, rd)| commit(Tip5::hash(&utxo), sr, rd))
                         .collect_vec();
 
-                        let kernel = TransactionKernel {
+                        let kernel = TransactionKernelProxy {
                             inputs: input_removal_records.clone(),
                             outputs: output_addition_records,
                             public_announcements,
@@ -1093,7 +1095,8 @@ mod test {
                             coinbase,
                             timestamp,
                             mutator_set_hash: mutator_set_accumulator.hash(),
-                        };
+                        }
+                        .into_kernel();
 
                         let type_scripts_and_witnesses = vec![NativeCurrencyWitness {
                             salted_input_utxos: salted_input_utxos.clone(),

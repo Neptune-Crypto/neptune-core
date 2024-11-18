@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -20,22 +22,45 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
+/// TransactionKernel is immutable and its hash never changes.
+///
+/// See [TransactionKernelModifier] for generating modified copies.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, GetSize, BFieldCodec, TasmObject)]
+#[readonly::make]
 pub struct TransactionKernel {
+    // note: see field descriptions in TransactionKernelProxy
     pub inputs: Vec<RemovalRecord>,
-
-    /// `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
-
     pub public_announcements: Vec<PublicAnnouncement>,
     pub fee: NeptuneCoins,
     pub coinbase: Option<NeptuneCoins>,
-
-    /// number of milliseconds since unix epoch
     pub timestamp: Timestamp,
-
-    /// mutator set hash *prior* to updating mutator set with this transaction.
     pub mutator_set_hash: Digest,
+
+    // this is only here as a cache for MastHash
+    // so that we lazily compute the input sequences at most once.
+    #[serde(skip)]
+    #[bfield_codec(ignore)]
+    #[tasm_object(ignore)]
+    #[get_size(ignore)]
+    mast_sequences: OnceLock<Vec<Vec<BFieldElement>>>,
+}
+
+// we impl PartialEq manually in order to skip mast_sequences field.
+// This could also be achieved with the `derivative` crate that has a
+// PartialEq that can skip fields, but this way we avoid an extra dep.
+impl PartialEq for TransactionKernel {
+    fn eq(&self, o: &Self) -> bool {
+        self.inputs == o.inputs
+            && self.outputs == o.outputs
+            && self.public_announcements == o.public_announcements
+            && self.fee == o.fee
+            && self.coinbase == o.coinbase
+            && self.timestamp == o.timestamp
+            && self.mutator_set_hash == o.mutator_set_hash
+
+        // mast_sequences intentionally skipped.
+    }
 }
 
 impl From<PrimitiveWitness> for TransactionKernel {
@@ -67,29 +92,33 @@ impl MastHash for TransactionKernel {
 
     /// Return the sequences (= leaf preimages) of the kernel Merkle tree.
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
-        let input_utxos_sequence = self.inputs.encode();
+        self.mast_sequences
+            .get_or_init(|| {
+                let input_utxos_sequence = self.inputs.encode();
 
-        let output_utxos_sequence = self.outputs.encode();
+                let output_utxos_sequence = self.outputs.encode();
 
-        let pubscript_sequence = self.public_announcements.encode();
+                let pubscript_sequence = self.public_announcements.encode();
 
-        let fee_sequence = self.fee.encode();
+                let fee_sequence = self.fee.encode();
 
-        let coinbase_sequence = self.coinbase.encode();
+                let coinbase_sequence = self.coinbase.encode();
 
-        let timestamp_sequence = self.timestamp.encode();
+                let timestamp_sequence = self.timestamp.encode();
 
-        let mutator_set_hash_sequence = self.mutator_set_hash.encode();
+                let mutator_set_hash_sequence = self.mutator_set_hash.encode();
 
-        vec![
-            input_utxos_sequence,
-            output_utxos_sequence,
-            pubscript_sequence,
-            fee_sequence,
-            coinbase_sequence,
-            timestamp_sequence,
-            mutator_set_hash_sequence,
-        ]
+                vec![
+                    input_utxos_sequence,
+                    output_utxos_sequence,
+                    pubscript_sequence,
+                    fee_sequence,
+                    coinbase_sequence,
+                    timestamp_sequence,
+                    mutator_set_hash_sequence,
+                ]
+            })
+            .clone() // can we refactor to avoid this clone?
     }
 }
 
@@ -112,7 +141,7 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
         let timestamp: Timestamp = u.arbitrary()?;
         let mutator_set_hash: Digest = u.arbitrary()?;
 
-        let transaction_kernel = TransactionKernel {
+        let transaction_kernel = TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements,
@@ -120,9 +149,156 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
             coinbase,
             timestamp,
             mutator_set_hash,
-        };
+        }
+        .into_kernel();
 
         Ok(transaction_kernel)
+    }
+}
+
+/// performs instantiation and destructuring of [TransactionKernel]
+///
+/// [TransactionKernel] is immutable, so it cannot be instantiated
+/// by direct field access.  This proxy is mutable, and it has an
+/// into_kernel() method that converts it to a [TransactionKernel].
+///
+/// It is also useful for destructuring kernel fields without cloning.
+pub struct TransactionKernelProxy {
+    /// contains the transaction inputs.
+    pub inputs: Vec<RemovalRecord>,
+
+    /// contains the commitments (addition records) that go into the AOCL
+    pub outputs: Vec<AdditionRecord>,
+
+    /// list of public-announcements to include in blockchain
+    pub public_announcements: Vec<PublicAnnouncement>,
+
+    /// tx fee amount
+    pub fee: NeptuneCoins,
+
+    /// optional coinbase.  applies only to miner payments.
+    pub coinbase: Option<NeptuneCoins>,
+
+    /// number of milliseconds since unix epoch
+    pub timestamp: Timestamp,
+
+    /// mutator set hash *prior* to updating mutator set with this transaction.
+    pub mutator_set_hash: Digest,
+}
+
+impl From<TransactionKernel> for TransactionKernelProxy {
+    fn from(k: TransactionKernel) -> Self {
+        Self {
+            inputs: k.inputs,
+            outputs: k.outputs,
+            public_announcements: k.public_announcements,
+            fee: k.fee,
+            coinbase: k.coinbase,
+            timestamp: k.timestamp,
+            mutator_set_hash: k.mutator_set_hash,
+        }
+    }
+}
+
+impl TransactionKernelProxy {
+    pub fn into_kernel(self) -> TransactionKernel {
+        TransactionKernel {
+            inputs: self.inputs,
+            outputs: self.outputs,
+            public_announcements: self.public_announcements,
+            fee: self.fee,
+            coinbase: self.coinbase,
+            timestamp: self.timestamp,
+            mutator_set_hash: self.mutator_set_hash,
+            mast_sequences: Default::default(),
+        }
+    }
+}
+
+/// performs modifications of [TransactionKernel]
+///
+/// [TransactionKernel] is immutable, so any modifications must
+/// generate a new instance.  [TransactionKernelModifier] uses
+/// a builder pattern to facilitate that task.
+///
+/// supports a move/modify operation and a clone/modify operation.
+#[derive(Default)]
+pub struct TransactionKernelModifier {
+    pub inputs: Option<Vec<RemovalRecord>>,
+    pub outputs: Option<Vec<AdditionRecord>>,
+    pub public_announcements: Option<Vec<PublicAnnouncement>>,
+    pub fee: Option<NeptuneCoins>,
+    pub coinbase: Option<Option<NeptuneCoins>>,
+    pub timestamp: Option<Timestamp>,
+    pub mutator_set_hash: Option<Digest>,
+}
+
+impl TransactionKernelModifier {
+    /// set modified inputs
+    pub fn inputs(mut self, inputs: Vec<RemovalRecord>) -> Self {
+        self.inputs = Some(inputs);
+        self
+    }
+    /// set modified outputs
+    pub fn outputs(mut self, outputs: Vec<AdditionRecord>) -> Self {
+        self.outputs = Some(outputs);
+        self
+    }
+    /// set modified public-announcements
+    pub fn public_announcements(mut self, pa: Vec<PublicAnnouncement>) -> Self {
+        self.public_announcements = Some(pa);
+        self
+    }
+    /// set modified fee
+    pub fn fee(mut self, fee: NeptuneCoins) -> Self {
+        self.fee = Some(fee);
+        self
+    }
+    /// set modified coinbase
+    pub fn coinbase(mut self, coinbase: Option<NeptuneCoins>) -> Self {
+        self.coinbase = Some(coinbase);
+        self
+    }
+    /// set modified timestamp
+    pub fn timestamp(mut self, timestamp: Timestamp) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+    /// set modified mutator-set-hash digest
+    pub fn mutator_set_hash(mut self, mutator_set_hash: Digest) -> Self {
+        self.mutator_set_hash = Some(mutator_set_hash);
+        self
+    }
+
+    /// perform move+modify operation.
+    ///
+    /// The input [TransactionKernel] is replaced with a copy
+    /// that contains any modifications previously set in the builder.
+    ///
+    /// Unmodified fields from the input kernel are moved into the
+    /// output kernel (no clone).
+    pub fn modify(self, k: TransactionKernel) -> TransactionKernel {
+        TransactionKernel {
+            inputs: self.inputs.unwrap_or(k.inputs),
+            outputs: self.outputs.unwrap_or(k.outputs),
+            public_announcements: self.public_announcements.unwrap_or(k.public_announcements),
+            fee: self.fee.unwrap_or(k.fee),
+            coinbase: self.coinbase.unwrap_or(k.coinbase),
+            timestamp: self.timestamp.unwrap_or(k.timestamp),
+            mutator_set_hash: self.mutator_set_hash.unwrap_or(k.mutator_set_hash),
+
+            // we must not copy from original, as the modified
+            // one must have a different sequence/hash.
+            mast_sequences: Default::default(),
+        }
+    }
+
+    /// perform clone+modify operation.
+    ///
+    /// The input [TransactionKernel] is replaced with a cloned copy
+    /// that contains any modifications previously set in the builder.
+    pub fn clone_modify(self, k: &TransactionKernel) -> TransactionKernel {
+        self.modify(k.clone())
     }
 }
 
@@ -167,7 +343,7 @@ pub mod transaction_kernel_tests {
         let timestamp: Timestamp = rng.gen();
         let mutator_set_hash: Digest = rng.gen();
 
-        TransactionKernel {
+        TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements,
@@ -176,6 +352,7 @@ pub mod transaction_kernel_tests {
             timestamp,
             mutator_set_hash,
         }
+        .into_kernel()
     }
 
     #[test]
@@ -238,7 +415,7 @@ pub mod transaction_kernel_tests {
             absolute_indices,
             target_chunks: Default::default(),
         };
-        let kernel = TransactionKernel {
+        let kernel = TransactionKernelProxy {
             inputs: vec![removal_record],
             outputs: vec![AdditionRecord {
                 canonical_commitment: random(),
@@ -248,7 +425,8 @@ pub mod transaction_kernel_tests {
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: rng.gen::<Digest>(),
-        };
+        }
+        .into_kernel();
         let encoded = kernel.encode();
         println!(
             "encoded: {}",

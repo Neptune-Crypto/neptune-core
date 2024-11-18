@@ -43,6 +43,8 @@ use validity::update::UpdateWitness;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
+use self::transaction_kernel::TransactionKernelModifier;
+use self::transaction_kernel::TransactionKernelProxy;
 use super::shared::Hash;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::proof::Proof;
@@ -245,14 +247,18 @@ impl Transaction {
             msa_state.remove(removal_record);
         }
 
-        primitive_witness.kernel.mutator_set_hash = msa_state.hash();
-        primitive_witness.mutator_set_accumulator = msa_state.clone();
-        primitive_witness.kernel.inputs = transaction_removal_records
-            .into_iter()
-            .map(|x| x.to_owned())
-            .collect_vec();
+        let kernel = TransactionKernelModifier::default()
+            .inputs(
+                transaction_removal_records
+                    .into_iter()
+                    .map(|x| x.to_owned())
+                    .collect_vec(),
+            )
+            .mutator_set_hash(msa_state.hash())
+            .clone_modify(&primitive_witness.kernel);
 
-        let kernel = primitive_witness.kernel.clone();
+        primitive_witness.kernel = kernel.clone();
+        primitive_witness.mutator_set_accumulator = msa_state.clone();
         let witness = TransactionProof::Witness(primitive_witness);
 
         Transaction {
@@ -296,14 +302,15 @@ impl Transaction {
         );
 
         // compute new kernel
-        let mut new_kernel = old_transaction_kernel.clone();
-        new_kernel.inputs = new_inputs;
-        new_kernel.mutator_set_hash = calculated_new_mutator_set.hash();
+        let new_kernel = TransactionKernelModifier::default()
+            .inputs(new_inputs)
+            .mutator_set_hash(calculated_new_mutator_set.hash())
+            .clone_modify(&old_transaction_kernel);
 
         // compute updated proof through recursion
         let update_witness = UpdateWitness::from_old_transaction(
-            old_transaction_kernel.clone(),
-            old_single_proof.clone(),
+            old_transaction_kernel,
+            old_single_proof,
             previous_mutator_set_accumulator.clone(),
             new_kernel.clone(),
             calculated_new_mutator_set,
@@ -456,7 +463,7 @@ mod tests {
 
     #[test]
     fn decode_encode_test_empty() {
-        let empty_kernel = TransactionKernel {
+        let empty_kernel = TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
             public_announcements: vec![],
@@ -464,7 +471,8 @@ mod tests {
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: Digest::default(),
-        };
+        }
+        .into_kernel();
         let primitive_witness = PrimitiveWitness {
             input_utxos: SaltedUtxos::empty(),
             type_scripts_and_witnesses: vec![],
@@ -535,7 +543,7 @@ mod transaction_tests {
             assert!(original_tx.is_valid().await);
 
             let mutator_set_update =
-                MutatorSetUpdate::new(mined.kernel.inputs, mined.kernel.outputs);
+                MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
             let updated_tx = Transaction::new_with_updated_mutator_set_records_given_proof(
                 original_tx.kernel,
                 &to_be_updated.mutator_set_accumulator,
@@ -599,8 +607,8 @@ mod transaction_tests {
         ) -> Transaction {
             Transaction::new_with_primitive_witness_ms_data(
                 to_be_updated,
-                mined.kernel.outputs,
-                mined.kernel.inputs,
+                mined.kernel.outputs.clone(),
+                mined.kernel.inputs.clone(),
             )
         }
 

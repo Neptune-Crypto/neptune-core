@@ -453,6 +453,7 @@ mod test {
 
     mod worker {
         use super::*;
+        use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 
         /// this tests the generate_public_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
@@ -495,10 +496,12 @@ mod test {
             assert!(key.matches_public_announcement_key_type(&public_announcement));
 
             // 8. add the public announcement to the mock tx.
-            mock_tx
-                .kernel
-                .public_announcements
-                .push(public_announcement);
+            let mut new_public_announcements = mock_tx.kernel.public_announcements.clone();
+            new_public_announcements.push(public_announcement);
+
+            mock_tx.kernel = TransactionKernelModifier::default()
+                .public_announcements(new_public_announcements)
+                .modify(mock_tx.kernel);
 
             // 9. scan tx public announcements for announced utxos
             let announced_utxos = key.scan_for_announced_utxos(&mock_tx.kernel).collect_vec();

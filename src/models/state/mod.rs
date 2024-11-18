@@ -51,6 +51,7 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
+use super::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -901,7 +902,7 @@ impl GlobalState {
             .iter()
             .map(|txi| txi.removal_record(&mutator_set_accumulator))
             .collect_vec();
-        let kernel = TransactionKernel {
+        let kernel = TransactionKernelProxy {
             inputs: removal_records,
             outputs: tx_outputs.addition_records(),
             public_announcements: tx_outputs.public_announcements(),
@@ -909,7 +910,8 @@ impl GlobalState {
             timestamp,
             coinbase,
             mutator_set_hash: mutator_set_accumulator.hash(),
-        };
+        }
+        .into_kernel();
 
         // populate witness
         let output_utxos = tx_outputs.utxos();

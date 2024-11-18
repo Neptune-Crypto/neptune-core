@@ -29,6 +29,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -842,7 +843,11 @@ impl Arbitrary for TimeLockWitness {
                         maybe_coinbase,
                     )
                     .prop_map(move |mut transaction_primitive_witness| {
-                        transaction_primitive_witness.kernel.timestamp = transaction_timestamp;
+                        let modified_kernel = TransactionKernelModifier::default()
+                            .timestamp(transaction_timestamp)
+                            .modify(transaction_primitive_witness.kernel);
+
+                        transaction_primitive_witness.kernel = modified_kernel;
                         TimeLockWitness::from(transaction_primitive_witness)
                     })
                     .boxed()
@@ -1038,7 +1043,11 @@ fn arbitrary_primitive_witness_with_timelocks(
                             time_lock_witness.nondeterminism(),
                         ),
                     );
-                    primitive_witness.kernel.timestamp = now;
+                    let modified_kernel = TransactionKernelModifier::default()
+                        .timestamp(now)
+                        .modify(primitive_witness.kernel);
+
+                    primitive_witness.kernel = modified_kernel;
                     primitive_witness
                 })
             },

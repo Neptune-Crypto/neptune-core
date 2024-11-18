@@ -40,6 +40,8 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -1008,12 +1010,9 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         }
         let swbfi: MmrAccumulator = u.arbitrary()?;
         let swbfa_hash: Digest = u.arbitrary()?;
-        let mut kernel: TransactionKernel = u.arbitrary()?;
-        kernel.mutator_set_hash = Hash::hash_pair(
-            Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-            Hash::hash_pair(swbfa_hash, Digest::default()),
-        );
-        kernel.inputs = input_utxos
+        let arb_kernel: TransactionKernel = u.arbitrary()?;
+
+        let new_inputs = input_utxos
             .iter()
             .zip(membership_proofs.iter())
             .map(|(utxo, msmp)| {
@@ -1032,6 +1031,14 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .rev()
             .collect_vec();
 
+        let kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(Hash::hash_pair(
+                Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+                Hash::hash_pair(swbfa_hash, Digest::default()),
+            ))
+            .inputs(new_inputs)
+            .modify(arb_kernel);
+
         let salted_utxos = SaltedUtxos::new(input_utxos);
 
         let aocl_auth_paths = membership_proofs
@@ -1039,19 +1046,27 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .map(|x| x.auth_path_aocl.to_owned())
             .collect();
 
+        let mast_root = kernel.mast_hash();
+        let mast_path_mutator_set = kernel.mast_path(TransactionKernelField::MutatorSetHash);
+        let mast_path_inputs = kernel.mast_path(TransactionKernelField::Inputs);
+        let mast_path_coinbase = kernel.mast_path(TransactionKernelField::Coinbase);
+        let TransactionKernelProxy {
+            coinbase, inputs, ..
+        } = kernel.into();
+
         Ok(RemovalRecordsIntegrityWitness {
             input_utxos: salted_utxos,
             membership_proofs,
             aocl_auth_paths,
-            coinbase: kernel.coinbase,
+            coinbase,
             aocl,
             swbfi,
             swbfa_hash,
-            mast_path_mutator_set: kernel.mast_path(TransactionKernelField::MutatorSetHash),
-            mast_path_inputs: kernel.mast_path(TransactionKernelField::Inputs),
-            mast_path_coinbase: kernel.mast_path(TransactionKernelField::Coinbase),
-            mast_root: kernel.mast_hash(),
-            removal_records: kernel.inputs,
+            mast_path_mutator_set,
+            mast_path_inputs,
+            mast_path_coinbase,
+            mast_root,
+            removal_records: inputs,
         })
     }
 }

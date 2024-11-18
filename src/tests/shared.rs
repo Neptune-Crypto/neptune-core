@@ -63,6 +63,7 @@ use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
@@ -506,7 +507,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
     let timestamp = Timestamp::now();
 
     Transaction {
-        kernel: TransactionKernel {
+        kernel: TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements: vec![],
@@ -514,7 +515,8 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
             timestamp,
             coinbase: None,
             mutator_set_hash,
-        },
+        }
+        .into_kernel(),
         proof: TransactionProof::invalid(),
     }
 }
@@ -551,7 +553,7 @@ pub fn make_mock_transaction_with_wallet(
         Some(ts) => ts,
         None => Timestamp::now(),
     };
-    let kernel = TransactionKernel {
+    let kernel = TransactionKernelProxy {
         inputs,
         outputs,
         public_announcements: vec![],
@@ -559,7 +561,8 @@ pub fn make_mock_transaction_with_wallet(
         timestamp,
         coinbase: None,
         mutator_set_hash: random(),
-    };
+    }
+    .into_kernel();
 
     Transaction {
         kernel,
@@ -670,7 +673,7 @@ pub(crate) fn make_mock_block(
         None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
-    let tx_kernel = TransactionKernel {
+    let tx_kernel = TransactionKernelProxy {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
@@ -678,7 +681,8 @@ pub(crate) fn make_mock_block(
         timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_block.mutator_set_accumulator_after().hash(),
-    };
+    }
+    .into_kernel();
     let tx = Transaction {
         kernel: tx_kernel,
         proof: TransactionProof::invalid(),

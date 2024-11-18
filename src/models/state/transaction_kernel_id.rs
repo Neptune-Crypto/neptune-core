@@ -114,7 +114,7 @@ mod tests {
                 .current();
         let tx_id_original = to_be_updated.kernel.txid();
 
-        let additions = mined.kernel.outputs;
+        let additions = mined.kernel.outputs.clone();
         let removals = mined.kernel.inputs.clone();
         let updated =
             Transaction::new_with_primitive_witness_ms_data(to_be_updated, additions, removals);

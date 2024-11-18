@@ -281,7 +281,7 @@ mod tests {
             //             .unwrap()
             //     })
             //     .collect_vec();
-            let inputs = kernel.inputs;
+            let inputs = &kernel.inputs;
             let inputs_encoded = inputs.encode();
             let inputs_hash = Hash::hash_varlen(&inputs_encoded);
             // address += BFieldElement::one() + BFieldElement::new(inputs_size as u64);
@@ -295,7 +295,7 @@ mod tests {
             //             .unwrap()
             //     })
             //     .collect_vec();
-            let outputs = kernel.outputs;
+            let outputs = &kernel.outputs;
             let outputs_encoded = outputs.encode();
             let outputs_hash = Hash::hash_varlen(&outputs_encoded);
             // address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
@@ -309,7 +309,7 @@ mod tests {
             //             .unwrap()
             //     })
             //     .collect_vec();
-            let public_announcements = kernel.public_announcements;
+            let public_announcements = &kernel.public_announcements;
             let public_announcements_encoded = public_announcements.encode();
             let public_announcements_hash = Hash::hash_varlen(&public_announcements_encoded);
             // address +=

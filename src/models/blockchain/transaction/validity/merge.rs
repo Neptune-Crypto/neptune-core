@@ -35,6 +35,7 @@ use crate::models::blockchain::transaction::validity::tasm::merge::authenticate_
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
+use crate::models::blockchain::transaction::TransactionKernelProxy;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
@@ -106,7 +107,7 @@ impl MergeWitness {
 
         let old_coinbase = left_kernel.coinbase.or(right_kernel.coinbase);
 
-        TransactionKernel {
+        TransactionKernelProxy {
             inputs,
             outputs,
             public_announcements,
@@ -115,6 +116,7 @@ impl MergeWitness {
             timestamp: max(left_kernel.timestamp, right_kernel.timestamp),
             mutator_set_hash: left_kernel.mutator_set_hash,
         }
+        .into_kernel()
     }
 }
 

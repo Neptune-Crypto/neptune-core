@@ -290,6 +290,7 @@ mod tests {
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::TransactionKernelProxy;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
@@ -306,7 +307,7 @@ mod tests {
     }
 
     fn dummy_tx_kernel(cb: Option<NeptuneCoins>) -> TransactionKernel {
-        TransactionKernel {
+        TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
             public_announcements: vec![],
@@ -315,6 +316,7 @@ mod tests {
             timestamp: Timestamp::now(),
             mutator_set_hash: Digest::default(),
         }
+        .into_kernel()
     }
 
     #[test]

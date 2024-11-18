@@ -44,7 +44,7 @@ use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 
 use super::transaction::lock_script::LockScript;
-use super::transaction::transaction_kernel::TransactionKernel;
+use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::transaction::utxo::Utxo;
 use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
@@ -396,7 +396,7 @@ impl Block {
             genesis_tx_outputs.push(addition_record)
         }
 
-        let genesis_txk = TransactionKernel {
+        let genesis_txk = TransactionKernelProxy {
             inputs: vec![],
             outputs: genesis_tx_outputs,
             fee: NeptuneCoins::new(0),
@@ -404,7 +404,8 @@ impl Block {
             public_announcements: vec![],
             coinbase: Some(total_premine_amount),
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
-        };
+        }
+        .into_kernel();
 
         let body: BlockBody = BlockBody::new(
             genesis_txk,
@@ -958,6 +959,7 @@ mod block_tests {
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
+    use super::super::transaction::transaction_kernel::TransactionKernelModifier;
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
@@ -1305,8 +1307,14 @@ mod block_tests {
     fn guesser_can_unlock_guesser_fee_utxo() {
         let genesis_block = Block::genesis_block(Network::Main);
         let mut transaction = make_mock_transaction(vec![], vec![]);
-        transaction.kernel.fee = NeptuneCoins::from_nau(1337.into())
-            .expect("given number should be valid NeptuneCoins amount");
+
+        transaction.kernel = TransactionKernelModifier::default()
+            .fee(
+                NeptuneCoins::from_nau(1337.into())
+                    .expect("given number should be valid NeptuneCoins amount"),
+            )
+            .modify(transaction.kernel);
+
         let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
         let preimage = thread_rng().gen::<Digest>();
