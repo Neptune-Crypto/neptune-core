@@ -80,7 +80,12 @@ impl SecretWitness for CollectTypeScriptsWitness {
             .utxos
             .iter()
             .chain(self.salted_output_utxos.utxos.iter())
-            .flat_map(|utxo| utxo.coins.iter().map(|c| c.type_script_hash).collect_vec())
+            .flat_map(|utxo| {
+                utxo.coins()
+                    .iter()
+                    .map(|c| c.type_script_hash)
+                    .collect_vec()
+            })
             .unique()
             .flat_map(|d| d.values())
             .collect_vec()
@@ -127,8 +132,8 @@ impl ConsensusProgram for CollectTypeScripts {
             let utxo: &Utxo = &input_utxos[i];
 
             let mut j = 0;
-            while j < utxo.coins.len() {
-                let coin: &Coin = &utxo.coins[j];
+            while j < utxo.coins().len() {
+                let coin: &Coin = &utxo.coins()[j];
                 if !type_script_hashes.contains(&coin.type_script_hash) {
                     type_script_hashes.push(coin.type_script_hash);
                 }
@@ -144,8 +149,8 @@ impl ConsensusProgram for CollectTypeScripts {
             let utxo: &Utxo = &output_utxos[i];
 
             let mut j = 0;
-            while j < utxo.coins.len() {
-                let coin: &Coin = &utxo.coins[j];
+            while j < utxo.coins().len() {
+                let coin: &Coin = &utxo.coins()[j];
                 if !type_script_hashes.contains(&coin.type_script_hash) {
                     type_script_hashes.push(coin.type_script_hash);
                 }

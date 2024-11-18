@@ -504,10 +504,8 @@ mod transaction_tests {
     #[traced_test]
     #[test]
     fn tx_get_timestamp_test() {
-        let output_1 = Utxo {
-            coins: NeptuneCoins::new(42).to_native_coins(),
-            lock_script_hash: LockScript::anyone_can_spend().hash(),
-        };
+        let output_1 =
+            Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(42));
         let ar = commit(Hash::hash(&output_1), random(), random());
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow

@@ -502,7 +502,7 @@ mod tests {
             assert_eq!(sender_randomness, tx_output.sender_randomness());
             assert_eq!(
                 address.lock_script().hash(),
-                tx_output.utxo().lock_script_hash
+                tx_output.utxo().lock_script_hash()
             );
 
             assert_eq!(tx_output.sender_randomness(), sender_randomness);

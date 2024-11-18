@@ -291,7 +291,7 @@ impl PrimitiveWitness {
             .output_utxos
             .utxos
             .iter()
-            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
+            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
             .unique()
             .collect_vec();
 
@@ -707,12 +707,14 @@ mod test {
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
     impl Utxo {
+        /// returns a new Utxo with properties:
         /// Set the number of NeptuneCoins, overriding the pre-existing number attached
         /// to the type script `NativeCurrency`, or adding a new coin with that amount
         /// and type script hash to the coins list.
-        pub(crate) fn set_native_currency_amount(&mut self, amount: NeptuneCoins) {
+        pub(crate) fn new_with_native_currency_amount(&self, amount: NeptuneCoins) -> Utxo {
+            let mut coins = self.coins().to_vec();
             assert!(
-                self.coins
+                coins
                     .iter()
                     .filter(|x| x.type_script_hash == NativeCurrency.hash())
                     .count()
@@ -720,15 +722,15 @@ mod test {
                 "Cannot have repeated native currency coins"
             );
             let new_coin = amount.to_native_coins().first().unwrap().clone();
-            if let Some(coin) = self
-                .coins
+            if let Some(coin) = coins
                 .iter_mut()
                 .find(|coin| coin.type_script_hash == NativeCurrency.hash())
             {
                 *coin = new_coin;
             } else {
-                self.coins.push(new_coin);
+                coins.push(new_coin);
             }
+            (self.lock_script_hash(), coins).into()
         }
     }
 
@@ -846,7 +848,7 @@ mod test {
                             .zip(output_utxo_amounts_per_tx)
                             .for_each(|(utxos, amounts)| {
                                 utxos.iter_mut().zip_eq(amounts).for_each(|(utxo, amount)| {
-                                    utxo.set_native_currency_amount(amount);
+                                    *utxo = utxo.new_with_native_currency_amount(amount);
                                 })
                             });
 
@@ -1061,9 +1063,8 @@ mod test {
                         let output_utxos = output_amounts
                             .into_iter()
                             .zip(lock_script_hashes)
-                            .map(|(amount, lock_script_hash)| Utxo {
-                                lock_script_hash,
-                                coins: amount.to_native_coins(),
+                            .map(|(amount, lock_script_hash)| {
+                                (lock_script_hash, amount.to_native_coins()).into()
                             })
                             .collect_vec();
 
@@ -1193,7 +1194,7 @@ mod test {
             NeptuneCoins::new(0)
         };
         for input in primitive_witness.input_utxos.utxos {
-            let u32s = input.coins[0]
+            let u32s = input.coins()[0]
                 .state
                 .iter()
                 .map(|b| b.value() as u32)

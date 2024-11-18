@@ -53,6 +53,7 @@ use crate::config_models::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -464,10 +465,12 @@ impl Block {
         let mut utxos = vec![];
         for (receiving_address, amount) in Self::premine_distribution() {
             // generate utxo
-            let mut utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
             let six_months = Timestamp::months(6);
-            utxo.coins
-                .push(TimeLock::until(network.launch_date() + six_months));
+            let coins = vec![
+                Coin::new_native_currency(amount),
+                TimeLock::until(network.launch_date() + six_months),
+            ];
+            let utxo = Utxo::new(receiving_address.lock_script(), coins);
             utxos.push(utxo);
         }
         utxos
@@ -886,11 +889,12 @@ impl Block {
         value_locked.div_two();
         let value_unlocked = total_guesser_reward.checked_sub(&value_locked).unwrap();
 
-        let mut locked_utxo = Utxo::new_native_currency(lock_script.clone(), value_locked);
         const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
-        locked_utxo.coins.push(TimeLock::until(
-            self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD,
-        ));
+        let coins = vec![
+            Coin::new_native_currency(value_locked),
+            TimeLock::until(self.header().timestamp + MINER_REWARD_TIME_LOCK_PERIOD),
+        ];
+        let locked_utxo = Utxo::new(lock_script.clone(), coins);
         let unlocked_utxo = Utxo::new_native_currency(lock_script, value_unlocked);
 
         vec![locked_utxo, unlocked_utxo]

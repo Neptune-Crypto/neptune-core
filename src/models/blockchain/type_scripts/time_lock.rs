@@ -57,7 +57,7 @@ impl TimeLock {
     /// Get the release date from a `Utxo`, if any. If there aren't any, return
     /// the null release date.
     pub fn extract_release_date(utxo: &Utxo) -> Timestamp {
-        utxo.coins
+        utxo.coins()
             .iter()
             .find(|coin| coin.type_script_hash == Self.hash())
             .cloned()
@@ -122,7 +122,7 @@ impl ConsensusProgram for TimeLock {
         let mut i = 0;
         while i < input_utxos.len() {
             // get coins
-            let coins: &Vec<Coin> = &input_utxos[i].coins;
+            let coins = input_utxos[i].coins();
 
             // if this typescript is present
             let mut j: usize = 0;
@@ -807,11 +807,13 @@ impl Arbitrary for TimeLockWitness {
                         );
                     let total_inputs = input_amounts.into_iter().sum::<NeptuneCoins>();
 
-                    // add time locks to input UTXOs
+                    // add time locks to input UTXOs (changes Utxo hash)
                     for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter()) {
                         if !release_date.is_zero() {
                             let time_lock_coin = TimeLock::until(*release_date);
-                            utxo.coins.push(time_lock_coin);
+                            let mut coins = utxo.coins().to_vec();
+                            coins.push(time_lock_coin);
+                            *utxo = (utxo.lock_script_hash(), coins).into()
                         }
                     }
 
@@ -1006,11 +1008,15 @@ fn arbitrary_primitive_witness_with_timelocks(
                 for utxo in input_utxos.iter_mut() {
                     let release_date = release_dates[counter];
                     let time_lock = TimeLock::until(release_date);
-                    utxo.coins.push(time_lock);
+                    let mut coins = utxo.coins().to_vec();
+                    coins.push(time_lock);
+                    *utxo = (utxo.lock_script_hash(), coins).into();
                     counter += 1;
                 }
                 for utxo in output_utxos.iter_mut() {
-                    utxo.coins.push(TimeLock::until(release_dates[counter]));
+                    let mut coins = utxo.coins().to_vec();
+                    coins.push(TimeLock::until(release_dates[counter]));
+                    *utxo = (utxo.lock_script_hash(), coins).into();
                     counter += 1;
                 }
                 let release_dates = release_dates.clone();

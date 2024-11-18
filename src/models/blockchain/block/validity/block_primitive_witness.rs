@@ -230,10 +230,7 @@ pub(crate) mod test {
                         let input_utxos = input_amounts
                             .into_iter()
                             .zip(lock_script_hashes)
-                            .map(|(amount, hash)| Utxo {
-                                lock_script_hash: hash,
-                                coins: amount.to_native_coins(),
-                            })
+                            .map(|(amount, hash)| (hash, amount.to_native_coins()).into())
                             .collect_vec();
                         let own_items = input_utxos.iter().map(Tip5::hash).collect_vec();
                         let removables = izip!(

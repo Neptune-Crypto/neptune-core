@@ -225,7 +225,7 @@ impl WalletState {
             let own_spending_key = wallet_state.next_unused_spending_key(KeyType::Generation);
             let own_receiving_address = own_spending_key.to_address();
             for utxo in Block::premine_utxos(cli_args.network) {
-                if utxo.lock_script_hash == own_receiving_address.lock_script().hash() {
+                if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
                     wallet_state
                         .add_expected_utxo(ExpectedUtxo::new(
                             utxo,
@@ -573,7 +573,7 @@ impl WalletState {
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
             .into_iter()
-            .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
+            .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash())
     }
 
     /// returns all spending keys of all key types with derivation index less than current counter
@@ -856,7 +856,7 @@ impl WalletState {
                     "Received UTXO in block {}, height {}: value = {}",
                     new_block.hash(),
                     new_block.kernel.header.height,
-                    utxo.coins
+                    utxo.coins()
                         .iter()
                         .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
                         .map(|coin| *NeptuneCoins::decode(&coin.state)

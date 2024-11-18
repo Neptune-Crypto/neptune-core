@@ -571,7 +571,7 @@ impl GlobalState {
         let type_script_hashes = input_utxos
             .iter()
             .chain(output_utxos.iter())
-            .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
+            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
             .unique()
             .collect_vec();
         let type_scripts_and_witnesses = type_script_hashes

@@ -406,10 +406,11 @@ pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
 
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    Utxo {
-        lock_script_hash: rng.gen(),
-        coins: NeptuneCoins::new(rng.gen_range(0..42000000)).to_native_coins(),
-    }
+    (
+        rng.gen(),
+        NeptuneCoins::new(rng.gen_range(0..42000000)).to_native_coins(),
+    )
+        .into()
 }
 
 pub fn random_transaction_kernel() -> TransactionKernel {

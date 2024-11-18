@@ -16,10 +16,8 @@ use tasm_lib::prelude::TasmObject;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::lock_script::LockScript;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
@@ -62,12 +60,19 @@ impl Coin {
             None
         }
     }
+
+    pub fn new_native_currency(amount: NeptuneCoins) -> Self {
+        Self {
+            type_script_hash: NativeCurrency.hash(),
+            state: amount.encode(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
 pub struct Utxo {
-    pub lock_script_hash: Digest,
-    pub coins: Vec<Coin>,
+    lock_script_hash: Digest,
+    coins: Vec<Coin>,
 }
 
 impl Display for Utxo {
@@ -91,7 +96,7 @@ impl GetSize for Utxo {
 
     fn get_heap_size(&self) -> usize {
         // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
-        let mut total = self.lock_script_hash.get_heap_size();
+        let mut total = self.lock_script_hash().get_heap_size();
         for v in self.coins.iter() {
             total += std::mem::size_of::<Digest>();
             total += v.state.len() * std::mem::size_of::<BFieldElement>();
@@ -105,22 +110,31 @@ impl GetSize for Utxo {
     }
 }
 
-impl Utxo {
-    pub fn new(lock_script: LockScript, coins: Vec<Coin>) -> Self {
+impl From<(Digest, Vec<Coin>)> for Utxo {
+    fn from(v: (Digest, Vec<Coin>)) -> Self {
+        let (lock_script_hash, coins) = v;
         Self {
-            lock_script_hash: lock_script.hash(),
+            lock_script_hash,
             coins,
         }
     }
+}
+
+impl Utxo {
+    pub fn new(lock_script: LockScript, coins: Vec<Coin>) -> Self {
+        (lock_script.hash(), coins).into()
+    }
+
+    pub fn coins(&self) -> &[Coin] {
+        &self.coins
+    }
+
+    pub fn lock_script_hash(&self) -> Digest {
+        self.lock_script_hash
+    }
 
     pub fn new_native_currency(lock_script: LockScript, amount: NeptuneCoins) -> Self {
-        Self::new(
-            lock_script,
-            vec![Coin {
-                type_script_hash: NativeCurrency.hash(),
-                state: amount.encode(),
-            }],
-        )
+        Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }
 
     /// Get the amount of Neptune coins that are encapsulated in this UTXO,
@@ -228,18 +242,17 @@ impl Utxo {
 #[allow(clippy::derived_hash_with_manual_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let neptune_hash = Hash::hash(self);
-        StdHash::hash(&neptune_hash, state);
+        StdHash::hash(&self.encode(), state);
     }
 }
 
 /// Generate a UTXO pseudorandomly, for testing purposes
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    Utxo {
-        lock_script_hash: rng.gen(),
-        coins: NeptuneCoins::new(rng.next_u32() % 42000000).to_native_coins(),
-    }
+    Utxo::from((
+        rng.gen(),
+        NeptuneCoins::new(rng.next_u32() % 42000000).to_native_coins(),
+    ))
 }
 
 impl<'a> Arbitrary<'a> for Utxo {
@@ -254,16 +267,14 @@ impl<'a> Arbitrary<'a> for Utxo {
             type_script_hash,
             state: amount.encode(),
         }];
-        Ok(Utxo {
-            lock_script_hash,
-            coins,
-        })
+        Ok((lock_script_hash, coins).into())
     }
 }
 #[cfg(test)]
 mod utxo_tests {
     use rand::thread_rng;
     use rand::Rng;
+    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
     use tracing_test::traced_test;
     use twenty_first::math::other::random_elements;
 
@@ -286,16 +297,13 @@ mod utxo_tests {
             });
         }
 
-        Utxo {
-            lock_script_hash,
-            coins,
-        }
+        (lock_script_hash, coins).into()
     }
 
     #[test]
     fn hash_utxo_test() {
         let output = make_random_utxo();
-        let _digest = Hash::hash(&output);
+        let _digest = crate::Hash::hash(&output);
     }
 
     #[traced_test]
@@ -316,9 +324,7 @@ mod utxo_tests {
             delta = Timestamp(BFieldElement::new(rng.next_u64() >> 2));
         }
         let mut utxo = Utxo::new(
-            LockScript {
-                program: Program::new(&[]),
-            },
+            LockScript::new(Program::new(&[])),
             NeptuneCoins::new(1).to_native_coins(),
         );
         utxo.coins.push(TimeLock::until(release_date));

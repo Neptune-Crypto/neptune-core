@@ -118,15 +118,15 @@ impl ConsensusProgram for NativeCurrency {
         let mut i: u32 = 0;
         let num_inputs: u32 = input_salted_utxos.utxos.len() as u32;
         while i < num_inputs {
-            let num_coins: u32 = input_salted_utxos.utxos[i as usize].coins.len() as u32;
+            let num_coins: u32 = input_salted_utxos.utxos[i as usize].coins().len() as u32;
             let mut j = 0;
             while j < num_coins {
-                if input_salted_utxos.utxos[i as usize].coins[j as usize].type_script_hash
+                if input_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
                     == self_digest
                 {
                     // decode state to get amount
                     let amount: NeptuneCoins = *NeptuneCoins::decode(
-                        &input_salted_utxos.utxos[i as usize].coins[j as usize].state,
+                        &input_salted_utxos.utxos[i as usize].coins()[j as usize].state,
                     )
                     .unwrap();
 
@@ -143,15 +143,15 @@ impl ConsensusProgram for NativeCurrency {
         i = 0;
         let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
         while i < num_outputs {
-            let num_coins: u32 = output_salted_utxos.utxos[i as usize].coins.len() as u32;
+            let num_coins: u32 = output_salted_utxos.utxos[i as usize].coins().len() as u32;
             let mut j = 0;
             while j < num_coins {
-                if output_salted_utxos.utxos[i as usize].coins[j as usize].type_script_hash
+                if output_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
                     == self_digest
                 {
                     // decode state to get amount
                     let amount: NeptuneCoins = *NeptuneCoins::decode(
-                        &output_salted_utxos.utxos[i as usize].coins[j as usize].state,
+                        &output_salted_utxos.utxos[i as usize].coins()[j as usize].state,
                     )
                     .unwrap();
 

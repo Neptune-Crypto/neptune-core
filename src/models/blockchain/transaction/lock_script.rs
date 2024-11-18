@@ -160,7 +160,7 @@ impl LockScriptAndWitness {
     /// Determine if the given UTXO can be unlocked with this
     /// lock-script-and-witness pair.
     pub fn can_unlock(&self, utxo: &Utxo) -> bool {
-        if self.program.hash() != utxo.lock_script_hash {
+        if self.program.hash() != utxo.lock_script_hash() {
             return false;
         }
         let any_digest = thread_rng().gen::<Digest>();

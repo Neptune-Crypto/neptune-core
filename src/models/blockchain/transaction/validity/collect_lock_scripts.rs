@@ -66,7 +66,7 @@ impl SecretWitness for CollectLockScriptsWitness {
         self.salted_input_utxos
             .utxos
             .iter()
-            .flat_map(|utxo| utxo.lock_script_hash.values())
+            .flat_map(|utxo| utxo.lock_script_hash().values())
             .collect_vec()
     }
 }
@@ -98,7 +98,7 @@ impl ConsensusProgram for CollectLockScripts {
         // iterate over all input UTXOs and output the lock script hashes
         let mut i = 0;
         while i < input_utxos.len() {
-            tasmlib::tasmlib_io_write_to_stdout___digest(input_utxos[i].lock_script_hash);
+            tasmlib::tasmlib_io_write_to_stdout___digest(input_utxos[i].lock_script_hash());
             i += 1;
         }
     }
