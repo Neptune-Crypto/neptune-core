@@ -44,9 +44,10 @@ where
     }
 
     /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        self.program().hash()
-    }
+    ///
+    /// note: we do not provide a default impl because implementors
+    /// should cache their Digest with OnceLock.
+    fn hash(&self) -> Digest;
 
     /// Run the source program natively in rust, but with the emulated TritonVM
     /// environment for input, output, nondeterminism, and program digest.
