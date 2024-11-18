@@ -104,7 +104,7 @@ mod transaction {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness =
-            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
@@ -184,7 +184,7 @@ mod transaction {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness =
-            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
@@ -230,7 +230,7 @@ mod transaction {
         let (num_inputs, num_outputs) = args;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness =
-            PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, num_outputs, 2)
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), num_outputs, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();

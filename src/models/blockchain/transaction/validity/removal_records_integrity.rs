@@ -1118,7 +1118,7 @@ mod tests {
 
     #[proptest(cases = 5)]
     fn removal_records_integrity_proptest(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
         let removal_records_integrity_witness =
@@ -1129,7 +1129,7 @@ mod tests {
     #[test]
     fn removal_records_integrity_only_rust_shadowing() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1149,7 +1149,7 @@ mod tests {
     #[test]
     fn removal_records_integrity_unit_test() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1163,7 +1163,7 @@ mod tests {
     #[test]
     fn removal_records_fail_on_bad_ms_acc() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1180,7 +1180,7 @@ mod tests {
     #[test]
     fn removal_records_fail_on_bad_mast_path_inputs() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1220,10 +1220,11 @@ mod tests {
     fn removal_record_fail_on_bad_absolute_indices_unit_test() {
         let mut test_runner = TestRunner::deterministic();
         let num_inputs = 2;
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
 
         for i in 0..num_inputs {
             let mut bad_pw = primitive_witness.clone();
@@ -1247,7 +1248,7 @@ mod tests {
 
     #[proptest(cases = 4)]
     fn removal_records_fail_on_bad_absolute_indices(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
         mut bad_pw: PrimitiveWitness,
         #[strategy(0..2usize)] mutated_input: usize,
         #[strategy(0..NUM_TRIALS as usize)] mutated_bloom_filter_index: usize,

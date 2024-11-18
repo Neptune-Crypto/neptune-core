@@ -736,7 +736,7 @@ mod test {
     #[tokio::test]
     async fn can_verify_via_valid_proof_collection() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();

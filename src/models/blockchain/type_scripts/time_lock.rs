@@ -823,6 +823,7 @@ impl Arbitrary for TimeLockWitness {
                         PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                             &output_amounts,
                             &output_address_seeds,
+                            None,
                         );
 
                     // generate primitive transaction witness and time lock witness from there
@@ -1000,6 +1001,7 @@ fn arbitrary_primitive_witness_with_timelocks(
                     PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
                         &output_address_seeds,
+                        None,
                     );
                 let mut counter = 0usize;
                 for utxo in input_utxos.iter_mut() {

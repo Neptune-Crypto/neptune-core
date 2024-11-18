@@ -799,7 +799,7 @@ pub(crate) mod test {
         // accumulator.
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(
-            num_inputs,
+            Some(num_inputs),
             num_outputs,
             num_pub_announcements,
         )

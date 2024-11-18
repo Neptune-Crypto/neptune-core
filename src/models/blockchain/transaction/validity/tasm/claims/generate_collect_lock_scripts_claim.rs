@@ -191,10 +191,11 @@ mod tests {
             let mut rng = test_runner.new_rng();
 
             let num_inputs = rng.gen_range(0usize..4);
-            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, 2, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+            let primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
             let proof_collection = rt

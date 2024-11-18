@@ -248,7 +248,7 @@ mod test {
 
     #[proptest(cases = 5)]
     fn collect_lock_script_proptest(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(2, 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
@@ -258,10 +258,11 @@ mod test {
     fn collect_lock_script_unit() {
         let mut test_runner = TestRunner::deterministic();
         for num_inputs in 0..5 {
-            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(num_inputs, 2, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+            let primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
             prop(primitive_witness).expect("");
         }
     }
