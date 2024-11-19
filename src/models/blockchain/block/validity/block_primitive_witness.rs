@@ -34,10 +34,13 @@ use crate::models::blockchain::transaction::Transaction;
 ///                                                                      v            |
 ///                                                                   Header -------}-'
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+// note: I removed unused PartialEq, Eq derive.   If we ever need one
+// PartialEq should be derived manually to ignore maybe_body.
+#[derive(Clone, Debug)]
 pub(crate) struct BlockPrimitiveWitness {
-    pub(crate) predecessor_block: Block,
-    pub(crate) transaction: Transaction,
+    predecessor_block: Block,
+    transaction: Transaction,
+
     maybe_body: OnceLock<BlockBody>,
 }
 
@@ -48,6 +51,10 @@ impl BlockPrimitiveWitness {
             transaction,
             maybe_body: OnceLock::new(),
         }
+    }
+
+    pub fn transaction(&self) -> &Transaction {
+        &self.transaction
     }
 
     pub(crate) fn body(&self) -> &BlockBody {

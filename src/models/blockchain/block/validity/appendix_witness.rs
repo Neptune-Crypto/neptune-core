@@ -73,12 +73,12 @@ impl AppendixWitness {
             .mast_hash();
 
         let tx_is_valid_claim = SingleProof::claim(txk_mast_hash);
-        let tx_is_valid_proof = match &block_primitive_witness.transaction.proof {
+        let tx_is_valid_proof = match &block_primitive_witness.transaction().proof {
             TransactionProof::SingleProof(proof) => proof.clone(),
             _ => {
                 panic!(
                     "can only produce appendix witness from single-proof transaction; got {:?}",
-                    block_primitive_witness.transaction.proof
+                    block_primitive_witness.transaction().proof
                 );
             }
         };
