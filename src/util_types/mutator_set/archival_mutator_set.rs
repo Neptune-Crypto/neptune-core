@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -211,17 +210,19 @@ where
         let batch_index = self.get_batch_index_async().await;
         let window_start = batch_index * CHUNK_SIZE as u128;
 
-        let chunk_indices: BTreeSet<u64> = swbf_indices
+        let chunk_indices: Vec<u64> = swbf_indices
             .iter()
             .filter(|bi| **bi < window_start)
             .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
             .collect();
         let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
 
-        let stream = self.chunks.stream_many(chunk_indices).await;
-        pin_mut!(stream); // needed for iteration
+        // This is maximum 45 chunks, so it's OK to get all at once. No need
+        // to have a stream. Stream didn't work when this function was called
+        // from RPC server, so we just collect all here.
+        let chunks = self.chunks.get_many(&chunk_indices).await;
 
-        while let Some((chunk_index, chunk)) = stream.next().await {
+        for (chunk_index, chunk) in chunk_indices.into_iter().zip_eq(chunks) {
             assert!(
                 self.chunks.len().await > chunk_index,
                 "Chunks must be known if its authentication path is known."
