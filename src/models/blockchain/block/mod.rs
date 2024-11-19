@@ -1359,6 +1359,7 @@ mod block_tests {
             NeptuneCoins::new(4),
             rng.gen(),
             alice_address.into(),
+            true,
         );
         let fee = NeptuneCoins::new(1);
         let (tx1, _) = alice

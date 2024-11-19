@@ -265,7 +265,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             // the generated RPC trait.
             .map(move |channel| {
                 let server = rpc_server::NeptuneRPCServer {
-                    socket_address: channel.transport().peer_addr().unwrap(),
                     state: rpc_state_lock.clone(),
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };

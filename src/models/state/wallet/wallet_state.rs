@@ -11,6 +11,7 @@ use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -52,6 +53,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
@@ -86,6 +88,23 @@ pub(crate) struct IncomingUtxoRecoveryData {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
     pub aocl_index: u64,
+}
+
+impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &MonitoredUtxo) -> std::result::Result<Self, Self::Error> {
+        let Some((_block_digest, msmp)) = value.get_latest_membership_proof_entry() else {
+            bail!("Cannot create recovery data before transaction registered as confirmed.");
+        };
+
+        Ok(Self {
+            utxo: value.utxo.clone(),
+            sender_randomness: msmp.sender_randomness,
+            receiver_preimage: msmp.receiver_preimage,
+            aocl_index: msmp.aocl_leaf_index,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -474,7 +493,7 @@ impl WalletState {
             //
             // note: this is a nice sanity check, but probably is un-necessary
             //       work that can eventually be removed.
-            .filter(|au| match tx_kernel.outputs.contains(&au.addition_record) {
+            .filter(|au| match tx_kernel.outputs.contains(&au.addition_record()) {
                 true => true,
                 false => {
                     warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
@@ -506,6 +525,44 @@ impl WalletState {
         addition_records
             .iter()
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
+    }
+
+    /// check if wallet already has the provided `expected_utxo`
+    /// perf:
+    ///
+    /// this fn is o(n) with the number of ExpectedUtxo stored.  Iteration is
+    /// performed from newest to oldest based on expectation that we will most
+    /// often be working with recent ExpectedUtxos.
+    pub async fn has_expected_utxo(&self, addition_record: AdditionRecord) -> bool {
+        let len = self.wallet_db.expected_utxos().len().await;
+        self.wallet_db
+            .expected_utxos()
+            .stream_many_values((0..len).rev())
+            .await
+            .any(|eu| futures::future::ready(eu.addition_record == addition_record))
+            .await
+    }
+
+    /// find the `MonitoredUtxo` that matches `utxo`, if any
+    ///
+    /// perf: this fn is o(n) with the number of MonitoredUtxo stored.  Iteration
+    ///       is performed from newest to oldest based on expectation that we
+    ///       will most often be working with recent MonitoredUtxos.
+    pub(crate) async fn find_monitored_utxo(&self, utxo: &Utxo) -> Option<MonitoredUtxo> {
+        let len = self.wallet_db.monitored_utxos().len().await;
+        let stream = self
+            .wallet_db
+            .monitored_utxos()
+            .stream_many_values((0..len).rev())
+            .await;
+        pin_mut!(stream); // needed for iteration
+
+        while let Some(mu) = stream.next().await {
+            if mu.utxo == *utxo {
+                return Some(mu);
+            }
+        }
+        None
     }
 
     /// Delete all ExpectedUtxo that exceed a certain age
@@ -574,6 +631,17 @@ impl WalletState {
         self.get_all_known_spending_keys()
             .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash())
+    }
+
+    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
+    // wallet keys.
+    pub(crate) fn find_known_spending_key_for_receiver_identifier(
+        &self,
+        receiver_identifier: BFieldElement,
+    ) -> Option<SpendingKey> {
+        self.get_all_known_spending_keys()
+            .into_iter()
+            .find(|k| k.receiver_identifier() == receiver_identifier)
     }
 
     /// returns all spending keys of all key types with derivation index less than current counter
@@ -656,6 +724,24 @@ impl WalletState {
     /// important to write to disk afterward to avoid possible funds loss.
     pub fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
         self.wallet_secret.nth_symmetric_key(0)
+    }
+
+    pub(crate) async fn claim_utxo(&mut self, utxo_claim_data: ClaimUtxoData) -> Result<()> {
+        // add expected_utxo to wallet if not existing.
+        //
+        // note: we add it even if block is already confirmed, although not
+        //       required for claiming. This is just so that we have it in the
+        //       wallet for consistency and backup.
+        if !utxo_claim_data.has_expected_utxo {
+            self.add_expected_utxo(utxo_claim_data.expected_utxo).await;
+        };
+
+        // If UTXO was already confirmed in block, add it to monitored UTXOs
+        if let Some(prepared_mutxo) = utxo_claim_data.prepared_monitored_utxo {
+            self.register_incoming_utxo(prepared_mutxo).await?;
+        }
+
+        Ok(())
     }
 
     /// Update wallet state with new block.
@@ -770,7 +856,7 @@ impl WalletState {
             all_received_outputs
                 .map(|au| {
                     (
-                        au.addition_record,
+                        au.addition_record(),
                         (au.utxo, au.sender_randomness, au.receiver_preimage),
                     )
                 })
@@ -1037,7 +1123,7 @@ impl WalletState {
             .filter(|(_, eu)| {
                 offchain_received_outputs
                     .iter()
-                    .any(|au| au.addition_record == eu.addition_record)
+                    .any(|au| au.addition_record() == eu.addition_record)
             })
             .map(|(idx, mut eu)| {
                 eu.mined_in_block = Some((new_block.hash(), new_block.kernel.header.timestamp));
@@ -1047,6 +1133,30 @@ impl WalletState {
 
         self.wallet_db.set_sync_label(new_block.hash()).await;
         self.wallet_db.persist().await;
+
+        Ok(())
+    }
+
+    /// writes prepared utxo claim data to disk
+    ///
+    /// Informs wallet of a Utxo *after* parent Tx is confirmed in a block
+    ///
+    /// no validation. assumes input data is valid/correct.
+    ///
+    /// The caller should persist wallet DB to disk after this returns.
+    pub(crate) async fn register_incoming_utxo(
+        &mut self,
+        monitored_utxo: MonitoredUtxo,
+    ) -> Result<()> {
+        // write to disk.
+        let recovery_data: IncomingUtxoRecoveryData = (&monitored_utxo).try_into()?;
+        self.store_utxo_ms_recovery_data(recovery_data).await?;
+
+        // add monitored_utxo
+        self.wallet_db
+            .monitored_utxos_mut()
+            .push(monitored_utxo)
+            .await;
 
         Ok(())
     }
@@ -1631,7 +1741,11 @@ mod tests {
                     send_amt,
                 )];
 
-                let tx_outputs = gs.generate_tx_outputs(outputs, UtxoNotificationMedium::OnChain);
+                let tx_outputs = gs.generate_tx_outputs(
+                    outputs,
+                    UtxoNotificationMedium::OnChain,
+                    UtxoNotificationMedium::OnChain,
+                );
 
                 let (tx, _change_output) = gs
                     .create_transaction_with_prover_capability(

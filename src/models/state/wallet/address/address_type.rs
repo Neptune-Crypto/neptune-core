@@ -6,13 +6,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
 use super::generation_address;
 use super::symmetric_key;
 use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -20,8 +18,6 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
 use crate::BFieldElement;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
@@ -35,7 +31,7 @@ use crate::BFieldElement;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(u8)]
 pub enum KeyType {
-    /// [generation_address] built on [twenty_first::math::lattice::kem]
+    /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
     ///
     /// wraps a symmetric key built on aes-256-gcm
     Generation = generation_address::GENERATION_FLAG_U8,
@@ -165,6 +161,22 @@ impl ReceivingAddress {
             }
             ReceivingAddress::Symmetric(symmetric_key) => {
                 symmetric_key.generate_public_announcement(&utxo_notification_payload)
+            }
+        }
+    }
+
+    pub(crate) fn private_notification(
+        &self,
+        utxo_notification_payload: UtxoNotificationPayload,
+        network: Network,
+    ) -> String {
+        match self {
+            ReceivingAddress::Generation(generation_receiving_address) => {
+                generation_receiving_address
+                    .private_utxo_notification(&utxo_notification_payload, network)
+            }
+            ReceivingAddress::Symmetric(symmetric_key) => {
+                symmetric_key.private_utxo_notification(&utxo_notification_payload, network)
             }
         }
     }
@@ -329,7 +341,6 @@ impl SpendingKey {
         // pre-compute some fields.
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
-        let receiver_digest = receiver_preimage.hash();
 
         // for all public announcements
         tx_kernel
@@ -355,7 +366,6 @@ impl SpendingKey {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
                 AnnouncedUtxo {
-                    addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
                     utxo,
                     sender_randomness,
                     receiver_preimage,
@@ -368,7 +378,7 @@ impl SpendingKey {
         match result {
             Ok(v) => Some(v),
             Err(e) => {
-                warn!("possible loss of funds! skipping public announcement for symmetric key with receiver_identifier: {}.  error: {}", self.receiver_identifier(), e.to_string());
+                warn!("possible loss of funds! skipping public announcement for {:?} key with receiver_identifier: {}.  error: {}", KeyType::from(self), self.receiver_identifier(), e.to_string());
                 None
             }
         }
@@ -454,6 +464,9 @@ mod test {
     mod worker {
         use super::*;
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+        use crate::prelude::twenty_first::prelude::Tip5;
+        use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+        use crate::util_types::mutator_set::commit;
 
         /// this tests the generate_public_announcement() and
         /// scan_for_announced_utxos() methods with a [SpendingKey]
@@ -471,7 +484,7 @@ mod test {
 
             // 3. create an addition record to verify against later.
             let expected_addition_record = commit(
-                Hash::hash(&utxo),
+                Tip5::hash(&utxo),
                 sender_randomness,
                 key.to_address().privacy_digest(),
             );
@@ -512,7 +525,7 @@ mod test {
 
             // 11. verify each field of the announced_utxo matches original values.
             assert_eq!(utxo, announced_utxo.utxo);
-            assert_eq!(expected_addition_record, announced_utxo.addition_record);
+            assert_eq!(expected_addition_record, announced_utxo.addition_record());
             assert_eq!(sender_randomness, announced_utxo.sender_randomness);
             assert_eq!(key.privacy_preimage(), announced_utxo.receiver_preimage);
         }

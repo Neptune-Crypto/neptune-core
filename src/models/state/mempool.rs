@@ -1113,6 +1113,7 @@ mod tests {
                 amount,
                 rng.gen(),
                 bob_address.into(),
+                true,
             ));
         }
 
@@ -1158,6 +1159,7 @@ mod tests {
             NeptuneCoins::new(68),
             rng.gen(),
             alice_address.into(),
+            true,
         )];
         let (tx_from_alice_original, _maybe_change_output) = alice
             .lock_guard()
@@ -1423,8 +1425,12 @@ mod tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
 
-        let tx_receiver_data =
-            TxOutput::onchain_native_currency(NeptuneCoins::new(1), rng.gen(), bob_address.into());
+        let tx_receiver_data = TxOutput::onchain_native_currency(
+            NeptuneCoins::new(1),
+            rng.gen(),
+            bob_address.into(),
+            false,
+        );
 
         let genesis_block = alice
             .lock_guard()
@@ -1544,6 +1550,7 @@ mod tests {
                     NeptuneCoins::new(1),
                     sender_randomness,
                     premine_address.into(),
+                    false,
                 );
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
                 let (tx, _maybe_change_output) = preminer_clone

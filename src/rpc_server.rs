@@ -10,6 +10,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -19,6 +20,8 @@ use serde::Serialize;
 use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tokio::sync::mpsc::error::SendError;
 use tracing::error;
 use tracing::info;
@@ -32,9 +35,11 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::channel::ClaimUtxoData;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
@@ -43,15 +48,19 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::transaction_output::PrivateNotificationData;
 use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::twenty_first::prelude::Tip5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -247,8 +256,9 @@ pub trait RPC {
         amount: NeptuneCoins,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<TransactionKernelId>;
+    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -265,25 +275,46 @@ pub trait RPC {
     /// lower fee than `OnChain` delivery however there is more potential of
     /// losing funds should the wallet files become corrupted or lost.
     ///
-    /// tip: if using `OnChain` notification use a
+    ///  tip: if using `OnChain` notification use a
     /// [ReceivingAddress::Symmetric] as the receiving address for any
     /// outputs destined for your own wallet.  This happens automatically for
     /// the Change output only.
+    ///
+    /// `unowned_utxo_notify_method` specifies how to notify other wallets of
+    /// any outputs destined for them.
+    ///
     ///
     /// `fee` represents the fee in native coins to pay the miner who mines
     /// the block that initially confirms the resulting transaction.
     ///
     /// a [Digest] of the resulting [Transaction](crate::models::blockchain::transaction::Transaction) is returned on success, else [None].
     ///
-    /// todo: shouldn't we return `Transaction` instead?
+    /// A list of the encoded transaction notifications is also returned. The relevant notifications
+    /// should be sent to the transaction receiver in case `Offchain` notifications are used.
     ///
     /// future work: add `unowned_utxo_notify_medium` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<TransactionKernelId>;
+    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+
+    /// claim a utxo
+    ///
+    /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
+    /// for the current network and the wallet must have the corresponding
+    /// `SpendingKey` for decryption.
+    ///
+    /// upon success, a new `ExpectedUtxo` will be added to the local wallet
+    /// state.
+    ///
+    /// if the utxo has already been claimed, this call has no effect.
+    async fn claim_utxo(
+        utxo_transfer_encrypted: String,
+        max_search_depth: Option<u64>,
+    ) -> Result<(), String>;
 
     /// Stop miner if running
     async fn pause_miner();
@@ -299,10 +330,9 @@ pub trait RPC {
 }
 
 #[derive(Clone)]
-pub struct NeptuneRPCServer {
-    pub socket_address: SocketAddr,
-    pub state: GlobalStateLock,
-    pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
+pub(crate) struct NeptuneRPCServer {
+    pub(crate) state: GlobalStateLock,
+    pub(crate) rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl NeptuneRPCServer {
@@ -333,24 +363,17 @@ impl NeptuneRPCServer {
         }
     }
 
-    /// Method to create a transaction with a given timestamp and prover
-    /// capability.
-    ///
-    /// Factored out from [NeptuneRPCServer::send_to_many] in order to generate
-    /// deterministic transaction kernels where tests can reuse previously
-    /// generated proofs.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn send_to_many_inner(
+    async fn send_to_many_inner_with_mock_proof_option(
         mut self,
-        _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notification_medium: UtxoNotificationMedium,
+        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
         fee: NeptuneCoins,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
-    ) -> Option<TransactionKernelId> {
+        mocked_invalid_proof: Option<TransactionProof>,
+    ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
+        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
+            utxo_notification_media;
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
 
@@ -369,7 +392,11 @@ impl NeptuneRPCServer {
         tracing::debug!("stmi: step 2. generate outputs. need read-lock");
 
         let state = self.state.lock_guard().await;
-        let tx_outputs = state.generate_tx_outputs(outputs, owned_utxo_notification_medium);
+        let tx_outputs = state.generate_tx_outputs(
+            outputs,
+            owned_utxo_notification_medium,
+            unowned_utxo_notification_medium,
+        );
 
         // Pause miner if we are mining
         let was_mining = self.state.mining().await;
@@ -390,7 +417,7 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let (transaction, maybe_change_output) = match state
+        let (mut transaction, maybe_change_output) = match state
             .create_transaction_with_prover_capability(
                 tx_outputs.clone(),
                 change_key,
@@ -410,7 +437,17 @@ impl NeptuneRPCServer {
         };
         drop(state);
 
+        if let Some(invalid_proof) = mocked_invalid_proof {
+            transaction.proof = invalid_proof;
+        }
+
         tracing::debug!("stmi: step 4. extract expected utxo. need read-lock");
+
+        let offchain_notifications = tx_outputs.private_notifications(self.state.cli().network);
+        tracing::debug!(
+            "Generated {} offchain notifications",
+            offchain_notifications.len()
+        );
 
         let utxos_sent_to_self = self
             .state
@@ -418,7 +455,7 @@ impl NeptuneRPCServer {
             .await
             .wallet_state
             .extract_expected_utxos(
-                tx_outputs.concat_with(maybe_change_output),
+                tx_outputs.clone().concat_with(maybe_change_output),
                 UtxoNotifier::Myself,
             );
 
@@ -459,8 +496,8 @@ impl NeptuneRPCServer {
 
         self.state.flush_databases().await.expect("flushed DBs");
 
-        let option = match response {
-            Ok(_) => Some(transaction.kernel.txid()),
+        let ret = match response {
+            Ok(_) => Some((transaction, offchain_notifications)),
             Err(e) => {
                 tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
                 None
@@ -468,7 +505,199 @@ impl NeptuneRPCServer {
         };
 
         tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
-        option
+        ret
+    }
+
+    /// Method to create a transaction with a given timestamp and prover
+    /// capability.
+    ///
+    /// Factored out from [NeptuneRPCServer::send_to_many] in order to generate
+    /// deterministic transaction kernels where tests can reuse previously
+    /// generated proofs.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn send_to_many_inner(
+        self,
+        _ctx: context::Context,
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
+        fee: NeptuneCoins,
+        now: Timestamp,
+        tx_proving_capability: TxProvingCapability,
+    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+        let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
+            utxo_notification_media;
+        let ret = self
+            .send_to_many_inner_with_mock_proof_option(
+                outputs,
+                (
+                    owned_utxo_notification_medium,
+                    unowned_utxo_notification_medium,
+                ),
+                fee,
+                now,
+                tx_proving_capability,
+                None,
+            )
+            .await;
+
+        ret.map(|(tx, offchain_notifications)| (tx.kernel.txid(), offchain_notifications))
+    }
+
+    /// Like [Self::send_to_many_inner] but without attempting to create a valid
+    /// SingleProof, since this is a time-consuming process.
+    ///
+    /// Also returns the full transaction and not just its kernel ID.
+    #[cfg(test)]
+    async fn send_to_many_inner_invalid_proof(
+        self,
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        owned_utxo_notification_medium: UtxoNotificationMedium,
+        unowned_utxo_notification_medium: UtxoNotificationMedium,
+        fee: NeptuneCoins,
+        now: Timestamp,
+    ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
+        self.send_to_many_inner_with_mock_proof_option(
+            outputs,
+            (
+                owned_utxo_notification_medium,
+                unowned_utxo_notification_medium,
+            ),
+            fee,
+            now,
+            TxProvingCapability::PrimitiveWitness,
+            Some(TransactionProof::invalid()),
+        )
+        .await
+    }
+
+    /// Assemble a data for the wallet to register the UTXO. Returns `Ok(None)`
+    /// if the UTXO has already been claimed by the wallet.
+    ///
+    /// `max_search_depth` denotes how many blocks back from tip we attempt
+    /// to find the transaction in a block. `None` means unlimited.
+    ///
+    /// `encrypted_utxo_notification` is expected to hold encrypted data about
+    /// a future or past UTXO, which can be claimed by this client.
+    async fn claim_utxo_inner(
+        &self,
+        encrypted_utxo_notification: String,
+        max_search_depth: Option<u64>,
+    ) -> anyhow::Result<Option<ClaimUtxoData>> {
+        let span = tracing::debug_span!("Claim UTXO inner");
+        let _enter = span.enter();
+
+        // deserialize UtxoTransferEncrypted from bech32m string.
+        let utxo_transfer_encrypted = EncryptedUtxoNotification::from_bech32m(
+            &encrypted_utxo_notification,
+            self.state.cli().network,
+        )?;
+
+        // // acquire global state read lock
+        let state = self.state.lock_guard().await;
+
+        // find known spending key by receiver_identifier
+        let spending_key = state
+            .wallet_state
+            .find_known_spending_key_for_receiver_identifier(
+                utxo_transfer_encrypted.receiver_identifier,
+            )
+            .ok_or(anyhow!("utxo does not match any known wallet key"))?;
+
+        // decrypt utxo_transfer_encrypted into UtxoTransfer
+        let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
+
+        tracing::debug!("claim-utxo: decrypted {:#?}", utxo_notification);
+
+        // search for matching monitored utxo and return early if found.
+        if state
+            .wallet_state
+            .find_monitored_utxo(&utxo_notification.utxo)
+            .await
+            .is_some()
+        {
+            info!("found monitored utxo. Returning early.");
+            return Ok(None);
+        }
+
+        // construct an AnnouncedUtxo
+        let announced_utxo = AnnouncedUtxo {
+            utxo: utxo_notification.utxo,
+            sender_randomness: utxo_notification.sender_randomness,
+            receiver_preimage: spending_key.privacy_preimage(),
+        };
+
+        // check if wallet is already expecting this utxo.
+        let addition_record = announced_utxo.addition_record();
+        let has_expected_utxo = state.wallet_state.has_expected_utxo(addition_record).await;
+
+        // Check if UTXO has already been mined in a transaction.
+        let mined_in_block = state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(addition_record, max_search_depth)
+            .await;
+        let maybe_prepared_mutxo = match mined_in_block {
+            Some(block) => {
+                let aocl_leaf_index = {
+                    // Find matching AOCL leaf index that must be in this block
+                    let last_aocl_index_in_block =
+                        block.mutator_set_accumulator_after().aocl.num_leafs() - 1;
+                    let num_outputs_in_block: u64 = block
+                        .mutator_set_update()
+                        .additions
+                        .len()
+                        .try_into()
+                        .unwrap();
+                    let min_aocl_leaf_index = last_aocl_index_in_block - num_outputs_in_block + 1;
+                    let mut haystack = last_aocl_index_in_block;
+                    let ams = state.chain.archival_state().archival_mutator_set.ams();
+                    while ams.aocl.get_leaf_async(haystack).await
+                        != addition_record.canonical_commitment
+                    {
+                        assert!(haystack > min_aocl_leaf_index);
+                        haystack -= 1;
+                    }
+
+                    haystack
+                };
+                let item = Tip5::hash(&announced_utxo.utxo);
+                let ams = state.chain.archival_state().archival_mutator_set.ams();
+                let msmp = ams
+                    .restore_membership_proof(
+                        item,
+                        announced_utxo.sender_randomness,
+                        announced_utxo.receiver_preimage,
+                        aocl_leaf_index,
+                    )
+                    .await
+                    .map_err(|x| anyhow!("Could not restore mutator set membership proof. Is archival mutator set corrupted? Got error: {x}"))?;
+
+                let tip_digest = state.chain.light_state().hash();
+
+                let mut monitored_utxo = MonitoredUtxo::new(
+                    announced_utxo.utxo.clone(),
+                    self.state.cli().number_of_mps_per_utxo,
+                );
+                monitored_utxo.confirmed_in_block = Some((
+                    block.hash(),
+                    block.header().timestamp,
+                    block.header().height,
+                ));
+                monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp);
+
+                Some(monitored_utxo)
+            }
+            None => None,
+        };
+
+        let expected_utxo = announced_utxo.into_expected_utxo(UtxoNotifier::Cli);
+        Ok(Some(ClaimUtxoData {
+            prepared_monitored_utxo: maybe_prepared_mutxo,
+            has_expected_utxo,
+            expected_utxo,
+        }))
     }
 }
 
@@ -930,12 +1159,19 @@ impl RPC for NeptuneRPCServer {
         amount: NeptuneCoins,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<TransactionKernelId> {
+    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
 
-        self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
-            .await
+        self.send_to_many(
+            ctx,
+            vec![(address, amount)],
+            owned_utxo_notify_method,
+            unowned_utxo_notify_medium,
+            fee,
+        )
+        .await
     }
 
     // Locking:
@@ -949,8 +1185,9 @@ impl RPC for NeptuneRPCServer {
         ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
+        unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<TransactionKernelId> {
+    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
 
         tracing::debug!("stm: entered fn");
@@ -967,12 +1204,46 @@ impl RPC for NeptuneRPCServer {
         self.send_to_many_inner(
             ctx,
             outputs,
-            owned_utxo_notification_medium,
+            (
+                owned_utxo_notification_medium,
+                unowned_utxo_notification_medium,
+            ),
             fee,
             Timestamp::now(),
             tx_proving_capability,
         )
         .await
+    }
+
+    // // documented in trait. do not add doc-comment.
+    async fn claim_utxo(
+        mut self,
+        _ctx: context::Context,
+        encrypted_utxo_notification: String,
+        max_search_depth: Option<u64>,
+    ) -> Result<(), String> {
+        log_slow_scope!(fn_name!());
+
+        let claim_data = self
+            .claim_utxo_inner(encrypted_utxo_notification, max_search_depth)
+            .await
+            .map_err(|x| x.to_string())?;
+
+        let Some(claim_data) = claim_data else {
+            // UTXO has already been claimed by wallet
+            warn!("UTXO notification of amount was already received. Not adding again.");
+            return Ok(());
+        };
+
+        self.state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .claim_utxo(claim_data)
+            .await
+            .map_err(|x| x.to_string())?;
+
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
@@ -1130,10 +1401,6 @@ impl RPC for NeptuneRPCServer {
 
 #[cfg(test)]
 mod rpc_server_tests {
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-    use std::net::SocketAddr;
-
     use anyhow::Result;
     use num_traits::One;
     use num_traits::Zero;
@@ -1167,7 +1434,7 @@ mod rpc_server_tests {
         wallet_secret: WalletSecret,
         peer_count: u8,
         cli: cli_args::Args,
-    ) -> (NeptuneRPCServer, GlobalStateLock) {
+    ) -> NeptuneRPCServer {
         let global_state_lock =
             mock_genesis_global_state(network, peer_count, wallet_secret, cli).await;
         let (dummy_tx, mut dummy_rx) =
@@ -1179,21 +1446,17 @@ mod rpc_server_tests {
             }
         });
 
-        (
-            NeptuneRPCServer {
-                socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                state: global_state_lock.clone(),
-                rpc_server_to_main_tx: dummy_tx,
-            },
-            global_state_lock,
-        )
+        NeptuneRPCServer {
+            state: global_state_lock,
+            rpc_server_to_main_tx: dummy_tx,
+        }
     }
 
     #[tokio::test]
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         for network in Network::iter() {
-            let (rpc_server, _) = test_rpc_server(
+            let rpc_server = test_rpc_server(
                 network,
                 WalletSecret::new_random(),
                 2,
@@ -1218,7 +1481,7 @@ mod rpc_server_tests {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(123456789088u64);
 
-        let (rpc_server, _) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             network,
             WalletSecret::new_pseudorandom(rng.gen()),
             2,
@@ -1273,6 +1536,7 @@ mod rpc_server_tests {
                 NeptuneCoins::one(),
                 own_receiving_address.clone(),
                 UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -1289,7 +1553,10 @@ mod rpc_server_tests {
             .send_to_many_inner(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
-                UtxoNotificationMedium::OffChain,
+                (
+                    UtxoNotificationMedium::OffChain,
+                    UtxoNotificationMedium::OffChain,
+                ),
                 NeptuneCoins::one(),
                 transaction_timestamp,
                 proving_capability,
@@ -1310,7 +1577,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        let (rpc_server, _) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             Network::Alpha,
             WalletSecret::new_random(),
             2,
@@ -1327,7 +1594,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (rpc_server, mut state_lock) = test_rpc_server(
+        let mut rpc_server = test_rpc_server(
             Network::Alpha,
             WalletSecret::new_random(),
             2,
@@ -1335,12 +1602,14 @@ mod rpc_server_tests {
         )
         .await;
         let rpc_request_context = context::current();
-        let global_state = state_lock.lock_guard().await;
-        let peer_address_0 =
-            global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
-        let peer_address_1 =
-            global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
-        drop(global_state);
+        let (peer_address0, peer_address1) = {
+            let global_state = rpc_server.state.lock_guard().await;
+
+            (
+                global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address(),
+                global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address(),
+            )
+        };
 
         // Verify that sanctions list is empty
         let punished_peers_startup = rpc_server
@@ -1353,13 +1622,13 @@ mod rpc_server_tests {
         );
 
         // sanction both
-        let (standing_0, standing_1) = {
-            let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let (standing0, standing1) = {
+            let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address_0)
+                .entry(peer_address0)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -1370,7 +1639,7 @@ mod rpc_server_tests {
             global_state_mut
                 .net
                 .peer_map
-                .entry(peer_address_1)
+                .entry(peer_address1)
                 .and_modify(|p| {
                     p.standing
                         .sanction(PeerSanction::Negative(
@@ -1378,8 +1647,8 @@ mod rpc_server_tests {
                         ))
                         .unwrap_err();
                 });
-            let standing_0 = global_state_mut.net.peer_map[&peer_address_0].standing;
-            let standing_1 = global_state_mut.net.peer_map[&peer_address_1].standing;
+            let standing_0 = global_state_mut.net.peer_map[&peer_address0].standing;
+            let standing_1 = global_state_mut.net.peer_map[&peer_address1].standing;
             (standing_0, standing_1)
         };
 
@@ -1395,15 +1664,15 @@ mod rpc_server_tests {
         );
 
         {
-            let mut global_state_mut = state_lock.lock_guard_mut().await;
+            let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
+                .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
                 .await;
             global_state_mut
                 .net
-                .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
+                .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
                 .await;
         }
 
@@ -1420,16 +1689,16 @@ mod rpc_server_tests {
 
         // Verify expected initial conditions
         {
-            let global_state = state_lock.lock_guard().await;
-            let peer_standing_0 = global_state
+            let global_state = rpc_server.state.lock_guard().await;
+            let standing0 = global_state
                 .net
-                .get_peer_standing_from_database(peer_address_0.ip())
+                .get_peer_standing_from_database(peer_address0.ip())
                 .await;
-            assert_ne!(0, peer_standing_0.unwrap().standing);
-            assert_ne!(None, peer_standing_0.unwrap().latest_punishment);
+            assert_ne!(0, standing0.unwrap().standing);
+            assert_ne!(None, standing0.unwrap().latest_punishment);
             let peer_standing_1 = global_state
                 .net
-                .get_peer_standing_from_database(peer_address_1.ip())
+                .get_peer_standing_from_database(peer_address1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
@@ -1438,31 +1707,31 @@ mod rpc_server_tests {
             // Clear standing of #0
             rpc_server
                 .clone()
-                .clear_standing_by_ip(rpc_request_context, peer_address_0.ip())
+                .clear_standing_by_ip(rpc_request_context, peer_address0.ip())
                 .await;
         }
 
         // Verify expected resulting conditions in database
         {
-            let global_state = state_lock.lock_guard().await;
-            let peer_standing_0 = global_state
+            let global_state = rpc_server.state.lock_guard().await;
+            let standing0 = global_state
                 .net
-                .get_peer_standing_from_database(peer_address_0.ip())
+                .get_peer_standing_from_database(peer_address0.ip())
                 .await;
-            assert_eq!(0, peer_standing_0.unwrap().standing);
-            assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
-            let peer_standing_1 = global_state
+            assert_eq!(0, standing0.unwrap().standing);
+            assert_eq!(None, standing0.unwrap().latest_punishment);
+            let standing1 = global_state
                 .net
-                .get_peer_standing_from_database(peer_address_1.ip())
+                .get_peer_standing_from_database(peer_address1.ip())
                 .await;
-            assert_ne!(0, peer_standing_1.unwrap().standing);
-            assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
+            assert_ne!(0, standing1.unwrap().standing);
+            assert_ne!(None, standing1.unwrap().latest_punishment);
 
             // Verify expected resulting conditions in peer map
-            let peer_standing_0_from_memory = global_state.net.peer_map[&peer_address_0].clone();
-            assert_eq!(0, peer_standing_0_from_memory.standing.standing);
-            let peer_standing_1_from_memory = global_state.net.peer_map[&peer_address_1].clone();
-            assert_ne!(0, peer_standing_1_from_memory.standing.standing);
+            let standing0_from_memory = global_state.net.peer_map[&peer_address0].clone();
+            assert_eq!(0, standing0_from_memory.standing.standing);
+            let standing1_from_memory = global_state.net.peer_map[&peer_address1].clone();
+            assert_ne!(0, standing1_from_memory.standing.standing);
         }
 
         // Verify expected sanctions reading, after one forgiveness
@@ -1483,70 +1752,73 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (rpc_server, mut state_lock) = test_rpc_server(
+        let mut rpc_server = test_rpc_server(
             Network::Alpha,
             WalletSecret::new_random(),
             2,
             cli_args::Args::default(),
         )
         .await;
-        let mut state = state_lock.lock_guard_mut().await;
-        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
-        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
+        let mut state = rpc_server.state.lock_guard_mut().await;
+        let peer_address0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
+        let peer_address1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
 
         // sanction both peers
-        let (standing_0, standing_1) = {
-            state.net.peer_map.entry(peer_address_0).and_modify(|p| {
+        let (standing0, standing1) = {
+            state.net.peer_map.entry(peer_address0).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
                     ))
                     .unwrap_err();
             });
-            state.net.peer_map.entry(peer_address_1).and_modify(|p| {
+            state.net.peer_map.entry(peer_address1).and_modify(|p| {
                 p.standing
                     .sanction(PeerSanction::Negative(
                         NegativePeerSanction::DifferentGenesis,
                     ))
                     .unwrap_err();
             });
-            let standing_0 = state.net.peer_map[&peer_address_0].standing;
-            let standing_1 = state.net.peer_map[&peer_address_1].standing;
-            (standing_0, standing_1)
+            (
+                state.net.peer_map[&peer_address0].standing,
+                state.net.peer_map[&peer_address1].standing,
+            )
         };
 
         state
             .net
-            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
+            .write_peer_standing_on_decrease(peer_address0.ip(), standing0)
             .await;
         state
             .net
-            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
+            .write_peer_standing_on_decrease(peer_address1.ip(), standing1)
             .await;
 
         drop(state);
 
         // Verify expected initial conditions
         {
-            let peer_standing_0 = state_lock
+            let peer_standing0 = rpc_server
+                .state
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address_0.ip())
+                .get_peer_standing_from_database(peer_address0.ip())
                 .await;
-            assert_ne!(0, peer_standing_0.unwrap().standing);
-            assert_ne!(None, peer_standing_0.unwrap().latest_punishment);
+            assert_ne!(0, peer_standing0.unwrap().standing);
+            assert_ne!(None, peer_standing0.unwrap().latest_punishment);
         }
 
         {
-            let peer_standing_1 = state_lock
+            let peer_standing1 = rpc_server
+                .state
                 .lock_guard_mut()
                 .await
                 .net
-                .get_peer_standing_from_database(peer_address_1.ip())
+                .get_peer_standing_from_database(peer_address1.ip())
                 .await;
-            assert_ne!(0, peer_standing_1.unwrap().standing);
-            assert_ne!(None, peer_standing_1.unwrap().latest_punishment);
+            assert_ne!(0, peer_standing1.unwrap().standing);
+            assert_ne!(None, peer_standing1.unwrap().latest_punishment);
         }
 
         // Verify expected reading through an RPC call
@@ -1563,13 +1835,13 @@ mod rpc_server_tests {
             .clear_all_standings(rpc_request_context)
             .await;
 
-        let state = state_lock.lock_guard().await;
+        let state = rpc_server.state.lock_guard().await;
 
         // Verify expected resulting conditions in database
         {
             let peer_standing_0 = state
                 .net
-                .get_peer_standing_from_database(peer_address_0.ip())
+                .get_peer_standing_from_database(peer_address0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
             assert_eq!(None, peer_standing_0.unwrap().latest_punishment);
@@ -1578,7 +1850,7 @@ mod rpc_server_tests {
         {
             let peer_still_standing_1 = state
                 .net
-                .get_peer_standing_from_database(peer_address_1.ip())
+                .get_peer_standing_from_database(peer_address1.ip())
                 .await;
             assert_eq!(0, peer_still_standing_1.unwrap().standing);
             assert_eq!(None, peer_still_standing_1.unwrap().latest_punishment);
@@ -1586,12 +1858,12 @@ mod rpc_server_tests {
 
         // Verify expected resulting conditions in peer map
         {
-            let peer_standing_0_from_memory = state.net.peer_map[&peer_address_0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_address0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
-            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address_1].clone();
+            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 
@@ -1608,15 +1880,17 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_digest_test() {
-        let (rpc_server, state_lock) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             Network::Alpha,
             WalletSecret::new_random(),
             2,
             cli_args::Args::default(),
         )
         .await;
-        let global_state = state_lock.lock_guard().await;
-        let aocl_leaves = global_state
+        let aocl_leaves = rpc_server
+            .state
+            .lock_guard()
+            .await
             .chain
             .archival_state()
             .archival_mutator_set
@@ -1643,14 +1917,14 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_info_test() {
         let network = Network::RegTest;
-        let (rpc_server, state_lock) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             network,
             WalletSecret::new_random(),
             2,
             cli_args::Args::default(),
         )
         .await;
-        let global_state = state_lock.lock_guard().await;
+        let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
@@ -1727,14 +2001,14 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_digest_test() {
         let network = Network::RegTest;
-        let (rpc_server, state_lock) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             network,
             WalletSecret::new_random(),
             2,
             cli_args::Args::default(),
         )
         .await;
-        let global_state = state_lock.lock_guard().await;
+        let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
         let genesis_hash = Block::genesis_block(network).hash();
@@ -1800,7 +2074,7 @@ mod rpc_server_tests {
         // On your local machine, this should return a temperature but in CI,
         // the RPC call returns `None`, so we only verify that the call doesn't
         // crash the host machine, we don't verify that any value is returned.
-        let (rpc_server, _) = test_rpc_server(
+        let rpc_server = test_rpc_server(
             Network::Alpha,
             WalletSecret::new_random(),
             2,
@@ -1816,7 +2090,7 @@ mod rpc_server_tests {
         // --- Init.  Basics ---
         let mut rng = StdRng::seed_from_u64(1814);
         let network = Network::Main;
-        let (rpc_server, mut state_lock) = test_rpc_server(
+        let mut rpc_server = test_rpc_server(
             network,
             WalletSecret::new_pseudorandom(rng.gen()),
             2,
@@ -1827,7 +2101,8 @@ mod rpc_server_tests {
 
         // --- Init.  get wallet spending key ---
         let genesis_block = Block::genesis_block(network);
-        let wallet_spending_key = state_lock
+        let wallet_spending_key = rpc_server
+            .state
             .lock_guard_mut()
             .await
             .wallet_state
@@ -1843,7 +2118,7 @@ mod rpc_server_tests {
         );
 
         {
-            let state_lock = state_lock.lock_guard().await;
+            let state_lock = rpc_server.state.lock_guard().await;
             let original_balance = state_lock
                 .wallet_state
                 .confirmed_balance(genesis_block.hash(), timestamp)
@@ -1852,7 +2127,8 @@ mod rpc_server_tests {
         };
 
         // --- Init.  append the block to blockchain ---
-        state_lock
+        rpc_server
+            .state
             .set_new_self_mined_tip(
                 block_1.clone(),
                 vec![ExpectedUtxo::new(
@@ -1865,7 +2141,7 @@ mod rpc_server_tests {
             .await?;
 
         {
-            let state_lock = state_lock.lock_guard().await;
+            let state_lock = rpc_server.state.lock_guard().await;
             let new_balance = state_lock
                 .wallet_state
                 .confirmed_balance(block_1.hash(), timestamp)
@@ -1885,7 +2161,8 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet can claim. ---
         let output2 = {
-            let spending_key = state_lock
+            let spending_key = rpc_server
+                .state
                 .lock_guard_mut()
                 .await
                 .wallet_state
@@ -1898,7 +2175,8 @@ mod rpc_server_tests {
         let fee = NeptuneCoins::new(1);
 
         // --- Store: store num expected utxo before spend ---
-        let num_expected_utxo = state_lock
+        let num_expected_utxo = rpc_server
+            .state
             .lock_guard()
             .await
             .wallet_state
@@ -1917,7 +2195,10 @@ mod rpc_server_tests {
             .send_to_many_inner(
                 ctx,
                 outputs,
-                UtxoNotificationMedium::OffChain,
+                (
+                    UtxoNotificationMedium::OffChain,
+                    UtxoNotificationMedium::OffChain,
+                ),
                 fee,
                 timestamp,
                 TxProvingCapability::ProofCollection,
@@ -1930,7 +2211,8 @@ mod rpc_server_tests {
         // --- Test: verify expected_utxos.len() has increased by 2.
         //           (one off-chain utxo + one change utxo)
         assert_eq!(
-            state_lock
+            rpc_server
+                .state
                 .lock_guard()
                 .await
                 .wallet_state
@@ -1959,8 +2241,7 @@ mod rpc_server_tests {
             ..Default::default()
         };
 
-        let (rpc_server, _state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2, cli_on).await;
+        let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2, cli_on).await;
 
         assert!(rpc_server
             .clone()
@@ -1968,6 +2249,7 @@ mod rpc_server_tests {
                 ctx,
                 amount,
                 address.into(),
+                UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::zero()
             )
@@ -1979,9 +2261,331 @@ mod rpc_server_tests {
                 ctx,
                 vec![(address.into(), amount)],
                 UtxoNotificationMedium::OffChain,
+                UtxoNotificationMedium::OffChain,
                 NeptuneCoins::zero()
             )
             .await
             .is_none());
+    }
+
+    mod claim_utxo_tests {
+        use super::*;
+
+        #[traced_test]
+        #[allow(clippy::needless_return)]
+        #[tokio::test]
+        async fn claim_utxo_owned_before_confirmed() -> Result<()> {
+            worker::claim_utxo_owned(false).await
+        }
+
+        #[traced_test]
+        #[allow(clippy::needless_return)]
+        #[tokio::test]
+        async fn claim_utxo_owned_after_confirmed() -> Result<()> {
+            worker::claim_utxo_owned(true).await
+        }
+
+        #[traced_test]
+        #[allow(clippy::needless_return)]
+        #[tokio::test]
+        async fn claim_utxo_unowned_before_confirmed() -> Result<()> {
+            worker::claim_utxo_unowned(false).await
+        }
+
+        #[traced_test]
+        #[allow(clippy::needless_return)]
+        #[tokio::test]
+        async fn claim_utxo_unowned_after_confirmed() -> Result<()> {
+            worker::claim_utxo_unowned(true).await
+        }
+
+        mod worker {
+            use cli_args::Args;
+
+            use super::*;
+            use crate::tests::shared::invalid_block_with_transaction;
+            use crate::tests::shared::invalid_empty_block;
+
+            pub(super) async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
+                let network = Network::Main;
+
+                // bob's node
+                let (pay_to_bob_outputs, bob_rpc_server) = {
+                    let rpc_server =
+                        test_rpc_server(network, WalletSecret::new_random(), 2, Args::default())
+                            .await;
+
+                    let receiving_address_generation = rpc_server
+                        .clone()
+                        .next_receiving_address(context::current(), KeyType::Generation)
+                        .await;
+                    let receiving_address_symmetric = rpc_server
+                        .clone()
+                        .next_receiving_address(context::current(), KeyType::Symmetric)
+                        .await;
+
+                    let pay_to_bob_outputs = vec![
+                        (receiving_address_generation, NeptuneCoins::new(1)),
+                        (receiving_address_symmetric, NeptuneCoins::new(2)),
+                    ];
+
+                    (pay_to_bob_outputs, rpc_server)
+                };
+
+                // alice's node
+                let (blocks, alice_to_bob_utxo_notifications, bob_amount) = {
+                    let wallet_secret = WalletSecret::new_random();
+                    let mut rpc_server =
+                        test_rpc_server(network, wallet_secret.clone(), 2, Args::default()).await;
+
+                    let genesis_block = Block::genesis_block(network);
+                    let mut blocks = vec![];
+                    let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
+
+                    let fee = NeptuneCoins::zero();
+                    let bob_amount: NeptuneCoins =
+                        pay_to_bob_outputs.iter().map(|(_, amt)| *amt).sum();
+
+                    // Mine block 1 to get some coins
+                    let cb_key = wallet_secret.nth_generation_spending_key(0);
+                    let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
+                        &genesis_block,
+                        None,
+                        cb_key.to_address(),
+                        Default::default(),
+                    );
+                    blocks.push(block1.clone());
+                    let cb = ExpectedUtxo::new(
+                        cb_utxo,
+                        cb_sender_randomness,
+                        cb_key.privacy_preimage,
+                        UtxoNotifier::OwnMinerComposeBlock,
+                    );
+                    rpc_server
+                        .state
+                        .lock_guard_mut()
+                        .await
+                        .set_new_self_mined_tip(block1.clone(), vec![cb])
+                        .await
+                        .unwrap();
+
+                    let (tx, offchain_notifications) = rpc_server
+                        .clone()
+                        .send_to_many_inner_invalid_proof(
+                            pay_to_bob_outputs,
+                            UtxoNotificationMedium::OffChain,
+                            UtxoNotificationMedium::OffChain,
+                            fee,
+                            in_seven_months,
+                        )
+                        .await
+                        .unwrap();
+
+                    let block2 = invalid_block_with_transaction(&block1, tx);
+                    let block3 = invalid_empty_block(&block2);
+
+                    // mine two blocks, the first will include the transaction
+                    blocks.push(block2);
+                    blocks.push(block3);
+
+                    (blocks, offchain_notifications, bob_amount)
+                };
+
+                // bob's node claims each utxo
+                {
+                    let mut state = bob_rpc_server.state.clone();
+
+                    state.set_new_tip(blocks[0].clone()).await?;
+
+                    if claim_after_confirmed {
+                        state.set_new_tip(blocks[1].clone()).await?;
+                        state.set_new_tip(blocks[2].clone()).await?;
+                    }
+
+                    for utxo_notification in alice_to_bob_utxo_notifications.into_iter() {
+                        bob_rpc_server
+                            .clone()
+                            .claim_utxo(context::current(), utxo_notification.ciphertext, None)
+                            .await
+                            .unwrap();
+                    }
+
+                    assert_eq!(
+                        vec![
+                            NeptuneCoins::new(1), // claimed via generation addr
+                            NeptuneCoins::new(2), // claimed via symmetric addr
+                        ],
+                        state
+                            .lock_guard()
+                            .await
+                            .wallet_state
+                            .wallet_db
+                            .expected_utxos()
+                            .get_all()
+                            .await
+                            .iter()
+                            .map(|eu| eu.utxo.get_native_currency_amount())
+                            .collect_vec()
+                    );
+
+                    if !claim_after_confirmed {
+                        assert_eq!(
+                            NeptuneCoins::zero(),
+                            bob_rpc_server
+                                .clone()
+                                .synced_balance(context::current())
+                                .await,
+                        );
+                        state.set_new_tip(blocks[1].clone()).await?;
+                        state.set_new_tip(blocks[2].clone()).await?;
+                    }
+
+                    assert_eq!(
+                        bob_amount,
+                        bob_rpc_server.synced_balance(context::current()).await,
+                    );
+                }
+
+                Ok(())
+            }
+
+            pub(super) async fn claim_utxo_owned(claim_after_confirmed: bool) -> Result<()> {
+                let network = Network::Main;
+                let bob_key = WalletSecret::new_random();
+                let mut bob_rpc_server =
+                    test_rpc_server(network, bob_key.clone(), 2, Args::default()).await;
+
+                let in_seven_months =
+                    Block::genesis_block(network).header().timestamp + Timestamp::months(7);
+                let in_eight_months = in_seven_months + Timestamp::months(1);
+
+                let bob_key = bob_key.nth_generation_spending_key(0);
+                let genesis_block = Block::genesis_block(network);
+                let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
+                    &genesis_block,
+                    None,
+                    bob_key.to_address(),
+                    Default::default(),
+                );
+                let cb = ExpectedUtxo::new(
+                    cb_utxo,
+                    cb_sender_randomness,
+                    bob_key.privacy_preimage,
+                    UtxoNotifier::OwnMinerComposeBlock,
+                );
+                bob_rpc_server
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .set_new_self_mined_tip(block1.clone(), vec![cb])
+                    .await
+                    .unwrap();
+
+                let receiving_address_generation = bob_rpc_server
+                    .clone()
+                    .next_receiving_address(context::current(), KeyType::Generation)
+                    .await;
+                let receiving_address_symmetric = bob_rpc_server
+                    .clone()
+                    .next_receiving_address(context::current(), KeyType::Symmetric)
+                    .await;
+
+                let pay_to_self_outputs = vec![
+                    (receiving_address_generation, NeptuneCoins::new(5)),
+                    (receiving_address_symmetric, NeptuneCoins::new(6)),
+                ];
+
+                let fee = NeptuneCoins::new(2);
+                let (tx, offchain_notifications) = bob_rpc_server
+                    .clone()
+                    .send_to_many_inner_invalid_proof(
+                        pay_to_self_outputs,
+                        UtxoNotificationMedium::OffChain,
+                        UtxoNotificationMedium::OffChain,
+                        fee,
+                        in_eight_months,
+                    )
+                    .await
+                    .unwrap();
+
+                // alice mines 2 more blocks.  block2 confirms the sent tx.
+                let block2 = invalid_block_with_transaction(&block1, tx);
+                let block3 = invalid_empty_block(&block2);
+
+                if claim_after_confirmed {
+                    // bob applies the blocks before claiming utxos.
+                    bob_rpc_server.state.set_new_tip(block2.clone()).await?;
+                    bob_rpc_server.state.set_new_tip(block3.clone()).await?;
+                }
+
+                for offchain_notification in offchain_notifications {
+                    bob_rpc_server
+                        .clone()
+                        .claim_utxo(context::current(), offchain_notification.ciphertext, None)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+
+                assert_eq!(
+                    vec![
+                        NeptuneCoins::new(128), // from block1 coinbase
+                        NeptuneCoins::new(5),   // claimed via generation addr
+                        NeptuneCoins::new(6),   // claimed via symmetric addr
+                        NeptuneCoins::new(115)  // change (symmetric addr) (2 paid in fee)
+                    ],
+                    bob_rpc_server
+                        .state
+                        .lock_guard()
+                        .await
+                        .wallet_state
+                        .wallet_db
+                        .expected_utxos()
+                        .get_all()
+                        .await
+                        .iter()
+                        .map(|eu| eu.utxo.get_native_currency_amount())
+                        .collect_vec()
+                );
+
+                if !claim_after_confirmed {
+                    // bob hasn't applied blocks 2,3. balance should be 128
+                    assert_eq!(
+                        NeptuneCoins::new(128),
+                        bob_rpc_server
+                            .clone()
+                            .synced_balance(context::current())
+                            .await,
+                    );
+                    // bob applies the blocks after claiming utxos.
+                    bob_rpc_server.state.set_new_tip(block2).await?;
+                    bob_rpc_server.state.set_new_tip(block3).await?;
+                }
+
+                // final balance should be 126.
+                // +128  coinbase
+                // -128  coinbase spent
+                // +5 self-send via Generation
+                // +6 self-send via Symmetric
+                // +115   change (less fee == 2)
+                assert_eq!(
+                    NeptuneCoins::new(126),
+                    bob_rpc_server.synced_balance(context::current()).await,
+                );
+
+                // todo: test that claim_utxo() correctly handles case when the
+                //       claimed utxo has already been spent.
+                //
+                //       in normal wallet usage this would not happen.  However it
+                //       is possible if bob were to claim a utxo with wallet A,
+                //       spend the utxo and then restore wallet B from A's seed.
+                //       When bob performs claim_utxo() in wallet B the balance
+                //       should reflect that the utxo was already spent.
+                //
+                //       this is a bit tricky to test, as it requires using a
+                //       different data directory for wallet B and test infrastructure
+                //       isn't setup for that.
+                Ok(())
+            }
+        }
     }
 }

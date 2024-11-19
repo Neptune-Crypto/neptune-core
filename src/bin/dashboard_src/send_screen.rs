@@ -142,6 +142,7 @@ impl SendScreen {
                 valid_amount,
                 valid_address,
                 UtxoNotificationMedium::OnChain,
+                UtxoNotificationMedium::OnChain,
                 fee,
             )
             .await

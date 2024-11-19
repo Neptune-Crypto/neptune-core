@@ -8,10 +8,20 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
+
+/// returns human-readable-prefix for the given network
+pub(crate) fn network_hrp_char(network: Network) -> char {
+    match network {
+        Network::Alpha | Network::Beta | Network::Main => 'm',
+        Network::Testnet => 't',
+        Network::RegTest => 'r',
+    }
+}
 
 /// Derive a receiver id from a seed.
 pub fn derive_receiver_id(seed: Digest) -> BFieldElement {

@@ -63,7 +63,6 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 /// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
 #[derive(Clone, Debug)]
 pub struct AnnouncedUtxo {
-    pub addition_record: AdditionRecord,
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -72,7 +71,6 @@ pub struct AnnouncedUtxo {
 impl From<&ExpectedUtxo> for AnnouncedUtxo {
     fn from(eu: &ExpectedUtxo) -> Self {
         Self {
-            addition_record: eu.addition_record,
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
