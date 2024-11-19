@@ -303,7 +303,7 @@ impl Neg for NeptuneCoins {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self(u128::MAX - self.0 + 1u128)
+        Self((u128::MAX - self.0).wrapping_add(1u128))
     }
 }
 
@@ -709,5 +709,10 @@ mod amount_tests {
         let computed_balances =
             NeptuneCoins::scan_balance(&balance_updates, NeptuneCoins::zero()).collect_vec();
         assert_eq!(expected_balances, computed_balances);
+    }
+
+    #[test]
+    fn can_negate_zero() {
+        println!("{}", -NeptuneCoins(0));
     }
 }
