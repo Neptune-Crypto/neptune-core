@@ -1547,6 +1547,7 @@ mod archival_state_tests {
                 .is_empty(),
             "Active window must be empty when no UTXOs have been spent"
         );
+
         assert!(
             alice
                 .lock_guard()
@@ -1555,10 +1556,11 @@ mod archival_state_tests {
                 .archival_state()
                 .archival_mutator_set
                 .ams()
-                .swbf_inactive
-                .num_leafs()
+                .chunks
+                .get_all()
                 .await
-                .is_zero(),
+                .into_iter()
+                .all(|ch| ch.is_empty()),
             "Inactive SWBF must be empty"
         );
     }
