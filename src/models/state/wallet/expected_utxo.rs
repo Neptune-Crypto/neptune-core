@@ -44,7 +44,7 @@ use crate::util_types::mutator_set::commit;
 /// <https://github.com/Neptune-Crypto/neptune-core/issues/176>
 ///
 /// see [AnnouncedUtxo](crate::models::blockchain::transaction::AnnouncedUtxo), [UtxoNotification](crate::models::blockchain::transaction::UtxoNotification)
-#[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, GetSize, Serialize, Deserialize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub addition_record: AdditionRecord,
@@ -56,7 +56,7 @@ pub struct ExpectedUtxo {
 }
 
 impl ExpectedUtxo {
-    pub fn new(
+    pub(crate) fn new(
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_preimage: Digest,

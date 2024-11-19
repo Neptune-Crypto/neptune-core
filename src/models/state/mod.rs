@@ -512,16 +512,19 @@ impl GlobalState {
             receiver_digest,
         );
 
+        let owned = true;
         let change_output = match change_utxo_notify_method {
             UtxoNotificationMedium::OnChain => TxOutput::onchain_native_currency(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
+                owned,
             ),
             UtxoNotificationMedium::OffChain => TxOutput::offchain_native_currency(
                 change_amount,
                 change_sender_randomness,
                 own_receiving_address,
+                owned,
             ),
         };
 
@@ -629,6 +632,7 @@ impl GlobalState {
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
+        unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> TxOutputList {
         let block_height = self.chain.light_state().header().height;
 
@@ -649,6 +653,7 @@ impl GlobalState {
                     amount,
                     sender_randomness,
                     owned_utxo_notify_medium,
+                    unowned_utxo_notify_medium,
                 )
             })
             .collect();
@@ -1683,6 +1688,7 @@ mod global_state_tests {
             NeptuneCoins::new(9),
             rng.gen(),
             alice_address.into(),
+            false,
         );
         let tx_outputs: TxOutputList = vec![nine_money_output].into();
 
@@ -1741,6 +1747,7 @@ mod global_state_tests {
                 that_much_money,
                 rng.gen(),
                 alice_address.into(),
+                false,
             );
             output_utxos.push(output_utxo);
         }
@@ -2258,11 +2265,13 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 sender_randomness,
                 alice_spending_key.to_address().into(),
+                false,
             ),
             TxOutput::onchain_native_currency(
                 NeptuneCoins::new(2),
                 sender_randomness,
                 alice_spending_key.to_address().into(),
+                false,
             ),
         ];
 
@@ -2272,11 +2281,13 @@ mod global_state_tests {
                 NeptuneCoins::new(3),
                 sender_randomness,
                 bob_spending_key.to_address().into(),
+                false,
             ),
             TxOutput::onchain_native_currency(
                 NeptuneCoins::new(4),
                 sender_randomness,
                 bob_spending_key.to_address().into(),
+                false,
             ),
         ];
 
@@ -2446,11 +2457,13 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
+                false,
             ),
             TxOutput::onchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
+                false,
             ),
         ];
         // About prover capability: we need `SingleProof` transactions for the
@@ -2483,16 +2496,19 @@ mod global_state_tests {
                 NeptuneCoins::new(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
+                false,
             ),
             TxOutput::onchain_native_currency(
                 NeptuneCoins::new(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
+                false,
             ),
             TxOutput::onchain_native_currency(
                 NeptuneCoins::new(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
+                false,
             ),
         ];
         let (tx_from_bob, maybe_change_for_bob) = bob
@@ -3112,8 +3128,11 @@ mod global_state_tests {
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let tx_outputs =
-                    alice_state_mut.generate_tx_outputs(outputs, change_notification_medium);
+                let tx_outputs = alice_state_mut.generate_tx_outputs(
+                    outputs,
+                    change_notification_medium,
+                    UtxoNotificationMedium::OnChain,
+                );
 
                 // create tx.  utxo_notify_method is a test param.
                 let (alice_to_bob_tx, maybe_change_utxo) = alice_state_mut

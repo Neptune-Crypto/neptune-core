@@ -1,6 +1,7 @@
 mod address_type;
 mod common;
 
+pub mod encrypted_utxo_notification;
 pub mod generation_address;
 pub mod symmetric_key;
 

@@ -5,7 +5,10 @@ use aead::Key;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
+use anyhow::bail;
 use anyhow::Result;
+use bech32::FromBase32;
+use bech32::ToBase32;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -14,6 +17,8 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
+use super::encrypted_utxo_notification::EncryptedUtxoNotification;
+use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -190,12 +195,67 @@ impl SymmetricKey {
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> PublicAnnouncement {
-        let ciphertext = [
-            &[SYMMETRIC_KEY_FLAG_U8.into(), self.receiver_identifier()],
-            self.encrypt(utxo_notification_payload).as_slice(),
-        ]
-        .concat();
+        let encrypted_utxo_notification = EncryptedUtxoNotification {
+            flag: SYMMETRIC_KEY_FLAG_U8.into(),
+            receiver_identifier: self.receiver_identifier(),
+            ciphertext: self.encrypt(utxo_notification_payload),
+        };
 
-        PublicAnnouncement::new(ciphertext)
+        encrypted_utxo_notification.into_public_announcement()
+    }
+
+    pub(crate) fn private_utxo_notification(
+        &self,
+        utxo_notification_payload: &UtxoNotificationPayload,
+        network: Network,
+    ) -> String {
+        let encrypted_utxo_notification = EncryptedUtxoNotification {
+            flag: SYMMETRIC_KEY_FLAG_U8.into(),
+            receiver_identifier: self.receiver_identifier(),
+            ciphertext: self.encrypt(utxo_notification_payload),
+        };
+
+        encrypted_utxo_notification.into_bech32m(network)
+    }
+
+    /// encodes the key as bech32m with network-specific prefix
+    ///
+    /// security: note that anyone that can view the bech32m string will be able
+    /// to spend the funds. In general it is best practice to avoid display of
+    /// any part of a symmetric key.
+    pub fn to_bech32m(&self, network: Network) -> anyhow::Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(self)?;
+        let variant = bech32::Variant::Bech32m;
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => bail!("Could not encode SymmetricKey as bech32m because error: {e}"),
+        }
+    }
+
+    /// decodes a key from bech32m with network-specific prefix
+    pub fn from_bech32m(encoded: &str, network: Network) -> anyhow::Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
+
+        if variant != bech32::Variant::Bech32m {
+            bail!("Can only decode bech32m addresses.");
+        }
+
+        if hrp != *Self::get_hrp(network) {
+            bail!("Could not decode bech32m address because of invalid prefix");
+        }
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+
+        match bincode::deserialize(&payload) {
+            Ok(ra) => Ok(ra),
+            Err(e) => bail!("Could not decode bech32m because of error: {e}"),
+        }
+    }
+
+    /// returns human readable prefix (hrp) of a key, specific to `network`
+    pub(super) fn get_hrp(network: Network) -> String {
+        // nsk: neptune-symmetric-key
+        format!("nsymk{}", common::network_hrp_char(network))
     }
 }

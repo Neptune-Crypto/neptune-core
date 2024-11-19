@@ -31,6 +31,8 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
+use super::common::network_hrp_char;
+use super::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -197,14 +199,10 @@ impl GenerationReceivingAddress {
     }
 
     /// returns human readable prefix (hrp) of an address.
-    fn get_hrp(network: Network) -> String {
+    pub(super) fn get_hrp(network: Network) -> String {
         // NOLGA: Neptune lattice-based generation address
         let mut hrp = "nolga".to_string();
-        let network_byte: char = match network {
-            Network::Alpha | Network::Beta | Network::Main => 'm',
-            Network::Testnet => 't',
-            Network::RegTest => 'r',
-        };
+        let network_byte = network_hrp_char(network);
         hrp.push(network_byte);
         hrp
     }
@@ -238,6 +236,33 @@ impl GenerationReceivingAddress {
         }
     }
 
+    /// returns an abbreviated address.
+    ///
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   8 start of address.
+    ///   8 end of address.
+    /// ```
+    /// it would be nice to standardize on a single prefix-len.  6 chars seems a
+    /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
+    /// ngkm --> neptune-generation-key-mainnet
+    pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        let bech32 = self.to_bech32m(network)?;
+        let first_len = Self::get_hrp(network).len() + 8usize;
+        let last_len = 8usize;
+
+        assert!(bech32.len() > first_len + last_len);
+
+        let (first, _) = bech32.split_at(first_len);
+        let (_, last) = bech32.split_at(bech32.len() - last_len);
+
+        Ok(format!("{}...{}", first, last))
+    }
+
     /// generates a lock script from the spending lock.
     ///
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
@@ -255,12 +280,26 @@ impl GenerationReceivingAddress {
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> PublicAnnouncement {
-        let ciphertext = [
-            &[GENERATION_FLAG_U8.into(), self.receiver_identifier],
-            self.encrypt(utxo_notification_payload).as_slice(),
-        ]
-        .concat();
+        let encrypted_utxo_notification = EncryptedUtxoNotification {
+            flag: GENERATION_FLAG_U8.into(),
+            receiver_identifier: self.receiver_identifier,
+            ciphertext: self.encrypt(utxo_notification_payload),
+        };
 
-        PublicAnnouncement::new(ciphertext)
+        encrypted_utxo_notification.into_public_announcement()
+    }
+
+    pub(crate) fn private_utxo_notification(
+        &self,
+        utxo_notification_payload: &UtxoNotificationPayload,
+        network: Network,
+    ) -> String {
+        let encrypted_utxo_notification = EncryptedUtxoNotification {
+            flag: GENERATION_FLAG_U8.into(),
+            receiver_identifier: self.receiver_identifier,
+            ciphertext: self.encrypt(utxo_notification_payload),
+        };
+
+        encrypted_utxo_notification.into_bech32m(network)
     }
 }

@@ -6,7 +6,9 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
 
 pub mod lock_script;
 pub mod primitive_witness;
@@ -63,7 +65,6 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 /// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
 #[derive(Clone, Debug)]
 pub struct AnnouncedUtxo {
-    pub addition_record: AdditionRecord,
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -72,11 +73,29 @@ pub struct AnnouncedUtxo {
 impl From<&ExpectedUtxo> for AnnouncedUtxo {
     fn from(eu: &ExpectedUtxo) -> Self {
         Self {
-            addition_record: eu.addition_record,
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
         }
+    }
+}
+
+impl AnnouncedUtxo {
+    pub(crate) fn addition_record(&self) -> AdditionRecord {
+        commit(
+            Hash::hash(&self.utxo),
+            self.sender_randomness,
+            self.receiver_preimage.hash(),
+        )
+    }
+
+    pub(crate) fn into_expected_utxo(self, received_from: UtxoNotifier) -> ExpectedUtxo {
+        ExpectedUtxo::new(
+            self.utxo.to_owned(),
+            self.sender_randomness,
+            self.receiver_preimage,
+            received_from,
+        )
     }
 }
 

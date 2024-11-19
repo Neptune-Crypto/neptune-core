@@ -3,12 +3,17 @@ use std::io::stdout;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
+use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
 use neptune_core::config_models::data_directory::DataDirectory;
@@ -18,19 +23,109 @@ use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::KeyType;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_core::models::state::wallet::transaction_output::PrivateNotificationData;
 use neptune_core::models::state::wallet::transaction_output::UtxoNotificationMedium;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
 use neptune_core::rpc_server::RPCClient;
+use serde::Deserialize;
+use serde::Serialize;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
+
+const SELF: &str = "self";
+const ANONYMOUS: &str = "anonymous";
 
 // for parsing SendToMany <output> arguments.
 #[derive(Debug, Clone)]
 struct TransactionOutput {
     address: String,
     amount: NeptuneCoins,
+}
+
+/// represents data format of input to claim-utxo
+#[derive(Debug, Clone, Subcommand)]
+enum ClaimUtxoFormat {
+    /// reads a utxo-transfer json file
+    File {
+        /// path to the file
+        path: PathBuf,
+    },
+}
+
+/// AddressEnum is used by send and send-to-many to distinguish between
+/// key-types when writing utxo-transfer file(s) for any off-chain-serialized
+/// utxos.
+///
+/// the issue is that it is useful to display the address in the file, or even an
+/// abbreviation in the filename. This aids the sender in identifying the utxo
+/// and routing it to the intended recipient.
+///
+/// however this should never be done for symmetric keys as it would expose the
+/// private key, so we only display the receiver_identifier.
+///
+/// normally unowned utxo-transfer would not be using symmetric keys, however
+/// there are some use cases for it such as when a person or org holds multiple
+/// wallets and is transferrng between them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum AddressEnum {
+    Generation {
+        address_abbrev: String,
+        address: String,
+        receiver_identifier: String,
+    },
+    Symmetric {
+        receiver_identifier: String,
+    },
+}
+
+impl AddressEnum {
+    fn new(addr: ReceivingAddress, network: Network) -> Self {
+        match addr {
+            ReceivingAddress::Generation(addr) => Self::Generation {
+                address_abbrev: addr
+                    .to_bech32m_abbreviated(network)
+                    .expect("Must be able to convert to abbreviated Bech32"),
+                address: addr
+                    .to_bech32m(network)
+                    .expect("Bech32m encoding must succeed"),
+                receiver_identifier: addr.receiver_identifier.to_string(),
+            },
+            ReceivingAddress::Symmetric(_) => Self::Symmetric {
+                receiver_identifier: addr.receiver_identifier().to_string(),
+            },
+        }
+    }
+}
+
+impl AddressEnum {
+    fn short_id(&self) -> &str {
+        match *self {
+            Self::Generation {
+                ref address_abbrev, ..
+            } => address_abbrev,
+            Self::Symmetric {
+                ref receiver_identifier,
+                ..
+            } => receiver_identifier,
+        }
+    }
+}
+
+/// represents a UtxoTransfer entry in a utxo-transfer file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UtxoTransferEntry {
+    pub data_format: String,
+    pub recipient: String,
+    pub ciphertext: String,
+    pub address_info: AddressEnum,
+}
+
+impl UtxoTransferEntry {
+    fn data_format() -> String {
+        "neptune-utxo-transfer-v1.0".to_string()
+    }
 }
 
 /// We impl FromStr deserialization so that clap can parse the --outputs arg of
@@ -119,10 +214,24 @@ enum Command {
     ClearStandingByIp {
         ip: IpAddr,
     },
+    /// claim an off-chain utxo-transfer.
+    ClaimUtxo {
+        #[clap(subcommand)]
+        format: ClaimUtxoFormat,
+
+        /// Indicates how many blocks to look back in case the UTXO was already
+        /// mined.
+        max_search_depth: Option<u64>,
+    },
     Send {
-        amount: NeptuneCoins,
         address: String,
+        amount: NeptuneCoins,
         fee: NeptuneCoins,
+
+        /// local tag for identifying a receiver
+        receiver_tag: String,
+        notify_self: UtxoNotificationMedium,
+        notify_other: UtxoNotificationMedium,
     },
     SendToMany {
         /// format: address:amount address:amount ...
@@ -453,28 +562,61 @@ async fn main() -> Result<()> {
             client.clear_standing_by_ip(ctx, ip).await?;
             println!("Cleared standing of {}", ip);
         }
+        Command::ClaimUtxo {
+            format,
+            max_search_depth,
+        } => {
+            let ciphertext = match format {
+                ClaimUtxoFormat::File { path } => {
+                    let buf = std::fs::read_to_string(path)?;
+                    let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
+                    utxo_transfer_entry.ciphertext
+                }
+            };
+
+            client
+                .claim_utxo(ctx, ciphertext, max_search_depth)
+                .await?
+                .map_err(|s| anyhow!(s))?;
+
+            println!("Success.  1 Utxo Transfer was imported.");
+        }
         Command::Send {
-            amount,
             address,
+            amount,
             fee,
+            receiver_tag,
+            notify_self,
+            notify_other,
         } => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
+            let network = client.network(ctx).await?;
+            let root_dir = DataDirectory::get(None, network)?;
 
-            let txid = client
+            let resp = client
                 .send(
                     ctx,
                     amount,
                     receiving_address,
-                    UtxoNotificationMedium::OnChain,
+                    notify_self,
+                    notify_other,
                     fee,
                 )
                 .await?;
+            let Some((txid, private_notifications)) = resp else {
+                eprintln!("Failed to create transaction. Please check the log.");
+                bail!("Failed to create transaction. Please check the log.");
+            };
 
-            match txid {
-                Some(txid) => println!("Successfully created transaction: {txid}"),
-                None => println!("Failed to create transaction. Please check the log."),
-            }
+            println!("Successfully created transaction: {txid}");
+
+            process_utxo_notifications(
+                &root_dir,
+                network,
+                private_notifications,
+                Some(receiver_tag),
+            )?
         }
         Command::SendToMany { outputs, fee } => {
             let parsed_outputs = outputs
@@ -482,11 +624,19 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            let txid = client
-                .send_to_many(ctx, parsed_outputs, UtxoNotificationMedium::OnChain, fee)
+            let res = client
+                .send_to_many(
+                    ctx,
+                    parsed_outputs,
+                    UtxoNotificationMedium::OnChain,
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                )
                 .await?;
-            match txid {
-                Some(txid) => println!("Successfully created transaction: {txid}"),
+            match res {
+                Some((txid, _offchain_notifications)) => {
+                    println!("Successfully created transaction: {txid}")
+                }
                 None => println!("Failed to create transaction. Please check the log."),
             }
         }
@@ -505,6 +655,87 @@ async fn main() -> Result<()> {
             let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx).await?;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
+    }
+
+    Ok(())
+}
+
+// processes utxo-notifications in TxParams outputs, if any.
+//
+// 1. find off-chain-serialized outputs and add metadata
+//    (address, label, owner-type)
+// 2. create utxo-transfer dir if not existing
+// 3. write out one UtxoTransferEntry in a json file, per output
+// 4. provide instructions for sender and receiver. (if needed)
+fn process_utxo_notifications(
+    root_data_dir: &DataDirectory,
+    network: Network,
+    private_notifications: Vec<PrivateNotificationData>,
+    receiver_tag: Option<String>,
+) -> anyhow::Result<()> {
+    let data_dir = root_data_dir.utxo_transfer_directory_path();
+
+    if !private_notifications.is_empty() {
+        // create utxo-transfer dir if not existing
+        std::fs::create_dir_all(&data_dir)?;
+
+        println!("\n*** Utxo Transfer Files ***\n");
+    }
+
+    // TODO: It would be better if this timestamp was read from the created
+    // transaction.
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    // write out one UtxoTransferEntry in a json file, per output
+    let mut wrote_file_cnt = 0usize;
+    for entry in private_notifications {
+        let receiver_tag = if entry.owned {
+            SELF.to_owned()
+        } else {
+            receiver_tag.clone().unwrap_or(ANONYMOUS.to_owned())
+        };
+        let file_dir = data_dir.join(&receiver_tag);
+        std::fs::create_dir_all(&file_dir)?;
+
+        let entry = UtxoTransferEntry {
+            data_format: UtxoTransferEntry::data_format(),
+            recipient: entry
+                .recipient_address
+                .to_bech32m(network)
+                .expect("String encoding of address must succeed"),
+            ciphertext: entry.ciphertext,
+            address_info: AddressEnum::new(entry.recipient_address, network),
+        };
+
+        let file_name = format!("{}-{}.json", entry.address_info.short_id(), timestamp);
+        let file_path = file_dir.join(&file_name);
+        println!("creating file: {}", file_path.to_string_lossy());
+        let file = std::fs::File::create_new(&file_path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, &entry)?;
+        writer.flush()?;
+
+        wrote_file_cnt += 1;
+
+        println!("wrote {}", file_path.display());
+    }
+
+    // provide instructions for sender and receiver. (if needed)
+    if wrote_file_cnt > 0 {
+        println!("\n*** Important - Read or risk losing funds ***\n");
+        println!(
+            "
+{wrote_file_cnt} transaction outputs were each written to individual files for off-chain transfer.
+-- Sender Instructions --
+You must transfer each file to the corresponding recipient for claiming or they will never be able to claim the funds.
+You should also provide them the following recipient instructions.
+-- Recipient Instructions --
+run `neptune-cli claim-utxo file <file>` or use equivalent claim functionality of your chosen wallet software.
+"
+        );
     }
 
     Ok(())

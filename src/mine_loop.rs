@@ -324,10 +324,12 @@ pub(crate) async fn make_coinbase_transaction(
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
 
     // TODO: Produce two outputs here, one timelocked and one not.
+    let owned = true;
     let coinbase_output = TxOutput::offchain_native_currency(
         amount_to_prover,
         sender_randomness,
         receiving_address.into(),
+        owned,
     );
 
     let transaction_details = TransactionDetails::new_with_coinbase(
@@ -859,6 +861,7 @@ pub(crate) mod mine_loop_tests {
             NeptuneCoins::new(4),
             rng.gen(),
             alice_key.to_address().into(),
+            false,
         );
         let (tx_from_alice, _maybe_change_output) = alice
             .lock_guard()

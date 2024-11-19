@@ -438,6 +438,43 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
+    /// searches max `max_search_depth` from tip for a matching transaction
+    /// output.
+    ///
+    /// If `max_search_depth` is set to `None`, then all blocks are searched. A
+    /// A `max_search_depth` of `Some(0)` will only consider the tip.
+    pub(crate) async fn find_canonical_block_with_output(
+        &self,
+        output: AdditionRecord,
+        max_search_depth: Option<u64>,
+    ) -> Option<Block> {
+        let mut block = self.get_tip().await;
+        let mut search_depth = 0;
+
+        loop {
+            if block
+                .body()
+                .transaction_kernel
+                .outputs
+                .iter()
+                .any(|ar| *ar == output)
+            {
+                break Some(block);
+            }
+
+            if max_search_depth.is_some_and(|max| max <= search_depth) {
+                return None;
+            }
+
+            block = self
+                .get_block(block.header().prev_block_digest)
+                .await
+                .ok()??;
+
+            search_depth += 1;
+        }
+    }
+
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub async fn get_tip(&self) -> Block {
@@ -1187,7 +1224,8 @@ mod archival_state_tests {
         // to the block, and this removal record will insert indices in the Bloom filter.
         let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
 
-        let tx_output_anyone_can_spend = TxOutput::no_notification(utxo, rng.gen(), rng.gen());
+        let tx_output_anyone_can_spend =
+            TxOutput::no_notification(utxo, rng.gen(), rng.gen(), false);
         let (sender_tx, _change_output) = alice
             .lock_guard()
             .await
@@ -1410,6 +1448,7 @@ mod archival_state_tests {
                     NeptuneCoins::new(1),
                     rng.gen(),
                     alice_address.into(),
+                    false,
                 )
             })
             .collect_vec();
@@ -1621,11 +1660,13 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 sender_randomness,
                 alice_address.into(),
+                false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(9),
                 sender_randomness,
                 alice_address.into(),
+                false,
             ),
         ];
 
@@ -1637,11 +1678,13 @@ mod archival_state_tests {
                 NeptuneCoins::new(2),
                 sender_randomness,
                 bob_address.into(),
+                false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(3),
                 sender_randomness,
                 bob_address.into(),
+                false,
             ),
         ];
 
@@ -1813,11 +1856,13 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 rng.gen(),
                 genesis_address.into(),
+                false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(8),
                 rng.gen(),
                 genesis_address.into(),
+                false,
             ),
         ]
         .into();
@@ -1851,16 +1896,19 @@ mod archival_state_tests {
                 NeptuneCoins::new(1),
                 rng.gen(),
                 genesis_address.into(),
+                false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
                 genesis_address.into(),
+                false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(2),
                 rng.gen(),
                 genesis_address.into(),
+                false,
             ),
         ]
         .into();

@@ -826,8 +826,13 @@ mod wallet_tests {
         let msa_tip_previous = next_block.mutator_set_accumulator_after().clone();
         let output_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(200));
-        let tx_outputs: TxOutputList =
-            vec![TxOutput::no_notification(output_utxo, random(), random())].into();
+        let tx_outputs: TxOutputList = vec![TxOutput::no_notification(
+            output_utxo,
+            random(),
+            random(),
+            false,
+        )]
+        .into();
 
         let removal_records = tx_inputs_two_utxos
             .iter()
@@ -944,11 +949,13 @@ mod wallet_tests {
             NeptuneCoins::new(12),
             bob_sender_randomness,
             alice_address.into(),
+            false,
         );
         let receiver_data_1_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(1),
             bob_sender_randomness,
             alice_address.into(),
+            false,
         );
 
         let receiver_data_to_alice: TxOutputList =
@@ -1203,6 +1210,7 @@ mod wallet_tests {
             NeptuneCoins::new(1),
             rng.gen(),
             alice_address.into(),
+            false,
         );
 
         let (tx_from_bob, _maybe_change_output) = bob
@@ -1399,7 +1407,8 @@ mod wallet_tests {
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let anyone_can_spend_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
-        let tx_output = TxOutput::no_notification(anyone_can_spend_utxo, rng.gen(), rng.gen());
+        let tx_output =
+            TxOutput::no_notification(anyone_can_spend_utxo, rng.gen(), rng.gen(), false);
         let change_key = WalletSecret::devnet_wallet().nth_symmetric_key_for_tests(0);
         let (sender_tx, _change_output) = bob
             .lock_guard()

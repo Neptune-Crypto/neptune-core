@@ -12,6 +12,7 @@ use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
+use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToMiner {
@@ -156,21 +157,21 @@ impl PeerTaskToMain {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ClaimUtxoData {
+    /// Some(mutxo) if UTXO has already been mined. Otherwise None.
+    pub(crate) prepared_monitored_utxo: Option<MonitoredUtxo>,
+
+    /// Indicates if wallet already expects this UTXO.
+    pub(crate) has_expected_utxo: bool,
+
+    pub(crate) expected_utxo: ExpectedUtxo,
+}
+
 #[derive(Clone, Debug)]
-pub enum RPCServerToMain {
+pub(crate) enum RPCServerToMain {
     BroadcastTx(Box<Transaction>),
     Shutdown,
     PauseMiner,
     RestartMiner,
-}
-
-impl RPCServerToMain {
-    pub fn get_type(&self) -> String {
-        match self {
-            RPCServerToMain::BroadcastTx(_) => "broadcast transaction".to_string(),
-            RPCServerToMain::Shutdown => "shutdown".to_string(),
-            RPCServerToMain::PauseMiner => "pause miner".to_owned(),
-            RPCServerToMain::RestartMiner => "restart miner".to_owned(),
-        }
-    }
 }
