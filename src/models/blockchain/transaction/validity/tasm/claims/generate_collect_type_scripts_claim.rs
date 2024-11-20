@@ -23,21 +23,11 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
     }
 
     fn entrypoint(&self) -> String {
-        "tasm_neptune_claims_generate_collect_lock_scripts_claim".to_owned()
+        "tasm_neptune_claims_generate_collect_type_scripts_claim".to_owned()
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let entrypoint = self.entrypoint();
-
         let new_claim = library.import(Box::new(NewClaim));
-
-        let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
-        let proof_collection_field_salted_outputs_hash =
-            field!(ProofCollection::salted_outputs_hash);
-        let proof_collection_field_and_size_lock_script_hashes =
-            field_with_size!(ProofCollection::type_script_hashes);
-
-        const INPUT_SIZE: usize = Digest::LEN * 2;
 
         let assert_correct_size_indicator = triton_asm!(
             // _ *type_script_hashes type_script_hashes_si
@@ -59,35 +49,98 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
             // _ *type_script_hashes type_script_hashes_si
         );
 
-        let push_digest = |d: Digest| {
-            let [d0, d1, d2, d3, d4] = d.values();
-            triton_asm! {
-                push {d4}
-                push {d3}
-                push {d2}
-                push {d1}
-                push {d0}
-            }
+        let push_cts_program_hash = {
+            let Digest([d0, d1, d2, d3, d4]) = CollectTypeScripts.program().hash();
+            triton_asm! { push {d4} push {d3} push {d2} push {d1} push {d0} }
         };
-        let push_cts_program_hash = push_digest(CollectTypeScripts.program().hash());
 
-        let load_digest_reversed = triton_asm!(
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
+        let load_digest_reversed = triton_asm! {
+            addi {Digest::LEN - 1}
+            read_mem {Digest::LEN}
             pop 1
-        );
+            pick 1 pick 2 pick 3 pick 4
+        };
 
-        let type_script_hashes_loop_label = format!("{entrypoint}_type_script_hashes_loop");
-        let type_script_hashes_loop = triton_asm!(
+        let entrypoint = self.entrypoint();
+        let type_script_hashes_loop = format!("{entrypoint}_type_script_hashes_loop");
+        triton_asm!(
+            // BEFORE: _ *proof_collection
+            // AFTER:  _ *claim
+            {entrypoint}:
+                // _ *proof_collection
+
+                /* Prepare call to `new_claim` */
+                dup 0
+                {&field_with_size!(ProofCollection::type_script_hashes)}
+                // _ *proof_collection *type_script_hashes type_script_hashes_si
+
+                {&assert_correct_size_indicator}
+
+                dup 0
+                addi -1
+                // _ *proof_collection *type_script_hashes tsh_si output_size
+
+                push {Digest::LEN * 2}
+                place 1
+                // _ *proof_collection *type_script_hashes tsh_si input_size output_size
+
+                call {new_claim}
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input *program_digest
+
+
+                /* Write program digest */
+                {&push_cts_program_hash}
+                pick 5
+                write_mem {Digest::LEN}
+                pop 1
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input
+
+                /* Write program input */
+                dup 5
+                {&field!(ProofCollection::salted_inputs_hash)}
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input *salted_inputs_hash
+
+                {&load_digest_reversed}
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input [salted_inputs]
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input[0] [reversed(salted_inputs)]
+
+                pick 5
+                write_mem {Digest::LEN}
+                // _ *proof_collection *type_script_hashes tsh_si *claim *claim_output *claim_input[1]
+
+                pick 5
+                {&field!(ProofCollection::salted_outputs_hash)}
+                {&load_digest_reversed}
+                // _ *type_script_hashes tsh_si *claim *claim_output *claim_input[1] [reversed(salted_outputs_hash)]
+
+                pick 5
+                write_mem {Digest::LEN}
+                pop 1
+                // _ *type_script_hashes tsh_si *claim *claim_output
+
+                pick 2
+                dup 3
+                add
+                addi {Digest::LEN - 1}
+                // _ *claim *claim_output (*ts_hashes[last+1]_lw)
+
+                pick 3
+                addi {Digest::LEN}
+                // _ *claim *claim_output (*ts_hashes[last+1]_lw) *ts_hashes[0]_lw
+
+                pick 2
+                // _ *claim (*ts_hashes[last+1]_lw) ts_hashes[0]_lw *claim_output
+
+                call {type_script_hashes_loop}
+                // _ *claim (*ts_hashes[last+1]_lw) ts_hashes[last+1]_lw *claim_output
+
+                pop 3
+                // _ *claim
+
+                return
+
             // INVARIANT: _ (*ts_hashes[last+1]_lw) *ts_hashes[n]_lw (*claim.output[n])
-            {type_script_hashes_loop_label}:
+            {type_script_hashes_loop}:
                 /* Loop end-condition */
                 dup 2
                 dup 2
@@ -95,118 +148,17 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
                 skiz
                     return
 
-                dup 1
+                pick 1
                 read_mem {Digest::LEN}
                 addi {Digest::LEN * 2}
-                swap 7
-                pop 1
+                place 6
                 // _ (*ts_hashes[last+1]_lw) *ts_hashes[n+1]_lw (*claim.output[n]) [ts_hash[n]]
 
-                dup 5
+                pick 5
                 write_mem {Digest::LEN}
-                swap 1
-                pop 1
                 // _ (*ts_hashes[last+1]_lw) *ts_hashes[n+1]_lw (*claim.output[n+1])
 
                 recurse
-        );
-
-        let type_script_hashes_si_alloc = library.kmalloc(1);
-        triton_asm!(
-            // BEFORE: _ *proof_collection_pointer
-            // AFTER:  _ *claim
-            {entrypoint}:
-                // _ *proof_collection_pointer
-
-
-                /* Prepare call to `new_claim` */
-                dup 0
-                {&proof_collection_field_and_size_lock_script_hashes}
-                // _ *proof_collection_pointer *type_script_hashes type_script_hashes_si
-
-                {&assert_correct_size_indicator}
-
-                push {INPUT_SIZE}
-                swap 1
-                // _ *proof_collection_pointer *type_script_hashes input_size type_script_hashes_si
-
-                dup 0
-                push {type_script_hashes_si_alloc.write_address()}
-                write_mem {type_script_hashes_si_alloc.num_words()}
-                pop 1
-                // _ *proof_collection_pointer *type_script_hashes input_size type_script_hashes_si
-
-                addi -1
-                // _ *proof_collection_pointer *type_script_hashes input_size (type_script_hashes_si - 1)
-                // _ *proof_collection_pointer *type_script_hashes input_size output_size  <-- rename
-
-                call {new_claim}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input *program_digest
-
-
-                /* Write program digest */
-                {&push_cts_program_hash}
-                dup 5
-                write_mem {Digest::LEN}
-                pop 2
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input
-
-                /* Write program input */
-                dup 4
-                {&proof_collection_field_salted_inputs_hash}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input *salted_inputs_hash
-
-                {&load_digest_reversed}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input [salted_inputs]
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input[0] [reversed(salted_inputs)]
-
-                dup 5
-                write_mem {Digest::LEN}
-                swap 1
-                pop 1
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input[1]
-
-                dup 4
-                {&proof_collection_field_salted_outputs_hash}
-                {&load_digest_reversed}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output *claim_input[1] [reversed(salted_outputs_hash)]
-
-                dup 5
-                write_mem {Digest::LEN}
-                pop 2
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output
-
-                push {type_script_hashes_si_alloc.read_address()}
-                read_mem {type_script_hashes_si_alloc.num_words()}
-                pop 1
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output type_script_hashes_si
-
-                dup 3
-                add
-                addi {Digest::LEN - 1}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output (*ts_hashes[last+1]_lw)
-
-                dup 3
-                addi {Digest::LEN}
-                // _ *proof_collection_pointer *type_script_hashes *claim *claim_output (*ts_hashes[last+1]_lw) ts_hashes[0]_lw
-
-                swap 1
-                swap 2
-                // _ *proof_collection_pointer *type_script_hashes *claim (*ts_hashes[last+1]_lw) ts_hashes[0]_lw *claim_output
-
-                call {type_script_hashes_loop_label}
-                // _ *proof_collection_pointer *type_script_hashes *claim (*ts_hashes[last+1]_lw) ts_hashes[last+1]_lw *claim_output
-
-                pop 3
-                // _ *proof_collection_pointer *type_script_hashes *claim
-
-                swap 2
-                pop 2
-                // _ *claim
-
-                return
-
-                {&type_script_hashes_loop}
         )
     }
 }
@@ -249,14 +201,8 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            fn type_script_hashes_size_indicator_pointer_isolated_run() -> BFieldElement {
-                bfe!(-2)
-            }
-
-            // _ *proof_collection
             let proof_collection_pointer = stack.pop().unwrap();
-
-            let proof_collection: ProofCollection =
+            let proof_collection =
                 *ProofCollection::decode_from_memory(memory, proof_collection_pointer).unwrap();
 
             let claim = proof_collection.collect_type_scripts_claim();
@@ -265,13 +211,6 @@ mod tests {
             encode_to_memory(memory, claim_pointer, &claim);
 
             println!("encoded claim: [\n{}\n]", claim.encode().iter().join(", "));
-
-            // Mimic population of static memory
-            let ts_hashes_size_indicator_as_u32: u32 = (claim.output.len() + 1).try_into().unwrap();
-            memory.insert(
-                type_script_hashes_size_indicator_pointer_isolated_run(),
-                bfe!(ts_hashes_size_indicator_as_u32),
-            );
 
             stack.push(claim_pointer);
         }
