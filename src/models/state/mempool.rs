@@ -670,18 +670,16 @@ impl Mempool {
 
                     (None, false)
                 }
-                TransactionProof::Witness(primitive_witness) => {
-                    let new_tx = Transaction::new_with_primitive_witness_ms_data(
-                        primitive_witness.to_owned(),
-                        mutator_set_update.additions.clone(),
-                        mutator_set_update.removals.clone(),
+                TransactionProof::Witness(_primitive_witness) => {
+                    debug!(
+                        "Failed to update transaction {tx_id}. Because it \
+                    is only supported by a primitive witness. While it is \
+                    technically possible, policy dictates not to update such \
+                    transactions in the mempool. Re-initiate the transaction \
+                    instead."
                     );
 
-                    tx.transaction = new_tx.clone();
-                    events.push(MempoolEvent::UpdateTxMutatorSet(*tx_id, new_tx.clone()));
-                    debug!("Updating primitive-witness supported transaction {tx_id} to new mutator set.");
-
-                    (None, true)
+                    (None, false)
                 }
                 TransactionProof::SingleProof(old_proof) => {
                     if can_upgrade_single_proof {
