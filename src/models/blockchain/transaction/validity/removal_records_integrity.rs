@@ -57,6 +57,9 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
 
+const COINBASE_HAS_INPUTS_ERROR: i128 = 1_000_000;
+const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_001;
+
 #[derive(
     Clone,
     Debug,
@@ -660,7 +663,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                results are {0, 1, 2} */
 
             pop_count
-            assert
+            assert error_id {COINBASE_HAS_INPUTS_ERROR}
             // _ [txk_mast_hash] *witness
         );
 
@@ -930,7 +933,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
                 {&compare_digests}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl (computed_bloom_indices_h == claimed_indices_h)
 
-                assert
+                assert error_id {COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR}
                 // _ *witness *rrs[i]_si num_utxos i *utxos[i]_si *aocl
 
                 /* 10. */
@@ -1079,6 +1082,7 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use test_strategy::proptest;
 
     use super::*;
@@ -1167,7 +1171,7 @@ mod tests {
         let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[],
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
         );
         assert!(let Ok(_) = assertion_failure);
     }
@@ -1184,7 +1188,7 @@ mod tests {
         let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[],
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
         );
         assert!(let Ok(_) = assertion_failure);
     }
@@ -1206,26 +1210,59 @@ mod tests {
         let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[],
+            &[COINBASE_HAS_INPUTS_ERROR],
         );
         assert!(let Ok(_) = assertion_failure);
     }
 
-    #[proptest(cases = 2)]
+    #[test]
+    fn removal_record_fail_on_bad_absolute_indices_unit_test() {
+        let mut test_runner = TestRunner::deterministic();
+        let num_inputs = 2;
+        let primitive_witness = PrimitiveWitness::arbitrary_with((num_inputs, 2, 2))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        for i in 0..num_inputs {
+            let mut bad_pw = primitive_witness.clone();
+            let mut bad_inputs = bad_pw.kernel.inputs.clone();
+            bad_inputs[i]
+                .absolute_indices
+                .increment_bloom_filter_index(12);
+            let bad_kernel = TransactionKernelModifier::default()
+                .inputs(bad_inputs)
+                .modify(bad_pw.kernel.clone());
+            bad_pw.kernel = bad_kernel;
+            let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
+            let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+            );
+            assert!(let Ok(_) = assertion_failure);
+        }
+    }
+
+    #[proptest(cases = 4)]
     fn removal_records_fail_on_bad_absolute_indices(
-        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
-        primitive_witness: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with((3, 2, 2)))] mut bad_pw: PrimitiveWitness,
         #[strategy(0..2usize)] mutated_input: usize,
         #[strategy(0..NUM_TRIALS as usize)] mutated_bloom_filter_index: usize,
     ) {
-        let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        bad_witness.removal_records[mutated_input]
+        let mut bad_inputs = bad_pw.kernel.inputs.clone();
+        bad_inputs[mutated_input]
             .absolute_indices
             .increment_bloom_filter_index(mutated_bloom_filter_index);
+        let bad_kernel = TransactionKernelModifier::default()
+            .inputs(bad_inputs)
+            .modify(bad_pw.kernel.clone());
+        bad_pw.kernel = bad_kernel;
+        let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
         RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[],
+            &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
         )?;
     }
 }

@@ -13,6 +13,10 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
+const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
+const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
+const BOTH_INPUT_COINBASES_ERROR: i128 = 1_000_022;
+
 /// Authenticate that both coinbase and fee fields match the tx-kernel mast
 /// hash. And authenticate that the no-inflation rule for merge is followed.
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +80,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
             {assert_coinbase_equality_label}:
                 // _ *coinbase_a *coinbase_b
 
+                /* Assert discriminant equality */
                 read_mem 1
                 addi 1
                 // _  *coinbase_a b_discriminant *coinbase_b
@@ -90,7 +95,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
 
                 dup 1
                 eq
-                assert
+                assert error_id {UNEQUAL_DISCRIMINANT_ERROR}
                 // _  *coinbase_a *coinbase_b discriminant
 
                 /* If discriminant == 0, we are done (coinbase == None) */
@@ -99,7 +104,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 skiz
                     return
 
-                /* Coinbase is Some(cb), so we must verify that they contain same value */
+                /* Coinbase is Some(cb); assert value equality */
                 // _  *coinbase_a *coinbase_b
 
                 dup 1
@@ -117,7 +122,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 {&compare_coinbases}
                 // _ *coinbase_a *coinbase_b (coinbase_a == coinbase_b)
 
-                assert
+                assert error_id {UNEQUAL_VALUE_ERROR}
                 // _ *coinbase_a *coinbase_b
 
                 return
@@ -198,7 +203,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
                 eq
                 // _ *new_txk *left_coinbase *right_coinbase !(right_coinbase.is_some() && left_coinbase.is_some())
 
-                assert
+                assert error_id {BOTH_INPUT_COINBASES_ERROR}
                 // _ *new_txk *left_coinbase *right_coinbase
 
 
@@ -270,6 +275,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::EnumCount;
+    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::prelude::TasmObject;
@@ -333,31 +339,28 @@ mod tests {
         right_cb: Option<NeptuneCoins>,
         new_cb: Option<NeptuneCoins>,
     ) {
-        let legal = !(left_cb.is_some() && right_cb.is_some());
-        let legal = legal
-            && if left_cb.is_some() {
-                new_cb == left_cb
-            } else {
-                new_cb == right_cb
-            };
+        let new_cb_is_legal = match (left_cb, right_cb, new_cb) {
+            (None, None, None) => Ok(()),
+            (Some(o), None, Some(n)) | (None, Some(o), Some(n)) if o == n => Ok(()),
+            (Some(_), None, Some(_)) | (None, Some(_), Some(_)) => Err(UNEQUAL_VALUE_ERROR),
+            (Some(_), Some(_), _) => Err(BOTH_INPUT_COINBASES_ERROR),
+            (Some(_), None, None) | (None, Some(_), None) | (None, None, Some(_)) => {
+                Err(UNEQUAL_DISCRIMINANT_ERROR)
+            }
+        };
 
         let snippet = dummy_snippet_for_test();
         let left = dummy_tx_kernel(left_cb);
         let right = dummy_tx_kernel(right_cb);
         let new = dummy_tx_kernel(new_cb);
-        let init_state = snippet.init_state(&left, &right, &new);
-        if legal {
-            test_rust_equivalence_given_execution_state(
-                &ShadowedReadOnlyAlgorithm::new(snippet),
-                init_state.into(),
-            );
+
+        let init_state = snippet.init_state(&left, &right, &new).into();
+        let snippet = ShadowedReadOnlyAlgorithm::new(snippet);
+        if let Err(error_id) = new_cb_is_legal {
+            test_assertion_failure(&snippet, init_state, &[error_id]);
         } else {
-            test_assertion_failure(
-                &ShadowedReadOnlyAlgorithm::new(snippet),
-                init_state.clone().into(),
-                &[],
-            );
-        }
+            test_rust_equivalence_given_execution_state(&snippet, init_state);
+        };
     }
 
     #[test]
@@ -392,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_all_cb_combinations() {
-        let options = [None, Some(NeptuneCoins::one())];
+        let options = [None, Some(NeptuneCoins::new(1))];
         for left_cb in options {
             for right_cb in options {
                 for new_cb in options {
@@ -417,7 +420,7 @@ mod tests {
             test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(snippet),
                 init_state.clone().into(),
-                &[],
+                &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
             );
         }
     }
@@ -532,10 +535,10 @@ mod tests {
             // Assert that either left or right is not set
             assert!(left_txk.coinbase.is_none() || right_txk.coinbase.is_none());
 
-            let maybe_coinbase = if left_txk.coinbase.is_none() {
-                &right_txk.coinbase
-            } else {
+            let maybe_coinbase = if left_txk.coinbase.is_some() {
                 &left_txk.coinbase
+            } else {
+                &right_txk.coinbase
             };
 
             assert_eq!(&new_txk.coinbase, maybe_coinbase);
@@ -546,21 +549,19 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<BenchmarkCase>,
         ) -> ReadOnlyAlgorithmInitialState {
-            let mut test_runner = TestRunner::deterministic();
             let [primitive_witness_left, primitive_witness_right] =
                 PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
                     (2, 2, 2),
                     (2, 2, 2),
                 ])
-                .new_tree(&mut test_runner)
+                .new_tree(&mut TestRunner::deterministic())
                 .unwrap()
                 .current();
 
             let left_kernel = &primitive_witness_left.kernel;
             let right_kernel = &primitive_witness_right.kernel;
 
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
-            let new_kernel = if left_kernel.coinbase.is_some() || rng.gen_bool(0.5) {
+            let new_kernel = if left_kernel.coinbase.is_some() || StdRng::from_seed(seed).gen() {
                 left_kernel
             } else {
                 right_kernel

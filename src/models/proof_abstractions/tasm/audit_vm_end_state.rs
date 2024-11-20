@@ -17,9 +17,7 @@ const NUM_TOP_STACK_WORDS_TO_CHECK: usize = 11;
 /// reported size matches the one given by input (the expected size). Also
 /// verifies that the top 11 elements of the stack are zeros. Crashes the VM if
 /// any of those checks fail. The expected size should be the one reported by
-/// [VerifyNdSiIntegrity] at the beginning of program execution.
-///
-/// [VerifyNdSiIntegrity]: tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity
+/// [`VerifyNdSiIntegrity`] at the beginning of program execution.
 #[derive(Clone, Debug, Copy)]
 pub struct AuditVmEndState<WitnessType: TasmObject + BFieldCodec + Clone + Debug + 'static> {
     _phantom_data: PhantomData<WitnessType>,
@@ -65,7 +63,7 @@ impl<Witness: TasmObject + BFieldCodec + Clone + Debug + 'static> BasicSnippet
                     dup {i}
                     push 0
                     eq
-                    assert
+                    assert error_id 1000010
                 )
             })
             .collect_vec();
@@ -78,7 +76,7 @@ impl<Witness: TasmObject + BFieldCodec + Clone + Debug + 'static> BasicSnippet
                 // _ expected_witness_size found_size
 
                 eq
-                assert
+                assert error_id 1000011
                 // _
 
                 /* Now, verify that the top 11 stack elements are zero */
@@ -193,7 +191,7 @@ mod tests {
 
         let stack_index_expected_size_value = NUM_OP_STACK_REGISTERS;
         bad_init_state.stack[stack_index_expected_size_value] += bfe!(1);
-        test_assertion_failure(&accessor, bad_init_state.into(), &[]);
+        test_assertion_failure(&accessor, bad_init_state.into(), &[1_000_011]);
     }
 
     #[test]
@@ -206,7 +204,7 @@ mod tests {
         for i in 0..NUM_TOP_STACK_WORDS_TO_CHECK {
             let mut bad_init_state = good_init_state.clone();
             bad_init_state.stack[first_zero - i] = random();
-            test_assertion_failure(&accessor, bad_init_state.into(), &[]);
+            test_assertion_failure(&accessor, bad_init_state.into(), &[1_000_010]);
         }
     }
 }

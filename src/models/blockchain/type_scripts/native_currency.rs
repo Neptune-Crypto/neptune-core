@@ -35,6 +35,11 @@ use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
+const BAD_COINBASE_SIZE_ERROR: i128 = 1_000_030;
+const BAD_SALTED_UTXOS_ERROR: i128 = 1_000_031;
+const INPUT_OUTPUT_VALUE_MISMATCH: i128 = 1_000_032;
+const BAD_STATE_SIZE_ERROR: i128 = 1_000_033;
+
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
 ///
@@ -242,7 +247,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ coinbase_size (coinbase_size == 1) (coinbase_size == 5)
 
             add
-            assert
+            assert error_id {BAD_COINBASE_SIZE_ERROR}
             // _ coinbase_size
         );
 
@@ -262,7 +267,8 @@ impl ConsensusProgram for NativeCurrency {
             read_io 5
             // _ *salted_utxos [salted_utxos_hash] [sud]
 
-            {&digest_eq} assert
+            {&digest_eq}
+            assert error_id {BAD_SALTED_UTXOS_ERROR}
             // _ *salted_utxos
         };
 
@@ -438,7 +444,7 @@ impl ConsensusProgram for NativeCurrency {
             {&u128_eq}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * (total_input == total_output)
 
-            assert
+            assert error_id {INPUT_OUTPUT_VALUE_MISMATCH}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * *
 
             pop 5
@@ -558,7 +564,8 @@ impl ConsensusProgram for NativeCurrency {
                     read_mem 1 push {coin_size+1} add
                     // _ *coins[j]_si [amount] state_size *state[last]
 
-                    swap 1 push {coin_size} eq assert
+                    swap 1 push {coin_size} eq
+                    assert error_id {BAD_STATE_SIZE_ERROR}
                     // _ *coins[j]_si [amount] *state[last]
 
                     read_mem {coin_size} pop 1
@@ -826,7 +833,7 @@ pub mod test {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[],
+            &[INPUT_OUTPUT_VALUE_MISMATCH],
         )?;
     }
 
@@ -863,7 +870,7 @@ pub mod test {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[],
+            &[INPUT_OUTPUT_VALUE_MISMATCH],
         )?;
     }
 

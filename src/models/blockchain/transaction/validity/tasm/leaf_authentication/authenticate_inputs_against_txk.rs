@@ -76,6 +76,7 @@ mod tests {
     use prop::test_runner::TestRunner;
     use proptest::prelude::*;
     use rand::random;
+    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -193,7 +194,7 @@ mod tests {
         test_assertion_failure(
             &ShadowedReadOnlyAlgorithm::new(AuthenticateInputsAgainstTxk),
             bad_auth_path.into(),
-            &[],
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
         );
     }
 }

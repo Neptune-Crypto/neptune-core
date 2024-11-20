@@ -157,6 +157,7 @@ mod tests {
     use proptest::prelude::*;
     use rand::random;
     use strum::EnumCount;
+    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::test_helpers::test_assertion_failure;
@@ -301,7 +302,7 @@ mod tests {
         test_assertion_failure(
             &ShadowedMemPreserver::new(AuthenticateMsaAgainstTxk),
             bad_auth_path.into(),
-            &[],
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
         );
     }
 }

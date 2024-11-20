@@ -499,6 +499,7 @@ impl ConsensusProgram for SingleProof {
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash] [txk_digest]
 
                 assert_vector
+                pop {Digest::LEN}
                 // [txk_digest] *spw disc *proof_collection
 
 
