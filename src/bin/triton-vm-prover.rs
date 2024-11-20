@@ -7,9 +7,17 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::prove;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
+use thread_priority::set_current_thread_priority;
+use thread_priority::ThreadPriority;
 use tracing::info;
 
 fn main() {
+    // run with a low priority so that neptune-core can remain responsive.
+    //
+    // todo: we could accept a thread-prioritycli param (0..100) and
+    //       pass it with ThreadPriority::CrossPlatform(x).
+    set_current_thread_priority(ThreadPriority::Min).unwrap();
+
     let stdin = io::stdin();
     let mut iterator = stdin.lock().lines();
     let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
