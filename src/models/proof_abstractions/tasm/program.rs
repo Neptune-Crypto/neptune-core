@@ -80,12 +80,10 @@ where
         input: &PublicInput,
         nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
-        use tasm_lib::maybe_write_debuggable_program_to_disk;
+        let mut vm_state = VMState::new(self.program(), input.clone(), nondeterminism.clone());
+        tasm_lib::maybe_write_debuggable_vm_state_to_disk(&vm_state);
 
-        let program = self.program();
-        let mut vm_state = VMState::new(&program, input.clone(), nondeterminism.clone());
         let init_stack = vm_state.op_stack.clone();
-        maybe_write_debuggable_program_to_disk(&program, &vm_state);
         let result = vm_state.run();
         match result {
             Ok(_) => {
@@ -110,6 +108,46 @@ where
                 ))
             }
         }
+    }
+
+    /// `Ok(())` iff the given input & non-determinism triggers the failure of
+    /// either the instruction `assert` or `vector_assert`, and if that
+    /// instruction's error ID is one of the expected error IDs.
+    #[cfg(test)]
+    fn test_assertion_failure(
+        &self,
+        public_input: PublicInput,
+        non_determinism: NonDeterminism,
+        expected_error_ids: &[i128],
+    ) -> proptest::test_runner::TestCaseResult {
+        let fail = |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
+
+        let tasm_result = self.run_tasm(&public_input, non_determinism.clone());
+        let Err(ConsensusError::TritonVMPanic(_, err)) = tasm_result else {
+            return fail("expected a failure in Triton VM, but it halted gracefully".into());
+        };
+
+        let err = match err {
+            InstructionError::AssertionFailed(err)
+            | InstructionError::VectorAssertionFailed(_, err) => err,
+            _ => return fail(format!("expected an assertion failure, but got: {err}")),
+        };
+
+        let ids_str = expected_error_ids.iter().join(", ");
+        let expected_ids_str = format!("expected an error ID in {{{ids_str}}}");
+        let Some(err_id) = err.id else {
+            return fail(format!("{expected_ids_str}, but found none"));
+        };
+
+        proptest::prop_assert!(
+            expected_error_ids.contains(&err_id),
+            "{expected_ids_str}, but found {err_id}",
+        );
+
+        let rust_result = self.run_rust(&public_input, non_determinism.clone());
+        proptest::prop_assert!(rust_result.is_err());
+
+        Ok(())
     }
 
     /// Run the program and generate a proof for it, assuming running halts
@@ -248,30 +286,33 @@ pub mod test {
         consensus_program: T,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
-        allowed_instruction_errors: &[InstructionError],
+        expected_error_ids: &[i128],
     ) {
         let rust_result = consensus_program.run_rust(input, nondeterminism.clone());
-        assert!(matches!(
-            rust_result.unwrap_err(),
-            ConsensusError::RustShadowPanic(_)
-        ));
+        assert2::assert!(let Err(ConsensusError::RustShadowPanic(_)) = rust_result);
 
         let tasm_result = consensus_program.run_tasm(input, nondeterminism);
-        let instruction_error = match tasm_result {
-            Ok(_) => {
-                panic!("negative test failed to fail for consensus program {consensus_program:?}",)
-            }
-            Err(ConsensusError::RustShadowPanic(_)) => {
-                panic!("TASM code must fail with expected error enum. Program was {consensus_program:?}")
-            }
-            Err(ConsensusError::TritonVMPanic(_, instruction_error)) => instruction_error,
+        let consensus_err = tasm_result.expect_err(&format!(
+            "negative test failed to fail for consensus program {consensus_program:?}"
+        ));
+        let ConsensusError::TritonVMPanic(_, instruction_error) = consensus_err else {
+            panic!("Triton VM must fail for consensus program {consensus_program:?}")
         };
+        let assertion_err = match instruction_error {
+            InstructionError::AssertionFailed(err)
+            | InstructionError::VectorAssertionFailed(_, err) => err,
+            _ => panic!("Triton VM must fail on assertion, but got: {instruction_error}"),
+        };
+        let err_id = assertion_err
+            .id
+            .expect("failed assertion must have an error ID, but does not");
 
+        let expected_error_ids_str = expected_error_ids.iter().join(", ");
         assert!(
-            allowed_instruction_errors.contains(&instruction_error),
-            "Triton VM must fail with expected instruction error. Expected one of: [{}]\n got {}",
-            allowed_instruction_errors.iter().join(","),
-            instruction_error
+            expected_error_ids.contains(&err_id),
+            "error ID {err_id} ∉ {{{expected_error_ids_str}}}\nTriton VM execution failed due to \
+            unfulfilled assertion with error ID {err_id}, but expected one of the following IDs: \
+            {{{expected_error_ids_str}}}",
         );
     }
 
@@ -548,7 +589,7 @@ pub mod test {
             .unwrap_or_else(|_| panic!("cannot create '{TEST_DATA_DIR}' directory"));
         path.push(Path::new(&name));
 
-        let proof = triton_vm::prove(Stark::default(), claim, &program, nondeterminism)
+        let proof = triton_vm::prove(Stark::default(), claim, program, nondeterminism)
             .expect("cannot produce proof");
 
         save_proof(&path, &proof);

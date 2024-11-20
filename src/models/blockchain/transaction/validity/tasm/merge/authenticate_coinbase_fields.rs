@@ -274,12 +274,11 @@ mod tests {
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::test_helpers::negative_test;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::test_helpers::test_rust_equivalence_given_execution_state;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithm;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
-    use tasm_lib::triton_vm::error::InstructionError;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Digest;
     use tasm_lib::triton_vm::prelude::Tip5;
@@ -353,10 +352,10 @@ mod tests {
                 init_state.into(),
             );
         } else {
-            negative_test(
+            test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(snippet),
                 init_state.clone().into(),
-                &[InstructionError::AssertionFailed],
+                &[],
             );
         }
     }
@@ -415,10 +414,10 @@ mod tests {
 
         for mutated_index in 0..nd_digests_len {
             init_state.nondeterminism.digests[mutated_index] = random();
-            negative_test(
+            test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(snippet),
                 init_state.clone().into(),
-                &[InstructionError::VectorAssertionFailed(0)],
+                &[],
             );
         }
     }

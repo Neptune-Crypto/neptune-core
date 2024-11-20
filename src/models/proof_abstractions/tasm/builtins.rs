@@ -368,12 +368,12 @@ mod test {
     fn can_verify_halt_in_emulated_environment() {
         let program_code = triton_asm! { halt };
         let program = Program::new(&program_code);
-        let claim = Claim::new(program.hash());
+        let claim = Claim::about_program(&program);
         let stark_parameters = Stark::default();
         let proof = triton_vm::prove(
             stark_parameters,
             &claim,
-            &program,
+            program.clone(),
             NonDeterminism::new(vec![]),
         )
         .unwrap();

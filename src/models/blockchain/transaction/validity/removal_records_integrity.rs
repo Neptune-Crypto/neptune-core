@@ -29,7 +29,6 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use tasm_lib::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -1073,28 +1072,20 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
 
 #[cfg(test)]
 mod tests {
+    use assert2::assert;
     use itertools::Itertools;
     use proptest::arbitrary::Arbitrary;
-    use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
-    use proptest::test_runner::TestCaseError;
+    use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
     use test_strategy::proptest;
 
-    use super::RemovalRecordsIntegrity;
-    use super::RemovalRecordsIntegrityWitness;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::ConsensusError;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
-    use crate::triton_vm::prelude::*;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use super::*;
 
     fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
-    ) -> Result<(), TestCaseError> {
+    ) -> TestCaseResult {
         let salted_inputs_utxos_hash = removal_records_integrity_witness.output();
         let rust_result = RemovalRecordsIntegrity
             .run_rust(
@@ -1117,31 +1108,6 @@ mod tests {
             tasm_result.iter().join(", "),
             rust_result.iter().join(", "),
         );
-
-        Ok(())
-    }
-
-    fn prop_negative(
-        removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
-        allowed_failure_codes: &[InstructionError],
-    ) -> Result<(), TestCaseError> {
-        let tasm_result = RemovalRecordsIntegrity.run_tasm(
-            &removal_records_integrity_witness.standard_input(),
-            removal_records_integrity_witness.nondeterminism(),
-        );
-        prop_assert!(tasm_result.is_err());
-        let triton_vm_error_code = match tasm_result.unwrap_err() {
-            ConsensusError::TritonVMPanic(_string, instruction_error) => instruction_error,
-            _ => unreachable!(),
-        };
-
-        prop_assert!(allowed_failure_codes.contains(&triton_vm_error_code));
-
-        let rust_result = RemovalRecordsIntegrity.run_rust(
-            &removal_records_integrity_witness.standard_input(),
-            removal_records_integrity_witness.nondeterminism(),
-        );
-        prop_assert!(rust_result.is_err());
 
         Ok(())
     }
@@ -1196,14 +1162,14 @@ mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let mut bad_removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        bad_removal_records_integrity_witness.mast_path_mutator_set[1] = Digest::default();
-        let property = prop_negative(
-            bad_removal_records_integrity_witness,
-            &[InstructionError::VectorAssertionFailed(0)],
+        let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_witness.mast_path_mutator_set[1] = Digest::default();
+        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
+            bad_witness.standard_input(),
+            bad_witness.nondeterminism(),
+            &[],
         );
-        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
+        assert!(let Ok(_) = assertion_failure);
     }
 
     #[test]
@@ -1213,14 +1179,14 @@ mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let mut bad_removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        bad_removal_records_integrity_witness.mast_path_inputs[1] = Digest::default();
-        let property = prop_negative(
-            bad_removal_records_integrity_witness,
-            &[InstructionError::VectorAssertionFailed(0)],
+        let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_witness.mast_path_inputs[1] = Digest::default();
+        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
+            bad_witness.standard_input(),
+            bad_witness.nondeterminism(),
+            &[],
         );
-        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
+        assert!(let Ok(_) = assertion_failure);
     }
 
     #[test]
@@ -1236,29 +1202,30 @@ mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let bad_removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::from(&bad_primitive_witness);
-        let property = prop_negative(
-            bad_removal_records_integrity_witness,
-            &[InstructionError::AssertionFailed],
+        let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_primitive_witness);
+        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
+            bad_witness.standard_input(),
+            bad_witness.nondeterminism(),
+            &[],
         );
-        assert!(property.is_ok(), "Got error: {}", property.unwrap_err());
+        assert!(let Ok(_) = assertion_failure);
     }
 
     #[proptest(cases = 2)]
     fn removal_records_fail_on_bad_absolute_indices(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
+        primitive_witness: PrimitiveWitness,
         #[strategy(0..2usize)] mutated_input: usize,
         #[strategy(0..NUM_TRIALS as usize)] mutated_bloom_filter_index: usize,
     ) {
-        let mut bad_removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::from(&primitive_witness);
-        bad_removal_records_integrity_witness.removal_records[mutated_input]
+        let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        bad_witness.removal_records[mutated_input]
             .absolute_indices
             .increment_bloom_filter_index(mutated_bloom_filter_index);
-        prop_negative(
-            bad_removal_records_integrity_witness,
-            &[InstructionError::VectorAssertionFailed(0)],
+        RemovalRecordsIntegrity.test_assertion_failure(
+            bad_witness.standard_input(),
+            bad_witness.nondeterminism(),
+            &[],
         )?;
     }
 }

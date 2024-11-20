@@ -245,49 +245,42 @@ impl ProofCollection {
         }
 
         // compile claims
-        let removal_records_integrity_claim = Claim {
-            program_digest: RemovalRecordsIntegrity.program().hash(),
-            input: self.kernel_mast_hash.reversed().values().to_vec(),
-            output: self.salted_inputs_hash.values().to_vec(),
-        };
+        let removal_records_integrity_claim =
+            Claim::about_program(&RemovalRecordsIntegrity.program())
+                .with_input(self.kernel_mast_hash.reversed().values())
+                .with_output(self.salted_inputs_hash.values().to_vec());
         debug!(
             "removal records integrity claim: {:?}",
             removal_records_integrity_claim
         );
-        let kernel_to_outputs_claim = Claim {
-            program_digest: KernelToOutputs.program().hash(),
-            input: self.kernel_mast_hash.reversed().values().to_vec(),
-            output: self.salted_outputs_hash.values().to_vec(),
-        };
-        let collect_lock_scripts_claim = Claim {
-            program_digest: CollectLockScripts.program().hash(),
-            input: self.salted_inputs_hash.reversed().values().to_vec(),
-            output: self
-                .lock_script_hashes
-                .iter()
-                .flat_map(|d| d.values())
-                .collect_vec(),
-        };
-        let collect_type_scripts_claim = Claim {
-            program_digest: CollectTypeScripts.program().hash(),
-            input: [self.salted_inputs_hash, self.salted_outputs_hash]
-                .into_iter()
-                .flat_map(|d| d.reversed().values())
-                .collect_vec(),
-            output: self
-                .type_script_hashes
-                .iter()
-                .flat_map(|d| d.values())
-                .collect_vec(),
-        };
+        let kernel_to_outputs_claim = Claim::about_program(&KernelToOutputs.program())
+            .with_input(self.kernel_mast_hash.reversed().values())
+            .with_output(self.salted_outputs_hash.values().to_vec());
+        let collect_lock_scripts_claim = Claim::about_program(&CollectLockScripts.program())
+            .with_input(self.salted_inputs_hash.reversed().values())
+            .with_output(
+                self.lock_script_hashes
+                    .iter()
+                    .flat_map(|d| d.values())
+                    .collect(),
+            );
+        let collect_type_scripts_claim = Claim::about_program(&CollectTypeScripts.program())
+            .with_input(
+                [self.salted_inputs_hash, self.salted_outputs_hash]
+                    .into_iter()
+                    .flat_map(|d| d.reversed().values())
+                    .collect_vec(),
+            )
+            .with_output(
+                self.type_script_hashes
+                    .iter()
+                    .flat_map(|d| d.values())
+                    .collect_vec(),
+            );
         let lock_script_claims = self
             .lock_script_hashes
             .iter()
-            .map(|lsh| Claim {
-                program_digest: *lsh,
-                input: self.kernel_mast_hash.reversed().values().to_vec(),
-                output: vec![],
-            })
+            .map(|&lsh| Claim::new(lsh).with_input(self.kernel_mast_hash.reversed().values()))
             .collect_vec();
         let type_script_claims = self
             .type_script_hashes
@@ -353,19 +346,15 @@ impl ProofCollection {
     }
 
     pub fn removal_records_integrity_claim(&self) -> Claim {
-        Claim {
-            program_digest: RemovalRecordsIntegrity.program().hash(),
-            input: self.kernel_mast_hash.reversed().values().to_vec(),
-            output: self.salted_inputs_hash.values().to_vec(),
-        }
+        Claim::about_program(&RemovalRecordsIntegrity.program())
+            .with_input(self.kernel_mast_hash.reversed().values())
+            .with_output(self.salted_inputs_hash.values().to_vec())
     }
 
     pub fn kernel_to_outputs_claim(&self) -> Claim {
-        Claim {
-            program_digest: KernelToOutputs.program().hash(),
-            input: self.kernel_mast_hash.reversed().values().to_vec(),
-            output: self.salted_outputs_hash.values().to_vec(),
-        }
+        Claim::about_program(&KernelToOutputs.program())
+            .with_input(self.kernel_mast_hash.reversed().values())
+            .with_output(self.salted_outputs_hash.values().to_vec())
     }
 
     pub fn collect_lock_scripts_claim(&self) -> Claim {
@@ -380,11 +369,9 @@ impl ProofCollection {
             }
             i += 1;
         }
-        Claim {
-            program_digest: CollectLockScripts.program().hash(),
-            input: self.salted_inputs_hash.reversed().values().to_vec(),
-            output: lock_script_hashes_as_output,
-        }
+        Claim::about_program(&CollectLockScripts.program())
+            .with_input(self.salted_inputs_hash.reversed().values())
+            .with_output(lock_script_hashes_as_output)
     }
 
     pub fn collect_type_scripts_claim(&self) -> Claim {
@@ -399,27 +386,22 @@ impl ProofCollection {
             }
             i += 1;
         }
-        Claim {
-            program_digest: CollectTypeScripts.program().hash(),
-            input: [
-                self.salted_inputs_hash.reversed().values().to_vec(),
-                self.salted_outputs_hash.reversed().values().to_vec(),
-            ]
-            .concat(),
-            output: type_script_hashes_as_output,
-        }
+        Claim::about_program(&CollectTypeScripts.program())
+            .with_input(
+                [self.salted_inputs_hash, self.salted_outputs_hash]
+                    .map(|digest| digest.reversed().values())
+                    .concat(),
+            )
+            .with_output(type_script_hashes_as_output)
     }
 
     pub fn lock_script_claims(&self) -> Vec<Claim> {
         let mut claims = vec![];
         let mut i = 0;
         while i < self.lock_script_hashes.len() {
-            let lock_script_hash = self.lock_script_hashes[i];
-            claims.push(Claim {
-                program_digest: lock_script_hash,
-                input: self.kernel_mast_hash.reversed().values().to_vec(),
-                output: vec![],
-            });
+            let claim = Claim::new(self.lock_script_hashes[i])
+                .with_input(self.kernel_mast_hash.reversed().values());
+            claims.push(claim);
 
             i += 1;
         }
@@ -438,11 +420,8 @@ impl ProofCollection {
         let mut i = 0;
         while i < self.type_script_hashes.len() {
             let type_script_hash = self.type_script_hashes[i];
-            claims.push(Claim {
-                program_digest: type_script_hash,
-                input: type_script_input.clone(),
-                output: vec![],
-            });
+            let claim = Claim::new(type_script_hash).with_input(type_script_input.clone());
+            claims.push(claim);
             i += 1;
         }
         claims

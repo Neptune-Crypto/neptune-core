@@ -253,7 +253,7 @@ impl PrimitiveWitness {
             // Also, the lock script is satisfied if it halts gracefully (i.e., without crashing).
             // The output is irrelevant.
             let result = tokio::task::spawn_blocking(move || {
-                VM::run(&lock_script, public_input, secret_input)
+                VM::run(lock_script, public_input, secret_input)
             })
             .await;
 
@@ -325,7 +325,7 @@ impl PrimitiveWitness {
             // Like above: potentially lengthy, CPU intensive call, only thing that matters
             // is error-free completion.
             let result = tokio::task::spawn_blocking(move || {
-                VM::run(&type_script, public_input, secret_input)
+                VM::run(type_script, public_input, secret_input)
             })
             .await;
 

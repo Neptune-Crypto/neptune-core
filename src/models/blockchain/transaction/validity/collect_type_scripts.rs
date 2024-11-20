@@ -514,7 +514,7 @@ mod test {
         let proof = triton_vm::prove(
             Stark::default(),
             &claim,
-            &CollectTypeScripts.program(),
+            CollectTypeScripts.program(),
             collect_type_scripts.nondeterminism(),
         )
         .expect("could not produce proof");

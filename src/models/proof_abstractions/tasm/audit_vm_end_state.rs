@@ -106,7 +106,7 @@ mod tests {
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::test_helpers::negative_test;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::accessor::Accessor;
     use tasm_lib::traits::accessor::AccessorInitialState;
     use tasm_lib::traits::accessor::ShadowedAccessor;
@@ -189,30 +189,24 @@ mod tests {
     fn rri_witness_negative_test_report_false_size() {
         let snippet = AuditVmEndState::<RemovalRecordsIntegrityWitness>::default();
         let mut bad_init_state = snippet.pseudorandom_initial_state(random(), None);
+        let accessor = ShadowedAccessor::new(snippet);
 
         let stack_index_expected_size_value = NUM_OP_STACK_REGISTERS;
         bad_init_state.stack[stack_index_expected_size_value] += bfe!(1);
-        negative_test(
-            &ShadowedAccessor::new(snippet.clone()),
-            bad_init_state.into(),
-            &[InstructionError::AssertionFailed],
-        );
+        test_assertion_failure(&accessor, bad_init_state.into(), &[]);
     }
 
     #[test]
     fn rri_witness_negative_test_not_zeros_on_stack() {
         let snippet = AuditVmEndState::<RemovalRecordsIntegrityWitness>::default();
         let good_init_state = snippet.pseudorandom_initial_state(random(), None);
+        let accessor = ShadowedAccessor::new(snippet);
 
         let first_zero = NUM_OP_STACK_REGISTERS - 1;
         for i in 0..NUM_TOP_STACK_WORDS_TO_CHECK {
             let mut bad_init_state = good_init_state.clone();
             bad_init_state.stack[first_zero - i] = random();
-            negative_test(
-                &ShadowedAccessor::new(snippet.clone()),
-                bad_init_state.into(),
-                &[InstructionError::AssertionFailed],
-            );
+            test_assertion_failure(&accessor, bad_init_state.into(), &[]);
         }
     }
 }

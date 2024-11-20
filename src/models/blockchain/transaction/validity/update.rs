@@ -205,11 +205,8 @@ impl ConsensusProgram for Update {
             old_txk_digest.reversed().values().to_vec();
 
         // verify the proof of the out-of-date transaction
-        let claim: Claim = Claim {
-            program_digest: single_proof_program_digest,
-            input: old_txk_digest_as_input,
-            output: vec![],
-        };
+        let claim: Claim =
+            Claim::new(single_proof_program_digest).with_input(old_txk_digest_as_input);
         let proof: &Proof = &uw.old_proof;
         tasmlib::verify_stark(Stark::default(), &claim, proof);
 
@@ -908,12 +905,7 @@ pub(crate) mod test {
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::AssertionFailed],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     fn bad_new_aocl(good_witness: &UpdateWitness) {
@@ -932,12 +924,7 @@ pub(crate) mod test {
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             &witness_again,
         );
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::VectorAssertionFailed(0)],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     fn bad_old_aocl(good_witness: &UpdateWitness) {
@@ -956,12 +943,7 @@ pub(crate) mod test {
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             &witness_again,
         );
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::VectorAssertionFailed(0)],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
@@ -980,12 +962,7 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::AssertionFailed],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
@@ -1001,12 +978,7 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::AssertionFailed],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
@@ -1024,12 +996,7 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(
-            Update,
-            &input,
-            nondeterminism,
-            &[InstructionError::AssertionFailed],
-        );
+        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
     }
 
     #[tokio::test]

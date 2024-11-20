@@ -159,7 +159,7 @@ mod tests {
     use strum::EnumCount;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::test_helpers::negative_test;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::mem_preserver::MemPreserver;
     use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
@@ -298,10 +298,10 @@ mod tests {
         let mut bad_auth_path = AuthenticateMsaAgainstTxk.pseudorandom_initial_state(seed, None);
         bad_auth_path.nondeterminism.digests[1] = random();
 
-        negative_test(
+        test_assertion_failure(
             &ShadowedMemPreserver::new(AuthenticateMsaAgainstTxk),
             bad_auth_path.into(),
-            &[InstructionError::VectorAssertionFailed(0)],
+            &[],
         );
     }
 }

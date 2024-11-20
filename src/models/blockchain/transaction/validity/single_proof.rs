@@ -268,11 +268,7 @@ pub struct SingleProof;
 impl SingleProof {
     /// Not to be confused with SingleProofWitness::claim
     pub(crate) fn claim(tx_kernel_mast_hash: Digest) -> Claim {
-        Claim {
-            program_digest: Self.hash(),
-            input: tx_kernel_mast_hash.reversed().values().to_vec(),
-            output: vec![],
-        }
+        Claim::new(tx_kernel_mast_hash).with_input(tx_kernel_mast_hash.reversed().values())
     }
 
     /// Generate a [SingleProof] for the transaction, given its primitive
@@ -854,6 +850,7 @@ impl ConsensusProgram for SingleProof {
 
 #[cfg(test)]
 mod test {
+    use assert2::let_assert;
     use proptest::prelude::Arbitrary;
     use proptest::prelude::Strategy;
     use proptest::strategy::ValueTree;
@@ -887,12 +884,12 @@ mod test {
             .collect();
 
             let nondeterminism = NonDeterminism::default().with_ram(init_ram);
-            let err = SingleProof.run_tasm(&pub_input, nondeterminism);
-            let triton_vm_error_code = match err.unwrap_err() {
-                ConsensusError::TritonVMPanic(_string, instruction_error) => instruction_error,
-                _ => panic!("TVM execution must fail on illegal witness discriminant"),
-            };
-            assert_eq!(InstructionError::AssertionFailed, triton_vm_error_code);
+            let consensus_err = SingleProof.run_tasm(&pub_input, nondeterminism);
+
+            let_assert!(Err(ConsensusError::TritonVMPanic(_, instruction_err)) = consensus_err);
+            let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
+            let_assert!(Some(err_id) = assertion_err.id);
+            assert_eq!(42, err_id);
         }
     }
 

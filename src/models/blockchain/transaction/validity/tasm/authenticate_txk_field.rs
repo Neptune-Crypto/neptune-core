@@ -77,12 +77,11 @@ mod tests {
     use strum::VariantArray;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::test_helpers::negative_test;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithm;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::triton_vm::error::InstructionError;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::prelude::*;
     use tasm_lib::Digest;
@@ -285,10 +284,10 @@ mod tests {
             let mut bad_auth_path = snippet.correct_initial_state(inputs_ptr, primitive_witness);
             bad_auth_path.nondeterminism.digests[0].0[0].increment();
 
-            negative_test(
+            test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(AuthenticateTxkField(field)),
                 bad_auth_path.into(),
-                &[InstructionError::VectorAssertionFailed(0)],
+                &[],
             );
         }
     }

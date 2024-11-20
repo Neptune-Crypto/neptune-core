@@ -52,7 +52,7 @@ mod transaction {
         case: BenchmarkCase,
     ) {
         let program = cp.program();
-        let (aet, _output) = VM::trace_execution(&program, input.clone(), nondeterminism).unwrap();
+        let (aet, _output) = VM::trace_execution(program, input.clone(), nondeterminism).unwrap();
         let benchmark_result = BenchmarkResult::new(&aet);
         let benchmark = NamedBenchmarkResult {
             name: name.to_owned(),
@@ -72,7 +72,7 @@ mod transaction {
     ) {
         let program = cp.program();
         let (_aet, _output) =
-            VM::trace_execution(&program, input.clone(), nondeterminism.clone()).unwrap();
+            VM::trace_execution(program.clone(), input.clone(), nondeterminism.clone()).unwrap();
         let profile = generate_full_profile(name, program, input, &nondeterminism);
         write_profile(name.to_string(), profile);
     }

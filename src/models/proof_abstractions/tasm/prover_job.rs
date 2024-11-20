@@ -10,7 +10,7 @@
 //! program can execute at a time.
 #[cfg(not(test))]
 use std::process::Stdio;
-
+use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
@@ -23,7 +23,6 @@ use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
-use crate::tasm_lib::maybe_write_debuggable_program_to_disk;
 use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
@@ -108,11 +107,11 @@ impl ProverJob {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let mut vm_state = VMState::new(
-            &self.program,
+            self.program.clone(),
             self.claim.input.clone().into(),
             self.nondeterminism.clone(),
         );
-        maybe_write_debuggable_program_to_disk(&self.program, &vm_state);
+        maybe_write_debuggable_vm_state_to_disk(&vm_state);
 
         // run program in VM
         //

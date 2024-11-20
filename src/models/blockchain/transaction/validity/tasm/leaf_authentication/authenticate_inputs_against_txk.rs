@@ -79,7 +79,7 @@ mod tests {
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::snippet_bencher::BenchmarkCase;
-    use tasm_lib::test_helpers::negative_test;
+    use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithm;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
@@ -190,10 +190,10 @@ mod tests {
         bad_auth_path.nondeterminism.digests[0] =
             bad_auth_path.nondeterminism.digests[0].reversed();
 
-        negative_test(
+        test_assertion_failure(
             &ShadowedReadOnlyAlgorithm::new(AuthenticateInputsAgainstTxk),
             bad_auth_path.into(),
-            &[InstructionError::VectorAssertionFailed(0)],
+            &[],
         );
     }
 }

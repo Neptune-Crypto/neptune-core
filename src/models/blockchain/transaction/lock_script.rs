@@ -168,14 +168,7 @@ impl LockScriptAndWitness {
     }
 
     pub fn halts_gracefully(&self, public_input: PublicInput) -> bool {
-        VM::run(
-            &self.program,
-            public_input,
-            NonDeterminism::new(self.nd_tokens.clone())
-                .with_digests(self.nd_digests.clone())
-                .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>()),
-        )
-        .is_ok()
+        VM::run(self.program.clone(), public_input, self.nondeterminism()).is_ok()
     }
 
     /// Assuming the lock script halts gracefully, prove it.

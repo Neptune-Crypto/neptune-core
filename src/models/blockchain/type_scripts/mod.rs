@@ -158,11 +158,8 @@ impl TypeScriptAndWitness {
             .flat_map(|d| d.reversed().values().to_vec())
             .collect_vec();
         let public_input = PublicInput::new(standard_input);
-        let non_determinism = NonDeterminism::new(self.nd_tokens.clone())
-            .with_digests(self.nd_digests.clone())
-            .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>());
 
-        VM::run(&self.program, public_input, non_determinism).is_ok()
+        VM::run(self.program.clone(), public_input, self.nondeterminism()).is_ok()
     }
 
     /// Assuming the type script halts gracefully, prove it.

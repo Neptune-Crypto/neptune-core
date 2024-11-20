@@ -683,8 +683,7 @@ impl SecretWitness for NativeCurrencyWitness {
 pub mod test {
     use proptest::collection::vec;
     use proptest::prelude::*;
-    use proptest::prop_assert;
-    use proptest::strategy::Strategy;
+    use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm;
@@ -700,11 +699,9 @@ pub mod test {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
-    use crate::triton_vm::prelude::InstructionError;
 
-    fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> Result<(), TestCaseError> {
+    fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> TestCaseResult {
         let tasm_result = NativeCurrency
             .run_tasm(
                 &native_currency_witness.standard_input(),
@@ -720,31 +717,6 @@ pub mod test {
             )
             .unwrap();
         prop_assert!(rust_result.is_empty());
-
-        Ok(())
-    }
-
-    fn prop_negative(
-        native_currency_witness: NativeCurrencyWitness,
-        allowed_failure_codes: &[InstructionError],
-    ) -> Result<(), TestCaseError> {
-        let tasm_result = NativeCurrency.run_tasm(
-            &native_currency_witness.standard_input(),
-            native_currency_witness.nondeterminism(),
-        );
-        prop_assert!(tasm_result.is_err());
-        let triton_vm_error_code = match tasm_result.unwrap_err() {
-            ConsensusError::TritonVMPanic(_string, instruction_error) => instruction_error,
-            _ => unreachable!(),
-        };
-
-        prop_assert!(allowed_failure_codes.contains(&triton_vm_error_code));
-
-        let rust_result = NativeCurrency.run_rust(
-            &native_currency_witness.standard_input(),
-            native_currency_witness.nondeterminism(),
-        );
-        prop_assert!(rust_result.is_err());
 
         Ok(())
     }
@@ -846,14 +818,15 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness = NativeCurrencyWitness {
+        let witness = NativeCurrencyWitness {
             salted_input_utxos: primitive_witness.input_utxos,
             salted_output_utxos: primitive_witness.output_utxos,
             kernel: primitive_witness.kernel,
         };
-        prop_negative(
-            native_currency_witness,
-            &[InstructionError::AssertionFailed],
+        NativeCurrency.test_assertion_failure(
+            witness.standard_input(),
+            witness.nondeterminism(),
+            &[],
         )?;
     }
 
@@ -882,14 +855,15 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness = NativeCurrencyWitness {
+        let witness = NativeCurrencyWitness {
             salted_input_utxos: primitive_witness.input_utxos,
             salted_output_utxos: primitive_witness.output_utxos,
             kernel: primitive_witness.kernel,
         };
-        prop_negative(
-            native_currency_witness,
-            &[InstructionError::AssertionFailed],
+        NativeCurrency.test_assertion_failure(
+            witness.standard_input(),
+            witness.nondeterminism(),
+            &[],
         )?;
     }
 

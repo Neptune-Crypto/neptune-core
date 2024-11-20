@@ -75,7 +75,7 @@ tarpc = { version = "^0.34", features = [
     "serde-transport-json",
     "tcp",
 ] }
-tasm-lib = "0.2.1"
+tasm-lib = "0.43.0"
 tiny-bip39 = "1.0"
 tokio = { version = "1.41", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
@@ -98,6 +98,7 @@ sysinfo = "0.31.4"
 thread-priority = "1.2.0"
 
 [dev-dependencies]
+assert2 = "0.3"
 blake3 = "1.5.4"
 divan = "0.1.14"
 pin-project-lite = "0.2.14"
@@ -181,7 +182,3 @@ harness = false
 [[bench]]
 name = "consensus"
 harness = false
-
-[patch.crates-io]
-# branch master, 2024-10-04
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "110926f3" }

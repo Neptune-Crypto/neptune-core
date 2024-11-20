@@ -25,7 +25,7 @@ fn main() {
         serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
     let default_stark: Stark = Stark::default();
 
-    let proof = prove(default_stark, &claim, &program, non_determinism).unwrap();
+    let proof = prove(default_stark, &claim, program, non_determinism).unwrap();
     info!("triton-vm: completed proof");
 
     let as_bytes = bincode::serialize(&proof).unwrap();

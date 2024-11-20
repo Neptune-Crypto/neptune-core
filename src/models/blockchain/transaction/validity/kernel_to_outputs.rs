@@ -434,7 +434,7 @@ mod test {
         let proof = triton_vm::prove(
             Stark::default(),
             &claim,
-            &KernelToOutputs.program(),
+            KernelToOutputs.program(),
             kernel_to_outputs_witness.nondeterminism(),
         )
         .expect("could not produce proof");
