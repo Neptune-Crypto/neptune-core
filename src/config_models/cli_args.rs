@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use bytesize::ByteSize;
@@ -253,13 +254,17 @@ impl Args {
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
     pub(crate) fn proving_capability(&self) -> TxProvingCapability {
-        if let Some(proving_capability) = self.tx_proving_capability {
-            proving_capability
-        } else if self.compose {
-            TxProvingCapability::SingleProof
-        } else {
-            Self::estimate_proving_capability()
-        }
+        static CAPABILITY: OnceLock<TxProvingCapability> = OnceLock::new();
+
+        *CAPABILITY.get_or_init(|| {
+            if let Some(proving_capability) = self.tx_proving_capability {
+                proving_capability
+            } else if self.compose {
+                TxProvingCapability::SingleProof
+            } else {
+                Self::estimate_proving_capability()
+            }
+        })
     }
 
     fn estimate_proving_capability() -> TxProvingCapability {
