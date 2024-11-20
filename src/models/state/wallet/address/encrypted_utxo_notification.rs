@@ -145,9 +145,8 @@ mod test {
     use tasm_lib::twenty_first::bfe;
     use test_strategy::proptest;
 
-    use crate::config_models::network::Network;
-
     use super::EncryptedUtxoNotification;
+    use crate::config_models::network::Network;
 
     impl<'a> Arbitrary<'a> for EncryptedUtxoNotification {
         fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
