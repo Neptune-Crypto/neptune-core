@@ -33,6 +33,7 @@ use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -439,10 +440,11 @@ impl ArchivalState {
     }
 
     /// searches max `max_search_depth` from tip for a matching transaction
-    /// output.
+    /// input.
     ///
-    /// If `max_search_depth` is set to `None`, then all blocks are searched. A
-    /// A `max_search_depth` of `Some(0)` will only consider the tip.
+    /// If `max_search_depth` is set to `None`, then all blocks are searched
+    /// until a match is found. A `max_search_depth` of `Some(0)` will only
+    /// consider the tip.
     pub(crate) async fn find_canonical_block_with_output(
         &self,
         output: AdditionRecord,
@@ -458,6 +460,44 @@ impl ArchivalState {
                 .outputs
                 .iter()
                 .any(|ar| *ar == output)
+            {
+                break Some(block);
+            }
+
+            if max_search_depth.is_some_and(|max| max <= search_depth) {
+                return None;
+            }
+
+            block = self
+                .get_block(block.header().prev_block_digest)
+                .await
+                .ok()??;
+
+            search_depth += 1;
+        }
+    }
+
+    /// searches max `max_search_depth` from tip for a matching transaction
+    /// input.
+    ///
+    /// If `max_search_depth` is set to `None`, then all blocks are searched
+    /// until a match is found. A `max_search_depth` of `Some(0)` will only
+    /// consider the tip.
+    pub(crate) async fn find_canonical_block_with_input(
+        &self,
+        input: AbsoluteIndexSet,
+        max_search_depth: Option<u64>,
+    ) -> Option<Block> {
+        let mut block = self.get_tip().await;
+        let mut search_depth = 0;
+
+        loop {
+            if block
+                .body()
+                .transaction_kernel
+                .inputs
+                .iter()
+                .any(|rr| rr.absolute_indices == input)
             {
                 break Some(block);
             }
@@ -1053,6 +1093,7 @@ mod archival_state_tests {
     use crate::tests::shared::unit_test_databases;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::test_shared::mutator_set::mock_item_mp_rr_for_init_msa;
+    use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).await.unwrap();
@@ -2313,6 +2354,41 @@ mod archival_state_tests {
                 .await
                 .is_none());
         }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn find_canonical_block_with_output_genesis_block_test() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network).await;
+        let genesis_block = Block::genesis_block(network);
+
+        let addition_records = Block::genesis_block(network)
+            .body()
+            .transaction_kernel
+            .outputs
+            .clone();
+
+        for ar in addition_records.iter() {
+            let found_block = archival_state
+                .find_canonical_block_with_output(*ar, None)
+                .await
+                .unwrap();
+            assert_eq!(genesis_block.hash(), found_block.hash());
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn find_canonical_block_with_input_genesis_block_test() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network).await;
+        let random_index_set: AbsoluteIndexSet = random_removal_record().absolute_indices;
+
+        assert!(archival_state
+            .find_canonical_block_with_input(random_index_set, None)
+            .await
+            .is_none());
     }
 
     #[traced_test]

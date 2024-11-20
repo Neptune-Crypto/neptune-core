@@ -1059,11 +1059,7 @@ impl WalletState {
                     );
 
                     let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index).await;
-                    spent_mutxo.spent_in_block = Some((
-                        new_block.hash(),
-                        new_block.kernel.header.timestamp,
-                        new_block.kernel.header.height,
-                    ));
+                    spent_mutxo.mark_as_spent(new_block);
                     monitored_utxos.set(*mutxo_list_index, spent_mutxo).await;
                 }
             }
