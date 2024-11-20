@@ -147,12 +147,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Create handshake data which is used when connecting to outgoing peers specified in the
     // CLI arguments
     let syncing = false;
-    let networking_state = NetworkingState::new(
-        peer_map,
-        peer_databases,
-        syncing,
-        cli_args.proving_capability(),
-    );
+    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
     let light_state: LightState = LightState::from(latest_block.clone());
     let blockchain_archival_state = BlockchainArchivalState {

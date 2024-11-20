@@ -1412,12 +1412,13 @@ mod tests {
         let network = Network::Main;
         let alice_wallet = WalletSecret::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let single_proof_capability = cli_args::Args {
-            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+        let proving_capability = TxProvingCapability::SingleProof;
+        let cli_with_proof_capability = cli_args::Args {
+            tx_proving_capability: Some(proving_capability),
             ..Default::default()
         };
         let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet, single_proof_capability).await;
+            mock_genesis_global_state(network, 2, alice_wallet, cli_with_proof_capability).await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
@@ -1450,7 +1451,7 @@ mod tests {
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_years,
-                TxProvingCapability::SingleProof,
+                proving_capability,
                 &TritonVmJobQueue::dummy(),
             )
             .await
@@ -1466,6 +1467,12 @@ mod tests {
         // is not being mined.
         let mut current_block = genesis_block.clone();
         for _ in 0..2 {
+            assert_eq!(
+                1,
+                alice.lock_guard().await.mempool.len(),
+                "The inserted tx must be in the mempool"
+            );
+
             let (next_block, _, _) =
                 make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();

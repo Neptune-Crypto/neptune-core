@@ -760,7 +760,7 @@ impl GlobalState {
             change_utxo_notify_medium,
             fee,
             timestamp,
-            self.net.tx_proving_capability,
+            self.proving_capability(),
             triton_vm_job_queue,
         )
         .await
@@ -1473,7 +1473,7 @@ impl GlobalState {
             .update_with_block_and_predecessor(
                 &new_block,
                 &tip_parent,
-                self.net.tx_proving_capability,
+                self.proving_capability(),
                 self.cli().compose,
             )
             .await;
@@ -1530,6 +1530,10 @@ impl GlobalState {
     #[inline]
     fn cli(&self) -> &cli_args::Args {
         &self.cli
+    }
+
+    pub(crate) fn proving_capability(&self) -> TxProvingCapability {
+        self.cli().proving_capability()
     }
 
     /// clears all Tx from mempool and notifies wallet of changes.

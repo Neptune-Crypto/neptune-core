@@ -335,7 +335,8 @@ mod cli_args_tests {
     }
 
     #[test]
-    fn estimate_proving_power_doesnt_crash() {
-        Args::estimate_proving_capability();
+    fn estimate_own_proving_capability() {
+        // doubles as a no-crash test
+        println!("{}", Args::estimate_proving_capability());
     }
 }

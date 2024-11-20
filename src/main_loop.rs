@@ -1057,19 +1057,19 @@ impl MainLoopHandler {
     /// spawned upgrade task such that its status can be expected.
     async fn proof_upgrader(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         fn attempt_upgrade(
-            global_state_lock: &GlobalState,
+            global_state: &GlobalState,
             now: SystemTime,
             tx_upgrade_interval: Option<Duration>,
             main_loop_state: &MutableMainLoopState,
         ) -> Result<bool> {
             let duration_since_last_upgrade =
-                now.duration_since(global_state_lock.net.last_tx_proof_upgrade_attempt)?;
+                now.duration_since(global_state.net.last_tx_proof_upgrade_attempt)?;
             let previous_upgrade_task_is_still_running = main_loop_state
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
-            Ok(!global_state_lock.net.syncing
-                && global_state_lock.net.tx_proving_capability == TxProvingCapability::SingleProof
+            Ok(!global_state.net.syncing
+                && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
                 && tx_upgrade_interval
                     .is_some_and(|upgrade_interval| duration_since_last_upgrade > upgrade_interval))
@@ -1457,12 +1457,7 @@ impl MainLoopHandler {
 
                     let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
 
-                    let proving_capability = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .net
-                        .tx_proving_capability;
+                    let proving_capability = self.global_state_lock.cli().proving_capability();
                     let upgrade_job =
                         UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
 
@@ -1678,12 +1673,6 @@ mod tests {
                 tx_proof_upgrade_interval: 100, // seconds
                 ..Default::default()
             };
-            main_loop_handler
-                .global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .tx_proving_capability = TxProvingCapability::SingleProof;
 
             main_loop_handler
                 .global_state_lock

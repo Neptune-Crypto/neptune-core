@@ -1567,12 +1567,7 @@ mod rpc_server_tests {
             .await;
 
         let transaction_timestamp = network.launch_date();
-        let proving_capability = rpc_server
-            .state
-            .lock_guard()
-            .await
-            .net
-            .tx_proving_capability;
+        let proving_capability = rpc_server.state.cli().proving_capability();
         let _ = rpc_server
             .clone()
             .send_to_many_inner(

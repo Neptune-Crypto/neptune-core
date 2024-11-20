@@ -4,9 +4,7 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use tracing::info;
 
-use super::tx_proving_capability::TxProvingCapability;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::NeptuneLevelDb;
@@ -39,9 +37,6 @@ pub struct NetworkingState {
     // Read-only value set during startup
     pub instance_id: u128,
 
-    /// The capabilities of this machine to produce STARK proofs
-    pub tx_proving_capability: TxProvingCapability,
-
     /// Timestamp for when the last tx-proof upgrade was attempted. Does not
     /// record latest successful upgrade, merely latest attempt. This is to
     /// prevent excessive runs of the proof-upgrade functionality.
@@ -49,19 +44,12 @@ pub struct NetworkingState {
 }
 
 impl NetworkingState {
-    pub(crate) fn new(
-        peer_map: PeerMap,
-        peer_databases: PeerDatabases,
-        syncing: bool,
-        tx_proving_capability: TxProvingCapability,
-    ) -> Self {
-        info!("transaction proving capability set to {tx_proving_capability:?}");
+    pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
         Self {
             peer_map,
             peer_databases,
             syncing,
             instance_id: rand::random(),
-            tx_proving_capability,
 
             // Initialize to now to prevent tx proof upgrade to run immediately
             // after startup of the client.
