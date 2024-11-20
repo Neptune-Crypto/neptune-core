@@ -27,86 +27,67 @@ impl BasicSnippet for GenerateTypeScriptClaimTemplate {
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let new_claim = library.import(Box::new(NewClaim));
-        let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
-        let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
-        let dup_reversed_digest = triton_asm!(dup 0 dup 2 dup 4 dup 6 dup 8);
-        let proof_collection_field_salted_outputs_hash =
-            field!(ProofCollection::salted_outputs_hash);
-        let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
-        let entrypoint = self.entrypoint();
 
+        let load_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
+        let reverse_digest = triton_asm!(pick 1 pick 2 pick 3 pick 4);
+
+        let entrypoint = self.entrypoint();
         triton_asm! {
             // BEFORE: _ *proof_collection
             // AFTER:  _ *claim *program_digest
             {entrypoint}:
 
-                push {3*Digest::LEN} push 0
+                push {3 * Digest::LEN}
+                push 0
                 call {new_claim}
                 // _ *proof_collection *claim *output *input *program_digest
 
-                swap 2 pop 1
-                // _ *proof_collection *claim *program_digest *input
+                place 2
+                // _ *proof_collection *claim *program_digest *output *input
 
 
                 /* write txk mast hash (reversed) to input */
-                dup 3 {&proof_collection_field_kernel_mast_hash}
-                // _ *proof_collection *claim *program_digest *input *txkmh
+                dup 4
+                {&field!(ProofCollection::kernel_mast_hash)}
+                // _ *proof_collection *claim *program_digest *output *input *txkmh
 
                 {&load_digest}
-                // _ *proof_collection *claim *program_digest *input [txkmh]
+                {&reverse_digest}
+                // _ *proof_collection *claim *program_digest *output *input [txkmh_rev]
 
-                {&dup_reversed_digest}
-                // _ *proof_collection *claim *program_digest *input [txkmh] [txkmh_rev]
-
-                dup 10
-                // _ *proof_collection *claim *program_digest *input [txkmh] [txkmh_rev] *input
-
+                pick 5
                 write_mem {Digest::LEN}
-                // _ *proof_collection *claim *program_digest *input [txkmh] (*input+5)
-
-                swap 6
-                pop 1
-                pop 5
-                // _ *proof_collection *claim *program_digest (*input+5)
+                // _ *proof_collection *claim *program_digest *output (*input+5)
 
 
                 /* write salted inputs hash (reversed) to input */
-                dup 3 {&proof_collection_field_salted_inputs_hash}
-                // _ *proof_collection *claim *program_digest (*input+5) *salted_inputs_hash
+                dup 4
+                {&field!(ProofCollection::salted_inputs_hash)}
+                // _ *proof_collection *claim *program_digest *output (*input+5) *salted_inputs_hash
 
                 {&load_digest}
-                // _ *proof_collection *claim *program_digest (*input+5) [salted_inputs_hash]
+                {&reverse_digest}
+                // _ *proof_collection *claim *program_digest *output (*input+5) [salted_inputs_hash_reversed]
 
-                {&dup_reversed_digest}
-                // _ *proof_collection *claim *program_digest (*input+5) [salted_inputs_hash] [salted_inputs_hash_reversed]
-
-                dup {2*Digest::LEN} write_mem {Digest::LEN}
-                // _ *proof_collection *claim *program_digest (*input+5) [salted_inputs_hash] (*input+10)
-
-                swap 6
-                pop 1 pop 5
-                // _ *proof_collection *claim *program_digest (*input+10)
+                pick 5
+                write_mem {Digest::LEN}
+                // _ *proof_collection *claim *program_digest *output (*input+10)
 
 
                 /* write salted outputs hash (reversed) to input */
-                dup 3 {&proof_collection_field_salted_outputs_hash}
-                // _ *proof_collection *claim *program_digest (*input+10) *salted_outputs_hash
+                pick 4
+                {&field!(ProofCollection::salted_outputs_hash)}
+                // _ *claim *program_digest *output (*input+10) *salted_outputs_hash
 
                 {&load_digest}
-                // _ *proof_collection *claim *program_digest (*input+10) [salted_outputs_hash]
+                {&reverse_digest}
+                // _ *claim *program_digest *output (*input+10) [salted_outputs_hash_reversed]
 
-                {&dup_reversed_digest}
-                // _ *proof_collection *claim *program_digest (*input+10) [salted_outputs_hash] [salted_outputs_hash_reversed]
+                pick 5
+                write_mem {Digest::LEN}
+                // _ *claim *program_digest *output (*input+15)
 
-                dup {2*Digest::LEN} write_mem {Digest::LEN}
-                // _ *proof_collection *claim *program_digest (*input+10) [salted_outputs_hash] (*input+15)
-
-                swap 6
-                pop 2 pop 5
-                // _ *proof_collection *claim *program_digest
-
-
-                swap 2 pop 1 swap 1
+                pop 2
                 // _ *claim *program_digest
 
                 return
@@ -127,17 +108,13 @@ mod test {
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::BasicSnippet;
     use tasm_lib::prelude::TasmObject;
-    use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::traits::function::Function;
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::triton_vm::prelude::BFieldElement;
-    use tasm_lib::twenty_first::bfe;
-    use tasm_lib::Digest;
 
-    use super::GenerateTypeScriptClaimTemplate;
+    use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -151,33 +128,28 @@ mod test {
         ) {
             let proof_collection_pointer = stack.pop().unwrap();
 
+            let input_length = bfe!(3 * Digest::LEN);
+            let output_length = bfe!(0);
+
+            stack.push(input_length);
+            stack.push(output_length);
+            NewClaim.rust_shadow(stack, memory);
+
+            let digest_pointer = stack.pop().unwrap();
+            let input_pointer = stack.pop().unwrap();
+            let _output_pointer = stack.pop().unwrap();
+
             let proof_collection =
                 *ProofCollection::decode_from_memory(memory, proof_collection_pointer).unwrap();
+            let mast_hash_reverse = proof_collection.kernel_mast_hash.reversed();
+            let input_hash_reverse = proof_collection.salted_inputs_hash.reversed();
+            let outputs_hash_reverse = proof_collection.salted_outputs_hash.reversed();
 
-            let claim_pointer =
-                rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
+            encode_to_memory(memory, input_pointer, &mast_hash_reverse);
+            encode_to_memory(memory, input_pointer + bfe!(5), &input_hash_reverse);
+            encode_to_memory(memory, input_pointer + bfe!(10), &outputs_hash_reverse);
 
-            // length / size indicators
-            memory.insert(claim_pointer, bfe!(1));
-            memory.insert(claim_pointer + bfe!(1), bfe!(0));
-            memory.insert(claim_pointer + bfe!(2), bfe!(3 * Digest::LEN as u64 + 1));
-            memory.insert(claim_pointer + bfe!(3), bfe!(3 * Digest::LEN as u64));
-
-            // insert reversed hashes: txk mast, salted inputs, salted outputs
-            for (i, b) in [
-                proof_collection.kernel_mast_hash,
-                proof_collection.salted_inputs_hash,
-                proof_collection.salted_outputs_hash,
-            ]
-            .into_iter()
-            .flat_map(|d| d.reversed().values())
-            .enumerate()
-            {
-                memory.insert(claim_pointer + bfe!(i as u64) + bfe!(4), b);
-            }
-
-            stack.push(claim_pointer);
-            stack.push(claim_pointer + bfe!(4u64 + 3 * Digest::LEN as u64));
+            stack.push(digest_pointer);
         }
 
         fn pseudorandom_initial_state(

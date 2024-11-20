@@ -27,10 +27,8 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let new_claim = library.import(Box::new(NewClaim));
-        let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
-        let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
-        let entrypoint = self.entrypoint();
 
+        let entrypoint = self.entrypoint();
         triton_asm! {
             // BEFORE: _ *proof_collection
             // AFTER:  _ *claim *program_digest
@@ -40,27 +38,26 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
                 call {new_claim}
                 // _ *proof_collection *claim *output *input *program_digest
 
-                swap 2 pop 1
-                // _ *proof_collection *claim *program_digest *input
+                place 2
+                // _ *proof_collection *claim *program_digest *output *input
 
-                dup 3 {&proof_collection_field_kernel_mast_hash}
-                // _ *proof_collection *claim *program_digest *input *txkmh
+                pick 4
+                {&field!(ProofCollection::kernel_mast_hash)}
+                // _ *claim *program_digest *output *input *txkmh
 
-                {&load_digest}
-                // _ *proof_collection *claim *program_digest *input [txkmh]
+                addi {Digest::LEN - 1}
+                read_mem {Digest::LEN}
+                pop 1
+                // _ *claim *program_digest *output *input [txkmh]
 
-                dup 0 dup 2 dup 4 dup 6 dup 8
-                // _ *proof_collection *claim *program_digest *input [txkmh] [txkmh_rev]
+                pick 1 pick 2 pick 3 pick 4
+                // _ *claim *program_digest *output *input [txkmh_rev]
 
-                dup 10
-                // _ *proof_collection *claim *program_digest *input [txkmh] [txkmh_rev] *input
+                pick 5
+                // _ *claim *program_digest *output [txkmh_rev] *input
 
                 write_mem {Digest::LEN}
                 pop 2
-                pop 5
-                // _ *proof_collection *claim *program_digest
-
-                swap 2 pop 1 swap 1
                 // _ *claim *program_digest
 
                 return
@@ -81,7 +78,6 @@ mod test {
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::BasicSnippet;
     use tasm_lib::prelude::TasmObject;
-    use tasm_lib::rust_shadowing_helper_functions;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::traits::function::Function;
     use tasm_lib::traits::function::FunctionInitialState;
@@ -96,6 +92,7 @@ mod test {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+    use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 
     impl Function for GenerateLockScriptClaimTemplate {
         fn rust_shadow(
@@ -105,42 +102,23 @@ mod test {
         ) {
             let proof_collection_pointer = stack.pop().unwrap();
 
+            let input_length = bfe!(Digest::LEN);
+            let output_length = bfe!(0);
+
+            stack.push(input_length);
+            stack.push(output_length);
+            NewClaim.rust_shadow(stack, memory);
+
+            let digest_pointer = stack.pop().unwrap();
+            let input_pointer = stack.pop().unwrap();
+            let _output_pointer = stack.pop().unwrap();
+
             let proof_collection =
                 *ProofCollection::decode_from_memory(memory, proof_collection_pointer).unwrap();
+            let mast_hash_reverse = proof_collection.kernel_mast_hash.reversed();
+            encode_to_memory(memory, input_pointer, &mast_hash_reverse);
 
-            let claim_pointer =
-                rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
-
-            // length / size indicators
-            memory.insert(claim_pointer, bfe!(1));
-            memory.insert(claim_pointer + bfe!(1), bfe!(0));
-            memory.insert(claim_pointer + bfe!(2), bfe!(Digest::LEN as u64 + 1));
-            memory.insert(claim_pointer + bfe!(3), bfe!(Digest::LEN as u64));
-
-            // reversed txk mast hash
-            memory.insert(
-                claim_pointer + bfe!(4),
-                proof_collection.kernel_mast_hash.values()[4],
-            );
-            memory.insert(
-                claim_pointer + bfe!(5),
-                proof_collection.kernel_mast_hash.values()[3],
-            );
-            memory.insert(
-                claim_pointer + bfe!(6),
-                proof_collection.kernel_mast_hash.values()[2],
-            );
-            memory.insert(
-                claim_pointer + bfe!(7),
-                proof_collection.kernel_mast_hash.values()[1],
-            );
-            memory.insert(
-                claim_pointer + bfe!(8),
-                proof_collection.kernel_mast_hash.values()[0],
-            );
-
-            stack.push(claim_pointer);
-            stack.push(claim_pointer + bfe!(4u64 + Digest::LEN as u64));
+            stack.push(digest_pointer);
         }
 
         fn pseudorandom_initial_state(
