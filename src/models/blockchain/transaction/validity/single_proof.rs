@@ -878,7 +878,7 @@ mod test {
     #[tokio::test]
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
-        for illegal_discriminant_value in bfe_array![-1, 3, 4, 1 << 40] {
+        for illegal_discriminant_value in bfe_array![-1, 3, 4, 1u64 << 40] {
             let init_ram: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 illegal_discriminant_value,
