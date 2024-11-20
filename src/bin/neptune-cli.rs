@@ -52,6 +52,11 @@ enum ClaimUtxoFormat {
         /// path to the file
         path: PathBuf,
     },
+    Raw {
+        /// The encrypted UTXO notification payload. Read from standard-in if
+        /// not present.
+        ciphertext: Option<String>,
+    },
 }
 
 /// AddressEnum is used by send and send-to-many to distinguish between
@@ -572,6 +577,7 @@ async fn main() -> Result<()> {
                     let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
                     utxo_transfer_entry.ciphertext
                 }
+                ClaimUtxoFormat::Raw { ciphertext } => val_or_stdin_line(ciphertext)?,
             };
 
             client
@@ -739,4 +745,16 @@ run `neptune-cli claim-utxo file <file>` or use equivalent claim functionality o
     }
 
     Ok(())
+}
+
+// retrieves value from Option or else from first line of stdin (trimmed).
+fn val_or_stdin_line<T: std::fmt::Display>(val: Option<T>) -> Result<String> {
+    match val {
+        Some(v) => Ok(v.to_string()),
+        None => {
+            let mut buffer = String::new();
+            std::io::stdin().read_line(&mut buffer)?;
+            Ok(buffer.trim().to_string())
+        }
+    }
 }
