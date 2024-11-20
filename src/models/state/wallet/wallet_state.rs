@@ -543,12 +543,17 @@ impl WalletState {
             .await
     }
 
-    /// find the `MonitoredUtxo` that matches `utxo`, if any
+    /// find the `MonitoredUtxo` that matches `utxo` and sender randomness, if
+    /// any.
     ///
     /// perf: this fn is o(n) with the number of MonitoredUtxo stored.  Iteration
     ///       is performed from newest to oldest based on expectation that we
     ///       will most often be working with recent MonitoredUtxos.
-    pub(crate) async fn find_monitored_utxo(&self, utxo: &Utxo) -> Option<MonitoredUtxo> {
+    pub(crate) async fn find_monitored_utxo(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: Digest,
+    ) -> Option<MonitoredUtxo> {
         let len = self.wallet_db.monitored_utxos().len().await;
         let stream = self
             .wallet_db
@@ -558,7 +563,13 @@ impl WalletState {
         pin_mut!(stream); // needed for iteration
 
         while let Some(mu) = stream.next().await {
-            if mu.utxo == *utxo {
+            if mu.utxo == *utxo
+                && mu
+                    .get_latest_membership_proof_entry()
+                    .is_some_and(|(_block_digest, msmp)| {
+                        msmp.sender_randomness == sender_randomness
+                    })
+            {
                 return Some(mu);
             }
         }
@@ -1312,6 +1323,7 @@ impl WalletState {
 #[cfg(test)]
 mod tests {
     use num_traits::One;
+    use rand::random;
     use rand::thread_rng;
     use rand::Rng;
     use tracing_test::traced_test;
@@ -1323,6 +1335,56 @@ mod tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
+
+    #[tokio::test]
+    #[traced_test]
+    async fn find_monitored_utxo_test() {
+        let network = Network::Testnet;
+        let alice_global_lock = mock_genesis_global_state(
+            network,
+            0,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+
+        let premine_utxo = {
+            let wallet = &alice_global_lock.lock_guard().await.wallet_state;
+            Block::premine_utxos(network)
+                .into_iter()
+                .find(|premine_utxo| wallet.can_unlock(premine_utxo))
+                .or_else(|| panic!())
+                .unwrap()
+        };
+        let premine_sender_randomness = Block::premine_sender_randomness(network);
+
+        let premine_mutxo = alice_global_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .find_monitored_utxo(&premine_utxo, premine_sender_randomness)
+            .await
+            .expect("Must be able to find premine MUTXO with this method");
+        assert_eq!(premine_utxo, premine_mutxo.utxo);
+
+        let genesis_digest = Block::genesis_block(network).hash();
+        assert_eq!(
+            premine_sender_randomness,
+            premine_mutxo
+                .get_membership_proof_for_block(genesis_digest)
+                .unwrap()
+                .sender_randomness
+        );
+
+        // Using another sender randomness returns nothing
+        assert!(alice_global_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .find_monitored_utxo(&premine_utxo, random())
+            .await
+            .is_none());
+    }
 
     #[tokio::test]
     #[traced_test]

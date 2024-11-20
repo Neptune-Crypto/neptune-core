@@ -613,7 +613,7 @@ impl NeptuneRPCServer {
         // search for matching monitored utxo and return early if found.
         if state
             .wallet_state
-            .find_monitored_utxo(&utxo_notification.utxo)
+            .find_monitored_utxo(&utxo_notification.utxo, utxo_notification.sender_randomness)
             .await
             .is_some()
         {
