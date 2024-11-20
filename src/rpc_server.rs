@@ -685,7 +685,32 @@ impl NeptuneRPCServer {
                     block.header().timestamp,
                     block.header().height,
                 ));
-                monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp);
+                monitored_utxo.add_membership_proof_for_tip(tip_digest, msmp.clone());
+
+                // Was UTXO already spent? If so, register it as such.
+                let msa = ams.accumulator().await;
+                if !msa.verify(item, &msmp) {
+                    warn!("Claimed UTXO was already spent. Marking it as such.");
+
+                    if let Some(spending_block) = state
+                        .chain
+                        .archival_state()
+                        .find_canonical_block_with_input(
+                            msmp.compute_indices(item),
+                            max_search_depth,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Claimed UTXO was spent in block {}; which has height {}",
+                            spending_block.hash(),
+                            spending_block.header().height
+                        );
+                        monitored_utxo.mark_as_spent(&spending_block);
+                    } else {
+                        error!("Claimed UTXO's mutator set membership proof was invalid but we could not find the block in which it was spent. This is most likely a bug in the software.");
+                    }
+                }
 
                 Some(monitored_utxo)
             }
@@ -2275,14 +2300,21 @@ mod rpc_server_tests {
         #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_before_confirmed() -> Result<()> {
-            worker::claim_utxo_owned(false).await
+            worker::claim_utxo_owned(false, false).await
         }
 
         #[traced_test]
         #[allow(clippy::needless_return)]
         #[tokio::test]
         async fn claim_utxo_owned_after_confirmed() -> Result<()> {
-            worker::claim_utxo_owned(true).await
+            worker::claim_utxo_owned(true, false).await
+        }
+
+        #[traced_test]
+        #[allow(clippy::needless_return)]
+        #[tokio::test]
+        async fn claim_utxo_owned_after_confirmed_and_after_spent() -> Result<()> {
+            worker::claim_utxo_owned(true, true).await
         }
 
         #[traced_test]
@@ -2449,7 +2481,14 @@ mod rpc_server_tests {
                 Ok(())
             }
 
-            pub(super) async fn claim_utxo_owned(claim_after_confirmed: bool) -> Result<()> {
+            pub(super) async fn claim_utxo_owned(
+                claim_after_mined: bool,
+                spent: bool,
+            ) -> Result<()> {
+                assert!(
+                    !spent || claim_after_mined,
+                    "If UTXO is spent, it must also be mined"
+                );
                 let network = Network::Main;
                 let bob_key = WalletSecret::new_random();
                 let mut bob_rpc_server =
@@ -2499,7 +2538,7 @@ mod rpc_server_tests {
                 let (tx, offchain_notifications) = bob_rpc_server
                     .clone()
                     .send_to_many_inner_invalid_proof(
-                        pay_to_self_outputs,
+                        pay_to_self_outputs.clone(),
                         UtxoNotificationMedium::OffChain,
                         UtxoNotificationMedium::OffChain,
                         fee,
@@ -2512,10 +2551,30 @@ mod rpc_server_tests {
                 let block2 = invalid_block_with_transaction(&block1, tx);
                 let block3 = invalid_empty_block(&block2);
 
-                if claim_after_confirmed {
+                if claim_after_mined {
                     // bob applies the blocks before claiming utxos.
                     bob_rpc_server.state.set_new_tip(block2.clone()).await?;
                     bob_rpc_server.state.set_new_tip(block3.clone()).await?;
+
+                    if spent {
+                        // Send entire balance somewhere else
+                        let another_address = WalletSecret::new_random()
+                            .nth_generation_spending_key(0)
+                            .to_address();
+                        let (spending_tx, _) = bob_rpc_server
+                            .clone()
+                            .send_to_many_inner_invalid_proof(
+                                vec![(another_address.into(), NeptuneCoins::new(126))],
+                                UtxoNotificationMedium::OffChain,
+                                UtxoNotificationMedium::OffChain,
+                                NeptuneCoins::zero(),
+                                in_eight_months,
+                            )
+                            .await
+                            .unwrap();
+                        let block4 = invalid_block_with_transaction(&block3, spending_tx);
+                        bob_rpc_server.state.set_new_tip(block4.clone()).await?;
+                    }
                 }
 
                 for offchain_notification in offchain_notifications {
@@ -2547,7 +2606,7 @@ mod rpc_server_tests {
                         .collect_vec()
                 );
 
-                if !claim_after_confirmed {
+                if !claim_after_mined {
                     // bob hasn't applied blocks 2,3. balance should be 128
                     assert_eq!(
                         NeptuneCoins::new(128),
@@ -2561,29 +2620,23 @@ mod rpc_server_tests {
                     bob_rpc_server.state.set_new_tip(block3).await?;
                 }
 
-                // final balance should be 126.
-                // +128  coinbase
-                // -128  coinbase spent
-                // +5 self-send via Generation
-                // +6 self-send via Symmetric
-                // +115   change (less fee == 2)
-                assert_eq!(
-                    NeptuneCoins::new(126),
-                    bob_rpc_server.synced_balance(context::current()).await,
-                );
-
-                // todo: test that claim_utxo() correctly handles case when the
-                //       claimed utxo has already been spent.
-                //
-                //       in normal wallet usage this would not happen.  However it
-                //       is possible if bob were to claim a utxo with wallet A,
-                //       spend the utxo and then restore wallet B from A's seed.
-                //       When bob performs claim_utxo() in wallet B the balance
-                //       should reflect that the utxo was already spent.
-                //
-                //       this is a bit tricky to test, as it requires using a
-                //       different data directory for wallet B and test infrastructure
-                //       isn't setup for that.
+                if spent {
+                    assert!(bob_rpc_server
+                        .synced_balance(context::current())
+                        .await
+                        .is_zero(),);
+                } else {
+                    // final balance should be 126.
+                    // +128  coinbase
+                    // -128  coinbase spent
+                    // +5 self-send via Generation
+                    // +6 self-send via Symmetric
+                    // +115   change (less fee == 2)
+                    assert_eq!(
+                        NeptuneCoins::new(126),
+                        bob_rpc_server.synced_balance(context::current()).await,
+                    );
+                }
                 Ok(())
             }
         }

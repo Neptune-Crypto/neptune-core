@@ -5,6 +5,7 @@ use serde::Serialize;
 use twenty_first::math::tip5::Digest;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::archival_state::ArchivalState;
@@ -69,6 +70,14 @@ impl MonitoredUtxo {
             .iter()
             .find(|x| x.0 == block_digest)
             .map(|x| x.1.clone())
+    }
+
+    pub(crate) fn mark_as_spent(&mut self, spending_block: &Block) {
+        self.spent_in_block = Some((
+            spending_block.hash(),
+            spending_block.kernel.header.timestamp,
+            spending_block.kernel.header.height,
+        ));
     }
 
     /// Get the most recent (block hash, membership proof) entry in the database,
