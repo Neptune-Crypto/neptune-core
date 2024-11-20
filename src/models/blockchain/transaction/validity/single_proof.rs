@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
-use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -376,20 +375,9 @@ impl ConsensusProgram for SingleProof {
         let mut library = Library::new();
 
         // imports
-        let compare_digests = DataType::Digest.compare();
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
-
-        let load_digest = triton_asm! {
-            // _ *digest
-            push {Digest::LEN - 1} add
-            read_mem {Digest::LEN}
-            pop 1
-            hint digest = stack[0..5]
-            // _ [digest]
-        };
-
         let new_claim = library.import(Box::new(NewClaim));
         let assemble_rri_claim = library.import(Box::new(GenerateRriClaim));
         let assemble_k2o_claim = library.import(Box::new(GenerateK2oClaim));
@@ -418,9 +406,9 @@ impl ConsensusProgram for SingleProof {
         let audit_witness_of_merge =
             library.import(Box::new(VerifyNdSiIntegrity::<WitnessOfMerge>::default()));
 
-        let claim_field_with_size_output = triton_asm!(read_mem 1 push 1 add swap 1 push -1 add);
+        let claim_field_with_size_output = triton_asm!(read_mem 1 addi 1 place 1 addi -1);
 
-        let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop".to_string();
+        let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop";
         let verify_scripts_loop_body = triton_asm! {
             // INVARIANT: _ *claim_template *claim_program_digest *current_program_digest *eof *current_proof current_proof_size
             {verify_scripts_loop_label}:
@@ -497,7 +485,10 @@ impl ConsensusProgram for SingleProof {
                 dup 0 {&proof_collection_field_kernel_mast_hash}
                 // [txk_digest] *spw disc *proof_collection *kernel_mast_hash
 
-                {&load_digest}
+                push {Digest::LEN - 1} add
+                read_mem {Digest::LEN}
+                pop 1
+                hint kernel_mast_hash: Digest = stack[0..5]
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash]
 
                 dup 12
@@ -507,8 +498,7 @@ impl ConsensusProgram for SingleProof {
                 dup 12
                 // [txk_digest] *spw disc *proof_collection [kernel_mast_hash] [txk_digest]
 
-                {&compare_digests}
-                assert
+                assert_vector
                 // [txk_digest] *spw disc *proof_collection
 
 
@@ -631,29 +621,28 @@ impl ConsensusProgram for SingleProof {
                 hint type_script_hashes = stack[1]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes size
 
-                dup 1 add push 2 add
+                dup 1 add addi 2
                 hint eof = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes *eof
 
-                swap 1 push 2 add
+                pick 1 addi 2
                 hint type_script_hashes_i = stack[0]
-                // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *eof *type_script_hashes[0]
-
-                swap 1
+                place 1
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes[0] *eof
 
 
                 dup 6
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes[0] *eof *proof_collection
 
-                {&proof_collection_field_type_scripts_halt} push 1 add
+                {&proof_collection_field_type_scripts_halt}
+                addi 1
                 hint type_script_proofs_i_si = stack[0]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes *eof *type_script_proofs[0]_si
 
                 read_mem 1
                 hint proof_size = stack[1]
-                push 2 add
-                swap 1
+                addi 2
+                place 1
                 hint type_script_proofs_i = stack[1]
                 // [txk_digest] *spw disc *proof_collection *cls_claim *cts_claim *ts_claim_template *program_digest_ptr *type_script_hashes *eof *type_script_proofs[0] proof_size
 

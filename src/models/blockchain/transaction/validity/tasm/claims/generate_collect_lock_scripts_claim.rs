@@ -1,7 +1,6 @@
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
-use tasm_lib::memory::write_words_to_memory_leave_pointer;
 use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
@@ -9,6 +8,7 @@ use tasm_lib::Digest;
 
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
+use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 pub(crate) struct GenerateCollectLockScriptsClaim;
@@ -28,46 +28,92 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
-        let push_digest = |d: Digest| {
-            let [d0, d1, d2, d3, d4] = d.values();
-            triton_asm! {
-                push {d4}
-                push {d3}
-                push {d2}
-                push {d1}
-                push {d0}
-            }
+        let push_collect_lock_scripts_hash = {
+            let Digest([d0, d1, d2, d3, d4]) = CollectLockScripts.program().hash();
+            triton_asm!(push {d4} push {d3} push {d2} push {d1} push {d0})
         };
-        let push_collect_lock_scripts_hash = push_digest(CollectLockScripts.program().hash());
 
-        let load_digest_reversed = triton_asm!(
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
-            addi 2
-            read_mem 1
-            pop 1
-        );
-        let dyn_malloc = library.import(Box::new(DynMalloc));
-        let claim_pointer_alloc = library.kmalloc(1);
+        let new_claim = library.import(Box::new(NewClaim));
+        let lock_script_hashes_loop = format!("{entrypoint}_lock_script_hashes_loop");
 
-        let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
-        let proof_collection_field_and_size_lock_script_hashes =
-            field_with_size!(ProofCollection::lock_script_hashes);
+        triton_asm!(
+            {entrypoint}:
+                // _ *proof_collection
 
-        const SIZE_OF_PROGRAM_DIGEST_AND_INPUT_FIELD: isize = 12;
-        let write_rest_of_claim = write_words_to_memory_leave_pointer(
-            SIZE_OF_PROGRAM_DIGEST_AND_INPUT_FIELD.try_into().unwrap(),
-        );
+                dup 0
+                {&field_with_size!(ProofCollection::lock_script_hashes)}
+                // _ *proof_collection *ls_hashes ls_hashes_si
 
-        let lock_script_hashes_loop_label = format!("{entrypoint}_lock_script_hashes_loop");
-        let lock_script_hashes_loop = triton_asm!(
+                /* calculate end of `ls_hashes` list */
+                dup 1
+                dup 1
+                add
+                addi {Digest::LEN - 1}
+                // _ *proof_collection *ls_hashes ls_hashes_si (*ls_hashes[last+1]_lw)
+
+                pick 2
+                read_mem 1
+                addi {1 + Digest::LEN}
+                // _ *proof_collection ls_hashes_si (*ls_hashes[last+1]_lw) ls_hashes_len *ls_hashes[0]_lw
+
+                /* assert correct size indicator */
+                pick 1
+                push {Digest::LEN}
+                mul
+                addi 1
+                // _ *proof_collection ls_hashes_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw (5 * ls_hashes_len + 1)
+
+                dup 3
+                eq
+                assert
+                // _ *proof_collection ls_hashes_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw
+
+                pick 2
+                addi -1
+                hint output_len = stack[0]
+                // _ *proof_collection (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len
+
+                push {Digest::LEN}
+                place 1
+                // _ *proof_collection (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw input_len output_len
+
+                call {new_claim}
+                // _ *proof_collection (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw *claim *output *input *program_digest
+
+                {&push_collect_lock_scripts_hash}
+                hint collect_lock_scripts_hash: Digest = stack[0..5]
+                pick 5
+                write_mem {Digest::LEN}
+                pop 1
+                // _ *proof_collection (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw *claim *output *input
+
+                /* Load claim's input reversed, since given as input in stream-form */
+                pick 5
+                {&field!(ProofCollection::salted_inputs_hash)}
+                addi {Digest::LEN - 1}
+                read_mem {Digest::LEN}
+                hint salted_inputs_hash: Digest = stack[1..6]
+                pop 1
+                pick 1 pick 2 pick 3 pick 4
+                // _ (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw *claim *output *input [reversed(salted_inputs_hash)]
+
+                pick 5
+                write_mem {Digest::LEN}
+                pop 1
+                // _ (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw *claim *output
+
+                pick 1
+                place 3
+                // _ *claim (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw *output
+
+                call {lock_script_hashes_loop}
+                // _ *claim (*ls_hashes[last+1]_lw) (*ls_hashes[last+1]_lw) *garbage
+
+                pop 3
+                return
+
             // INVARIANT: _ (*ls_hashes[last+1]_lw) *ls_hashes[n]_lw (*claim.output[n])
-            {lock_script_hashes_loop_label}:
+            {lock_script_hashes_loop}:
                 /* Loop end-condition */
                 dup 2
                 dup 2
@@ -75,122 +121,17 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
                 skiz
                     return
 
-                dup 1
+                pick 1
                 read_mem {Digest::LEN}
                 addi {Digest::LEN * 2}
-                swap 7
-                pop 1
+                place 6
                 // _ (*ls_hashes[last+1]_lw) *ls_hashes[n+1]_lw (*claim.output[n]) [ls_hash[n]]
 
-                dup 5
+                pick 5
                 write_mem {Digest::LEN}
-                swap 1
-                pop 1
                 // _ (*ls_hashes[last+1]_lw) *ls_hashes[n+1]_lw (*claim.output[n+1])
 
                 recurse
-        );
-
-        let assert_correct_size_indicator = triton_asm!(
-            // _ ls_hashes_len ls_hashes_si
-
-            /* Calculate expected size-indicator */
-            swap 1
-            push {Digest::LEN}
-            mul
-            addi 1
-            // _ ls_hashes_si (5 * ls_hashes_len + 1)
-
-            dup 1
-            eq
-            assert
-            // _ ls_hashes_si
-        );
-
-        triton_asm!(
-            {entrypoint}:
-                // _ *proof_collection
-
-                /* Put the entire encoding onto the stack, then write to memory */
-                {&push_collect_lock_scripts_hash}
-                // _ *proof_collection [program_digest]
-
-                dup 5
-                {&proof_collection_field_salted_inputs_hash}
-                // _ *proof_collection [program_digest] *salted_inputs_hash
-
-                /* Load claim-input reversed, since given as input in stream-form */
-                {&load_digest_reversed}
-                // _ *proof_collection [program_digest] [reversed(salted_inputs_hash)]
-
-                push {Digest::LEN}
-                push {Digest::LEN + 1}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si
-
-                dup 12
-                {&proof_collection_field_and_size_lock_script_hashes}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si *ls_hashes ls_hashes_si
-
-                /* Calculate end of `ls_hashes` list */
-                dup 1
-                dup 1
-                add
-                addi {Digest::LEN - 1}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si *ls_hashes ls_hashes_si (*ls_hashes[last+1]_lw)
-
-
-                /* Get length of list of lock script hashes */
-                swap 2
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) ls_hashes_si *ls_hashes
-
-                read_mem 1
-                addi {1 + Digest::LEN}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) ls_hashes_si ls_hashes_len *ls_hashes[0]_lw
-
-                swap 2
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw ls_hashes_len ls_hashes_si
-
-                {&assert_correct_size_indicator}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw ls_hashes_si
-
-                dup 0
-                addi -1
-                swap 1
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len output_si
-
-                call {dyn_malloc}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len output_si *claim
-
-                dup 0
-                push {claim_pointer_alloc.write_address()}
-                write_mem {claim_pointer_alloc.num_words()}
-                pop 1
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw output_len output_si *claim
-
-                /* Write size-indicator and length for claims `output` field */
-                write_mem 2
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[0]_lw (*claim + 2)
-
-                call {lock_script_hashes_loop_label}
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*ls_hashes[last+1]_lw) *ls_hashes[last+1]_lw (*claim.input)
-
-                swap 2
-                pop 2
-                // _ *proof_collection [program_digest] [salted_inputs_hash] input_len input_si (*claim.input)
-
-                {&write_rest_of_claim}
-                // _ *proof_collection (*claim + n)
-
-                pop 2
-
-                push {claim_pointer_alloc.read_address()}
-                read_mem {claim_pointer_alloc.num_words()}
-                pop 1
-                // _ *claim
-
-                return
-
-                {&lock_script_hashes_loop}
         )
     }
 }
@@ -228,21 +169,14 @@ mod tests {
             stack: &mut Vec<BFieldElement>,
             memory: &mut HashMap<BFieldElement, BFieldElement>,
         ) {
-            let claim_ptr_ptr_in_isolated_run = tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;
-
-            // _ *proof_collection
             let proof_collection_pointer = stack.pop().unwrap();
-
-            let proof_collection: ProofCollection =
+            let proof_collection =
                 *ProofCollection::decode_from_memory(memory, proof_collection_pointer).unwrap();
 
             let claim = proof_collection.collect_lock_scripts_claim();
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
-
-            // Mimic population of static memory
-            memory.insert(claim_ptr_ptr_in_isolated_run, claim_pointer);
 
             stack.push(claim_pointer);
         }
