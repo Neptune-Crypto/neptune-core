@@ -210,6 +210,9 @@ pub trait RPC {
     /// Return information about funds in the wallet
     async fn wallet_status() -> WalletStatus;
 
+    /// Return the number of expected UTXOs, including already received UTXOs.
+    async fn num_expected_utxos() -> u64;
+
     /// Return an address that this client can receive funds on
     async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
 
@@ -966,6 +969,17 @@ impl RPC for NeptuneRPCServer {
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
+            .await
+    }
+
+    async fn num_expected_utxos(self, _context: tarpc::context::Context) -> u64 {
+        log_slow_scope!(fn_name!());
+
+        self.state
+            .lock_guard()
+            .await
+            .wallet_state
+            .num_expected_utxos()
             .await
     }
 

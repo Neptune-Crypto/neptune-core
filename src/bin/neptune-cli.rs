@@ -208,6 +208,7 @@ enum Command {
     SyncedBalance,
     SyncedBalanceUnconfirmed,
     WalletStatus,
+    NumExpectedUtxos,
     OwnReceivingAddress,
     ListCoins,
     MempoolTxCount,
@@ -537,6 +538,10 @@ async fn main() -> Result<()> {
         Command::WalletStatus => {
             let wallet_status: WalletStatus = client.wallet_status(ctx).await?;
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
+        }
+        Command::NumExpectedUtxos => {
+            let num = client.num_expected_utxos(ctx).await?;
+            println!("Found a total of {num} expected UTXOs in the database");
         }
         Command::OwnReceivingAddress => {
             let rec_addr = client

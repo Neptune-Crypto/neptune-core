@@ -419,6 +419,11 @@ impl WalletState {
             .expect("balance must never overflow")
     }
 
+    /// Returns the number of expected UTXOs in the database.
+    pub(crate) async fn num_expected_utxos(&self) -> u64 {
+        self.wallet_db.expected_utxos().len().await
+    }
+
     // note: does not verify we do not have any dups.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
         self.wallet_db
