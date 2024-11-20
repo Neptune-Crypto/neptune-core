@@ -164,6 +164,13 @@ pub struct Args {
     #[clap(long)]
     pub tx_proving_capability: Option<TxProvingCapability>,
 
+    /// Cache for the proving capability. If the above parameter is not set, we
+    /// want to estimate proving capability and afterwards reuse the result from
+    /// previous estimations. This argument cannot be set from CLI, so clap
+    /// ignores it.
+    #[clap(skip)]
+    pub tx_proving_capability_cache: OnceLock<TxProvingCapability>,
+
     /// The number of seconds between each attempt to upgrade transactions in
     /// the mempool to proofs of a higher quality. Will only run if the machine
     /// on which the client runs is powerful enough to produce `SingleProof`s.
@@ -253,10 +260,9 @@ impl Args {
     }
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
+    /// Cache the result so we don't estimate more than once.
     pub(crate) fn proving_capability(&self) -> TxProvingCapability {
-        static CAPABILITY: OnceLock<TxProvingCapability> = OnceLock::new();
-
-        *CAPABILITY.get_or_init(|| {
+        *self.tx_proving_capability_cache.get_or_init(|| {
             if let Some(proving_capability) = self.tx_proving_capability {
                 proving_capability
             } else if self.compose {
@@ -338,5 +344,18 @@ mod cli_args_tests {
     fn estimate_own_proving_capability() {
         // doubles as a no-crash test
         println!("{}", Args::estimate_proving_capability());
+    }
+
+    #[test]
+    fn cli_args_can_differ_about_proving_capability() {
+        let a = Args {
+            tx_proving_capability: Some(TxProvingCapability::ProofCollection),
+            ..Default::default()
+        };
+        let b = Args {
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+        assert_ne!(a.proving_capability(), b.proving_capability());
     }
 }
