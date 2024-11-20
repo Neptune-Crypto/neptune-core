@@ -70,7 +70,7 @@ impl BasicSnippet for GenerateK2oClaim {
 
         triton_asm!(
             // BEFORE: _ [txk_digest] garb0 garb1 *proof_collection
-            // AFTER: _ [txk_digest] garb0 garb1 *proof_collection *claim
+            // AFTER:  _ [txk_digest] garb0 garb1 *proof_collection *claim
             {entrypoint}:
 
                 push {OUTPUT_LENGTH}

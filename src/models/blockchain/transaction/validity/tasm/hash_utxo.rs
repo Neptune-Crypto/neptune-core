@@ -42,7 +42,7 @@ impl BasicSnippet for HashUtxo {
 
         triton_asm!(
         // BEFORE: _ *utxo
-        // AFTER: _ [utxo_digest]
+        // AFTER:  _ [utxo_digest]
         {entrypoint}:
             push -1 add // _ *utxo_si // because it lives in a contiguous list
             read_mem 1  // _ utxo_size (*utxo_si - 1)

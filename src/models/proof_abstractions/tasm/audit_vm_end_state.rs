@@ -181,13 +181,13 @@ mod tests {
 
     #[test]
     fn pbt_rri_witness() {
-        let snippet: AuditVmEndState<RemovalRecordsIntegrityWitness> = AuditVmEndState::default();
+        let snippet = AuditVmEndState::<RemovalRecordsIntegrityWitness>::default();
         ShadowedAccessor::new(snippet).test();
     }
 
     #[test]
     fn rri_witness_negative_test_report_false_size() {
-        let snippet: AuditVmEndState<RemovalRecordsIntegrityWitness> = AuditVmEndState::default();
+        let snippet = AuditVmEndState::<RemovalRecordsIntegrityWitness>::default();
         let mut bad_init_state = snippet.pseudorandom_initial_state(random(), None);
 
         let stack_index_expected_size_value = NUM_OP_STACK_REGISTERS;
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn rri_witness_negative_test_not_zeros_on_stack() {
-        let snippet: AuditVmEndState<RemovalRecordsIntegrityWitness> = AuditVmEndState::default();
+        let snippet = AuditVmEndState::<RemovalRecordsIntegrityWitness>::default();
         let good_init_state = snippet.pseudorandom_initial_state(random(), None);
 
         let first_zero = NUM_OP_STACK_REGISTERS - 1;

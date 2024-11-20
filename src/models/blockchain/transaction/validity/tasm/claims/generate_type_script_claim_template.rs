@@ -37,7 +37,7 @@ impl BasicSnippet for GenerateTypeScriptClaimTemplate {
 
         triton_asm! {
             // BEFORE: _ *proof_collection
-            // AFTER: _ *claim *program_digest
+            // AFTER:  _ *claim *program_digest
             {entrypoint}:
 
                 push {3*Digest::LEN} push 0

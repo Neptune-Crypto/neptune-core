@@ -1,6 +1,5 @@
 use std::io::BufRead;
 use std::io::Write;
-use std::io::{self};
 
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
@@ -18,7 +17,7 @@ fn main() {
     //       pass it with ThreadPriority::CrossPlatform(x).
     set_current_thread_priority(ThreadPriority::Min).unwrap();
 
-    let stdin = io::stdin();
+    let stdin = std::io::stdin();
     let mut iterator = stdin.lock().lines();
     let claim: Claim = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();
     let program: Program = serde_json::from_str(&iterator.next().unwrap().unwrap()).unwrap();

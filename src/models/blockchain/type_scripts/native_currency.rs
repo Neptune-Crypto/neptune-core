@@ -547,7 +547,7 @@ impl ConsensusProgram for NativeCurrency {
                 recurse
 
                 // BEFORE: _ *coins[j]_si [amount]
-                // AFTER: _ *coins[j]_si [amount']
+                // AFTER:  _ *coins[j]_si [amount']
                 {read_and_add_amount}:
                     dup 4 push 1 add
                     // _ *coins[j]_si [amount] *coins[j]
@@ -751,12 +751,10 @@ pub mod test {
 
     #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_empty_tx() {
-        let mut test_runner = TestRunner::deterministic();
-
         // Generate a tx with coinbase input, no outputs, fee-size is the same
         // as the coinbase, so tx is valid.
         let primitive_witness = PrimitiveWitness::arbitrary_with((0, 0, 0))
-            .new_tree(&mut test_runner)
+            .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();
         let native_currency_witness = NativeCurrencyWitness {
@@ -769,9 +767,8 @@ pub mod test {
 
     #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_unittest() {
-        let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
+            .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();
         let native_currency_witness = NativeCurrencyWitness {
@@ -787,7 +784,11 @@ pub mod test {
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)))]
+        #[strategy(PrimitiveWitness::arbitrary_with((
+            #_num_inputs,
+            #_num_outputs,
+            #_num_public_announcements),
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
@@ -805,7 +806,12 @@ pub mod test {
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
         #[strategy(arb::<Timestamp>())] _now: Timestamp,
-        #[strategy(arbitrary_primitive_witness_with_active_timelocks(#_num_inputs, #_num_outputs, #_num_public_announcements, #_now))]
+        #[strategy(arbitrary_primitive_witness_with_active_timelocks(
+            #_num_inputs,
+            #_num_outputs,
+            #_num_public_announcements,
+            #_now,
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         let native_currency_witness = NativeCurrencyWitness {
@@ -829,7 +835,14 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
+            &#_input_utxos,
+            &#_input_lock_scripts_and_witnesses,
+            &#_output_utxos,
+            &#_public_announcements,
+            #_fee,
+            None,
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
@@ -858,7 +871,14 @@ pub mod test {
             PublicAnnouncement,
         >,
         #[strategy(arb())] _fee: NeptuneCoins,
-        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts_and_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
+            &#_input_utxos,
+            &#_input_lock_scripts_and_witnesses,
+            &#_output_utxos,
+            &#_public_announcements,
+            #_fee,
+            Some(#_coinbase),
+        ))]
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
@@ -875,9 +895,8 @@ pub mod test {
 
     #[tokio::test]
     async fn native_currency_failing_proof() {
-        let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
-            .new_tree(&mut test_runner)
+            .new_tree(&mut TestRunner::deterministic())
             .unwrap()
             .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();

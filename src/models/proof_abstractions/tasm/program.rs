@@ -66,10 +66,8 @@ where
             self.source();
             environment::PUB_OUTPUT.take()
         });
-        match emulation_result {
-            Ok(result) => Result::Ok(result),
-            Err(e) => Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e))),
-        }
+
+        emulation_result.map_err(|e| ConsensusError::RustShadowPanic(format!("{e:?}")))
     }
 
     /// Use Triton VM to run the tasm code.
@@ -105,9 +103,9 @@ where
                 Ok(vm_state.public_output)
             }
             Err(error) => {
-                debug!("VM State:\n{}\n\n", error);
+                debug!("VM State:\n{error}\n\n");
                 Err(ConsensusError::TritonVMPanic(
-                    format!("Triton VM failed.\nVMState:\n{}", vm_state),
+                    format!("Triton VM failed.\nVMState:\n{vm_state}"),
                     error,
                 ))
             }
@@ -304,7 +302,7 @@ pub mod test {
     }
 
     /// First, attempt to load the proof from disk. If it does not exist,
-    /// attempt to fetech it online. If that also fails, run the prover and
+    /// attempt to fetch it online. If that also fails, run the prover and
     /// save the proof before returning it.
     pub(crate) fn load_proof_or_produce_and_save(
         claim: &Claim,

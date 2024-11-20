@@ -182,13 +182,10 @@ mod tests {
     fn negative_test_bad_auth_path() {
         let snippet = AuthenticateInputsAgainstTxk;
         let inputs_ptr: BFieldElement = random();
-        let primitive_witness: PrimitiveWitness = {
-            let mut test_runner = TestRunner::deterministic();
-            PrimitiveWitness::arbitrary_with((2, 2, 2))
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current()
-        };
+        let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
         let mut bad_auth_path = snippet.correct_init_state(inputs_ptr, primitive_witness);
         bad_auth_path.nondeterminism.digests[0] =
             bad_auth_path.nondeterminism.digests[0].reversed();

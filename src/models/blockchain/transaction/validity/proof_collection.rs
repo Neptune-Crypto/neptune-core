@@ -69,49 +69,15 @@ impl ProofCollection {
         )
     }
     pub fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
-        let (
-            removal_records_integrity_witness,
-            collect_lock_scripts_witness,
-            kernel_to_outputs_witness,
-            collect_type_scripts_witness,
-        ) = Self::extract_specific_witnesses(primitive_witness);
-
-        // verify graceful halts
-        let removal_records_integrity_halts = if let Ok(output) = RemovalRecordsIntegrity.run_rust(
-            &removal_records_integrity_witness.standard_input(),
-            removal_records_integrity_witness.nondeterminism(),
-        ) {
-            output == removal_records_integrity_witness.output()
-        } else {
-            false
-        };
-
-        let collect_lock_scripts_halts = if let Ok(output) = CollectLockScripts.run_rust(
-            &collect_lock_scripts_witness.standard_input(),
-            collect_lock_scripts_witness.nondeterminism(),
-        ) {
-            output == collect_lock_scripts_witness.output()
-        } else {
-            false
-        };
-
-        let kernel_to_outputs_halts = if let Ok(output) = KernelToOutputs.run_rust(
-            &kernel_to_outputs_witness.standard_input(),
-            kernel_to_outputs_witness.nondeterminism(),
-        ) {
-            output == kernel_to_outputs_witness.output()
-        } else {
-            false
-        };
-
-        let collect_type_scripts_halts = if let Ok(output) = CollectTypeScripts.run_rust(
-            &collect_type_scripts_witness.standard_input(),
-            collect_type_scripts_witness.nondeterminism(),
-        ) {
-            output == collect_type_scripts_witness.output()
-        } else {
-            false
-        };
+        fn witness_halts_gracefully(
+            program: impl ConsensusProgram,
+            witness: impl SecretWitness,
+        ) -> bool {
+            program
+                .run_rust(&witness.standard_input(), witness.nondeterminism())
+                .map(|output| output == witness.output())
+                .unwrap_or(false)
+        }
 
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
         let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
@@ -127,10 +93,17 @@ impl ProofCollection {
             .iter()
             .all(|ts| ts.halts_gracefully(txk_mast_hash, salted_inputs_hash, salted_outputs_hash));
 
-        removal_records_integrity_halts
-            || collect_lock_scripts_halts
-            || kernel_to_outputs_halts
-            || collect_type_scripts_halts
+        let (
+            removal_records_integrity_witness,
+            collect_lock_scripts_witness,
+            kernel_to_outputs_witness,
+            collect_type_scripts_witness,
+        ) = Self::extract_specific_witnesses(primitive_witness);
+
+        witness_halts_gracefully(RemovalRecordsIntegrity, removal_records_integrity_witness)
+            || witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
+            || witness_halts_gracefully(KernelToOutputs, kernel_to_outputs_witness)
+            || witness_halts_gracefully(CollectTypeScripts, collect_type_scripts_witness)
             || all_lock_scripts_halt
             || all_type_scripts_halt
     }

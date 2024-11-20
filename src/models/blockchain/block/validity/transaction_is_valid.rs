@@ -29,7 +29,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins::{self as tasmlib};
+use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -46,7 +46,7 @@ impl From<BlockPrimitiveWitness> for TransactionIsValidWitness {
         let block_body = block_primitive_witness.body();
         let mast_path_txk = block_body.mast_path(BlockBodyField::TransactionKernel);
         let TransactionProof::SingleProof(single_proof) =
-            &block_primitive_witness.transaction.proof
+            &block_primitive_witness.transaction().proof
         else {
             panic!("cannot make a block whose transaction is not supported by a single proof");
         };
@@ -101,6 +101,7 @@ impl SecretWitness for TransactionIsValidWitness {
 pub(crate) struct TransactionIsValid;
 
 impl TransactionIsValid {
+    #[expect(unused)] // todo: still needed?
     pub(crate) fn claim(block_body_mast_hash: Digest) -> Claim {
         let input = block_body_mast_hash.reversed().values().to_vec();
 

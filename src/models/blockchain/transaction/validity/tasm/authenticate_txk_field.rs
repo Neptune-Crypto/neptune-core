@@ -214,7 +214,7 @@ mod tests {
         fn rust_shadow(
             &self,
             stack: &mut Vec<BFieldElement>,
-            memory: &std::collections::HashMap<BFieldElement, BFieldElement>,
+            memory: &HashMap<BFieldElement, BFieldElement>,
             _nd_tokens: std::collections::VecDeque<BFieldElement>,
             nd_digests: std::collections::VecDeque<Digest>,
         ) {
@@ -257,13 +257,10 @@ mod tests {
             let mut rng: TestRng = TestRng::from_seed(RngAlgorithm::ChaCha, &seed);
             let inputs_ptr: BFieldElement = bfe!(rng.gen_range(0..(1 << 30)));
 
-            let primitive_witness: PrimitiveWitness = {
-                let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
-                PrimitiveWitness::arbitrary_with((2, 2, 2))
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current()
-            };
+            let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+                .new_tree(&mut TestRunner::new_with_rng(Default::default(), rng))
+                .unwrap()
+                .current();
             self.correct_initial_state(inputs_ptr, primitive_witness)
         }
     }
@@ -281,13 +278,10 @@ mod tests {
         for &field in TransactionKernelField::VARIANTS {
             let snippet = AuthenticateTxkField(field);
             let inputs_ptr: BFieldElement = random();
-            let primitive_witness: PrimitiveWitness = {
-                let mut test_runner = TestRunner::deterministic();
-                PrimitiveWitness::arbitrary_with((2, 2, 2))
-                    .new_tree(&mut test_runner)
-                    .unwrap()
-                    .current()
-            };
+            let primitive_witness = PrimitiveWitness::arbitrary_with((2, 2, 2))
+                .new_tree(&mut TestRunner::deterministic())
+                .unwrap()
+                .current();
             let mut bad_auth_path = snippet.correct_initial_state(inputs_ptr, primitive_witness);
             bad_auth_path.nondeterminism.digests[0].0[0].increment();
 

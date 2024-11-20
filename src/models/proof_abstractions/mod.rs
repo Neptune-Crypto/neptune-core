@@ -20,7 +20,7 @@ pub trait SecretWitness {
     /// The program's (public/standard) input
     fn standard_input(&self) -> PublicInput;
 
-    /// The program's (standard/public) output.
+    /// The program's (public/standard) output.
     fn output(&self) -> Vec<BFieldElement> {
         vec![]
     }

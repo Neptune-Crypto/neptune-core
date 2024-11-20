@@ -436,7 +436,7 @@ impl Block {
     /// kernels. The net result is that broadcasting transaction on other
     /// networks invalidates the lock script proofs.
     pub(crate) fn premine_sender_randomness(network: Network) -> Digest {
-        Digest::new([bfe!(network as u64), bfe!(0), bfe!(0), bfe!(0), bfe!(0)])
+        Digest::new(bfe_array![network as u64, 0, 0, 0, 0])
     }
 
     fn premine_distribution() -> Vec<(ReceivingAddress, NeptuneCoins)> {
@@ -587,7 +587,8 @@ impl Block {
         //   b) Block proof is valid
         //   c) Max block size is not exceeded
         // 2. The transaction is valid.
-        //   a) Verify that MS removal records are valid, done against previous `mutator_set_accumulator`,
+        //   a) Verify that MS removal records are valid, done against previous
+        //      `mutator_set_accumulator`,
         //   b) Verify that all removal records have unique index sets
         //   c) Verify that the mutator set update induced by the block sends
         //      the old mutator set accumulator to the new one.
@@ -626,11 +627,13 @@ impl Block {
             > self.kernel.header.timestamp
         {
             warn!(
-                "Block's timestamp ({}) should be greater than or equal to that of previous block ({}) plus minimum block time ({}) \nprevious <= current ?? {}",
+                "Block's timestamp ({}) should be greater than or equal to that of previous block \
+                ({}) plus minimum block time ({}) \nprevious <= current ?? {}",
                 self.kernel.header.timestamp,
                 previous_block.kernel.header.timestamp,
                 minimum_block_time,
-                previous_block.kernel.header.timestamp + minimum_block_time <= self.kernel.header.timestamp
+                previous_block.kernel.header.timestamp + minimum_block_time
+                    <= self.kernel.header.timestamp
             );
             return false;
         }
@@ -645,7 +648,8 @@ impl Block {
         );
         if self.kernel.header.difficulty != expected_difficulty {
             warn!(
-                "Value for new difficulty is incorrect.  actual: {},  expected: {expected_difficulty}",
+                "Value for new difficulty is incorrect. \
+                actual: {}, expected: {expected_difficulty}",
                 self.kernel.header.difficulty,
             );
             return false;
@@ -653,7 +657,12 @@ impl Block {
         let expected_cumulative_proof_of_work =
             previous_block.header().cumulative_proof_of_work + previous_block.header().difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
-            warn!("Block's cumulative proof-of-work number does not match with expectation.\n\nBlock's pow: {}\nexpectation: {}", self.header().cumulative_proof_of_work, expected_cumulative_proof_of_work);
+            warn!(
+                "Block's cumulative proof-of-work number does not match with expectation.\n\n\
+                Block's pow: {}\nexpectation: {}",
+                self.header().cumulative_proof_of_work,
+                expected_cumulative_proof_of_work
+            );
             return false;
         }
 
@@ -671,7 +680,10 @@ impl Block {
         // 1.a) Verify appendix contains required claims
         for required_claim in BlockAppendix::consensus_claims(self.body()) {
             if !self.appendix().contains(&required_claim) {
-                warn!("Block appendix does not contain required claim.\nRequired claim: {required_claim:?}");
+                warn!(
+                    "Block appendix does not contain required claim.\n\
+                    Required claim: {required_claim:?}"
+                );
                 return false;
             }
         }
@@ -756,7 +768,7 @@ impl Block {
             return false;
         }
 
-        // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp.
+        // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             warn!(
                 "Transaction timestamp ({}) is is larger than that of block ({})",
@@ -771,7 +783,10 @@ impl Block {
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
             if coinbase > block_subsidy {
-                warn!("Coinbase exceeds block subsidy. coinbase: {coinbase}; block subsidy: {block_subsidy}.");
+                warn!(
+                    "Coinbase exceeds block subsidy. coinbase: {coinbase}; \
+                    block subsidy: {block_subsidy}."
+                );
                 return false;
             }
         }
@@ -950,8 +965,6 @@ impl Block {
 
 #[cfg(test)]
 mod block_tests {
-    use std::collections::HashSet;
-
     use rand::thread_rng;
     use rand::Rng;
     use rayon::iter::IntoParallelRefIterator;
@@ -980,16 +993,17 @@ mod block_tests {
 
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
-        let mut genesis_block_msa_digests: HashSet<Digest> = HashSet::default();
+        let mutator_set_hash = |network| {
+            Block::genesis_block(network)
+                .body()
+                .mutator_set_accumulator
+                .hash()
+        };
 
-        for network in Network::iter() {
-            assert!(genesis_block_msa_digests.insert(
-                Block::genesis_block(network)
-                    .body()
-                    .mutator_set_accumulator
-                    .hash(),
-            ), "All genesis blocks must have unique MSA digests, otherwise replay attacks are possible");
-        }
+        assert!(
+            Network::iter().map(mutator_set_hash).all_unique(),
+            "All genesis blocks must have unique MSA digests, else replay attacks are possible",
+        );
     }
 
     #[test]
@@ -1041,7 +1055,8 @@ mod block_tests {
             assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
         }
 
-        // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
+        // Verify that a difficulty of BFieldElement::MAX accepts all digests where the
+        // last BFieldElement is zero
         let some_difficulty = Difficulty::new([1, u32::MAX, 0, 0, 0]);
         let some_threshold_actual: Digest = some_difficulty.target();
 
@@ -1412,9 +1427,18 @@ mod block_tests {
             block2.body().transaction_kernel.inputs.clone(),
             block2.body().transaction_kernel.outputs.clone(),
         );
-        mutator_set_update_guesser_fees.apply_to_accumulator_and_records(&mut ms, &mut mutator_set_update_tx.removals.iter_mut().collect_vec())
-            .expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
-        mutator_set_update_tx.apply_to_accumulator(&mut ms).expect("applying mutator set update derived from block 2 to mutator set from block 1 should work");
+
+        let reason = "applying mutator set update derived from block 2 \
+                      to mutator set from block 1 should work";
+        mutator_set_update_guesser_fees
+            .apply_to_accumulator_and_records(
+                &mut ms,
+                &mut mutator_set_update_tx.removals.iter_mut().collect_vec(),
+            )
+            .expect(reason);
+        mutator_set_update_tx
+            .apply_to_accumulator(&mut ms)
+            .expect(reason);
 
         assert_eq!(ms.hash(), block2.body().mutator_set_accumulator.hash());
     }

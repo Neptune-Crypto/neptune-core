@@ -72,7 +72,7 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
         let assert_coinbase_equality_label = format!("{entrypoint}_assert_eq");
         let assert_coinbase_equality = triton_asm!(
             // BEFORE: _  *coinbase_a *coinbase_b
-            // AFTER: _  *coinbase_a *coinbase_b
+            // AFTER:  _  *coinbase_a *coinbase_b
             {assert_coinbase_equality_label}:
                 // _ *coinbase_a *coinbase_b
 

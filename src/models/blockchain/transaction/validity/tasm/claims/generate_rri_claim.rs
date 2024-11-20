@@ -72,7 +72,7 @@ impl BasicSnippet for GenerateRriClaim {
 
         triton_asm!(
             // BEFORE: _ [txk_digest] garb garb *proof_collection
-            // AFTER: _ [txk_digest] garb garb *proof_collection *rri_claim
+            // AFTER:  _ [txk_digest] garb garb *proof_collection *rri_claim
             {entrypoint}:
 
                 push {input_length}

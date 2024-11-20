@@ -1,4 +1,4 @@
-//! implements a triton-vm-job-queue job for proving
+//! Implements a triton-vm-job-queue job for proving
 //! consensus programs.
 //!
 //! These proofs take a lot of time, cpu, and memory to
@@ -30,7 +30,7 @@ use crate::triton_vm::vm::VMState;
 /// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
 pub enum ProverJobError {
-    #[error("triton-vm program complexity limit exceeded.  result: {result},  limit: {limit}")]
+    #[error("triton-vm program complexity limit exceeded. result: {result}, limit: {limit}")]
     ProofComplexityLimitExceeded { limit: u32, result: u32 },
 
     #[error("external proving process failed")]
@@ -59,7 +59,7 @@ pub enum VmProcessError {
 
     // note: on unix an exit with no code indicates the process
     // ended because of a signal, but this is not the case in
-    // windows, so cannot be relied upon.  there doesn't appear to
+    // windows, so cannot be relied upon. There doesn't appear to
     // be any good cross-platform heuristic to determine if a process
     // ended normally or was killed.
     //
@@ -131,16 +131,13 @@ impl ProverJob {
                 Ok(r) => r,
                 Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
                 Err(e) if e.is_cancelled() => {
-                    panic!("VM::run() task was cancelled unexpectedlly. error: {}", e)
+                    panic!("VM::run() task was cancelled unexpectedly. error: {e}")
                 }
-                Err(e) => panic!(
-                    "unexpected error from VM::run() spawn-blocking task.  {}",
-                    e
-                ),
+                Err(e) => panic!("unexpected error from VM::run() spawn-blocking task. {e}"),
             };
 
             if let Err(e) = run_result {
-                panic!("VM run prior to proving should halt gracefully.\n{e}");
+                panic!("Triton VM should halt gracefully.\nError: {e}\n\n{vm_state_moved}");
             }
             vm_state_moved
         };
@@ -170,7 +167,7 @@ impl ProverJob {
         }
         #[cfg(not(test))]
         {
-            // todo:  perhaps we should retry once if process exits
+            // todo: perhaps we should retry once if process exits
             // with non-zero or no exit code.
             Ok(self.prove_out_of_process().await?)
         }
@@ -181,7 +178,7 @@ impl ProverJob {
     /// input is sent via stdin, output is received via stdout.
     /// stderr is ignored.
     ///
-    /// The prover executable is triton-vm-prover.  Presently
+    /// The prover executable is triton-vm-prover. Presently
     /// it must be in $PATH.
     ///
     /// todo: figure out how to exec correct executable for
@@ -237,7 +234,7 @@ impl ProverJob {
     /// This enables debug build of neptune-core to invoke debug build of triton-vm-prover.
     /// Also works for release build, and for a package/distribution.
     ///
-    /// note: we do not verify that the path exists.  That will occur anyway
+    /// note: we do not verify that the path exists. That will occur anyway
     /// when triton-vm-prover is executed.
     #[cfg(not(test))]
     fn path_to_triton_vm_prover() -> Result<std::path::PathBuf, std::io::Error> {
@@ -250,6 +247,7 @@ impl ProverJob {
 #[async_trait::async_trait]
 impl Job for ProverJob {
     // see trait doc-comment
+    // except there is no trait doc-comment
     fn is_async(&self) -> bool {
         true
     }

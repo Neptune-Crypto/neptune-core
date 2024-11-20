@@ -33,7 +33,7 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
 
         triton_asm! {
             // BEFORE: _ *proof_collection
-            // AFTER: _ *claim *program_digest
+            // AFTER:  _ *claim *program_digest
             {entrypoint}:
 
                 push {Digest::LEN} push 0

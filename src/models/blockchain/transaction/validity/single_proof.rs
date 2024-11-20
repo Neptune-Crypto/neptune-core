@@ -307,13 +307,6 @@ impl SingleProof {
 }
 
 impl ConsensusProgram for SingleProof {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let stark: Stark = Stark::default();
         let own_program_digest: Digest = tasmlib::own_program_digest();
@@ -850,6 +843,13 @@ impl ConsensusProgram for SingleProof {
             {&library.all_imports()}
         }
     }
+
+    /// Get the program hash digest.
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
 }
 
 #[cfg(test)]
@@ -878,7 +878,7 @@ mod test {
     #[tokio::test]
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
-        for illegal_discriminant_value in [bfe!(-1), bfe!(3), bfe!(4), bfe!(1u64 << 40)] {
+        for illegal_discriminant_value in bfe_array![-1, 3, 4, 1 << 40] {
             let init_ram: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 illegal_discriminant_value,

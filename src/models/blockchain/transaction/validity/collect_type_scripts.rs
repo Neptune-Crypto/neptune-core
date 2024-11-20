@@ -343,7 +343,7 @@ impl ConsensusProgram for CollectTypeScripts {
                 recurse
 
             // BEFORE: _ *coin[j] *type_script_hashes
-            // AFTER: _ *coin[j] *
+            // AFTER:  _ *coin[j] *
             {push_digest_to_list}:
                 dup 1
                 // _ *coin[j] *type_script_hashes *coin[j]

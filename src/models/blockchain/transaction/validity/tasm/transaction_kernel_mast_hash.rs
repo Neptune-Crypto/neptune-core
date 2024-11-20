@@ -58,7 +58,7 @@ impl BasicSnippet for TransactionKernelMastHash {
 
         triton_asm! {
         // BEFORE: _ *kernel
-        // AFTER: _ d4 d3 d2 d1 d0
+        // AFTER:  _ d4 d3 d2 d1 d0
         {entrypoint}:
             // allocate new list of 16 digests
             push 16                      // _ *kernel 16
