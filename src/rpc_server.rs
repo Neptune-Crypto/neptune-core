@@ -314,10 +314,12 @@ pub trait RPC {
     /// state.
     ///
     /// if the utxo has already been claimed, this call has no effect.
+    ///
+    /// Return true if a new expected UTXO was added, otherwise false.
     async fn claim_utxo(
         utxo_transfer_encrypted: String,
         max_search_depth: Option<u64>,
-    ) -> Result<(), String>;
+    ) -> Result<bool, String>;
 
     /// Stop miner if running
     async fn pause_miner();
@@ -1260,7 +1262,7 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         encrypted_utxo_notification: String,
         max_search_depth: Option<u64>,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         log_slow_scope!(fn_name!());
 
         let claim_data = self
@@ -1271,9 +1273,10 @@ impl RPC for NeptuneRPCServer {
         let Some(claim_data) = claim_data else {
             // UTXO has already been claimed by wallet
             warn!("UTXO notification of amount was already received. Not adding again.");
-            return Ok(());
+            return Ok(false);
         };
 
+        let expected_utxo_was_new = !claim_data.has_expected_utxo;
         self.state
             .lock_guard_mut()
             .await
@@ -1282,7 +1285,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .map_err(|x| x.to_string())?;
 
-        Ok(())
+        Ok(expected_utxo_was_new)
     }
 
     // documented in trait. do not add doc-comment.

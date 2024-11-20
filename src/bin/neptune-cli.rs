@@ -585,12 +585,16 @@ async fn main() -> Result<()> {
                 ClaimUtxoFormat::Raw { ciphertext } => val_or_stdin_line(ciphertext)?,
             };
 
-            client
+            let claim_was_new = client
                 .claim_utxo(ctx, ciphertext, max_search_depth)
                 .await?
                 .map_err(|s| anyhow!(s))?;
 
-            println!("Success.  1 Utxo Transfer was imported.");
+            if claim_was_new {
+                println!("Success.  1 Utxo Transfer was imported.");
+            } else {
+                println!("This claim has already been registered.");
+            }
         }
         Command::Send {
             address,
