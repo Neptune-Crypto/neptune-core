@@ -747,7 +747,9 @@ fn process_utxo_notifications(
 You must transfer each file to the corresponding recipient for claiming or they will never be able to claim the funds.
 You should also provide them the following recipient instructions.
 -- Recipient Instructions --
-run `neptune-cli claim-utxo file <file>` or use equivalent claim functionality of your chosen wallet software.
+run `neptune-cli claim-utxo file <file>`, or
+run `neptune-cli claim-utxo raw <ciphertext>`,
+or use equivalent claim functionality of your chosen wallet software.
 "
         );
     }
