@@ -72,8 +72,8 @@ impl AppendixWitness {
             .transaction_kernel
             .mast_hash();
 
-        let tx_is_valid_claim = SingleProof::claim(txk_mast_hash);
-        let tx_is_valid_proof = match &block_primitive_witness.transaction().proof {
+        let tx_claim = SingleProof::claim(txk_mast_hash);
+        let tx_proof = match &block_primitive_witness.transaction().proof {
             TransactionProof::SingleProof(proof) => proof.clone(),
             _ => {
                 panic!(
@@ -84,8 +84,7 @@ impl AppendixWitness {
         };
 
         // Add more claim/proof pairs here, when softforking.
-        let ret = Self::new(block_primitive_witness.body())
-            .with_claim(tx_is_valid_claim, tx_is_valid_proof);
+        let ret = Self::new(block_primitive_witness.body()).with_claim(tx_claim, tx_proof);
 
         assert_eq!(
             BlockAppendix::consensus_claims(block_primitive_witness.body()),
