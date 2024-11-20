@@ -2447,11 +2447,24 @@ mod rpc_server_tests {
                     }
 
                     for utxo_notification in alice_to_bob_utxo_notifications.into_iter() {
-                        bob_rpc_server
+                        // Register the same UTXO multiple times to ensure that this does not
+                        // change the balance.
+                        let claim_was_new0 = bob_rpc_server
+                            .clone()
+                            .claim_utxo(
+                                context::current(),
+                                utxo_notification.ciphertext.clone(),
+                                None,
+                            )
+                            .await
+                            .unwrap();
+                        assert!(claim_was_new0);
+                        let claim_was_new1 = bob_rpc_server
                             .clone()
                             .claim_utxo(context::current(), utxo_notification.ciphertext, None)
                             .await
                             .unwrap();
+                        assert!(!claim_was_new1);
                     }
 
                     assert_eq!(
