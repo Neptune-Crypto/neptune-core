@@ -448,32 +448,40 @@ impl PrimitiveWitness {
                     fee_dist,
                     timestamp,
                 )| {
-                    let maybe_coinbase = if set_coinbase {
-                        Some(total_amount)
-                    } else {
-                        None
-                    };
+                    let (maybe_coinbase, input_utxos, input_lock_scripts_and_witnesses) =
+                        if set_coinbase {
+                            (Some(total_amount), vec![], vec![])
+                        } else {
+                            // distribute total amount across inputs (+ coinbase)
+                            let input_denominator =
+                                input_dist.iter().map(|u| *u as f64).sum::<f64>();
+                            let input_weights = input_dist
+                                .into_iter()
+                                .map(|u| (u as f64) / input_denominator)
+                                .collect_vec();
+                            let mut input_amounts = input_weights
+                                .into_iter()
+                                .map(|w| total_amount.to_nau_f64() * w)
+                                .map(|f| NeptuneCoins::try_from(f).unwrap())
+                                .collect_vec();
 
-                    // distribute total amount across inputs (+ coinbase)
-                    let input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
-                    let input_weights = input_dist
-                        .into_iter()
-                        .map(|u| (u as f64) / input_denominator)
-                        .collect_vec();
-                    let mut input_amounts = input_weights
-                        .into_iter()
-                        .map(|w| total_amount.to_nau_f64() * w)
-                        .map(|f| NeptuneCoins::try_from(f).unwrap())
-                        .collect_vec();
+                            let sum_of_all_but_last = input_amounts
+                                .iter()
+                                .rev()
+                                .skip(1)
+                                .cloned()
+                                .sum::<NeptuneCoins>();
+                            *input_amounts.last_mut().unwrap() =
+                                total_amount.checked_sub(&sum_of_all_but_last).unwrap();
 
-                    let sum_of_all_but_last = input_amounts
-                        .iter()
-                        .rev()
-                        .skip(1)
-                        .cloned()
-                        .sum::<NeptuneCoins>();
-                    *input_amounts.last_mut().unwrap() =
-                        total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                            let (input_utxos, input_lock_scripts_and_witnesses) =
+                                Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    &input_address_seeds,
+                                    &input_amounts,
+                                );
+
+                            (None, input_utxos, input_lock_scripts_and_witnesses)
+                        };
 
                     // distribute total amount across outputs
                     let output_denominator =
@@ -489,15 +497,14 @@ impl PrimitiveWitness {
                         .collect_vec();
                     let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
                     let fee = total_amount.checked_sub(&total_outputs).unwrap();
-
-                    let (input_utxos, input_lock_scripts_and_witnesses) =
-                        Self::transaction_inputs_from_address_seeds_and_amounts(
-                            &input_address_seeds,
-                            &input_amounts,
-                        );
-                    let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    let total_inputs = input_utxos
+                        .iter()
+                        .cloned()
+                        .map(|utxo| utxo.get_native_currency_amount())
+                        .sum::<NeptuneCoins>();
 
                     assert_eq!(maybe_coinbase.unwrap_or(total_inputs), total_outputs + fee);
+
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
                         &output_address_seeds,
