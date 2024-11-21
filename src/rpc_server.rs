@@ -401,6 +401,9 @@ impl NeptuneRPCServer {
         );
 
         // Pause miner if we are mining
+        // note: we cannot return (early) until we un-pause mining.
+        // tbd: do we **really** need to pause mining given that
+        //      proofs are now generated async in job-queue?
         let was_mining = self.state.mining().await;
         if was_mining {
             let _ = self
@@ -433,6 +436,14 @@ impl NeptuneRPCServer {
         {
             Ok(tx) => tx,
             Err(e) => {
+                // Restart mining if it was paused
+                if was_mining {
+                    let _ = self
+                        .rpc_server_to_main_tx
+                        .send(RPCServerToMain::RestartMiner)
+                        .await;
+                }
+
                 tracing::error!("Could not create transaction: {}", e);
                 return Err(e);
             }
