@@ -256,6 +256,7 @@ impl DashboardApp {
     ) -> Result<String, Box<dyn Error>> {
         // create app
         let mut app = DashboardApp::new(Arc::new(client), network, listen_addr_for_peers);
+        let (refresh_tx, mut refresh_rx) = tokio::sync::mpsc::channel::<()>(2);
 
         // setup terminal
         let mut terminal = Self::enable_raw_mode()?;
@@ -315,15 +316,24 @@ impl DashboardApp {
                 app.handle(
                     &mut terminal,
                     DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)),
+                    refresh_tx.clone(),
                 )
                 .await?;
+            }
+
+            if refresh_rx.try_recv().is_ok() {
+                terminal.draw(|f| app.render(f))?;
             }
 
             // note: setting a low duration like 100 can cause high CPU usage
             if event::poll(Duration::from_millis(200))? {
                 if let Ok(event) = event::read() {
-                    app.handle(&mut terminal, DashboardEvent::ConsoleEvent(event))
-                        .await?;
+                    app.handle(
+                        &mut terminal,
+                        DashboardEvent::ConsoleEvent(event),
+                        refresh_tx.clone(),
+                    )
+                    .await?;
                     terminal.draw(|f| app.render(f))?;
                 }
             }
@@ -333,7 +343,7 @@ impl DashboardApp {
                 let maybe_event_arc = app.current_screen().escalatable_event();
                 if maybe_event_arc.lock().unwrap().is_some() {
                     let event = maybe_event_arc.lock().unwrap().clone().unwrap();
-                    app.handle(&mut terminal, event).await?;
+                    app.handle(&mut terminal, event, refresh_tx.clone()).await?;
 
                     // mark handled
                     *maybe_event_arc.lock().unwrap() = None;
@@ -355,6 +365,7 @@ impl DashboardApp {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         event: DashboardEvent,
+        refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) -> Result<Option<Event>, Box<dyn Error>> {
         if let DashboardEvent::RefreshScreen = event {
             terminal.draw(|f| self.render(f))?;
@@ -421,7 +432,7 @@ impl DashboardApp {
                 }
                 MenuItem::Send => {
                     let mut send_screen = self.send_screen.as_ref().borrow_mut();
-                    send_screen.handle(event)?
+                    send_screen.handle(event, refresh_tx)?
                 }
                 // MenuItem::Quit => todo!(),
                 _ => Some(event),

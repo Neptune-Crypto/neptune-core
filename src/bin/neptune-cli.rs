@@ -618,9 +618,12 @@ async fn main() -> Result<()> {
                     fee,
                 )
                 .await?;
-            let Some((txid, private_notifications)) = resp else {
-                eprintln!("Failed to create transaction. Please check the log.");
-                bail!("Failed to create transaction. Please check the log.");
+            let (txid, private_notifications) = match resp {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    bail!("Failed to create transaction.");
+                }
             };
 
             println!("Successfully created transaction: {txid}");
@@ -648,10 +651,10 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             match res {
-                Some((txid, _offchain_notifications)) => {
+                Ok((txid, _offchain_notifications)) => {
                     println!("Successfully created transaction: {txid}")
                 }
-                None => println!("Failed to create transaction. Please check the log."),
+                Err(e) => eprintln!("{}", e),
             }
         }
         Command::PauseMiner => {

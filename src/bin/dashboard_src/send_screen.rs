@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::error::Error;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -27,7 +28,6 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use tarpc::context;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
 
 use super::dashboard_app::ConsoleIO;
 use super::dashboard_app::DashboardEvent;
@@ -42,6 +42,14 @@ pub enum SendScreenWidget {
     Notice,
 }
 
+#[derive(Default, Debug, Clone)]
+enum ResetType {
+    #[default]
+    None,
+    Form,
+    Notice,
+}
+
 #[derive(Debug, Clone)]
 pub struct SendScreen {
     active: bool,
@@ -53,7 +61,7 @@ pub struct SendScreen {
     focus: Arc<Mutex<SendScreenWidget>>,
     amount: String,
     notice: Arc<Mutex<String>>,
-    reset_me: Arc<Mutex<bool>>,
+    reset_me: Arc<Mutex<ResetType>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     network: Network,
 }
@@ -70,7 +78,7 @@ impl SendScreen {
             focus: Arc::new(Mutex::new(SendScreenWidget::Address)),
             amount: "".to_string(),
             notice: Arc::new(Mutex::new("".to_string())),
-            reset_me: Arc::new(Mutex::new(false)),
+            reset_me: Arc::new(Mutex::new(Default::default())),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             network,
         }
@@ -81,56 +89,37 @@ impl SendScreen {
         address: String,
         amount: String,
         notice_arc: Arc<Mutex<String>>,
-        focus_arc: Arc<Mutex<SendScreenWidget>>,
-        reset_me: Arc<Mutex<bool>>,
+        reset_me: Arc<Mutex<ResetType>>,
         network: Network,
+        refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) {
-        *focus_arc.lock().await = SendScreenWidget::Notice;
-        *notice_arc.lock().await = "Validating input ...".to_string();
-        let maybe_valid_address: Option<ReceivingAddress> = rpc_client
-            .validate_address(context::current(), address, network)
-            .await
-            .unwrap();
-        let valid_address = match maybe_valid_address {
-            Some(add) => add,
-            None => {
-                *notice_arc.lock().await = "Invalid address.".to_string();
-                *focus_arc.lock().await = SendScreenWidget::Address;
-                return;
-            }
-        };
+        //        *focus_arc.lock().await = SendScreenWidget::Notice;
 
-        *notice_arc.lock().await = "Validated address; validating amount ...".to_string();
-
-        let maybe_valid_amount = rpc_client
-            .validate_amount(context::current(), amount)
-            .await
-            .unwrap();
-        let valid_amount = match maybe_valid_amount {
-            Some(amt) => amt,
-            None => {
-                *notice_arc.lock().await = "Invalid amount.".to_string();
-                *focus_arc.lock().await = SendScreenWidget::Amount;
-                return;
-            }
-        };
-
-        *notice_arc.lock().await = "Validated amount; checking against balance ...".to_string();
-
-        let enough_balance = rpc_client
-            .amount_leq_synced_balance(context::current(), valid_amount)
-            .await
-            .unwrap();
-        if !enough_balance {
-            *notice_arc.lock().await = "Insufficient balance.".to_string();
-            *focus_arc.lock().await = SendScreenWidget::Amount;
-            return;
-        }
-
-        *notice_arc.lock().await = "Validated inputs; sending ...".to_string();
+        *notice_arc.lock().await = "sending ...".to_string();
+        refresh_tx.send(()).await.unwrap();
 
         // TODO: Let user specify this number
         let fee = NeptuneCoins::zero();
+
+        let valid_amount = match NeptuneCoins::from_str(&amount) {
+            Ok(a) => a,
+            Err(e) => {
+                *notice_arc.lock().await = format!("amount: {}", e);
+                *reset_me.lock().await = ResetType::Notice;
+                refresh_tx.send(()).await.unwrap();
+                return;
+            }
+        };
+
+        let valid_address = match ReceivingAddress::from_bech32m(&address, network) {
+            Ok(a) => a,
+            Err(e) => {
+                *notice_arc.lock().await = format!("address: {}", e);
+                *reset_me.lock().await = ResetType::Notice;
+                refresh_tx.send(()).await.unwrap();
+                return;
+            }
+        };
 
         // Allow the generation of proves to take some time...
         let mut send_ctx = context::current();
@@ -148,33 +137,43 @@ impl SendScreen {
             .await
             .unwrap();
 
-        if send_result.is_none() {
-            *notice_arc.lock().await = "Could not send due to error.".to_string();
-            *focus_arc.lock().await = SendScreenWidget::Address;
-            return;
+        match send_result {
+            Ok(_) => {
+                *notice_arc.lock().await = "Payment broadcast".to_string();
+                *reset_me.lock().await = ResetType::Form;
+            }
+            Err(e) => {
+                *notice_arc.lock().await = format!("send error.  {}", e.to_string());
+                *reset_me.lock().await = ResetType::Notice;
+            }
         }
-
-        *notice_arc.lock().await = "Payment broadcast!".to_string();
-
-        sleep(Duration::from_secs(3)).await;
-
-        *notice_arc.lock().await = "".to_string();
-        *focus_arc.lock().await = SendScreenWidget::Address;
-        *reset_me.lock().await = true;
+        refresh_tx.send(()).await.unwrap();
     }
 
     pub fn handle(
         &mut self,
         event: DashboardEvent,
+        refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) -> Result<Option<DashboardEvent>, Box<dyn Error>> {
-        if let Ok(mut reset_me_mutex_guard) = self.reset_me.try_lock() {
-            if reset_me_mutex_guard.to_owned() {
-                self.amount = "".to_string();
-                self.address = "".to_string();
-                *reset_me_mutex_guard = false;
-            }
-        }
         let mut escalate_event = None;
+        if let Ok(mut reset_me_mutex_guard) = self.reset_me.try_lock() {
+            match *reset_me_mutex_guard {
+                ResetType::Form => {
+                    self.amount = "".to_string();
+                    self.address = "".to_string();
+                    if let Ok(mut n) = self.notice.try_lock() {
+                        *n = "".to_string();
+                    }
+                }
+                ResetType::Notice => {
+                    if let Ok(mut n) = self.notice.try_lock() {
+                        *n = "".to_string();
+                    }
+                }
+                _ => {}
+            }
+            *reset_me_mutex_guard = ResetType::None;
+        }
         if self.in_focus {
             match event {
                 DashboardEvent::ConsoleEvent(Event::Key(key))
@@ -201,18 +200,14 @@ impl SendScreen {
                                         let address = self.address.clone();
                                         let amount = self.amount.clone();
                                         let notice = self.notice.clone();
-                                        let focus = self.focus.clone();
                                         let reset_me = self.reset_me.clone();
                                         let network = self.network;
 
-                                        tokio::spawn(async move {
-                                            Self::check_and_pay_sequence(
-                                                rpc_client, address, amount, notice, focus,
-                                                reset_me, network,
-                                            )
-                                            .await;
-                                        });
-                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                        tokio::spawn(Self::check_and_pay_sequence(
+                                            rpc_client, address, amount, notice, reset_me, network,
+                                            refresh_tx,
+                                        ));
+                                        //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     _ => {
                                         escalate_event = None;
@@ -351,15 +346,7 @@ impl Widget for SendScreen {
             let mut vrecter = VerticalRectifier::new(inner);
 
             // display address widget
-            let mut address = if let Ok(mg) = self.reset_me.try_lock() {
-                if mg.to_owned() {
-                    "".to_string()
-                } else {
-                    self.address.clone()
-                }
-            } else {
-                self.address.clone()
-            };
+            let mut address = self.address.clone();
             let mut address_lines = vec![];
 
             // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
@@ -403,15 +390,7 @@ impl Widget for SendScreen {
             }
 
             // display amount widget
-            let amount = if let Ok(mg) = self.reset_me.try_lock() {
-                if mg.to_owned() {
-                    "".to_string()
-                } else {
-                    self.amount
-                }
-            } else {
-                self.amount
-            };
+            let amount = self.amount;
             let amount_rect = vrecter.next(3);
             let amount_widget = Paragraph::new(Line::from(vec![
                 Span::from(amount),

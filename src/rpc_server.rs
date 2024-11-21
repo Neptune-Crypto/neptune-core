@@ -22,7 +22,6 @@ use systemstat::System;
 use tarpc::context;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::twenty_first::prelude::Mmr;
-use tokio::sync::mpsc::error::SendError;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -261,7 +260,7 @@ pub trait RPC {
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String>;
 
     /// Send coins to multiple recipients
     ///
@@ -302,7 +301,7 @@ pub trait RPC {
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)>;
+    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String>;
 
     /// claim a utxo
     ///
@@ -376,11 +375,9 @@ impl NeptuneRPCServer {
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
         mocked_invalid_proof: Option<TransactionProof>,
-    ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
+    ) -> anyhow::Result<(Transaction, Vec<PrivateNotificationData>)> {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
-        let span = tracing::debug_span!("Constructing transaction");
-        let _enter = span.enter();
 
         tracing::debug!("stmi: step 1. get change key. need write-lock");
 
@@ -435,9 +432,9 @@ impl NeptuneRPCServer {
             .await
         {
             Ok(tx) => tx,
-            Err(err) => {
-                tracing::error!("Could not create transaction: {}", err);
-                return None;
+            Err(e) => {
+                tracing::error!("Could not create transaction: {}", e);
+                return Err(e);
             }
         };
         drop(state);
@@ -484,7 +481,7 @@ impl NeptuneRPCServer {
         tracing::debug!("stmi: step 6. send messges. no lock needed");
 
         // Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = self
+        let response = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
             .await;
@@ -501,16 +498,13 @@ impl NeptuneRPCServer {
 
         self.state.flush_databases().await.expect("flushed DBs");
 
-        let ret = match response {
-            Ok(_) => Some((transaction, offchain_notifications)),
-            Err(e) => {
-                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-                None
-            }
+        if let Err(e) = response {
+            tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
         };
 
         tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
-        ret
+
+        Ok((transaction, offchain_notifications))
     }
 
     /// Method to create a transaction with a given timestamp and prover
@@ -530,7 +524,7 @@ impl NeptuneRPCServer {
         fee: NeptuneCoins,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
-    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> anyhow::Result<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
         let ret = self
@@ -1202,7 +1196,7 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String> {
         log_slow_scope!(fn_name!());
 
         self.send_to_many(
@@ -1228,14 +1222,14 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Option<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String> {
         log_slow_scope!(fn_name!());
 
         tracing::debug!("stm: entered fn");
 
         if self.state.cli().no_transaction_initiation {
             warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return None;
+            return Err("send() is not supported by this node".to_string());
         }
 
         // The proving capability is set to the lowest possible value here,
@@ -1254,6 +1248,7 @@ impl RPC for NeptuneRPCServer {
             tx_proving_capability,
         )
         .await
+        .map_err(|e| e.to_string())
     }
 
     // // documented in trait. do not add doc-comment.
