@@ -234,7 +234,10 @@ pub(crate) mod test {
             .iter()
             .flat_map(|appendix_claim| Tip5::hash(appendix_claim).values().to_vec())
             .collect_vec();
-        assert_eq!(expected_output, tasm_output);
+        assert_eq!(
+            expected_output, tasm_output,
+            "tasm output must equal rust output"
+        );
     }
 
     // TODO: Add test that verifies that double spends *within* one block is

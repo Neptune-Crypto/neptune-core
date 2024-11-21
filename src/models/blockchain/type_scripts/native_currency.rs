@@ -766,7 +766,6 @@ pub mod test {
     use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::prelude::*;
-    use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm;
@@ -783,17 +782,10 @@ pub mod test {
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
-    fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> TestCaseResult {
-        let tasm_result = NativeCurrency
-            .run_tasm(
-                &native_currency_witness.standard_input(),
-                native_currency_witness.nondeterminism(),
-            )
-            .unwrap();
-        prop_assert!(tasm_result.is_empty());
-
+    fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> Result<(), TestCaseError> {
         let rust_result = NativeCurrency
             .run_rust(
                 &native_currency_witness.standard_input(),
@@ -801,6 +793,23 @@ pub mod test {
             )
             .unwrap();
         prop_assert!(rust_result.is_empty());
+
+        let tasm_result = match NativeCurrency.run_tasm(
+            &native_currency_witness.standard_input(),
+            native_currency_witness.nondeterminism(),
+        ) {
+            Ok(r) => r,
+            Err(e) => match e {
+                ConsensusError::RustShadowPanic(rsp) => {
+                    panic!("Tasm run failed due to rust shadow panic (?): {rsp}");
+                }
+                ConsensusError::TritonVMPanic(_, instruction_error) => {
+                    panic!("Tasm run failed due to VM panic: {instruction_error} ");
+                }
+            },
+        };
+
+        prop_assert!(tasm_result.is_empty());
 
         Ok(())
     }
@@ -1007,5 +1016,33 @@ pub mod test {
                 .into_iter()
                 .join(",")
         );
+    }
+
+    #[proptest]
+    fn transaction_with_timelocked_coinbase_is_valid(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
+        prop_positive(native_currency_witness).unwrap();
+    }
+
+    #[test]
+    fn transaction_with_timelocked_coinbase_is_valid_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
+        assert!(prop_positive(native_currency_witness).is_ok());
     }
 }
