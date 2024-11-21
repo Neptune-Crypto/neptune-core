@@ -54,6 +54,7 @@ use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -64,6 +65,7 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
+use crate::triton_vm;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -227,6 +229,15 @@ impl Block {
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
+        let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
+        assert!(
+            triton_vm::verify(
+                Stark::default(),
+                &tx_claim,
+                &transaction.proof.clone().into_single_proof()
+            ),
+            "Transaction proof must be valid to generate a block"
+        );
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
         let header = Self::template_header(

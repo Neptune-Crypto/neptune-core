@@ -267,7 +267,7 @@ pub struct SingleProof;
 impl SingleProof {
     /// Not to be confused with SingleProofWitness::claim
     pub(crate) fn claim(tx_kernel_mast_hash: Digest) -> Claim {
-        Claim::new(tx_kernel_mast_hash).with_input(tx_kernel_mast_hash.reversed().values())
+        Claim::about_program(&Self.program()).with_input(tx_kernel_mast_hash.reversed().values())
     }
 
     /// Generate a [SingleProof] for the transaction, given its primitive
@@ -919,6 +919,13 @@ mod test {
             .expect("tasm run should pass");
 
         assert_eq!(rust_result, tasm_result);
+
+        // Verify equivalence of claim functions
+        assert_eq!(
+            single_proof_witness.claim(),
+            SingleProof::claim(txk_mast_hash),
+            "Claim functions must agree"
+        );
     }
 
     #[tokio::test]

@@ -699,7 +699,9 @@ pub(crate) mod mine_loop_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -708,6 +710,8 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
+    use crate::triton_vm;
+    use crate::triton_vm::stark::Stark;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
@@ -889,6 +893,17 @@ pub(crate) mod mine_loop_tests {
                     .await
                     .unwrap()
             };
+
+            let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
+            let cb_tx_claim = SingleProof::claim(cb_txkmh);
+            assert!(
+                triton_vm::verify(
+                    Stark::default(),
+                    &cb_tx_claim,
+                    &transaction_empty_mempool.proof.clone().into_single_proof()
+                ),
+                "Transaction proof for coinbase transaction must be valid."
+            );
 
             assert_eq!(
                 1,
