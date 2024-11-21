@@ -1,11 +1,14 @@
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::Digest;
 
 use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 
 /// Wraps all information necessary to produce a block.
 ///
@@ -57,20 +60,48 @@ impl BlockPrimitiveWitness {
         &self.transaction
     }
 
+    pub(crate) fn header(
+        &self,
+        timestamp: Timestamp,
+        nonce: Digest,
+        target_block_interval: Option<Timestamp>,
+    ) -> BlockHeader {
+        let parent_header = self.predecessor_block.header();
+        let parent_digest = self.predecessor_block.hash();
+        Block::template_header(
+            parent_header,
+            parent_digest,
+            timestamp,
+            nonce,
+            target_block_interval,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn predecessor_block(&self) -> &Block {
+        &self.predecessor_block
+    }
+
     pub(crate) fn body(&self) -> &BlockBody {
-        self.maybe_body.get_or_init(||{
+        self.maybe_body.get_or_init(|| {
             assert_eq!(
-                self.predecessor_block.mutator_set_accumulator_after().hash(),
+                self.predecessor_block
+                    .mutator_set_accumulator_after()
+                    .hash(),
                 self.transaction.kernel.mutator_set_hash,
                 "Mutator set of transaction must agree with mutator set after previous block."
             );
 
             let mut mutator_set = self.predecessor_block.mutator_set_accumulator_after();
-            let mutator_set_update = MutatorSetUpdate::new(self.transaction.kernel.inputs.clone(), self.transaction.kernel.outputs.clone());
+            let mutator_set_update = MutatorSetUpdate::new(
+                self.transaction.kernel.inputs.clone(),
+                self.transaction.kernel.outputs.clone(),
+            );
 
-            mutator_set_update.apply_to_accumulator(&mut mutator_set).unwrap_or_else(|e| {
-                panic!("attempting to produce a block body from a transaction whose mutator set update is incompatible: {e:?}");
-            });
+            // Due to tests, we don't verify that the removal records can be applied. That is
+            // the caller's responsibility to ensure by e.g. calling block.is_valid() after
+            // constructing a block.
+            mutator_set_update.apply_to_accumulator_unsafe(&mut mutator_set);
 
             let predecessor_body = self.predecessor_block.body();
             let lock_free_mmr = predecessor_body.lock_free_mmr_accumulator.clone();

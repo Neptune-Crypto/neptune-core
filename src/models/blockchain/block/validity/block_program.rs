@@ -179,11 +179,18 @@ pub(crate) mod test {
     use itertools::Itertools;
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
+    use triton_vm::prelude::Digest;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::block::BlockPrimitiveWitness;
+    use crate::models::blockchain::block::TritonVmProofJobOptions;
+    use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::mast_hash::MastHash;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
 
     #[traced_test]
@@ -227,5 +234,65 @@ pub(crate) mod test {
             .flat_map(|appendix_claim| Tip5::hash(appendix_claim).values().to_vec())
             .collect_vec();
         assert_eq!(expected_output, tasm_output);
+    }
+
+    // TODO: Add test that verifies that double spends *within* one block is
+    //       disallowed.
+
+    #[traced_test]
+    #[test]
+    fn disallow_double_spends_across_blocks() {
+        let current_pw = deterministic_block_primitive_witness();
+        let tx = current_pw.transaction().to_owned();
+        assert!(
+            !tx.kernel.inputs.is_empty(),
+            "Transaction in double-spend test cannot be empty"
+        );
+        let predecessor = current_pw.predecessor_block().to_owned();
+        let mock_now = predecessor.header().timestamp + Timestamp::months(12);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let current_block = rt
+            .block_on(Block::block_template_from_block_primitive_witness(
+                current_pw,
+                mock_now,
+                Digest::default(),
+                None,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            ))
+            .unwrap();
+
+        assert!(current_block.is_valid(&predecessor, mock_now));
+
+        let mutator_set_update = current_block.mutator_set_update();
+        let updated_tx = rt
+            .block_on(
+                Transaction::new_with_updated_mutator_set_records_given_proof(
+                    tx.kernel,
+                    &predecessor.mutator_set_accumulator_after(),
+                    &mutator_set_update,
+                    tx.proof.into_single_proof(),
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default().into(),
+                ),
+            )
+            .unwrap();
+        assert!(rt.block_on(updated_tx.is_valid()));
+
+        let mock_later = mock_now + Timestamp::hours(3);
+        let next_pw = BlockPrimitiveWitness::new(current_block.clone(), updated_tx);
+        let next_block = rt
+            .block_on(Block::block_template_from_block_primitive_witness(
+                next_pw,
+                mock_later,
+                Digest::default(),
+                None,
+                &TritonVmJobQueue::dummy(),
+                TritonVmProofJobOptions::default(),
+            ))
+            .unwrap();
+        assert!(!next_block.is_valid(&current_block, mock_later));
     }
 }

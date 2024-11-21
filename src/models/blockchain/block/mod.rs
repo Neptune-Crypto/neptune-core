@@ -169,26 +169,26 @@ impl Eq for Block {}
 
 impl Block {
     fn template_header(
-        predecessor: &Block,
+        predecessor_header: &BlockHeader,
+        predecessor_digest: Digest,
         timestamp: Timestamp,
         nonce: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> BlockHeader {
         let difficulty = difficulty_control(
             timestamp,
-            predecessor.header().timestamp,
-            predecessor.header().difficulty,
+            predecessor_header.timestamp,
+            predecessor_header.difficulty,
             target_block_interval,
-            predecessor.header().height,
+            predecessor_header.height,
         );
 
         let new_cumulative_proof_of_work: ProofOfWork =
-            predecessor.kernel.header.cumulative_proof_of_work
-                + predecessor.kernel.header.difficulty;
+            predecessor_header.cumulative_proof_of_work + predecessor_header.difficulty;
         BlockHeader {
             version: BLOCK_HEADER_VERSION,
-            height: predecessor.kernel.header.height.next(),
-            prev_block_digest: predecessor.hash(),
+            height: predecessor_header.height.next(),
+            prev_block_digest: predecessor_digest,
             timestamp,
             nonce,
             cumulative_proof_of_work: new_cumulative_proof_of_work,
@@ -209,8 +209,7 @@ impl Block {
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         let body = primitive_witness.body().to_owned();
-        let header = Self::template_header(
-            predecessor,
+        let header = primitive_witness.header(
             block_timestamp,
             nonce_preimage.hash(),
             target_block_interval,
@@ -218,6 +217,36 @@ impl Block {
         let proof = BlockProof::Invalid;
         let appendix = BlockAppendix::default();
         Block::new(header, body, appendix, proof)
+    }
+
+    pub(crate) async fn block_template_from_block_primitive_witness(
+        primitive_witness: BlockPrimitiveWitness,
+        timestamp: Timestamp,
+        nonce_preimage: Digest,
+        target_block_interval: Option<Timestamp>,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<Block> {
+        let body = primitive_witness.body().to_owned();
+        let header =
+            primitive_witness.header(timestamp, nonce_preimage.hash(), target_block_interval);
+        let (appendix, proof) = {
+            let appendix_witness =
+                AppendixWitness::produce(primitive_witness, triton_vm_job_queue).await?;
+            let appendix = appendix_witness.appendix();
+            let claim = BlockProgram::claim(&body, &appendix);
+            let proof = BlockProgram
+                .prove(
+                    &claim,
+                    appendix_witness.nondeterminism(),
+                    triton_vm_job_queue,
+                    proof_job_options,
+                )
+                .await?;
+            (appendix, BlockProof::SingleProof(proof))
+        };
+
+        Ok(Block::new(header, body, appendix, proof))
     }
 
     async fn make_block_template_with_valid_proof(
@@ -239,30 +268,15 @@ impl Block {
             "Transaction proof must be valid to generate a block"
         );
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
-        let body = primitive_witness.body().to_owned();
-        let header = Self::template_header(
-            predecessor,
+        Self::block_template_from_block_primitive_witness(
+            primitive_witness,
             block_timestamp,
-            nonce_preimage.hash(),
+            nonce_preimage,
             target_block_interval,
-        );
-        let (appendix, proof) = {
-            let appendix_witness =
-                AppendixWitness::produce(primitive_witness, triton_vm_job_queue).await?;
-            let appendix = appendix_witness.appendix();
-            let claim = BlockProgram::claim(&body, &appendix);
-            let proof = BlockProgram
-                .prove(
-                    &claim,
-                    appendix_witness.nondeterminism(),
-                    triton_vm_job_queue,
-                    proof_job_options,
-                )
-                .await?;
-            (appendix, BlockProof::SingleProof(proof))
-        };
-
-        Ok(Block::new(header, body, appendix, proof))
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await
     }
 
     /// Compose a block.
