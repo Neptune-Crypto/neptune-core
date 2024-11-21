@@ -28,7 +28,7 @@ pub trait SecretWitness {
     fn program(&self) -> Program;
 
     fn claim(&self) -> Claim {
-        Claim::new(self.program().hash())
+        Claim::about_program(&self.program())
             .with_input(self.standard_input().individual_tokens)
             .with_output(self.output())
     }

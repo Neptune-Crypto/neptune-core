@@ -318,17 +318,7 @@ pub mod test {
 
     /// Derive a file name from the claim, includes the extension
     fn proof_filename(claim: &Claim) -> String {
-        let base_name = Hash::hash(
-            &[
-                Hash::hash(&claim.input),
-                claim.program_digest,
-                Hash::hash(&claim.output),
-            ]
-            .into_iter()
-            .flat_map(|d| d.values())
-            .collect_vec(),
-        )
-        .to_hex();
+        let base_name = Hash::hash(claim).to_hex();
 
         format!("{base_name}.proof")
     }
@@ -354,6 +344,10 @@ pub mod test {
         match try_load_proof_from_disk(claim) {
             Some(proof) => {
                 debug!(" - Loaded proof from disk: {name}.");
+                assert!(
+                    triton_vm::verify(Stark::default(), claim, &proof),
+                    "proof loaded from disk is invalid"
+                );
                 proof
             }
             None => {

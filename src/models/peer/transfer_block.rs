@@ -67,6 +67,7 @@ mod test {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::models::peer::Network;
@@ -90,6 +91,7 @@ mod test {
     // test: verify digest is the same after conversion from
     //       TransferBlock and back.
     #[tokio::test]
+    #[traced_test]
     async fn from_transfer_block() {
         let network = Network::Main;
         // note: we have to generate a block because
