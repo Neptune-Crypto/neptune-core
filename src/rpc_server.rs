@@ -569,6 +569,7 @@ impl NeptuneRPCServer {
             Some(TransactionProof::invalid()),
         )
         .await
+        .ok()
     }
 
     /// Assemble a data for the wallet to register the UTXO. Returns `Ok(None)`
@@ -2238,7 +2239,7 @@ mod rpc_server_tests {
             .await;
 
         // --- Test: verify op returns a value.
-        assert!(result.is_some());
+        assert!(result.is_ok());
 
         // --- Test: verify expected_utxos.len() has increased by 2.
         //           (one off-chain utxo + one change utxo)
@@ -2286,7 +2287,7 @@ mod rpc_server_tests {
                 NeptuneCoins::zero()
             )
             .await
-            .is_none());
+            .is_err());
         assert!(rpc_server
             .clone()
             .send_to_many(
@@ -2297,7 +2298,7 @@ mod rpc_server_tests {
                 NeptuneCoins::zero()
             )
             .await
-            .is_none());
+            .is_err());
     }
 
     mod claim_utxo_tests {
