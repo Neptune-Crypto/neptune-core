@@ -18,4 +18,5 @@ often.
 |     0..10 | [`RemovalRecordsIntegrity`](models/blockchain/transaction/validity/removal_records_integrity.rs)                         |
 |    10..20 | [`AuditVmEndState`](models/proof_abstractions/tasm/audit_vm_end_state.rs)                                                |
 |    20..30 | [`merge::AuthenticateCoinbaseFields`](models/blockchain/transaction/validity/tasm/merge/authenticate_coinbase_fields.rs) |
-|    30..40 | [`NativeCurrency`](src/models/blockchain/type_scripts/native_currency.rs)                                                |
+|    30..40 | [`NativeCurrency`](models/blockchain/type_scripts/native_currency.rs)                                                    |
+|   40..100 | [`SingleProof`](models/blockchain/transaction/validity/single_proof.rs)                                                  |

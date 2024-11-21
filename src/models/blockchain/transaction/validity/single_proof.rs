@@ -35,6 +35,9 @@ use crate::models::blockchain::transaction::validity::merge::Merge;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::update::Update;
 
+const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_040;
+const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_041;
+
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub(crate) struct WitnessOfUpdate {
     proof: Proof,
@@ -775,7 +778,7 @@ impl ConsensusProgram for SingleProof {
             add
             // _ discr (discr == proof_coll || discr == update || discr == merge)
 
-            assert
+            assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ discr
         );
 
@@ -812,7 +815,7 @@ impl ConsensusProgram for SingleProof {
             // a discriminant of -1 indicates that some branch was executed
             push -1
             eq
-            assert
+            assert error_id {NO_BRANCH_TAKEN_ERROR}
 
             pop 1 pop 5 pop 5
             // _
@@ -879,7 +882,7 @@ mod test {
             let_assert!(Err(ConsensusError::TritonVMPanic(_, instruction_err)) = consensus_err);
             let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
             let_assert!(Some(err_id) = assertion_err.id);
-            assert_eq!(42, err_id);
+            assert_eq!(INVALID_WITNESS_DISCRIMINANT_ERROR, err_id);
         }
     }
 
