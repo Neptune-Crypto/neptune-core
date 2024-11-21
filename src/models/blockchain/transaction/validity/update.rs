@@ -35,6 +35,9 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use super::single_proof::SingleProof;
 
+const INPUT_SETS_NOT_EQUAL_ERROR: i128 = 1_000_100;
+const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
+
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct UpdateWitness {
     old_kernel: TransactionKernel,
@@ -613,7 +616,7 @@ impl ConsensusProgram for Update {
             call {multiset_eq_digests}
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel set_equality(*new_inputs_digests, *old_inputs_digests)
 
-            assert
+            assert error_id {INPUT_SETS_NOT_EQUAL_ERROR}
             // _ witness_size *update_witness [new_txk_mhash] *old_kernel *new_kernel
 
             /* Authenticate outputs and verify no-change */
@@ -679,7 +682,7 @@ impl ConsensusProgram for Update {
             push 0 eq
             // _ witness_size *update_witness [new_txk_mhash] (new_timestamp >= old_timestamp)
 
-            assert
+            assert error_id {NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR}
             // _ witness_size *update_witness [new_txk_mhash]
 
             pop {Digest::LEN}
@@ -711,6 +714,7 @@ pub(crate) mod test {
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
+    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use tasm_lib::triton_vm::prelude::*;
     use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 
@@ -905,7 +909,12 @@ pub(crate) mod test {
         let claim = bad_witness.claim();
         let input = PublicInput::new(claim.input.clone());
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+        );
     }
 
     fn bad_new_aocl(good_witness: &UpdateWitness) {
@@ -924,7 +933,12 @@ pub(crate) mod test {
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             &witness_again,
         );
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+        );
     }
 
     fn bad_old_aocl(good_witness: &UpdateWitness) {
@@ -943,7 +957,12 @@ pub(crate) mod test {
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             &witness_again,
         );
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+        );
     }
 
     fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
@@ -962,7 +981,12 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[INPUT_SETS_NOT_EQUAL_ERROR],
+        );
     }
 
     fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
@@ -978,7 +1002,12 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[INPUT_SETS_NOT_EQUAL_ERROR],
+        );
     }
 
     fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
@@ -996,7 +1025,12 @@ pub(crate) mod test {
         let input = PublicInput::new(claim.input.clone());
         bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
         let nondeterminism = bad_witness.nondeterminism();
-        consensus_program_negative_test(Update, &input, nondeterminism, &[]);
+        consensus_program_negative_test(
+            Update,
+            &input,
+            nondeterminism,
+            &[INPUT_SETS_NOT_EQUAL_ERROR],
+        );
     }
 
     #[tokio::test]

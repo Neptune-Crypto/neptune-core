@@ -20,3 +20,4 @@ often.
 |    20..30 | [`merge::AuthenticateCoinbaseFields`](models/blockchain/transaction/validity/tasm/merge/authenticate_coinbase_fields.rs) |
 |    30..40 | [`NativeCurrency`](models/blockchain/type_scripts/native_currency.rs)                                                    |
 |   40..100 | [`SingleProof`](models/blockchain/transaction/validity/single_proof.rs)                                                  |
+|  100..120 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
