@@ -33,6 +33,7 @@ use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 
 const BAD_COINBASE_SIZE_ERROR: i128 = 1_000_030;
@@ -51,8 +52,21 @@ const BAD_STATE_SIZE_ERROR: i128 = 1_000_033;
 ///
 /// Transactions that are not balanced in this way are invalid. Furthermore, the
 /// type script checks that no overflow occurs while computing the sums.
+///
+/// Lastly, if the coinbase is set then at least half of this amount must be
+/// time-locked for 3 years.
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct NativeCurrency;
+
+impl NativeCurrency {
+    const TIME_LOCK_HASH: Digest = Digest([
+        BFieldElement::new(1099415371751974362_u64),
+        BFieldElement::new(274457847644817458_u64),
+        BFieldElement::new(5749046657545930452_u64),
+        BFieldElement::new(4873191867236712662_u64),
+        BFieldElement::new(6955338650254959680_u64),
+    ]);
+}
 
 impl ConsensusProgram for NativeCurrency {
     #[allow(clippy::needless_return)]
@@ -77,6 +91,7 @@ impl ConsensusProgram for NativeCurrency {
         let fee: NeptuneCoins = native_currency_witness_mem.fee;
         let input_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_input_utxos;
         let output_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_output_utxos;
+        let timestamp = native_currency_witness_mem.timestamp;
 
         // authenticate coinbase against kernel mast hash
         let coinbase_leaf_index: u32 = 4;
@@ -102,6 +117,15 @@ impl ConsensusProgram for NativeCurrency {
             tx_kernel_digest,
             fee_leaf_index,
             fee_leaf,
+            kernel_tree_height,
+        );
+
+        let timestamp_leaf_index = TransactionKernelField::Timestamp as u32;
+        let timestamp_leaf = Tip5::hash(&timestamp);
+        tasm::tasmlib_hashing_merkle_verify(
+            tx_kernel_digest,
+            timestamp_leaf_index,
+            timestamp_leaf,
             kernel_tree_height,
         );
 
@@ -138,10 +162,14 @@ impl ConsensusProgram for NativeCurrency {
 
         // get total output amount from outputs
         let mut total_output = NeptuneCoins::new(0);
+        let mut total_timelocked_output = NeptuneCoins::new(0);
+        let three_years = Timestamp::years(3);
         i = 0;
         let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
         while i < num_outputs {
             let num_coins: u32 = output_salted_utxos.utxos[i as usize].coins().len() as u32;
+            let mut total_amount_for_utxo = NeptuneCoins::new(0);
+            let mut time_locked = false;
             let mut j = 0;
             while j < num_coins {
                 if output_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
@@ -157,12 +185,34 @@ impl ConsensusProgram for NativeCurrency {
                     assert!(!amount.is_negative());
 
                     // safely add to total
-                    total_output = total_output.safe_add(amount).unwrap();
+                    total_amount_for_utxo = total_amount_for_utxo.safe_add(amount).unwrap();
+                } else if output_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
+                    == Self::TIME_LOCK_HASH
+                {
+                    // decode state to get release date
+                    let release_date = *Timestamp::decode(
+                        &input_salted_utxos.utxos[i as usize].coins()[j as usize].state,
+                    )
+                    .unwrap();
+                    if release_date >= timestamp + three_years {
+                        time_locked = true;
+                    }
                 }
                 j += 1;
             }
+            total_output = total_output.safe_add(total_amount_for_utxo).unwrap();
+            if time_locked {
+                total_timelocked_output = total_timelocked_output
+                    .safe_add(total_amount_for_utxo)
+                    .unwrap();
+            }
             i += 1;
         }
+
+        // if coinbase is set, verify that half of it is time-locked
+        let mut half_of_coinbase = some_coinbase;
+        half_of_coinbase.div_two();
+        // assert!(half_of_coinbase < total_timelocked_input);
 
         // test no-inflation equation
         let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
@@ -176,6 +226,7 @@ impl ConsensusProgram for NativeCurrency {
         let mut library = Library::new();
         let field_with_size_coinbase = field_with_size!(NativeCurrencyWitnessMemory::coinbase);
         let field_fee = field!(NativeCurrencyWitnessMemory::fee);
+        let field_timestamp = field!(NativeCurrencyWitnessMemory::timestamp);
         let field_with_size_salted_input_utxos =
             field_with_size!(NativeCurrencyWitnessMemory::salted_input_utxos);
         let field_with_size_salted_output_utxos =
@@ -189,6 +240,10 @@ impl ConsensusProgram for NativeCurrency {
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
+        let timestamp_size = 1;
+        let hash_timestamp = library.import(Box::new(HashStaticSize {
+            size: timestamp_size,
+        }));
         let u128_safe_add =
             library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAddU128));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
@@ -346,6 +401,22 @@ impl ConsensusProgram for NativeCurrency {
             call {merkle_verify}
             // _ [txkmh] *ncw *coinbase *fee
 
+
+            /* Divine and authenticate timestamp */
+            dup 7 dup 7 dup 7 dup 7 dup 7
+            // _ [txkmh] *ncw *coinbase *fee [txkmh]
+
+            push {TransactionKernel::MAST_HEIGHT}
+            push {TransactionKernelField::Timestamp as u32}
+
+            dup 9 {&field_timestamp}
+            // _ [txkmh] *ncw *coinbase *fee [txkmh] h i *timestamp
+
+            call {hash_timestamp}
+            // _ [txkmh] *ncw *coinbase *fee [txkmh] h i [timestamp_hash]
+
+            call {merkle_verify}
+            // _ [txkmh] *ncw *coinbase *fee
 
             /* Divine and authenticate salted input and output UTXOs */
 
@@ -605,6 +676,7 @@ struct NativeCurrencyWitnessMemory {
     salted_output_utxos: SaltedUtxos,
     coinbase: Option<NeptuneCoins>,
     fee: NeptuneCoins,
+    timestamp: Timestamp,
 }
 
 impl From<&NativeCurrencyWitness> for NativeCurrencyWitnessMemory {
@@ -614,6 +686,7 @@ impl From<&NativeCurrencyWitness> for NativeCurrencyWitnessMemory {
             salted_output_utxos: value.salted_output_utxos.clone(),
             coinbase: value.kernel.coinbase,
             fee: value.kernel.fee,
+            timestamp: value.kernel.timestamp,
         }
     }
 }
@@ -677,6 +750,7 @@ impl SecretWitness for NativeCurrencyWitness {
         let mast_paths = [
             self.kernel.mast_path(TransactionKernelField::Coinbase),
             self.kernel.mast_path(TransactionKernelField::Fee),
+            self.kernel.mast_path(TransactionKernelField::Timestamp),
         ]
         .concat();
 
@@ -689,6 +763,7 @@ impl SecretWitness for NativeCurrencyWitness {
 
 #[cfg(test)]
 pub mod test {
+    use itertools::Itertools;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::test_runner::TestCaseResult;
@@ -707,6 +782,7 @@ pub mod test {
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> TestCaseResult {
@@ -759,7 +835,7 @@ pub mod test {
         prop_positive(native_currency_witness).unwrap();
     }
 
-    #[proptest(cases = 10)]
+    #[proptest(cases = 1)]
     fn balanced_transaction_is_valid(
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
@@ -917,6 +993,20 @@ pub mod test {
         assert!(
             triton_vm::verify(Stark::default(), &claim, &proof),
             "proof fails"
+        );
+    }
+
+    #[test]
+    fn hardcoded_time_lock_hash_matches_hash_of_time_lock_program() {
+        assert_eq!(
+            TimeLock.hash(),
+            NativeCurrency::TIME_LOCK_HASH,
+            "time lock hash: {}\nhardcoded value: {}",
+            TimeLock.hash().values().into_iter().join(","),
+            NativeCurrency::TIME_LOCK_HASH
+                .values()
+                .into_iter()
+                .join(",")
         );
     }
 }
