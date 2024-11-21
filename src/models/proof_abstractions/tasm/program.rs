@@ -564,10 +564,29 @@ pub mod test {
         None
     }
 
-    #[test]
-    fn test_query_proof() {
-        let filename = "155848c090374716f0612597f818fb7d4879aa8b45e1a781f03aea7731079534f3ef3a05b888d72d.proof".to_string();
-        assert!(try_fetch_from_server_inner(filename).is_some());
+    #[tokio::test]
+    async fn test_query_proof() {
+        // Ensure file exists on machine, in case this machine syncs automatically with proof server
+        let program = triton_program!(halt);
+        let claim = Claim::about_program(&program);
+        prove_consensus_program(
+            program,
+            claim.clone(),
+            NonDeterminism::default(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        // Then verify that the proof server has this file
+        let filename = proof_filename(&claim);
+        let (proof, url) =
+            try_fetch_from_server_inner(filename).expect("Expected this proof on the proof server");
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &proof),
+            "Returned proof from {url} must be valid"
+        );
     }
 
     /// Call Triton VM prover to produce a proof and save it to disk.
