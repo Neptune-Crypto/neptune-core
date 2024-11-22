@@ -52,7 +52,7 @@ impl DataDirectory {
     pub async fn create_dir_if_not_exists(dir: &Path) -> Result<()> {
         tokio::fs::create_dir_all(dir)
             .await
-            .with_context(|| format!("Failed to create data directory {}", dir.to_string_lossy()))
+            .with_context(|| format!("Failed to create data directory {}", dir.display()))
     }
 
     /// Open file, create parent directory if it does not exist

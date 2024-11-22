@@ -422,7 +422,7 @@ async fn main() -> Result<()> {
                 Ok(result) => result,
             };
             println!("Seed phrase for {}.", network);
-            println!("Read from file `{}`.", wallet_file.to_string_lossy());
+            println!("Read from file `{}`.", wallet_file.display());
             for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
                 println!("{}. {word}", i + 1);
             }
@@ -731,7 +731,7 @@ fn process_utxo_notifications(
 
         let file_name = format!("{}-{}.json", entry.address_info.short_id(), timestamp);
         let file_path = file_dir.join(&file_name);
-        println!("creating file: {}", file_path.to_string_lossy());
+        println!("creating file: {}", file_path.display());
         let file = std::fs::File::create_new(&file_path)?;
         let mut writer = std::io::BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, &entry)?;

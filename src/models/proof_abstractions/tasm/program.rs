@@ -367,15 +367,12 @@ pub mod test {
     fn try_load_proof_from_disk(claim: &Claim) -> Option<Proof> {
         let path = proof_path(claim);
         let Ok(mut input_file) = File::open(path.clone()) else {
-            debug!(
-                "cannot open file '{}' -- might not exist",
-                path.to_string_lossy()
-            );
+            debug!("cannot open file '{}' -- might not exist", path.display());
             return None;
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
-            debug!("cannot read file '{}'", path.to_string_lossy());
+            debug!("cannot read file '{}'", path.display());
             return None;
         }
         let mut proof_data = vec![];
@@ -399,19 +396,19 @@ pub mod test {
         let Ok(mut input_file) = File::open(server_list_path.clone()) else {
             debug!(
                 "cannot proof-server list '{}' -- file might not exist",
-                server_list_path.to_string_lossy()
+                server_list_path.display()
             );
             return vec![];
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
-            debug!("cannot read file '{}'", server_list_path.to_string_lossy());
+            debug!("cannot read file '{}'", server_list_path.display());
             return vec![];
         }
         let Ok(file_as_string) = String::from_utf8(file_contents) else {
             debug!(
                 "cannot parse file '{}' -- is it valid utf8?",
-                server_list_path.to_string_lossy()
+                server_list_path.display()
             );
             return vec![];
         };

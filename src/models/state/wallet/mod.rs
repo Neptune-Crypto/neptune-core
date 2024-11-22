@@ -168,19 +168,19 @@ impl WalletSecret {
         if !wallet_secret_path.exists() {
             bail!(
                 "Wallet secret file '{}' must exist on disk after reading/creating it.",
-                wallet_secret_path.to_string_lossy()
+                wallet_secret_path.display()
             );
         }
         if !outgoing_randomness_file.exists() {
             bail!(
                 "file containing outgoing randomness '{}' must exist on disk.",
-                outgoing_randomness_file.to_string_lossy()
+                outgoing_randomness_file.display()
             );
         }
         if !incoming_randomness_file.exists() {
             bail!(
                 "file containing ingoing randomness '{}' must exist on disk.",
-                incoming_randomness_file.to_string_lossy()
+                incoming_randomness_file.display()
             );
         }
 
@@ -305,19 +305,11 @@ impl WalletSecret {
 
     /// Read Wallet from file as JSON
     pub fn read_from_file(wallet_file: &Path) -> Result<Self> {
-        let wallet_file_content: String = fs::read_to_string(wallet_file).with_context(|| {
-            format!(
-                "Failed to read wallet from {}",
-                wallet_file.to_string_lossy(),
-            )
-        })?;
+        let wallet_file_content: String = fs::read_to_string(wallet_file)
+            .with_context(|| format!("Failed to read wallet from {}", wallet_file.display(),))?;
 
-        serde_json::from_str::<WalletSecret>(&wallet_file_content).with_context(|| {
-            format!(
-                "Failed to decode wallet from {}",
-                wallet_file.to_string_lossy(),
-            )
-        })
+        serde_json::from_str::<WalletSecret>(&wallet_file_content)
+            .with_context(|| format!("Failed to decode wallet from {}", wallet_file.display(),))
     }
 
     /// Used to generate both the file for incoming and outgoing randomness
