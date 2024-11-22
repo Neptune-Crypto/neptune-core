@@ -1,0 +1,71 @@
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+# Template engine: https://keats.github.io/tera/docs/
+
+header = ""
+body = """
+{% if version %}\
+    {% if previous.version %}\
+        ## [{{ version | trim_start_matches(pat="v") }}](<REPO>/compare/{{ previous.version }}..{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+    {% else %}\
+        ## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}
+    {% endif %}\
+{% else %}\
+    ## [unreleased]
+{% endif %}\
+
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim  | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.breaking %}(!) {% endif %}\
+        {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+        {{ commit.message | upper_first }} \
+        ([{{ commit.id | truncate(length=8, end="") }}](<REPO>/commit/{{ commit.id | truncate(length=8, end="") }}))\
+    {% endfor %}
+{% endfor %}\n
+"""
+footer = "Note: (!) indicates a breaking change.\n"
+trim = true
+
+postprocessors = [
+  { pattern = '<REPO>', replace = "https://github.com/Neptune-Crypto/neptune-core" },
+]
+
+[git]
+
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_preprocessors = [
+      { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](<REPO>/issues/${2}))" },
+]
+
+# Use <!-- prio --> hack to sort the categories. See: https://github.com/orhun/git-cliff/issues/9
+commit_parsers = [
+  { message = "^feat",              group = "<!-- 000 --> ✨ Features" },
+  { message = "^fix",               group = "<!-- 010 --> 🐛 Bug Fixes" },
+  { message = "^perf",              group = "<!-- 020 --> 🚀 Performance" },
+  { message = "^doc",               group = "<!-- 030 --> 📚 Documentation" },
+  { message = "^WIP",               skip = true },
+  { message = "^chore\\(deps\\)",   skip = true },
+  { message = "^chore\\(pr\\)",     skip = true },
+  { message = "^chore\\(pull\\)",   skip = true },
+  { body = ".*security",            group = "<!-- 040 --> 🔒️ Security" },
+  { message = "^refactor",          group = "<!-- 050 --> ♻️ Refactor" },
+  { message = "^test",              group = "<!-- 060 --> ✅ Testing" },
+  { message = "^bench",             group = "<!-- 070 --> ⏱ Benchmark" },
+  { message = "^style",             group = "<!-- 080 --> 🎨 Styling" },
+  { message = "^build",             group = "<!-- 090 --> 🛠 Build" },
+  { message = "^revert",            group = "<!-- 100 --> ⏪️ Revert" },
+  { message = "^chore|ci|misc",     group = "<!-- 110 --> ⚙️ Miscellaneous" },
+  { footer = "^changelog: ?ignore", skip = true },
+]
+
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+"
+skip_tags = ""
+ignore_tags = "-alpha|-beta|-rc\\."
+topo_order = false
+sort_commits = "oldest"
