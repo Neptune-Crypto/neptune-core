@@ -1245,17 +1245,13 @@ impl WalletState {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
-        if wallet_status.synced_unspent_available_amount(timestamp) < total_spend {
+        let available = wallet_status.synced_unspent_available_amount(timestamp);
+        if available < total_spend {
             bail!(
-                "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
+                "Insufficient funds. Requested: {}, Available: {}",
                 total_spend,
-                wallet_status.synced_unspent.len(),
-                wallet_status.synced_unspent.iter().map(|(wse, _msmp)| wse.utxo.get_native_currency_amount()).sum::<NeptuneCoins>(),
-                wallet_status.synced_unspent_available_amount(timestamp),
-                wallet_status.synced_unspent_timelocked_amount(timestamp),
-                wallet_status.unsynced_unspent.len(),
-                wallet_status.unsynced_unspent_amount(),
-                tip_digest);
+                available,
+            );
         }
 
         let mut input_funds = vec![];
