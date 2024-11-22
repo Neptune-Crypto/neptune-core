@@ -84,34 +84,27 @@ where
         tasm_lib::maybe_write_debuggable_vm_state_to_disk(&vm_state);
 
         let init_stack = vm_state.op_stack.clone();
-        let result = vm_state.run();
-        match result {
-            Ok(_) => {
-                // Do some sanity checks that are likely to catch programming
-                // errors in the consensus program. This doesn't catch
-                // soundness errors, though, since a valid proof could still be
-                // generated even though one of these checks fail.
-                assert!(
-                    vm_state.secret_digests.is_empty(),
-                    "Secret digest list must be empty after executing consensus program"
-                );
-
-                assert_eq!(&init_stack, &vm_state.op_stack);
-
-                Ok(vm_state.public_output)
-            }
-            Err(error) => {
-                debug!("VM State:\n{error}\n\n");
-                Err(ConsensusError::TritonVMPanic(
-                    format!("Triton VM failed.\nVMState:\n{vm_state}"),
-                    error,
-                ))
-            }
+        if let Err(err) = vm_state.run() {
+            let err_str = format!("Triton VM failed.\nError: {err}\nVMState:\n{vm_state}");
+            debug!(err_str);
+            return Err(ConsensusError::TritonVMPanic(err_str, err));
         }
+
+        // Do some sanity checks that are likely to catch programming
+        // errors in the consensus program. This doesn't catch
+        // soundness errors, though, since a valid proof could still be
+        // generated even though one of these checks fail.
+        assert!(
+            vm_state.secret_digests.is_empty(),
+            "Secret digest list must be empty after executing consensus program"
+        );
+        assert_eq!(&init_stack, &vm_state.op_stack);
+
+        Ok(vm_state.public_output)
     }
 
     /// `Ok(())` iff the given input & non-determinism triggers the failure of
-    /// either the instruction `assert` or `vector_assert`, and if that
+    /// either the instruction `assert` or `assert_vector`, and if that
     /// instruction's error ID is one of the expected error IDs.
     #[cfg(test)]
     fn test_assertion_failure(
