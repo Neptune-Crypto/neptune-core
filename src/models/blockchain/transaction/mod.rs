@@ -247,7 +247,7 @@ impl Transaction {
         info!("updating transaction; starting update proof ...");
         let update_proof = Update
             .prove(
-                &update_claim,
+                update_claim,
                 update_nondeterminism,
                 triton_vm_job_queue,
                 proof_job_options,
@@ -261,7 +261,7 @@ impl Transaction {
         info!("starting single proof via update ...");
         let new_single_proof = SingleProof
             .prove(
-                &new_single_proof_claim,
+                new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,
@@ -323,7 +323,7 @@ impl Transaction {
         let merge_claim = merge_witness.claim();
         let merge_proof = Merge
             .prove(
-                &merge_claim,
+                merge_claim,
                 merge_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,
@@ -336,7 +336,7 @@ impl Transaction {
         info!("Start: creating new single proof");
         let new_single_proof = SingleProof
             .prove(
-                &new_single_proof_claim,
+                new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,

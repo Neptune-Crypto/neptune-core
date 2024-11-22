@@ -292,7 +292,7 @@ impl SingleProof {
         info!("Start: generate single proof");
         let single_proof = SingleProof
             .prove(
-                &claim,
+                claim,
                 nondeterminism,
                 triton_vm_job_queue,
                 proof_job_options,
@@ -984,7 +984,7 @@ mod test {
         let nondeterminism_for_update = witness_for_update.nondeterminism();
         let proof = Update
             .prove(
-                &claim_for_update,
+                claim_for_update.clone(),
                 nondeterminism_for_update,
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -1020,7 +1020,7 @@ mod test {
         let nondeterminism_for_witness = witness_for_merge.nondeterminism();
         let proof = Merge
             .prove(
-                &claim_for_merge,
+                claim_for_merge.clone(),
                 nondeterminism_for_witness,
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),

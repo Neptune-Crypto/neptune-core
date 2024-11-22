@@ -132,7 +132,7 @@ impl ProofCollection {
         debug!("proving RemovalRecordsIntegrity");
         let removal_records_integrity = RemovalRecordsIntegrity
             .prove(
-                &removal_records_integrity_witness.claim(),
+                removal_records_integrity_witness.claim(),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,
@@ -142,7 +142,7 @@ impl ProofCollection {
         debug!("proving CollectLockScripts");
         let collect_lock_scripts = CollectLockScripts
             .prove(
-                &collect_lock_scripts_witness.claim(),
+                collect_lock_scripts_witness.claim(),
                 collect_lock_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,
@@ -152,7 +152,7 @@ impl ProofCollection {
         debug!("proving KernelToOutputs");
         let kernel_to_outputs = KernelToOutputs
             .prove(
-                &kernel_to_outputs_witness.claim(),
+                kernel_to_outputs_witness.claim(),
                 kernel_to_outputs_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,
@@ -162,7 +162,7 @@ impl ProofCollection {
         debug!("proving CollectTypeScripts");
         let collect_type_scripts = CollectTypeScripts
             .prove(
-                &collect_type_scripts_witness.claim(),
+                collect_type_scripts_witness.claim(),
                 collect_type_scripts_witness.nondeterminism(),
                 triton_vm_job_queue,
                 proof_job_options,

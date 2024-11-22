@@ -237,7 +237,7 @@ impl Block {
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
                 .prove(
-                    &claim,
+                    claim,
                     appendix_witness.nondeterminism(),
                     triton_vm_job_queue,
                     proof_job_options,

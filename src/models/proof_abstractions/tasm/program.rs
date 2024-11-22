@@ -153,23 +153,22 @@ where
     /// does the same but for arbitrary programs.
     #[allow(async_fn_in_trait)] // Trait must be public bc of benchmarks.
     #[allow(private_interfaces)] // Trait must be public bc of benchmarks.
+    #[doc(hidden)]
     async fn prove(
         &self,
-        claim: &Claim,
+        claim: Claim,
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        {
-            prove_consensus_program(
-                self.program(),
-                claim.clone(),
-                nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
-            .await
-        }
+        prove_consensus_program(
+            self.program(),
+            claim,
+            nondeterminism,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await
     }
 }
 

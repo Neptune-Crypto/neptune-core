@@ -306,7 +306,7 @@ impl UpgradeJob {
                 info!("Proof-upgrader: Start generate single proof");
                 let single_proof = SingleProof
                     .prove(
-                        &claim,
+                        claim,
                         nondeterminism,
                         triton_vm_job_queue,
                         proof_job_options,
