@@ -23,7 +23,6 @@ use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use neptune_core::config_models::network::Network;
 use neptune_core::rpc_server::RPCClient;
-use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -347,7 +346,6 @@ impl DashboardApp {
 
                     // mark handled
                     *maybe_event_arc.lock().unwrap() = None;
-                    // terminal.draw(|f| app.render(f))?;
                 };
             }
 
@@ -468,12 +466,12 @@ impl DashboardApp {
         Ok(None)
     }
 
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>) {
+    fn render(&mut self, f: &mut Frame) {
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
-            .split(f.size());
+            .split(f.area());
         let header_chunk = main_chunks[0];
         let body_chunks = Layout::default()
             .direction(Direction::Horizontal)

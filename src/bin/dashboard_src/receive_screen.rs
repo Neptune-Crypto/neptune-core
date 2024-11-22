@@ -182,7 +182,7 @@ impl Widget for ReceiveScreen {
         // divide the overview box vertically into subboxes,
         // and render each separately
         let style = Style::default().bg(self.bg).fg(self.fg);
-        let inner = area.inner(&Margin {
+        let inner = area.inner(Margin {
             vertical: 1,
             horizontal: 1,
         });

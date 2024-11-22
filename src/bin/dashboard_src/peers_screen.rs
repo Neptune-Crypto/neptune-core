@@ -163,7 +163,7 @@ impl Widget for PeersScreen {
             .style(style)
             .render(area, buf);
 
-        let mut inner = area.inner(&Margin {
+        let mut inner = area.inner(Margin {
             vertical: 2,
             horizontal: 2,
         });
@@ -314,7 +314,7 @@ impl Widget for PeersScreen {
             .iter()
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
-        let table = Table::new(rows).widths(&width_constraints).style(style);
+        let table = Table::new(rows, width_constraints).style(style);
         inner.width = min(
             inner.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,

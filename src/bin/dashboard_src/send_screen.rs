@@ -337,7 +337,7 @@ impl Widget for SendScreen {
         // and render each separately
         let style = Style::default().bg(self.bg).fg(self.fg);
         let focus_style = Style::default().bg(self.bg).fg(Color::LightCyan);
-        let inner = area.inner(&Margin {
+        let inner = area.inner(Margin {
             vertical: 1,
             horizontal: 1,
         });

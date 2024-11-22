@@ -251,7 +251,7 @@ impl Widget for HistoryScreen {
             .render(area, buf);
 
         // subdivide into two parts
-        let mut table_canvas = area.inner(&Margin {
+        let mut table_canvas = area.inner(Margin {
             vertical: 2,
             horizontal: 2,
         });
@@ -385,10 +385,10 @@ impl Widget for HistoryScreen {
             .iter()
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
-        let table = Table::new(rows)
-            .widths(&width_constraints)
+        let table = Table::new(rows, width_constraints)
+            // .widths(&width_constraints)
             .style(style)
-            .highlight_style(selected_style);
+            .row_highlight_style(selected_style);
         table_canvas.width = min(
             table_canvas.width,
             widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1,

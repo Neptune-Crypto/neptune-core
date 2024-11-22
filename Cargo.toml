@@ -61,7 +61,7 @@ priority-queue = "1.4"
 proptest = "1.5"
 proptest-arbitrary-interop = "0.1"
 rand = "0.8"
-ratatui = "0.23"
+ratatui = "0.29"
 regex = "1.11.0"
 semver = "^1.0.23"
 serde = { version = "1.0", features = ["derive"] }
