@@ -144,7 +144,7 @@ impl SendScreen {
                 *reset_me.lock().await = ResetType::Form;
             }
             Err(e) => {
-                *notice_arc.lock().await = format!("send error.  {}", e.to_string());
+                *notice_arc.lock().await = format!("send error.  {}", e);
                 *reset_me.lock().await = ResetType::Notice;
             }
         }
