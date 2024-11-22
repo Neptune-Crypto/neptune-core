@@ -421,6 +421,8 @@ async fn main() -> Result<()> {
                 }
                 Ok(result) => result,
             };
+            println!("Seed phrase for {}.", network);
+            println!("Read from file `{}`.", wallet_file.to_string_lossy());
             for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
                 println!("{}. {word}", i + 1);
             }
