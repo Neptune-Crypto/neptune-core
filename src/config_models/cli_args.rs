@@ -143,8 +143,8 @@ pub struct Args {
     #[structopt(long)]
     pub peers: Vec<SocketAddr>,
 
-    /// Specify network, `alpha`, `testnet`, or `regtest`
-    #[structopt(long, short, default_value = "alpha")]
+    /// Specify network, `alpha`, `beta`, `testnet`, or `regtest`
+    #[structopt(long, default_value = "beta", short)]
     pub network: Network,
 
     /// Max number of membership proofs stored per owned UTXO
@@ -357,5 +357,10 @@ mod cli_args_tests {
             ..Default::default()
         };
         assert_ne!(a.proving_capability(), b.proving_capability());
+    }
+
+    #[test]
+    fn cli_args_default_network_agrees_with_enum_default() {
+        assert_eq!(Args::default().network, Network::default());
     }
 }

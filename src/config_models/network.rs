@@ -16,11 +16,11 @@ pub enum Network {
     Main,
 
     /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
-    #[default]
     Alpha,
 
-    /// Upcoming iteration of testnet. Not feature-complete either but moreso than
-    /// Alpha. Soon to be set as default.
+    /// 2nd iteration of integration testing. Not feature-complete either but
+    /// moreso than Alpha. Soon to be set as default.
+    #[default]
     Beta,
 
     /// Feature-complete (or as feature-complete as possible) test network separate
