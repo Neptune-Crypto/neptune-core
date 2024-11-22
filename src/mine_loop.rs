@@ -86,7 +86,7 @@ async fn guess_nonce(
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
-    unrestricted_mining: bool,
+    sleepy_guessing: bool,
     target_block_interval: Option<Timestamp>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
@@ -107,7 +107,7 @@ async fn guess_nonce(
             previous_block,
             sender,
             composer_utxos,
-            unrestricted_mining,
+            sleepy_guessing,
             target_block_interval,
         )
     })
@@ -120,7 +120,7 @@ fn guess_worker(
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
-    unrestricted_mining: bool,
+    sleepy_guessing: bool,
     target_block_interval: Option<Timestamp>,
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
@@ -150,7 +150,7 @@ fn guess_worker(
             threshold,
         },
         &mut nonce_preimage,
-        unrestricted_mining,
+        sleepy_guessing,
         &mut rng,
     ) {}
     // If the sender is cancelled, the parent to this thread most
@@ -221,7 +221,7 @@ fn guess_nonce_iteration(
     sender: &oneshot::Sender<NewBlockFound>,
     difficulty_info: DifficultyInfo,
     nonce_preimage: &mut Digest,
-    unrestricted_mining: bool,
+    sleepy_guessing: bool,
     rng: &mut StdRng,
 ) -> bool {
     if sender.is_canceled() {
@@ -253,7 +253,7 @@ fn guess_nonce_iteration(
 
     let success = block.hash() <= difficulty_info.threshold;
 
-    if !unrestricted_mining {
+    if sleepy_guessing {
         std::thread::sleep(Duration::from_millis(100));
     }
 
@@ -733,7 +733,7 @@ pub(crate) mod mine_loop_tests {
     /// Estimates the hash rate in number of hashes per milliseconds
     async fn estimate_own_hash_rate(
         target_block_interval: Option<Timestamp>,
-        unrestricted_mining: bool,
+        sleepy_guessing: bool,
     ) -> f64 {
         let mut rng: StdRng = SeedableRng::from_rng(thread_rng()).unwrap();
         let network = Network::RegTest;
@@ -787,7 +787,7 @@ pub(crate) mod mine_loop_tests {
                     threshold,
                 },
                 &mut nonce_preimage,
-                unrestricted_mining,
+                sleepy_guessing,
                 &mut rng,
             );
         }
@@ -1051,14 +1051,14 @@ pub(crate) mod mine_loop_tests {
             None,
         );
 
-        let unrestricted_mining = true;
+        let sleepy_guessing = false;
 
         guess_worker(
             block,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
-            unrestricted_mining,
+            sleepy_guessing,
             None,
         );
 
@@ -1118,14 +1118,14 @@ pub(crate) mod mine_loop_tests {
         let initial_header_timestamp = template.header().timestamp;
         assert_eq!(ten_seconds_ago, initial_header_timestamp);
 
-        let unrestricted_mining = true;
+        let sleepy_guessing = false;
 
         guess_worker(
             template,
             tip_block_orig.clone(),
             worker_task_tx,
             coinbase_utxo_info,
-            unrestricted_mining,
+            sleepy_guessing,
             None,
         );
 
@@ -1169,7 +1169,7 @@ pub(crate) mod mine_loop_tests {
     /// We ignore the first 2 blocks after genesis because they are typically
     /// mined very fast.
     ///
-    /// We use unrestricted mining (100% CPU) to avoid complications from the
+    /// We avoid sleepy guessing to avoid complications from the
     /// sleep(100 millis) call in mining loop when restricted mining is enabled.
     ///
     /// This serves as a regression test for issue #154.
@@ -1203,9 +1203,8 @@ pub(crate) mod mine_loop_tests {
         );
 
         // set initial difficulty in accordance with own hash rate
-        let unrestricted_mining = true;
-        let hash_rate =
-            estimate_own_hash_rate(Some(target_block_interval), unrestricted_mining).await;
+        let sleepy_guessing = false;
+        let hash_rate = estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
         let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
@@ -1276,7 +1275,7 @@ pub(crate) mod mine_loop_tests {
                 prev_block.clone(),
                 worker_task_tx,
                 composer_utxos,
-                unrestricted_mining,
+                sleepy_guessing,
                 Some(target_block_interval),
             );
 
