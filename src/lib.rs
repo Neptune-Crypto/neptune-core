@@ -86,6 +86,8 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
+    info!("Starting client on {}.", cli_args.network);
+
     // Get data directory (wallet, block database), create one if none exists
     let data_dir = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
     DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path()).await?;
