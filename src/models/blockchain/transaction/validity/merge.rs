@@ -122,13 +122,10 @@ impl MergeWitness {
 
 impl SecretWitness for MergeWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(
-            [
-                self.new_kernel.mast_hash().reversed().values(),
-                SingleProof.program().hash().reversed().values(),
-            ]
-            .concat(),
-        )
+        [self.new_kernel.mast_hash(), SingleProof.hash()]
+            .map(|digest| digest.reversed().values())
+            .concat()
+            .into()
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -213,13 +210,6 @@ impl SecretWitness for MergeWitness {
 pub struct Merge;
 
 impl ConsensusProgram for Merge {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest = tasmlib::tasmlib_io_read_stdin___digest();
@@ -378,7 +368,7 @@ impl ConsensusProgram for Merge {
         assert_mutator_set_hash_integrity(new_txk_digest);
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -955,10 +945,18 @@ impl ConsensusProgram for Merge {
             halt
         };
 
-        triton_asm! {
+        let code = triton_asm! {
             {&main}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

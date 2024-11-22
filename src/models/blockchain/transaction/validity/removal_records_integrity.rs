@@ -371,13 +371,6 @@ impl RemovalRecordsIntegrityWitness {
 }
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
@@ -474,7 +467,7 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         tasmlib::tasmlib_io_write_to_stdout___digest(hash_of_inputs);
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
         let bag_peaks = library.import(Box::new(BagPeaks));
@@ -960,11 +953,19 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         };
 
         let imports = library.all_imports();
-        triton_asm!(
+        let code = triton_asm!(
             {&payload}
             {&for_all_utxos_loop}
             {&imports}
-        )
+        );
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

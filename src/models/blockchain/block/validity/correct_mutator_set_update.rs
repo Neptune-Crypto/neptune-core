@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
 
 use crate::models::blockchain::block::BFieldCodec;
@@ -35,18 +36,17 @@ pub struct CorrectMutatorSetUpdate {
 }
 
 impl ConsensusProgram for CorrectMutatorSetUpdate {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         todo!()
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }

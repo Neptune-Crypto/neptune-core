@@ -106,7 +106,7 @@ impl SecretWitness for AppendixWitness {
     }
 
     fn program(&self) -> Program {
-        Program::new(&BlockProgram.code())
+        BlockProgram.program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {

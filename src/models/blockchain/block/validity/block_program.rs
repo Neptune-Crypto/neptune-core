@@ -44,13 +44,6 @@ impl BlockProgram {
 }
 
 impl ConsensusProgram for BlockProgram {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let _block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -67,7 +60,7 @@ impl ConsensusProgram for BlockProgram {
         }
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
@@ -132,7 +125,7 @@ impl ConsensusProgram for BlockProgram {
                 recurse
         };
 
-        triton_asm! {
+        let code = triton_asm! {
             // _
 
             read_io 5
@@ -170,7 +163,15 @@ impl ConsensusProgram for BlockProgram {
 
             {&verify_all_claims_function}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

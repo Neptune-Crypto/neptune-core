@@ -55,13 +55,6 @@ const BAD_STATE_SIZE_ERROR: i128 = 1_000_033;
 pub struct NativeCurrency;
 
 impl ConsensusProgram for NativeCurrency {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     #[allow(clippy::needless_return)]
     fn source(&self) {
         // get in the current program's hash digest
@@ -178,7 +171,7 @@ impl ConsensusProgram for NativeCurrency {
         assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let coin_size = NeptuneCoins::static_length().unwrap();
         let mut library = Library::new();
         let field_with_size_coinbase = field_with_size!(NativeCurrencyWitnessMemory::coinbase);
@@ -579,11 +572,19 @@ impl ConsensusProgram for NativeCurrency {
 
         let imports = library.all_imports();
 
-        triton_asm!(
+        let code = triton_asm!(
             {&main_code}
             {&subroutines}
             {&imports}
-        )
+        );
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

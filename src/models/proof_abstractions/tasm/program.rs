@@ -2,6 +2,7 @@ use std::panic::catch_unwind;
 use std::panic::RefUnwindSafe;
 
 use itertools::Itertools;
+use tasm_lib::library::Library;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -28,25 +29,37 @@ pub trait ConsensusProgram
 where
     Self: RefUnwindSafe + std::fmt::Debug,
 {
-    /// The canonical reference source code for the consensus program, written in the
-    /// subset of rust that the tasm-lang compiler understands. To run this program, call
-    /// [`run`][`run`], which spawns a new thread, boots the environment, and executes
-    /// the program.
+    /// The canonical reference source code for the consensus program, written in
+    /// the subset of rust that the tasm-lang compiler understands. To run this
+    /// program, call [`Self::run_rust`], which spawns a new thread, boots the
+    /// environment, and executes the program.
     fn source(&self);
+
+    /// Helps identify all imported Triton assembly snippets.
+    /// You probably want to use [`Self::code`].
+    // Implemented this way to ensure synchronicity between the library in use
+    // and the actual code.
+    #[doc(hidden)]
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>);
 
     /// A derivative of source, in Triton-assembler (tasm) rather than rust. Either
     /// produced automatically or hand-optimized.
-    fn code(&self) -> Vec<LabelledInstruction>;
+    ///
+    /// See also [`Self::program`].
+    fn code(&self) -> Vec<LabelledInstruction> {
+        let (_, code) = self.library_and_code();
+        code
+    }
 
-    /// Get the program as a `Program` object rather than as a list of `LabelledInstruction`s.
+    /// The Triton VM [`Program`].
     fn program(&self) -> Program {
         Program::new(&self.code())
     }
 
-    /// Get the program hash digest.
-    ///
-    /// note: we do not provide a default impl because implementors
-    /// should cache their Digest with OnceLock.
+    /// The [program](Self::program)'s hash [digest](Digest).
+    //
+    // note: we do not provide a default impl because implementors should cache
+    // their Digest with OnceLock.
     fn hash(&self) -> Digest;
 
     /// Run the source program natively in rust, but with the emulated TritonVM
@@ -73,7 +86,7 @@ where
     /// Use Triton VM to run the tasm code.
     ///
     /// Should only be called in tests. In production code, use [`Self::run_rust`]
-    /// instead -- it's faster.
+    /// instead – it's faster.
     #[cfg(test)]
     fn run_tasm(
         &self,
@@ -283,12 +296,13 @@ pub mod test {
         let rust_result = consensus_program.run_rust(input, nondeterminism.clone());
         assert2::assert!(let Err(ConsensusError::RustShadowPanic(_)) = rust_result);
 
+        let program_name = core::any::type_name::<T>();
         let tasm_result = consensus_program.run_tasm(input, nondeterminism);
         let consensus_err = tasm_result.expect_err(&format!(
-            "negative test failed to fail for consensus program {consensus_program:?}"
+            "negative test failed to fail for consensus program {program_name}"
         ));
         let ConsensusError::TritonVMPanic(_, instruction_error) = consensus_err else {
-            panic!("Triton VM must fail for consensus program {consensus_program:?}")
+            panic!("Triton VM must fail for consensus program {program_name}")
         };
         let assertion_err = match instruction_error {
             InstructionError::AssertionFailed(err)

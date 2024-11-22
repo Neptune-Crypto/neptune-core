@@ -91,22 +91,18 @@ impl Display for Utxo {
 
 impl GetSize for Utxo {
     fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
+        size_of::<Self>()
     }
 
     fn get_heap_size(&self) -> usize {
         // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
         let mut total = self.lock_script_hash().get_heap_size();
         for v in self.coins.iter() {
-            total += std::mem::size_of::<Digest>();
-            total += v.state.len() * std::mem::size_of::<BFieldElement>();
+            total += size_of::<Digest>();
+            total += v.state.len() * size_of::<BFieldElement>();
         }
 
         total
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
     }
 }
 

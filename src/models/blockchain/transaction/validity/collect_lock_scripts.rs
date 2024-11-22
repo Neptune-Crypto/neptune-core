@@ -37,6 +37,27 @@ pub struct CollectLockScriptsWitness {
 }
 
 impl SecretWitness for CollectLockScriptsWitness {
+    fn standard_input(&self) -> PublicInput {
+        PublicInput::new(
+            Hash::hash(&self.salted_input_utxos)
+                .reversed()
+                .values()
+                .to_vec(),
+        )
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        self.salted_input_utxos
+            .utxos
+            .iter()
+            .flat_map(|utxo| utxo.lock_script_hash().values())
+            .collect_vec()
+    }
+
+    fn program(&self) -> Program {
+        CollectLockScripts.program()
+    }
+
     fn nondeterminism(&self) -> NonDeterminism {
         // set memory
         let mut memory = HashMap::default();
@@ -48,40 +69,12 @@ impl SecretWitness for CollectLockScriptsWitness {
 
         NonDeterminism::default().with_ram(memory)
     }
-
-    fn standard_input(&self) -> PublicInput {
-        PublicInput::new(
-            Hash::hash(&self.salted_input_utxos)
-                .reversed()
-                .values()
-                .to_vec(),
-        )
-    }
-
-    fn program(&self) -> triton_vm::prelude::Program {
-        CollectLockScripts.program()
-    }
-
-    fn output(&self) -> Vec<BFieldElement> {
-        self.salted_input_utxos
-            .utxos
-            .iter()
-            .flat_map(|utxo| utxo.lock_script_hash().values())
-            .collect_vec()
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectLockScripts;
 
 impl ConsensusProgram for CollectLockScripts {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -103,7 +96,7 @@ impl ConsensusProgram for CollectLockScripts {
         }
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
             field_with_size!(CollectLockScriptsWitness::salted_input_utxos);
@@ -193,10 +186,18 @@ impl ConsensusProgram for CollectLockScripts {
 
 
         };
-        triton_asm! {
+        let code = triton_asm! {
             {&payload}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 
@@ -223,7 +224,7 @@ mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::SecretWitness;
 
-    fn prop(primitive_witness: PrimitiveWitness) -> std::result::Result<(), TestCaseError> {
+    fn prop(primitive_witness: PrimitiveWitness) -> Result<(), TestCaseError> {
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);
         let expected_output = collect_lock_scripts_witness.output();
 
@@ -248,7 +249,8 @@ mod test {
 
     #[proptest(cases = 5)]
     fn collect_lock_script_proptest(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
+        primitive_witness: PrimitiveWitness,
     ) {
         prop(primitive_witness)?;
     }

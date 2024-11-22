@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -16,15 +17,15 @@ pub struct CorrectControlParameterUpdateWitness {
 }
 
 impl SecretWitness for CorrectControlParameterUpdateWitness {
-    fn nondeterminism(&self) -> NonDeterminism {
-        todo!()
-    }
-
     fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
     fn program(&self) -> Program {
+        todo!()
+    }
+
+    fn nondeterminism(&self) -> NonDeterminism {
         todo!()
     }
 }
@@ -35,18 +36,17 @@ pub struct CorrectControlParameterUpdate {
 }
 
 impl ConsensusProgram for CorrectControlParameterUpdate {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         todo!()
     }
 
-    fn code(&self) -> Vec<tasm_lib::prelude::triton_vm::prelude::LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }

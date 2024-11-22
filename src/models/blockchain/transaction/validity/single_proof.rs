@@ -173,7 +173,7 @@ impl SecretWitness for SingleProofWitness {
     }
 
     fn program(&self) -> Program {
-        Program::new(&SingleProof.code())
+        SingleProof.program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
@@ -370,7 +370,7 @@ impl ConsensusProgram for SingleProof {
         }
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         const DISCRIMINANT_FOR_PROOF_COLLECTION: isize = 0;
         const DISCRIMINANT_FOR_UPDATE: isize = 1;
         const DISCRIMINANT_FOR_MERGE: isize = 2;
@@ -823,17 +823,18 @@ impl ConsensusProgram for SingleProof {
             halt
         };
 
-        triton_asm! {
+        let code = triton_asm! {
             {&main}
             {&proof_collection_case_body}
             {&update_case_body}
             {&merge_case_body}
             {&verify_scripts_loop_body}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
     }
 
-    /// Get the program hash digest.
     fn hash(&self) -> Digest {
         static HASH: OnceLock<Digest> = OnceLock::new();
 

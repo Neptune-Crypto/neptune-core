@@ -100,13 +100,10 @@ impl UpdateWitness {
 
 impl SecretWitness for UpdateWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(
-            [
-                self.new_kernel.mast_hash().reversed().values(),
-                SingleProof.program().hash().reversed().values(),
-            ]
-            .concat(),
-        )
+        [self.new_kernel.mast_hash(), SingleProof.hash()]
+            .map(|digest| digest.reversed().values())
+            .concat()
+            .into()
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -137,8 +134,8 @@ impl SecretWitness for UpdateWitness {
         );
 
         // set remaining digests
-        nondeterminism.digests.append(
-            &mut [
+        nondeterminism.digests.extend(
+            [
                 // mutator set hash
                 self.new_kernel
                     .mast_path(TransactionKernelField::MutatorSetHash),
@@ -150,8 +147,8 @@ impl SecretWitness for UpdateWitness {
 
         VerifyMmrSuccessor::update_nondeterminism(&mut nondeterminism, &self.aocl_successor_proof);
 
-        nondeterminism.digests.append(
-            &mut [
+        nondeterminism.digests.extend(
+            [
                 // inputs
                 self.old_kernel.mast_path(TransactionKernelField::Inputs),
                 self.new_kernel.mast_path(TransactionKernelField::Inputs),
@@ -184,13 +181,6 @@ impl SecretWitness for UpdateWitness {
 pub struct Update;
 
 impl ConsensusProgram for Update {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         // read the kernel of the transaction that this proof applies to
         let new_txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
@@ -361,7 +351,7 @@ impl ConsensusProgram for Update {
         assert!(new_timestamp >= old_timestamp);
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
         let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
@@ -694,10 +684,18 @@ impl ConsensusProgram for Update {
             halt
         };
 
-        triton_asm! {
+        let code = triton_asm! {
             {&main}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

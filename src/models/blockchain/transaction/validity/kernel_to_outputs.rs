@@ -79,15 +79,19 @@ impl From<&PrimitiveWitness> for KernelToOutputsWitness {
 }
 
 impl SecretWitness for KernelToOutputsWitness {
-    fn standard_input(&self) -> tasm_lib::triton_vm::prelude::PublicInput {
+    fn standard_input(&self) -> PublicInput {
         PublicInput::new(self.kernel.mast_hash().reversed().values().to_vec())
     }
 
-    fn program(&self) -> tasm_lib::triton_vm::prelude::Program {
+    fn output(&self) -> Vec<BFieldElement> {
+        Hash::hash(&self.output_utxos).values().to_vec()
+    }
+
+    fn program(&self) -> Program {
         KernelToOutputs.program()
     }
 
-    fn nondeterminism(&self) -> tasm_lib::triton_vm::prelude::NonDeterminism {
+    fn nondeterminism(&self) -> NonDeterminism {
         // set memory
         let mut memory = HashMap::default();
         let witness_for_memory: KernelToOutputsWitnessMemory = self.into();
@@ -104,23 +108,12 @@ impl SecretWitness for KernelToOutputsWitness {
             .with_ram(memory)
             .with_digests(digests)
     }
-
-    fn output(&self) -> Vec<BFieldElement> {
-        Hash::hash(&self.output_utxos).values().to_vec()
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct KernelToOutputs;
 
 impl ConsensusProgram for KernelToOutputs {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -161,7 +154,7 @@ impl ConsensusProgram for KernelToOutputs {
         tasmlib::tasmlib_io_write_to_stdout___digest(salted_output_utxos_hash);
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
         let new_list = library.import(Box::new(list::new::New {
@@ -336,10 +329,18 @@ impl ConsensusProgram for KernelToOutputs {
 
         let dependencies = library.all_imports();
 
-        triton_asm!(
+        let code = triton_asm!(
             {&tasm}
             {&dependencies}
-        )
+        );
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 

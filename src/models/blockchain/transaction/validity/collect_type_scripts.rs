@@ -43,36 +43,11 @@ pub struct CollectTypeScriptsWitness {
 }
 
 impl SecretWitness for CollectTypeScriptsWitness {
-    fn nondeterminism(&self) -> NonDeterminism {
-        // set memory
-        let mut memory = HashMap::default();
-        encode_to_memory(
-            &mut memory,
-            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            self,
-        );
-
-        NonDeterminism::default().with_ram(memory)
-    }
-
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(
-            [
-                Hash::hash(&self.salted_input_utxos)
-                    .reversed()
-                    .values()
-                    .to_vec(),
-                Hash::hash(&self.salted_output_utxos)
-                    .reversed()
-                    .values()
-                    .to_vec(),
-            ]
-            .concat(),
-        )
-    }
-
-    fn program(&self) -> triton_vm::prelude::Program {
-        CollectTypeScripts.program()
+        [&self.salted_input_utxos, &self.salted_output_utxos]
+            .map(|utxos| Tip5::hash(utxos).reversed().values().to_vec())
+            .concat()
+            .into()
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -90,19 +65,28 @@ impl SecretWitness for CollectTypeScriptsWitness {
             .flat_map(|d| d.values())
             .collect_vec()
     }
+
+    fn program(&self) -> Program {
+        CollectTypeScripts.program()
+    }
+
+    fn nondeterminism(&self) -> NonDeterminism {
+        // set memory
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            self,
+        );
+
+        NonDeterminism::default().with_ram(memory)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectTypeScripts;
 
 impl ConsensusProgram for CollectTypeScripts {
-    /// Get the program hash digest.
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
-    }
-
     fn source(&self) {
         let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let sou_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
@@ -168,7 +152,7 @@ impl ConsensusProgram for CollectTypeScripts {
         }
     }
 
-    fn code(&self) -> Vec<LabelledInstruction> {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
             field_with_size!(CollectTypeScriptsWitness::salted_input_utxos);
@@ -382,10 +366,19 @@ impl ConsensusProgram for CollectTypeScripts {
                 recurse
 
         };
-        triton_asm! {
+
+        let code = triton_asm! {
             {&payload}
             {&library.all_imports()}
-        }
+        };
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
     }
 }
 
