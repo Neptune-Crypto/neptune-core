@@ -156,3 +156,13 @@ That's all handled by [`dist`](https://opensource.axo.dev/cargo-dist/book/introd
 After CI [has done its job](https://github.com/Neptune-Crypto/neptune-core/actions), check the [release page](https://github.com/Neptune-Crypto/neptune-core/releases) if everything looks okay.
 
 To modify which systems the binaries & installers are built for, run [`dist init`](https://opensource.axo.dev/cargo-dist/book/quickstart/rust.html#adding-installers).
+
+### Set Branch `release`
+
+By convention, branch `release` should always point to the latest stable commit compatible with the latest release.
+
+```sh
+git checkout release
+git reset --hard master
+git push --force-with-lease
+```
