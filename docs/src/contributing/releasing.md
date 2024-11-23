@@ -39,6 +39,18 @@ Unless indicated otherwise, the current working directory is assumed to be the w
 cd /path/to/neptune-core
 ```
 
+### Check Distribution Workflow Files
+
+Run [`dist init`](https://opensource.axo.dev/cargo-dist/book/quickstart/rust.html#adding-installers) to generate the latest GitHub workflow files that will take care of binary distribution.
+The interface allows to add or remove target platforms as well as installers.
+Feel free to change those settings, but be aware that not all installers are equally well supported; you might want to inform yourself before changing anything.
+
+Usually, the generated GitHub workflow files are identical to the existing ones.
+In this case, move on to the next step.
+If the workflow files have changed, commit them.
+An appropriate commit message could be:
+`ci: Update release workflow files`
+
 ### Bump Version
 
 Bump the version in `Cargo.toml` [as appropriate](https://doc.rust-lang.org/cargo/reference/semver.html).
@@ -138,24 +150,22 @@ cargo release --execute --no-push
 #             omit this to get a dry run
 ```
 
-### Push to GitHub
+### Get Green Light from Continuous Integration
 
-In the previous step, `cargo-release` automatically created one or multiple git tags.
-Edit them until you are happy (which probably means no editing), then push the tags to GitHub.
+Create a new git branch with the release commit and push it to GitHub.
+Open a pull request from that branch.
+Wait for continuous integration to do its job.
+
+Once CI gives the green light, fast-forward the master branch to the tip of the feature branch and push it.
+
+### Push Tag to GitHub
+
+In a previous step, `cargo-release` automatically created one or multiple git tags.
+Edit them until you are happy, then push the tag(s) to GitHub.
 
 ```sh
 cargo release --execute push
 ```
-
-> 🎉 Congrats on the new release!
-
-### Distribute Binaries
-
-Oh… distributing binaries?
-That's all handled by [`dist`](https://opensource.axo.dev/cargo-dist/book/introduction.html)!
-After CI [has done its job](https://github.com/Neptune-Crypto/neptune-core/actions), check the [release page](https://github.com/Neptune-Crypto/neptune-core/releases) if everything looks okay.
-
-To modify which systems the binaries & installers are built for, run [`dist init`](https://opensource.axo.dev/cargo-dist/book/quickstart/rust.html#adding-installers).
 
 ### Set Branch `release`
 
@@ -166,3 +176,10 @@ git checkout release
 git reset --hard master
 git push --force-with-lease
 ```
+
+### Check Release Artifacts & Page
+
+Pushing the git tag(s) triggers CI once more.
+After [has done its job](https://github.com/Neptune-Crypto/neptune-core/actions), check the [release page](https://github.com/Neptune-Crypto/neptune-core/releases) if everything looks okay.
+
+> 🎉 Congrats on the new release!
