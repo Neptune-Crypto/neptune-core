@@ -10,7 +10,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::tokio::{AtomicRw, traits::*};
+    /// # use neptune_cash::locks::tokio::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };
@@ -28,7 +28,7 @@ pub trait Atomic<T> {
     ///
     /// # Example
     /// ```
-    /// # use neptune_core::locks::tokio::{AtomicRw, traits::*};
+    /// # use neptune_cash::locks::tokio::{AtomicRw, traits::*};
     /// struct Car {
     ///     year: u16,
     /// };

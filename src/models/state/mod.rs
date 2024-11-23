@@ -131,7 +131,7 @@ use crate::VERSION;
 ///
 /// Deadlocks are generally not hard to track down.  Lock events are traced.
 /// The app log records each `TryAcquire`, `Acquire` and `Release` event
-/// when run with `RUST_LOG='info,neptune_core=trace'`.
+/// when run with `RUST_LOG='info,neptune_cash=trace'`.
 ///
 /// If a deadlock has occurred, the log will end with a `TryAcquire` event
 /// (read or write) and just scroll up to find the previous `Acquire` for

@@ -96,9 +96,9 @@ pub enum BlockProof {
 /// internals directly (bypassing encapsulation)
 ///
 /// ```compile_fail,E0594
-/// use neptune_core::models::blockchain::block::Block;
-/// use neptune_core::config_models::network::Network;
-/// use neptune_core::prelude::twenty_first::math::b_field_element::BFieldElement;
+/// use neptune_cash::models::blockchain::block::Block;
+/// use neptune_cash::config_models::network::Network;
+/// use neptune_cash::prelude::twenty_first::math::b_field_element::BFieldElement;
 ///
 /// let mut block = Block::genesis_block(Network::RegTest);
 ///

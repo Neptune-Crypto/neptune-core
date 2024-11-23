@@ -49,7 +49,7 @@ use serde::Serialize;
 ///
 /// ```
 /// use serde::{Serialize, Deserialize};
-/// use neptune_core::database::storage::storage_schema::RustyValue;
+/// use neptune_cash::database::storage::storage_schema::RustyValue;
 ///
 /// #[derive(Debug, Clone, Serialize, Deserialize)]
 /// pub struct Person {

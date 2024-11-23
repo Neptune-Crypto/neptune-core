@@ -27,7 +27,7 @@ use super::LockType;
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::locks::tokio::AtomicRw;
+/// # use neptune_cash::locks::tokio::AtomicRw;
 /// struct Car {
 ///     year: u16,
 /// };
@@ -43,7 +43,7 @@ use super::LockType;
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::locks::tokio::{AtomicRw, LockEvent, LockCallbackFn};
+/// # use neptune_cash::locks::tokio::{AtomicRw, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
@@ -216,7 +216,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -238,7 +238,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -276,7 +276,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -303,7 +303,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// struct Car {
     ///     year: u16,
     /// };
@@ -334,7 +334,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,
@@ -363,7 +363,7 @@ impl<T> AtomicRw<T> {
     ///
     /// # Examples
     /// ```
-    /// # use neptune_core::locks::tokio::AtomicRw;
+    /// # use neptune_cash::locks::tokio::AtomicRw;
     /// # use futures::future::FutureExt;
     /// struct Car {
     ///     year: u16,

@@ -41,9 +41,9 @@ use crate::locks::tokio::LockCallbackFn;
 /// ```
 /// # // note: compile_fail due to: https://github.com/rust-lang/rust/issues/67295
 /// # tokio_test::block_on(async {
-/// # use neptune_core::database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = neptune_core::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
-/// use neptune_core::locks::tokio::AtomicRw;
+/// # use neptune_cash::database::storage::{storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = neptune_cash::database::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
+/// use neptune_cash::locks::tokio::AtomicRw;
 ///
 /// let mut storage = SimpleRustyStorage::new(db);
 ///

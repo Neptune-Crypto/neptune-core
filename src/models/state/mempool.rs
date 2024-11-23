@@ -762,9 +762,9 @@ impl Mempool {
     ///
     /// ```
     /// use bytesize::ByteSize;
-    /// use neptune_core::models::blockchain::block::Block;
-    /// use neptune_core::models::state::mempool::Mempool;
-    /// use neptune_core::config_models::network::Network;
+    /// use neptune_cash::models::blockchain::block::Block;
+    /// use neptune_cash::models::state::mempool::Mempool;
+    /// use neptune_cash::config_models::network::Network;
     ///
     /// let network = Network::Main;
     /// let genesis_block = Block::genesis_block(network);

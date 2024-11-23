@@ -123,7 +123,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream().await;
@@ -147,7 +147,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_values().await;
@@ -171,7 +171,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_many([2,3,7]).await;
@@ -201,7 +201,7 @@ pub trait StorageVecStream<T: Send>: StorageVecBase<T> {
     /// # Example:
     /// ```
     /// # tokio_test::block_on(async {
-    /// # use neptune_core::database::storage::storage_vec::{OrdinaryVec, traits::*};
+    /// # use neptune_cash::database::storage::storage_vec::{OrdinaryVec, traits::*};
     /// # let mut vec = OrdinaryVec::<u32>::from(vec![1,2,3,4,5,6,7,8,9]);
     ///
     /// let stream = vec.stream_many_values([2,3,7]).await;
