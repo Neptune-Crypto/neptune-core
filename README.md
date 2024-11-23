@@ -1,6 +1,6 @@
 # Neptune Core
 
-Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The implementation is not complete yet, but already supports many integral components. In particular, alpha-net is live.
+Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The implementation is not complete yet, but already supports many integral components. In particular, beta-net is live.
 
 ## Installing
 
@@ -36,7 +36,7 @@ With a functioning version of cargo, compilation on Windows should just work out
 
  - Generate a wallet file: `neptune-cli generate-wallet`
  - Run neptune-core daemon: `neptune-core` with flags
-   - `--peers [ip_address:port]` to connect to a given peer, for instance `--peers [2001:bc8:611:1c72::1]:9798` or `--peers 139.162.193.206:9798` or both
+   - `--peers [ip_address:port]` to connect to a given peer, for instance `--peers 51.15.139.238:9798` or `--peers 139.162.193.206:9798` or both
    - `--compose --guess` to mine — if you want to generate testnet coins to test sending and receiving
    - `--help` to get a list of available command-line arguments
 
