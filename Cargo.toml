@@ -1,9 +1,9 @@
 [package]
-name = "neptune-core"
+name = "neptune-cash"
 description = "A layer-1 cryptocurrency featuring scalable privacy and post-quantum security."
 authors = ["Triton Software"]
 
-version = "0.0.5"
+version = "0.0.10"
 edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"

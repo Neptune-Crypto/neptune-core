@@ -1950,8 +1950,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "neptune-core"
-version = "0.0.5"
+name = "neptune-cash"
+version = "0.0.10"
 dependencies = [
  "aead",
  "aes-gcm",

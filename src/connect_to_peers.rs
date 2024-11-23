@@ -67,8 +67,9 @@ async fn check_if_connection_is_allowed(
             }
         };
 
-        // All alphanet versions are incompatible with each other. Alphanet has versions
-        // "0.0.n". Alphanet is also incompatible with mainnet or any other versions.
+        // All alphanet and betanet versions are incompatible with each other.
+        // Alpha and betanet have versions "0.0.n". Alpha and betanet are
+        // incompatible with all other versions.
         if own_version.major == 0 && own_version.minor == 0
             || other_version.major == 0 && other_version.minor == 0
         {

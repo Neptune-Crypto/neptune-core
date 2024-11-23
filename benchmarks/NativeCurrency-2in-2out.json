@@ -2,10 +2,10 @@
   {
     "name": "NativeCurrency-2in-2out",
     "benchmark_result": {
-      "clock_cycle_count": 2599,
-      "hash_table_height": 1024,
-      "u32_table_height": 663,
-      "op_stack_table_height": 2014,
+      "clock_cycle_count": 2597,
+      "hash_table_height": 1018,
+      "u32_table_height": 670,
+      "op_stack_table_height": 2018,
       "ram_table_height": 327
     },
     "case": "CommonCase"
