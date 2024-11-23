@@ -3,11 +3,11 @@ use leveldb::options::Options;
 use leveldb::options::ReadOptions;
 use leveldb::options::WriteOptions;
 use leveldb_sys::Compression;
-use neptune_core::database::storage::storage_schema::traits::*;
-use neptune_core::database::storage::storage_schema::DbtVec;
-use neptune_core::database::storage::storage_schema::SimpleRustyStorage;
-use neptune_core::database::storage::storage_vec::traits::*;
-use neptune_core::database::NeptuneLevelDb;
+use neptune_cash::database::storage::storage_schema::traits::*;
+use neptune_cash::database::storage::storage_schema::DbtVec;
+use neptune_cash::database::storage::storage_schema::SimpleRustyStorage;
+use neptune_cash::database::storage::storage_vec::traits::*;
+use neptune_cash::database::NeptuneLevelDb;
 
 // These database bench tests are made with divan.
 //

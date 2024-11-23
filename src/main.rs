@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use neptune_core::config_models::cli_args;
+use neptune_cash::config_models::cli_args;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
@@ -36,7 +36,7 @@ pub fn main() -> Result<()> {
                 .expect("Failed to set trace subscriber");
         }
 
-        neptune_core::initialize(args).await
+        neptune_cash::initialize(args).await
     });
 
     tokio_runtime.shutdown_timeout(tokio::time::Duration::from_secs(10));

@@ -7,14 +7,14 @@ use std::time::SystemTime;
 
 use bytesize::ByteSize;
 use itertools::Itertools;
-use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::block::block_header::BlockHeader;
-use neptune_core::models::blockchain::block::block_height::BlockHeight;
-use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use neptune_core::models::state::mining_status::MiningStatus;
-use neptune_core::models::state::tx_proving_capability::TxProvingCapability;
-use neptune_core::prelude::twenty_first;
-use neptune_core::rpc_server::RPCClient;
+use neptune_cash::config_models::network::Network;
+use neptune_cash::models::blockchain::block::block_header::BlockHeader;
+use neptune_cash::models::blockchain::block::block_height::BlockHeight;
+use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_cash::models::state::mining_status::MiningStatus;
+use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
+use neptune_cash::prelude::twenty_first;
+use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -357,7 +357,7 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "latest block timestamp: {}",
             dashifnotset!(data.block_header.as_ref().map(|bh| {
-                neptune_core::utc_timestamp_to_localtime(bh.timestamp.0.value()).to_string()
+                neptune_cash::utc_timestamp_to_localtime(bh.timestamp.0.value()).to_string()
             })),
         ));
 

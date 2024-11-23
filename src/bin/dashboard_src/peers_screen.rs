@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use itertools::Itertools;
-use neptune_core::models::peer::PeerInfo;
-use neptune_core::rpc_server::RPCClient;
+use neptune_cash::models::peer::PeerInfo;
+use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
 use ratatui::style::Color;
@@ -200,7 +200,7 @@ impl Widget for PeersScreen {
                     .unwrap();
                 vec![
                     pi.connected_address().to_string(),
-                    neptune_core::utc_timestamp_to_localtime(connection_established.as_millis())
+                    neptune_cash::utc_timestamp_to_localtime(connection_established.as_millis())
                         .to_string(),
                     pi.standing().to_string(),
                     if pi.is_archival_node() {

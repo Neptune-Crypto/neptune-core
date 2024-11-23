@@ -4,7 +4,7 @@ use std::process;
 
 use clap::Parser;
 use dashboard_src::dashboard_app::DashboardApp;
-use neptune_core::rpc_server::RPCClient;
+use neptune_cash::rpc_server::RPCClient;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;

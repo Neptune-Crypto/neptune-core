@@ -4,7 +4,7 @@ use leveldb::options::Options;
 use leveldb::options::ReadOptions;
 use leveldb::options::WriteOptions;
 use leveldb_sys::Compression;
-use neptune_core::database::leveldb::DB;
+use neptune_cash::database::leveldb::DB;
 
 // These database bench tests are made with divan.
 //
