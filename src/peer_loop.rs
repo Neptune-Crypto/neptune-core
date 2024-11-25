@@ -1078,7 +1078,7 @@ impl PeerLoopHandler {
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalNotification");
 
-                let request = self
+                let verdict = self
                     .global_state_lock
                     .lock_guard()
                     .await
@@ -1086,17 +1086,17 @@ impl PeerLoopHandler {
                         block_proposal_notification.height,
                         block_proposal_notification.guesser_fee,
                     );
-
-                if request {
-                    peer.send(PeerMessage::BlockProposalRequest(
-                        BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
-                    ))
-                    .await?;
-                } else {
-                    info!(
-                        "Got unfavorable block proposal notification from {} peer; rejecting",
+                match verdict {
+                    Ok(_) => {
+                        peer.send(PeerMessage::BlockProposalRequest(
+                            BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
+                        ))
+                        .await?
+                    }
+                    Err(reject_reason) => info!(
+                        "Got unfavorable block proposal notification from {} peer; rejecting. Reason:\n{reject_reason}",
                         self.peer_address
-                    );
+                    ),
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -1125,15 +1125,16 @@ impl PeerLoopHandler {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposal");
 
                 info!("Got block proposal from peer.");
-                if !self
+                let verdict = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .favor_incoming_block_proposal(
                         block.header().height,
                         block.total_guesser_reward(),
-                    )
-                {
+                    );
+                if let Err(rejection_reason) = verdict {
+                    warn!("Rejecting new block proposal:\n{rejection_reason}");
                     self.punish(NegativePeerSanction::NonFavorableBlockProposal)
                         .await?;
 
@@ -1789,7 +1790,7 @@ mod peer_loop_tests {
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
         let block_1 =
-            valid_block_for_tests(&alice, now, StdRng::seed_from_u64(5550001).gen()).await;
+            valid_block_for_tests(&alice, now, StdRng::seed_from_u64(5550001).gen(), 0.0).await;
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block must be valid for this test to make sense"
@@ -2077,7 +2078,7 @@ mod peer_loop_tests {
             .await;
 
         let now = genesis_block.header().timestamp + Timestamp::hours(2);
-        let block_1 = valid_block_for_tests(&state_lock, now, rng.gen()).await;
+        let block_1 = valid_block_for_tests(&state_lock, now, rng.gen(), 0.0).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
@@ -2833,6 +2834,133 @@ mod peer_loop_tests {
             Ok(_) => panic!("to_main channel must be empty"),
         };
         Ok(())
+    }
+
+    mod block_proposals {
+        use super::*;
+        use crate::tests::shared::get_dummy_handshake_data_for_genesis;
+
+        struct TestSetup {
+            peer_loop_handler: PeerLoopHandler,
+            to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+            from_main_rx: broadcast::Receiver<MainToPeerTask>,
+            peer_state: MutablePeerState,
+            to_main_tx: mpsc::Sender<PeerTaskToMain>,
+            genesis_block: Block,
+            peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+        }
+
+        async fn genesis_setup(network: Network) -> TestSetup {
+            let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, alice, _hsd) =
+                get_test_genesis_setup(network, 0).await.unwrap();
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network).await;
+            let peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                alice.clone(),
+                get_dummy_socket_address(0),
+                peer_hsd.clone(),
+                true,
+                1,
+            );
+            let peer_state = MutablePeerState::new(peer_hsd.tip_header.height);
+
+            // (peer_loop_handler, to_main_rx1)
+            TestSetup {
+                peer_broadcast_tx,
+                peer_loop_handler,
+                to_main_rx,
+                from_main_rx,
+                peer_state,
+                to_main_tx,
+                genesis_block: Block::genesis_block(network),
+            }
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn accept_block_proposal_height_one() {
+            // Node knows genesis block, receives a block proposal for block 1
+            // and must accept this. Verify that main loop is informed of block
+            // proposal.
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                mut to_main_rx,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block,
+            } = genesis_setup(Network::Main).await;
+            let now = genesis_block.header().timestamp + Timestamp::hours(1);
+            let guesser_fraction = 0.5;
+            let block1 = valid_block_for_tests(
+                &peer_loop_handler.global_state_lock,
+                now,
+                StdRng::seed_from_u64(5550001).gen(),
+                guesser_fraction,
+            )
+            .await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockProposal(Box::new(block1))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+
+            match to_main_rx.try_recv().unwrap() {
+                PeerTaskToMain::BlockProposal(block) => {
+                    assert_eq!(genesis_block.hash(), block.header().prev_block_digest);
+                }
+                _ => panic!("Expected main loop to be informed of block proposal"),
+            };
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn accept_block_proposal_notification_height_one() {
+            // Node knows genesis block, receives a block proposal notification
+            // for block 1 and must accept this by requesting the block
+            // proposal from peer.
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                to_main_rx: _,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block,
+            } = genesis_setup(Network::Main).await;
+            let now = genesis_block.header().timestamp + Timestamp::hours(1);
+            let guesser_fraction = 0.5;
+            let block1 = valid_block_for_tests(
+                &peer_loop_handler.global_state_lock,
+                now,
+                StdRng::seed_from_u64(5550001).gen(),
+                guesser_fraction,
+            )
+            .await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockProposalNotification((&block1).into())),
+                Action::Write(PeerMessage::BlockProposalRequest(
+                    BlockProposalRequest::new(block1.body().mast_hash()),
+                )),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
+        }
     }
 
     mod proof_qualities {

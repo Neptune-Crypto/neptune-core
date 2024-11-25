@@ -872,8 +872,8 @@ pub(crate) async fn valid_block_for_tests(
     state_lock: &GlobalStateLock,
     timestamp: Timestamp,
     seed: [u8; 32],
+    guesser_fraction: f64,
 ) -> Block {
-    let guesser_fraction = 0f64;
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
     let (cb, _) = make_coinbase_transaction(state_lock, guesser_fraction, timestamp)
         .await

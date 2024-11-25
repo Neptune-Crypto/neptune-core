@@ -1,5 +1,9 @@
+use std::fmt;
+
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::BlockHeight;
 
 /// A proposed block to extend the block chain with.
 ///
@@ -73,6 +77,44 @@ impl BlockProposal {
                 }
             }
             BlockProposal::None => None,
+        }
+    }
+}
+
+/// Enumerates the reason that a specific block proposal was rejected. The
+/// block proposal is most likely from another peer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BlockProposalRejectError {
+    /// Denotes that this instance is itself composing blocks
+    Composing,
+
+    /// Incoming block proposal does not have height matching current tip
+    WrongHeight {
+        received: BlockHeight,
+        expected: BlockHeight,
+    },
+
+    /// Incoming block proposal does not have sufficient fee
+    InsufficientFee {
+        current: Option<NeptuneCoins>,
+        received: NeptuneCoins,
+    },
+}
+
+impl fmt::Display for BlockProposalRejectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockProposalRejectError::Composing => write!(f, "Making own composition"),
+            BlockProposalRejectError::WrongHeight { received, expected } => write!(
+                f,
+                "Expected block height: {}\nProposal block height: {}",
+                expected, received
+            ),
+            BlockProposalRejectError::InsufficientFee { current, received } => write!(
+                f,
+                "Insufficient fee. Proposal was {};\ncurrent fee is: {:?}",
+                received, current
+            ),
         }
     }
 }

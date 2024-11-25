@@ -776,16 +776,16 @@ impl MainLoopHandler {
                 // on, then we switch to this, and notify the miner to mine
                 // on this new block. We don't need to verify the block's
                 // validity, since that was done in peer loop.
-                if !self
+                let verdict = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .favor_incoming_block_proposal(
                         block.header().height,
                         block.total_guesser_reward(),
-                    )
-                {
-                    warn!("main loop got unfavorable block proposal.");
+                    );
+                if let Err(reject_reason) = verdict {
+                    warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
                     return Ok(());
                 }
 

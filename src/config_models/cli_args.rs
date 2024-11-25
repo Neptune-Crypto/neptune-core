@@ -219,6 +219,14 @@ fn fraction_validator(s: &str) -> Result<f64, String> {
 }
 
 impl Args {
+    #[cfg(test)]
+    pub(crate) fn default_with_network(network: Network) -> Self {
+        Self {
+            network,
+            ..Default::default()
+        }
+    }
+
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
         self.max_peers.is_zero()

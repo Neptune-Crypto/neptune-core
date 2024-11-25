@@ -71,6 +71,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::peer::HandshakeData;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -354,26 +355,35 @@ impl GlobalState {
     }
 
     /// Returns true iff the incoming block proposal is more favorable than the
-    /// one we're currently working on. Returns false if client is not guessing,
-    /// or is composing itself.
+    /// one we're currently working on. Returns false if client is a composer,
+    /// as it's assumed that they prefer guessing on their own block.
     pub(crate) fn favor_incoming_block_proposal(
         &self,
         incoming_block_height: BlockHeight,
         incoming_guesser_fee: NeptuneCoins,
-    ) -> bool {
-        if !self.cli().guess || self.cli().compose {
-            return false;
+    ) -> Result<(), BlockProposalRejectError> {
+        if self.cli().compose {
+            return Err(BlockProposalRejectError::Composing);
         }
 
         let expected_height = self.chain.light_state().header().height.next();
         if incoming_block_height != expected_height {
-            return false;
+            return Err(BlockProposalRejectError::WrongHeight {
+                received: incoming_block_height,
+                expected: expected_height,
+            });
         }
 
         let maybe_existing_fee = self.block_proposal.map(|x| x.total_guesser_reward());
-        match maybe_existing_fee {
-            Some(existing_reward) => existing_reward < incoming_guesser_fee,
-            None => !incoming_guesser_fee.is_zero(),
+        if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
+            || incoming_guesser_fee.is_zero()
+        {
+            Err(BlockProposalRejectError::InsufficientFee {
+                current: maybe_existing_fee,
+                received: incoming_guesser_fee,
+            })
+        } else {
+            Ok(())
         }
     }
 
@@ -2630,6 +2640,81 @@ mod global_state_tests {
                 .await
                 .is_valid(&genesis_block, now),
             "archival state tip must be a valid block"
+        );
+    }
+
+    #[tokio::test]
+    async fn favor_incoming_block_proposal_test() {
+        async fn block1_proposal(
+            guesser_fraction: f64,
+            global_state_lock: &GlobalStateLock,
+        ) -> Block {
+            let genesis_block = Block::genesis_block(global_state_lock.cli().network);
+            let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
+            let (cb, _) = make_coinbase_transaction(global_state_lock, guesser_fraction, timestamp)
+                .await
+                .unwrap();
+            let block_1 = Block::compose(
+                &genesis_block,
+                cb,
+                timestamp,
+                Digest::default(),
+                None,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+
+            block_1
+        }
+
+        let network = Network::Main;
+        let mut global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let small_guesser_fraction = block1_proposal(0.1, &global_state_lock).await;
+        let big_guesser_fraction = block1_proposal(0.5, &global_state_lock).await;
+
+        let mut state = global_state_lock.global_state_lock.lock_guard_mut().await;
+        assert!(
+            state
+                .favor_incoming_block_proposal(
+                    small_guesser_fraction.header().height,
+                    small_guesser_fraction.total_guesser_reward()
+                )
+                .is_ok(),
+            "Must favor low guesser fee over none"
+        );
+
+        state.block_proposal = BlockProposal::foreign_proposal(small_guesser_fraction.clone());
+        assert!(
+            state
+                .favor_incoming_block_proposal(
+                    big_guesser_fraction.header().height,
+                    big_guesser_fraction.total_guesser_reward()
+                )
+                .is_ok(),
+            "Must favor big guesser fee over low"
+        );
+
+        state.block_proposal = BlockProposal::foreign_proposal(big_guesser_fraction.clone());
+        assert_eq!(
+            BlockProposalRejectError::InsufficientFee {
+                current: Some(big_guesser_fraction.total_guesser_reward()),
+                received: big_guesser_fraction.total_guesser_reward()
+            },
+            state
+                .favor_incoming_block_proposal(
+                    big_guesser_fraction.header().height,
+                    big_guesser_fraction.total_guesser_reward()
+                )
+                .unwrap_err(),
+            "Must favor existing over incoming equivalent"
         );
     }
 
