@@ -110,6 +110,7 @@ thiserror = "1.0.65"
 systemstat = "0.2.3"
 sysinfo = "0.31.4"
 thread-priority = "1.2.0"
+rayon = "1.10"
 
 [dev-dependencies]
 assert2 = "0.3"
