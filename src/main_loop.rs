@@ -277,9 +277,14 @@ impl PotentialPeersState {
             .insert(potential_peer_socket_address, insert_value);
     }
 
-    /// Return a random peer from the potential peer list that we aren't connected to
-    /// and that isn't our own address. Returns (socket address, peer distance)
-    fn get_distant_candidate(
+    /// Return a peer from the potential peer list that we aren't connected to
+    /// and  that isn't our own address.
+    ///
+    /// Favors peers with a high distance and with IPs that we are not already
+    /// connected to.
+    ///
+    /// Returns (socket address, peer distance)
+    fn get_candidate(
         &self,
         connected_clients: &[PeerInfo],
         own_instance_id: u128,
@@ -294,7 +299,7 @@ impl PotentialPeersState {
             .collect();
 
         // Find the appropriate candidates
-        let not_connected_peers = self
+        let candidates = self
             .potential_peers
             .iter()
             // Prevent connecting to self. Note that we *only* use instance ID to prevent this,
@@ -306,8 +311,25 @@ impl PotentialPeersState {
             .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
             .collect::<Vec<_>>();
 
+        // Prefer candidates with IPs that we are not already connected to but
+        // connect to repeated IPs in case we don't have other options, as
+        // repeated IPs may just be multiple machines on the same NAT'ed IPv4
+        // address.
+        let mut connected_ips = peers_listen_addresses.into_iter().map(|x| x.ip());
+        let candidates = if candidates
+            .iter()
+            .any(|candidate| !connected_ips.contains(&candidate.0.ip()))
+        {
+            candidates
+                .into_iter()
+                .filter(|candidate| !connected_ips.contains(&candidate.0.ip()))
+                .collect()
+        } else {
+            candidates
+        };
+
         // Get the candidate list with the highest distance
-        let max_distance_candidates = not_connected_peers.iter().max_by_key(|pp| pp.1.distance);
+        let max_distance_candidates = candidates.iter().max_by_key(|pp| pp.1.distance);
 
         // Pick a random candidate from the appropriate candidates
         let mut rng = rand::thread_rng();
@@ -912,7 +934,7 @@ impl MainLoopHandler {
         // 1)
         let (peer_candidate, candidate_distance) = match main_loop_state
             .potential_peers
-            .get_distant_candidate(&connected_peers, global_state.net.instance_id)
+            .get_candidate(&connected_peers, global_state.net.instance_id)
         {
             Some(candidate) => candidate,
             None => return Ok(()),
