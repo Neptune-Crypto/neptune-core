@@ -84,12 +84,15 @@ impl BlockPrimitiveWitness {
 
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
+            let predecessor_msa_digest = self.predecessor_block
+            .mutator_set_accumulator_after()
+            .hash();
+            let tx_msa_digest = self.transaction.kernel.mutator_set_hash;
             assert_eq!(
-                self.predecessor_block
-                    .mutator_set_accumulator_after()
-                    .hash(),
-                self.transaction.kernel.mutator_set_hash,
-                "Mutator set of transaction must agree with mutator set after previous block."
+                predecessor_msa_digest,
+                tx_msa_digest,
+                "Mutator set of transaction must agree with mutator set after previous block.\
+                \nPredecessor block had {predecessor_msa_digest};\ntransaction had {tx_msa_digest}\n\n"
             );
 
             let mut mutator_set = self.predecessor_block.mutator_set_accumulator_after();

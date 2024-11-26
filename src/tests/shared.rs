@@ -184,6 +184,7 @@ pub async fn get_dummy_peer_connection_data_genesis(
 ///
 /// All contained peers represent outgoing connections.
 pub(crate) async fn mock_genesis_global_state(
+    // TODO: Remove network and read it from CLI arguments instead
     network: Network,
     peer_count: u8,
     wallet: WalletSecret,
