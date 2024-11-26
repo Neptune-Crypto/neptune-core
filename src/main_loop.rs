@@ -771,29 +771,32 @@ impl MainLoopHandler {
                 debug!("main loop received block proposal from peer loop");
 
                 // Due to race-conditions, we need to verify that this
-                // block is still the immediate child of tip. If it is, and
-                // it has a higher guesser fee than what we're currently working
-                // on, then we switch to this, and notify the miner to mine
-                // on this new block. We don't need to verify the block's
+                // block proposal is still the immediate child of tip. If it is,
+                // and it has a higher guesser fee than what we're currently
+                // working on, then we switch to this, and notify the miner to
+                // mine on this new block. We don't need to verify the block's
                 // validity, since that was done in peer loop.
-                let verdict = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .favor_incoming_block_proposal(
-                        block.header().height,
-                        block.total_guesser_reward(),
-                    );
-                if let Err(reject_reason) = verdict {
-                    warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
-                    return Ok(());
-                }
-
+                // To ensure atomicity, a write-lock must be held over global
+                // state while we check if this proposal is favorable.
                 {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                    global_state_mut.block_proposal = BlockProposal::foreign_proposal(*block);
+                    let verdict = global_state_mut.favor_incoming_block_proposal(
+                        block.header().height,
+                        block.total_guesser_reward(),
+                    );
+                    if let Err(reject_reason) = verdict {
+                        warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
+                        return Ok(());
+                    }
+
+                    global_state_mut.block_proposal =
+                        BlockProposal::foreign_proposal(*block.clone());
                 }
+
+                // Notify all peers of the block proposal we just accepted
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::BlockProposalNotification((&*block).into()))?;
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
