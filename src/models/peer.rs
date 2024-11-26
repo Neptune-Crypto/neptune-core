@@ -583,7 +583,8 @@ impl PeerMessage {
     }
 }
 
-/// `MutablePeerState` contains the part of the peer-loop's state that is mutable
+/// `MutablePeerState` contains information about the peer's blockchain state.
+/// Under normal conditions, this information varies across time.
 #[derive(Clone, Debug)]
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,

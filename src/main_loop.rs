@@ -816,8 +816,9 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
-    /// to establish connections with one of those potential peers.
+    /// Perform peer discovery and (if necessary) reconnect to the peers listed
+    /// as CLI arguments. Peer discovery involves finding potential peers from
+    /// connected peers and attempts to establish connections with one of them.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for read

@@ -411,6 +411,12 @@ where
         bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
     }
 
+    // By default, start by asking the peer for its peers. In an adversarial
+    // context, we want the network topology to be as robust as possible.
+    // Blockchain data can be obtained from other peers, if this connection
+    // fails.
+    peer.send(PeerMessage::PeerListRequest).await?;
+
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
@@ -516,6 +522,7 @@ mod connect_tests {
             .read(&to_bytes(&PeerMessage::ConnectionStatus(
                 ConnectionStatus::Accepted,
             ))?)
+            .write(&to_bytes(&PeerMessage::PeerListRequest)?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 

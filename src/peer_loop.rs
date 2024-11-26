@@ -198,7 +198,8 @@ impl PeerLoopHandler {
     /// in the batch.
     ///
     /// # Locking
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     ///
     /// # Panics
     ///
@@ -309,7 +310,8 @@ impl PeerLoopHandler {
     /// are passed down the pipeline.
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     async fn try_ensure_path<S>(
         &mut self,
         received_block: Box<Block>,
@@ -452,8 +454,9 @@ impl PeerLoopHandler {
     /// Otherwise returns OK(false).
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for read
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for read.
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     async fn handle_peer_message<S>(
         &mut self,
         msg: PeerMessage,
