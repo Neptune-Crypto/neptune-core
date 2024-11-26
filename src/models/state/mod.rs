@@ -2654,7 +2654,8 @@ mod global_state_tests {
             let (cb, _) = make_coinbase_transaction(global_state_lock, guesser_fraction, timestamp)
                 .await
                 .unwrap();
-            let block_1 = Block::compose(
+
+            Block::compose(
                 &genesis_block,
                 cb,
                 timestamp,
@@ -2664,9 +2665,7 @@ mod global_state_tests {
                 TritonVmJobPriority::default().into(),
             )
             .await
-            .unwrap();
-
-            block_1
+            .unwrap()
         }
 
         let network = Network::Main;
