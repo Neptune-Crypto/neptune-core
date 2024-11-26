@@ -1194,10 +1194,19 @@ mod tests {
 
         // Create next block which includes Bob's, but not Alice's, transaction.
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, _expected_utxo) =
-            make_coinbase_transaction(&bob, guesser_fraction, in_eight_months)
+        let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction(
+            &bob.global_state_lock
+                .lock_guard()
                 .await
-                .unwrap();
+                .chain
+                .light_state()
+                .clone(),
+            &bob,
+            guesser_fraction,
+            in_eight_months,
+        )
+        .await
+        .unwrap();
         let block_transaction = tx_by_bob
             .merge_with(
                 coinbase_transaction,
@@ -1264,9 +1273,20 @@ mod tests {
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let (cbtx, _eutxo) = make_coinbase_transaction(&alice, guesser_fraction, block_5_timestamp)
-            .await
-            .unwrap();
+        let (cbtx, _eutxo) = make_coinbase_transaction(
+            &alice
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .clone(),
+            &alice,
+            guesser_fraction,
+            block_5_timestamp,
+        )
+        .await
+        .unwrap();
         let block_tx_5 = cbtx
             .merge_with(
                 tx_by_alice_updated,

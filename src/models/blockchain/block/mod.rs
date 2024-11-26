@@ -1210,7 +1210,7 @@ mod block_tests {
 
             let guesser_fraction = 0f64;
             let (block_tx, _expected_utxo) =
-                make_coinbase_transaction(&genesis_state, guesser_fraction, now)
+                make_coinbase_transaction(&genesis_block, &genesis_state, guesser_fraction, now)
                     .await
                     .unwrap();
             let mut block1 = Block::make_block_template_with_valid_proof(

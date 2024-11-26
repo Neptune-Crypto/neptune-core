@@ -1760,10 +1760,20 @@ mod archival_state_tests {
         println!("Generated transaction for Alice and Bob.");
 
         let guesser_fraction = 0f64;
-        let (cbtx, expected_composer_utxos) =
-            make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
+        let (cbtx, expected_composer_utxos) = make_coinbase_transaction(
+            &genesis
+                .global_state_lock
+                .lock_guard()
                 .await
-                .unwrap();
+                .chain
+                .light_state()
+                .clone(),
+            &genesis,
+            guesser_fraction,
+            in_seven_months,
+        )
+        .await
+        .unwrap();
 
         let block_tx = cbtx
             .merge_with(
@@ -1984,10 +1994,20 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
-        let (cbtx2, expected_composer_utxos2) =
-            make_coinbase_transaction(&genesis, guesser_fraction, in_seven_months)
+        let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction(
+            &genesis
+                .global_state_lock
+                .lock_guard()
                 .await
-                .unwrap();
+                .chain
+                .light_state()
+                .clone(),
+            &genesis,
+            guesser_fraction,
+            in_seven_months,
+        )
+        .await
+        .unwrap();
         let block_tx2 = cbtx2
             .merge_with(
                 tx_from_alice,
