@@ -1,0 +1,6 @@
+# A workaround for
+# https://github.com/axodotdev/cargo-dist/issues/1571
+# using
+# https://opensource.axo.dev/cargo-dist/book/ci/customizing.html#customizing-build-setup
+- name: Update RUSTFLAGS with --cfg tokio_unstable
+  run: echo RUSTFLAGS="$RUSTFLAGS --cfg tokio_unstable" >> "$GITHUB_ENV"

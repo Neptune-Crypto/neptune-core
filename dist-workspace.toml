@@ -17,3 +17,4 @@ install-path = "CARGO_HOME"
 install-updater = true
 # Whether to enable GitHub Attestations
 github-attestations = true
+github-build-setup = "build-workaround"
