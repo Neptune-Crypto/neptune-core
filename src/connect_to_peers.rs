@@ -100,7 +100,7 @@ async fn check_if_connection_is_allowed(
 
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
-        if (cli_arguments.max_peers as usize) <= global_state.net.peer_map.len() {
+        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len() {
             Some(ConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
@@ -589,7 +589,7 @@ mod connect_tests {
 
         // pretend --max_peers is 1.
         let mut cli = state_lock.cli().clone();
-        cli.max_peers = 1;
+        cli.max_num_peers = 1;
         state_lock.set_cli(cli.clone()).await;
 
         status = check_if_connection_is_allowed(
@@ -606,7 +606,7 @@ mod connect_tests {
         }
 
         // pretend --max-peers is 100
-        cli.max_peers = 100;
+        cli.max_num_peers = 100;
         state_lock.set_cli(cli.clone()).await;
 
         // Attempt to connect to already connected peer
@@ -897,7 +897,7 @@ mod connect_tests {
 
         // set max_peers to 2 to ensure failure on next connection attempt
         let mut cli = state_lock.cli().clone();
-        cli.max_peers = 2;
+        cli.max_num_peers = 2;
         state_lock.set_cli(cli).await;
 
         let answer = answer_peer(

@@ -56,7 +56,7 @@ pub struct Args {
     /// Will not prevent outgoing connections made with `--peers`.
     /// Set this value to 0 to refuse all incoming connections.
     #[clap(long, default_value = "10", value_name = "COUNT")]
-    pub max_peers: u16,
+    pub max_num_peers: u16,
 
     /// If this flag is set, the node will refuse to initiate a transaction.
     /// This flag makes sense for machines whose resources are dedicated to
@@ -229,7 +229,7 @@ impl Args {
 
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
-        self.max_peers.is_zero()
+        self.max_num_peers.is_zero()
     }
 
     /// Return the port that peer can connect on. None if incoming connections
@@ -319,7 +319,7 @@ mod cli_args_tests {
         let default_args = Args::default();
 
         assert_eq!(1000, default_args.peer_tolerance);
-        assert_eq!(10, default_args.max_peers);
+        assert_eq!(10, default_args.max_num_peers);
         assert_eq!(9798, default_args.peer_port);
         assert_eq!(9799, default_args.rpc_port);
         assert_eq!(
@@ -342,7 +342,7 @@ mod cli_args_tests {
     #[test]
     fn max_peers_0_means_no_incoming_connections() {
         let args = Args {
-            max_peers: 0,
+            max_num_peers: 0,
             ..Default::default()
         };
         assert!(args.disallow_all_incoming_peer_connections());

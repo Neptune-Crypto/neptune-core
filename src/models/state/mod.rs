@@ -1649,7 +1649,7 @@ mod global_state_tests {
         )
         .await;
         let no_incoming_connections = cli_args::Args {
-            max_peers: 0,
+            max_num_peers: 0,
             ..Default::default()
         };
         bob.set_cli(no_incoming_connections).await;

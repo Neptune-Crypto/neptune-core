@@ -731,7 +731,7 @@ impl MainLoopHandler {
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
 
-                let max_peers = self.global_state_lock.cli().max_peers;
+                let max_peers = self.global_state_lock.cli().max_num_peers;
                 for pot_peer in pot_peers {
                     main_loop_state.potential_peers.add(
                         reported_by,
@@ -832,7 +832,7 @@ impl MainLoopHandler {
         let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > cli_args.max_peers as usize {
+        if connected_peers.len() > cli_args.max_num_peers as usize {
             // If *all* peer connections were outgoing, then it's OK to exceed
             // the max-peer count. But in that case we don't want to connect to
             // more peers, so we should just stop execution of this scheduled
@@ -847,7 +847,7 @@ impl MainLoopHandler {
             warn!(
                 "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
                 connected_peers.len(),
-                self.global_state_lock.cli().max_peers
+                self.global_state_lock.cli().max_num_peers
             );
             let mut rng = thread_rng();
 
@@ -927,8 +927,9 @@ impl MainLoopHandler {
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
         // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == cli_args.max_peers as usize
-            || connected_peers.len() > 2 && connected_peers.len() - 1 == cli_args.max_peers as usize
+        if connected_peers.len() == cli_args.max_num_peers as usize
+            || connected_peers.len() > 2
+                && connected_peers.len() - 1 == cli_args.max_num_peers as usize
         {
             return Ok(());
         }
@@ -1833,7 +1834,7 @@ mod tests {
             // Set CLI to ban incoming connections and all outgoing peer-discovery-
             // initiated connections.
             let mocked_cli = cli_args::Args {
-                max_peers: 0,
+                max_num_peers: 0,
                 ..Default::default()
             };
             main_loop_handler
@@ -1890,7 +1891,7 @@ mod tests {
 
             // Set CLI to attempt to make more connections
             let mocked_cli = cli_args::Args {
-                max_peers: 10,
+                max_num_peers: 10,
                 ..Default::default()
             };
             main_loop_handler
