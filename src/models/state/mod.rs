@@ -12,6 +12,7 @@ pub mod tx_proving_capability;
 pub mod wallet;
 
 use std::cmp::max;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::time::SystemTime;
@@ -1540,6 +1541,11 @@ impl GlobalState {
     #[inline]
     fn cli(&self) -> &cli_args::Args {
         &self.cli
+    }
+
+    /// Return the list of peers that were supplied as CLI arguments.
+    pub(crate) fn cli_peers(&self) -> Vec<SocketAddr> {
+        self.cli().peers.clone()
     }
 
     pub(crate) fn proving_capability(&self) -> TxProvingCapability {

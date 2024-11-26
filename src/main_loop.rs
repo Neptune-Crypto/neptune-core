@@ -811,6 +811,32 @@ impl MainLoopHandler {
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
+            PeerTaskToMain::DisconnectFromLongestLivedPeer => {
+                let global_state = self.global_state_lock.lock_guard().await;
+
+                // get all peers
+                let all_peers = global_state.net.peer_map.iter();
+
+                // filter out CLI peers
+                let disconnect_candidates =
+                    all_peers.filter(|p| !global_state.cli_peers().contains(p.0));
+
+                // find the one with the oldest connection
+                let longest_lived_peer = disconnect_candidates.min_by(
+                    |(_socket_address_left, peer_info_left),
+                     (_socket_address_right, peer_info_right)| {
+                        peer_info_left
+                            .connection_established()
+                            .cmp(&peer_info_right.connection_established())
+                    },
+                );
+
+                // tell to disconnect
+                if let Some((peer_socket, _peer_info)) = longest_lived_peer {
+                    self.main_to_peer_broadcast_tx
+                        .send(MainToPeerTask::Disconnect(peer_socket.to_owned()))?;
+                }
+            }
         }
 
         Ok(())

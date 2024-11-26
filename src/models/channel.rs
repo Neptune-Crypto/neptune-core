@@ -135,6 +135,7 @@ pub(crate) enum PeerTaskToMain {
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
     Transaction(Box<PeerTaskToMainTransaction>),
     BlockProposal(Box<Block>),
+    DisconnectFromLongestLivedPeer,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +153,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
+            PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
         }
         .to_string()
     }

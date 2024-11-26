@@ -58,6 +58,16 @@ pub struct Args {
     #[clap(long, default_value = "10", value_name = "COUNT")]
     pub max_num_peers: u16,
 
+    /// Whether to act as bootstrapper node.
+    ///
+    /// Bootstrapper nodes ensure that the maximum number of peers is never
+    /// reached by disconnecting from existing peers when the maximum is about
+    /// to be reached. As a result, they will respond with high likelihood to
+    /// incoming connection requests -- in contrast to regular nodes, which
+    /// refuse incoming connections when the max is reached.
+    #[clap(long)]
+    pub bootstrap: bool,
+
     /// If this flag is set, the node will refuse to initiate a transaction.
     /// This flag makes sense for machines whose resources are dedicated to
     /// composing, and which must do so in a regular and predictable manner,
