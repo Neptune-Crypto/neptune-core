@@ -498,6 +498,11 @@ impl MainLoopHandler {
                 if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     return Ok(());
+                } else {
+                    info!(
+                        "Block from miner is new canonical tip: {}",
+                        new_block.hash(),
+                    );
                 }
 
                 let update_jobs = global_state_mut
@@ -599,6 +604,12 @@ impl MainLoopHandler {
                         // Alternatively set the `max_number_of_blocks_before_syncing` value higher
                         // if this problem is encountered.
                         return Ok(());
+                    } else {
+                        info!(
+                            "Last block from peer is new canonical tip: {}; height: {}",
+                            last_block.hash(),
+                            last_block.header().height
+                        );
                     }
 
                     // Ask miner to stop work until state update is completed
