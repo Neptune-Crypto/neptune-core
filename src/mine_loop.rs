@@ -292,6 +292,7 @@ fn guess_nonce_iteration(
 }
 
 pub(crate) async fn make_coinbase_transaction(
+    latest_block: &Block,
     global_state_lock: &GlobalStateLock,
     guesser_block_subsidy_fraction: f64,
     timestamp: Timestamp,
@@ -304,6 +305,11 @@ pub(crate) async fn make_coinbase_transaction(
     //     we actually win the mining lottery.
     //  3. also this way we do not have to modify global/wallet state.
 
+    // It's important to use the input `latest_block` here instead of
+    // reading it from state, since that could, because of a race condition
+    // lead to an inconsistent witness higher up in the call graph. This is
+    // done to avoid holding a read-lock throughout this function.
+
     let coinbase_recipient_spending_key = global_state_lock
         .lock_guard()
         .await
@@ -311,12 +317,6 @@ pub(crate) async fn make_coinbase_transaction(
         .wallet_secret
         .nth_generation_spending_key(0);
     let receiving_address = coinbase_recipient_spending_key.to_address();
-    let latest_block = global_state_lock
-        .lock_guard()
-        .await
-        .chain
-        .light_state()
-        .clone();
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
@@ -418,8 +418,13 @@ pub(crate) async fn create_block_transaction(
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    let (coinbase_transaction, composer_utxos) =
-        make_coinbase_transaction(global_state_lock, guesser_fee_fraction, timestamp).await?;
+    let (coinbase_transaction, composer_utxos) = make_coinbase_transaction(
+        predecessor_block,
+        global_state_lock,
+        guesser_fee_fraction,
+        timestamp,
+    )
+    .await?;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -840,10 +845,14 @@ pub(crate) mod mine_loop_tests {
         )
         .await;
         let tick = std::time::SystemTime::now();
-        let (transaction, _coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state_lock, 0f64, network.launch_date())
-                .await
-                .unwrap();
+        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction(
+            &genesis_block,
+            &global_state_lock,
+            0f64,
+            network.launch_date(),
+        )
+        .await
+        .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
         let block = Block::block_template_invalid_proof(
@@ -919,7 +928,7 @@ pub(crate) mod mine_loop_tests {
                 "Mempool must be empty at start of loop"
             );
             let (transaction_empty_mempool, _coinbase_utxo_info) = {
-                make_coinbase_transaction(&alice, guesser_fee_fraction, now)
+                make_coinbase_transaction(&genesis_block, &alice, guesser_fee_fraction, now)
                     .await
                     .unwrap()
             };
@@ -1069,7 +1078,7 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state_lock, 0f64, launch_date)
+            make_coinbase_transaction(&tip_block_orig, &global_state_lock, 0f64, launch_date)
                 .await
                 .unwrap();
 
@@ -1132,7 +1141,7 @@ pub(crate) mod mine_loop_tests {
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
         let (transaction, coinbase_utxo_info) =
-            make_coinbase_transaction(&global_state_lock, 0f64, ten_seconds_ago)
+            make_coinbase_transaction(&tip_block_orig, &global_state_lock, 0f64, ten_seconds_ago)
                 .await
                 .unwrap();
 

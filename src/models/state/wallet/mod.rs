@@ -1220,6 +1220,13 @@ mod wallet_tests {
 
         let guesser_fraction = 0f64;
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction(
+            &alice
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .clone(),
             &alice,
             guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
@@ -1392,10 +1399,19 @@ mod wallet_tests {
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
         let guesser_fraction = 0f64;
-        let (cbtx, _cb_expected) =
-            make_coinbase_transaction(&bob, guesser_fraction, in_seven_months)
+        let (cbtx, _cb_expected) = make_coinbase_transaction(
+            &bob.global_state_lock
+                .lock_guard()
                 .await
-                .unwrap();
+                .chain
+                .light_state()
+                .clone(),
+            &bob,
+            guesser_fraction,
+            in_seven_months,
+        )
+        .await
+        .unwrap();
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let anyone_can_spend_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
