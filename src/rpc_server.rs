@@ -384,7 +384,10 @@ impl NeptuneRPCServer {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
-            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
+            let key = s
+                .wallet_state
+                .next_unused_spending_key(KeyType::Symmetric)
+                .await;
 
             // write state to disk. create_transaction() may be slow.
             s.persist_wallet().await.expect("flushed");
@@ -997,6 +1000,7 @@ impl RPC for NeptuneRPCServer {
         let address = global_state_mut
             .wallet_state
             .next_unused_spending_key(key_type)
+            .await
             .to_address();
 
         // persist wallet state to disk
@@ -2122,7 +2126,8 @@ mod rpc_server_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Generation);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         // --- Init.  generate a block, with coinbase going to our wallet ---
         let timestamp = network.launch_date() + Timestamp::days(1);
@@ -2182,7 +2187,8 @@ mod rpc_server_tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .next_unused_spending_key(KeyType::Generation);
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
             (spending_key.to_address(), NeptuneCoins::new(25))
         };
 

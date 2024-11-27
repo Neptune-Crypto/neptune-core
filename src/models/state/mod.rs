@@ -717,7 +717,7 @@ impl GlobalState {
     ///     .await
     ///     .wallet_state
     ///     .wallet_secret
-    ///     .next_unused_spending_key(KeyType::Symmetric);
+    ///     .next_unused_spending_key(KeyType::Symmetric).await;
     ///
     /// // on-chain notification for all utxos destined for our wallet.
     /// let change_notify_medium = UtxoNotificationMedium::OnChain;
@@ -2314,7 +2314,8 @@ mod global_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Generation);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
@@ -3214,6 +3215,7 @@ mod global_state_tests {
                     .await
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
+                    .await
                     .to_address()
             };
 
@@ -3232,7 +3234,8 @@ mod global_state_tests {
                 // create change key for alice. change_key_type is a test param.
                 let alice_change_key = alice_state_mut
                     .wallet_state
-                    .next_unused_spending_key(change_key_type);
+                    .next_unused_spending_key(change_key_type)
+                    .await;
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
@@ -3350,6 +3353,17 @@ mod global_state_tests {
                 .await;
 
                 let mut alice_state_mut = alice_restored_state_lock.lock_guard_mut().await;
+
+                // ensure alice's wallet knows about the first key of each type.
+                // for a real restore, we should generate perhaps 1000 of each.
+                let _ = alice_state_mut
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await;
+                let _ = alice_state_mut
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Symmetric)
+                    .await;
 
                 // check alice's initial balance after genesis.
                 let alice_initial_balance = alice_state_mut

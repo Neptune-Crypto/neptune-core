@@ -61,7 +61,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 ///   offchain expected-utxos
 ///
 /// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnnouncedUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,

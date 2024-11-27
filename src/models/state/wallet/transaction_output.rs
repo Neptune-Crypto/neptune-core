@@ -483,7 +483,8 @@ mod tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Generation);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let address_gen = spending_key_gen.to_address();
 
         // obtain next unused symmetric address from our wallet.
@@ -491,7 +492,8 @@ mod tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .next_unused_spending_key(KeyType::Symmetric);
+            .next_unused_spending_key(KeyType::Symmetric)
+            .await;
         let address_sym = spending_key_sym.to_address();
 
         let state = global_state_lock.lock_guard().await;

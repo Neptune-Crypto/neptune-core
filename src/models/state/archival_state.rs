@@ -1077,6 +1077,7 @@ mod archival_state_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -1733,11 +1734,11 @@ mod archival_state_tests {
         let fee = NeptuneCoins::new(1);
         let change_key = genesis
             .global_state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_symmetric_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Symmetric)
+            .await;
         let (tx_to_alice_and_bob, change_utxo) = genesis
             .lock_guard()
             .await
@@ -1748,7 +1749,7 @@ mod archival_state_tests {
                 ]
                 .concat()
                 .into(),
-                change_key.into(),
+                change_key,
                 UtxoNotificationMedium::OffChain,
                 fee,
                 in_seven_months,
@@ -1815,10 +1816,13 @@ mod archival_state_tests {
             let expected_utxos = genesis_state
                 .wallet_state
                 .extract_expected_utxos(vec![change_utxo.unwrap()].into(), UtxoNotifier::Cli);
+            assert_eq!(expected_utxos.len(), 1);
             genesis_state
                 .wallet_state
                 .add_expected_utxos(expected_utxos)
                 .await;
+
+            assert_eq!(expected_composer_utxos.len(), 1);
             genesis_state
                 .wallet_state
                 .add_expected_utxos(expected_composer_utxos)

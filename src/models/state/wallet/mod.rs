@@ -201,13 +201,8 @@ impl WalletSecret {
     /// which takes &mut self.
     pub fn nth_generation_spending_key(
         &self,
-        index: u16,
+        index: u64,
     ) -> generation_address::GenerationSpendingKey {
-        assert!(
-            index.is_zero(),
-            "For now we only support one generation address per wallet"
-        );
-
         // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
         // in case you don't know with what counter you made the address
         let key_seed = Hash::hash_varlen(
@@ -215,7 +210,7 @@ impl WalletSecret {
                 self.secret_seed.0.encode(),
                 vec![
                     generation_address::GENERATION_FLAG,
-                    BFieldElement::new(index.into()),
+                    BFieldElement::new(index),
                 ],
             ]
             .concat(),
@@ -230,11 +225,6 @@ impl WalletSecret {
     /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
     /// which takes &mut self.
     pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
-        assert!(
-            index.is_zero(),
-            "For now we only support one symmetric key per wallet"
-        );
-
         let key_seed = Hash::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
@@ -254,7 +244,7 @@ impl WalletSecret {
     #[cfg(test)]
     pub fn nth_generation_spending_key_for_tests(
         &self,
-        counter: u16,
+        counter: u64,
     ) -> generation_address::GenerationSpendingKey {
         self.nth_generation_spending_key(counter)
     }
