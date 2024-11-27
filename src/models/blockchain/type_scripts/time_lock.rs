@@ -60,17 +60,8 @@ impl TimeLock {
     pub fn extract_release_date(utxo: &Utxo) -> Timestamp {
         utxo.coins()
             .iter()
-            .find(|coin| coin.type_script_hash == Self.hash())
-            .cloned()
-            .map(|coin| {
-                coin.state
-                    .first()
-                    .copied()
-                    .map(Timestamp)
-                    // state is empty; interpret as null-timelock
-                    .unwrap_or_else(Timestamp::zero)
-            })
-            // no time lock coin found; interpret as null-timelock
+            .filter_map(Coin::release_date)
+            .next()
             .unwrap_or_else(Timestamp::zero)
     }
 }
