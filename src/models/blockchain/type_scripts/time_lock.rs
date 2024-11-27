@@ -1051,9 +1051,12 @@ fn arbitrary_primitive_witness_with_timelocks(
 mod test {
     use num_traits::Zero;
     use proptest::collection::vec;
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::Strategy;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::strategy::Just;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
     use tokio::runtime::Runtime;
@@ -1095,6 +1098,36 @@ mod test {
             "time lock program did not halt gracefully"
         );
         prop_assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+    }
+
+    #[test]
+    fn tx_timestamp_same_as_release_time_must_fail() {
+        // Verify use of `>`, not `>=`.
+        let release_date = Timestamp::now();
+        let mut test_runner = TestRunner::deterministic();
+        let time_lock_witness =
+            TimeLockWitness::arbitrary_with((vec![release_date], 1, 0, release_date))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        assert!(
+            TimeLock {}
+                .run_rust(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_err(),
+            "time lock program failed to panic"
+        );
+        assert!(
+            TimeLock {}
+                .run_tasm(
+                    &time_lock_witness.standard_input(),
+                    time_lock_witness.nondeterminism(),
+                )
+                .is_err(),
+            "time lock program failed to panic"
+        );
     }
 
     #[proptest(cases = 20)]

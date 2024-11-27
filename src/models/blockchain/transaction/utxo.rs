@@ -308,7 +308,10 @@ mod utxo_tests {
         prop_assert!(!utxo.can_spend_at(release_date - delta));
         prop_assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
 
-        prop_assert!(utxo.can_spend_at(release_date));
+        let epsilon = Timestamp::millis(1);
+        prop_assert!(!utxo.can_spend_at(release_date - epsilon));
+        prop_assert!(!utxo.can_spend_at(release_date));
+        prop_assert!(utxo.can_spend_at(release_date + epsilon));
         prop_assert!(utxo.can_spend_at(release_date + delta));
         prop_assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
     }
