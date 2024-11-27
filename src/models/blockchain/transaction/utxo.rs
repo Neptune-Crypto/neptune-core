@@ -307,6 +307,8 @@ mod utxo_tests {
 
         prop_assert!(!utxo.can_spend_at(release_date - delta));
         prop_assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
+
+        prop_assert!(utxo.can_spend_at(release_date));
         prop_assert!(utxo.can_spend_at(release_date + delta));
         prop_assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
     }
