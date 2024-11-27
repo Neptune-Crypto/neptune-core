@@ -55,7 +55,7 @@ impl Display for Coin {
 impl Coin {
     pub fn release_date(&self) -> Option<Timestamp> {
         if self.type_script_hash == TimeLock.hash() {
-            Some(Timestamp(self.state[0]))
+            Timestamp::decode(&self.state).ok().map(|b| *b)
         } else {
             None
         }
