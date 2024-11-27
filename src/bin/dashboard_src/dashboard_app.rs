@@ -46,6 +46,7 @@ use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
+use super::address_screen::AddressScreen;
 use super::history_screen::HistoryScreen;
 use super::mempool_screen::MempoolScreen;
 use super::overview_screen::OverviewScreen;
@@ -61,6 +62,7 @@ enum MenuItem {
     History,
     Receive,
     Send,
+    Address,
     Mempool,
     Quit,
 }
@@ -82,8 +84,9 @@ impl From<MenuItem> for usize {
             MenuItem::History => 2,
             MenuItem::Receive => 3,
             MenuItem::Send => 4,
-            MenuItem::Mempool => 5,
-            MenuItem::Quit => 6,
+            MenuItem::Address => 5,
+            MenuItem::Mempool => 6,
+            MenuItem::Quit => 7,
         }
     }
 }
@@ -107,6 +110,7 @@ impl fmt::Display for MenuItem {
             MenuItem::History => write!(f, "History"),
             MenuItem::Receive => write!(f, "Receive"),
             MenuItem::Send => write!(f, "Send"),
+            MenuItem::Address => write!(f, "Addresses"),
             MenuItem::Mempool => write!(f, "Mempool"),
             MenuItem::Quit => write!(f, "Quit"),
         }
@@ -136,6 +140,7 @@ pub struct DashboardApp {
     menu_in_focus: bool,
     overview_screen: Rc<RefCell<OverviewScreen>>,
     peers_screen: Rc<RefCell<PeersScreen>>,
+    address_screen: Rc<RefCell<AddressScreen>>,
     history_screen: Rc<RefCell<HistoryScreen>>,
     receive_screen: Rc<RefCell<ReceiveScreen>>,
     send_screen: Rc<RefCell<SendScreen>>,
@@ -177,13 +182,20 @@ impl DashboardApp {
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server.clone(), network)));
+        let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
+
+        let address_screen = Rc::new(RefCell::new(AddressScreen::new(
+            rpc_server.clone(),
+            network,
+        )));
+        let address_screen_dyn = Rc::clone(&address_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Address, Rc::clone(&address_screen_dyn));
+
         let mempool_screen = Rc::new(RefCell::new(MempoolScreen::new(rpc_server.clone())));
         let mempool_screen_dyn = Rc::clone(&mempool_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Mempool, Rc::clone(&mempool_screen_dyn));
-
-        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, network)));
-        let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
-        screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
         Self {
             running: false,
@@ -194,6 +206,7 @@ impl DashboardApp {
             history_screen,
             receive_screen,
             send_screen,
+            address_screen,
             mempool_screen,
             screens,
             output: "".to_string(),
@@ -420,6 +433,10 @@ impl DashboardApp {
             let escalated: Option<DashboardEvent> = match self.current_menu_item {
                 // MenuItem::Overview => todo!(),
                 // MenuItem::Peers => todo!(),
+                MenuItem::Address => {
+                    let mut address_screen = self.address_screen.as_ref().borrow_mut();
+                    address_screen.handle(event)?
+                }
                 MenuItem::History => {
                     let mut history_screen = self.history_screen.as_ref().borrow_mut();
                     history_screen.handle(event)?
@@ -533,6 +550,12 @@ impl DashboardApp {
             }
             MenuItem::Peers => {
                 f.render_widget::<PeersScreen>(self.peers_screen.borrow().to_owned(), screen_chunk);
+            }
+            MenuItem::Address => {
+                f.render_widget::<AddressScreen>(
+                    self.address_screen.borrow().to_owned(),
+                    screen_chunk,
+                );
             }
             MenuItem::History => {
                 f.render_widget::<HistoryScreen>(

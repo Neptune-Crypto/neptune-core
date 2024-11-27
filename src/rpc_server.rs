@@ -50,6 +50,7 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -214,6 +215,12 @@ pub trait RPC {
 
     /// Return an address that this client can receive funds on
     async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
+
+    /// Return all known keys, for every [KeyType]
+    async fn known_keys() -> Vec<SpendingKey>;
+
+    /// Return known keys for the provided [KeyType]
+    async fn known_keys_by_keytype(key_type: KeyType) -> Vec<SpendingKey>;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -1007,6 +1014,34 @@ impl RPC for NeptuneRPCServer {
         global_state_mut.persist_wallet().await.expect("flushed");
 
         address
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKey> {
+        log_slow_scope!(fn_name!());
+
+        self.state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_known_spending_keys()
+            .collect()
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn known_keys_by_keytype(
+        self,
+        _context: tarpc::context::Context,
+        key_type: KeyType,
+    ) -> Vec<SpendingKey> {
+        log_slow_scope!(fn_name!());
+
+        self.state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_known_spending_keys(key_type)
+            .collect()
     }
 
     // documented in trait. do not add doc-comment.

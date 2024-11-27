@@ -40,6 +40,15 @@ pub enum KeyType {
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 }
 
+impl std::fmt::Display for KeyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Generation => write!(f, "Generation"),
+            Self::Symmetric => write!(f, "Symmetric"),
+        }
+    }
+}
+
 impl From<&ReceivingAddress> for KeyType {
     fn from(addr: &ReceivingAddress) -> Self {
         match addr {
@@ -218,23 +227,66 @@ impl ReceivingAddress {
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
-            Self::Symmetric(_k) => bail!("bech32m not implemented for symmetric keys"),
+            Self::Symmetric(k) => k.to_bech32m(network),
         }
     }
 
-    /// parses an address from its bech32m encoding
+    /// returns an abbreviated address.
     ///
-    /// note: this will fail for Symmetric keys which do not impl bech32m
-    ///       at present.  There is no need to give them out to 3rd parties
-    ///       in a serialized form.
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   8 start of address.
+    ///   8 end of address.
+    /// ```
+    ///
+    /// security: note that if this is used on a symmetric key it will display 16 chars
+    /// of the bech32m encoded key.  This seriously reduces the key's strength and it
+    /// may be possible to brute-force it.  In general it is best practice to avoid
+    /// display of any part of a symmetric key.
+    ///
+    /// todo:
+    ///
+    /// it would be nice to standardize on a single prefix-len.  6 chars seems a
+    /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
+    /// ngkm --> neptune-generation-key-mainnet
+    pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        let bech32 = self.to_bech32m(network)?;
+        let first_len = self.get_hrp(network).len() + 8usize;
+        let last_len = 8usize;
+
+        assert!(bech32.len() > first_len + last_len);
+
+        let (first, _) = bech32.split_at(first_len);
+        let (_, last) = bech32.split_at(bech32.len() - last_len);
+
+        Ok(format!("{}...{}", first, last))
+    }
+
+    /// parses an address from its bech32m encoding
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        let addr = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)?;
-        Ok(addr.into())
+        if let Ok(addr) =
+            generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)
+        {
+            return Ok(addr.into());
+        }
+
+        let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
+        Ok(key.into())
 
         // when future addr types are supported, we would attempt each type in
         // turn.
+    }
 
-        // note: not implemented for SymmetricKey (yet?)
+    /// returns human-readable-prefix (hrp) for a given network
+    pub fn get_hrp(&self, network: Network) -> String {
+        match self {
+            Self::Generation(_) => generation_address::GenerationReceivingAddress::get_hrp(network),
+            Self::Symmetric(_) => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
+        }
     }
 
     /// generates a lock script from the spending lock.
@@ -259,7 +311,7 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
