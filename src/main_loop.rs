@@ -497,6 +497,7 @@ impl MainLoopHandler {
 
                 if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
+                    self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(());
                 } else {
                     info!(
@@ -547,6 +548,7 @@ impl MainLoopHandler {
                            slow to competitively compose blocks. Consider running the client only \
                            with the guesser flag set and not the compose flag."
                     );
+                    self.main_to_miner_tx.send(MainToMiner::Continue);
                     return Ok(());
                 }
 
