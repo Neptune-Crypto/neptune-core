@@ -449,7 +449,6 @@ mod test {
     }
 
     /// tests bech32m serialize, deserialize with a symmetric key
-    #[should_panic(expected = "bech32m not implemented for symmetric keys")]
     #[proptest]
     fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
         worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());

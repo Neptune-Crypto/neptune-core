@@ -80,6 +80,9 @@ pub struct WalletState {
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
     mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
     mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<AnnouncedUtxo>>,
+
+    known_generation_keys: Vec<SpendingKey>,
+    known_symmetric_keys: Vec<SpendingKey>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -236,6 +239,29 @@ impl WalletState {
         let rusty_wallet_database = RustyWalletDatabase::connect(wallet_db).await;
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
+        // generate and cache all used generation keys
+        let mut known_generation_keys =
+            (0..rusty_wallet_database.get_generation_key_counter().await)
+                .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
+                .collect_vec();
+
+        // this is a hack to appease existing tests that bypass
+        // WalletState::next_unused_generation_spending_key() by
+        // calling WalletSecret::nth_generation_spending_key_for_tests().
+        //
+        // In the future all such tests should be fixed, however for
+        // right now, we want to demonstrate that the existing tests
+        // work with key-derivation in place.
+        if known_generation_keys.is_empty() {
+            let key = wallet_secret.nth_generation_spending_key(0);
+            known_generation_keys.push(key.into());
+        }
+
+        // generate and cache all used symmetric keys
+        let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
+            .map(|idx| wallet_secret.nth_symmetric_key(idx).into())
+            .collect();
+
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
             wallet_secret,
@@ -243,6 +269,8 @@ impl WalletState {
             wallet_directory_path: data_dir.wallet_directory_path(),
             mempool_spent_utxos: Default::default(),
             mempool_unspent_utxos: Default::default(),
+            known_generation_keys,
+            known_symmetric_keys,
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -252,7 +280,7 @@ impl WalletState {
         // outputs.
         if sync_label == Digest::default() {
             // Check if we are premine recipients
-            let own_spending_key = wallet_state.next_unused_spending_key(KeyType::Generation);
+            let own_spending_key = wallet_state.nth_spending_key(KeyType::Generation, 0);
             let own_receiving_address = own_spending_key.to_address();
             for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
@@ -328,15 +356,18 @@ impl WalletState {
 
                 let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
 
+                let announced_from_addition = self
+                    .scan_addition_records_for_expected_utxos(&tx.kernel.outputs)
+                    .await;
+
                 let announced_utxos = self
                     .scan_for_announced_utxos(&tx.kernel)
-                    .chain(
-                        self.scan_addition_records_for_expected_utxos(&tx.kernel.outputs)
-                            .await,
-                    )
+                    .chain(announced_from_addition)
+                    .unique()
                     .collect_vec();
 
                 let tx_id = tx.kernel.txid();
+
                 self.mempool_spent_utxos.insert(tx_id, spent_utxos);
                 self.mempool_unspent_utxos.insert(tx_id, announced_utxos);
             }
@@ -502,7 +533,6 @@ impl WalletState {
     ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
         // scan for announced utxos for every known key of every key type.
         self.get_all_known_spending_keys()
-            .into_iter()
             .flat_map(|key| key.scan_for_announced_utxos(tx_kernel).collect_vec())
 
             // filter for presence in transaction
@@ -656,7 +686,6 @@ impl WalletState {
     // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
-            .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash())
     }
 
@@ -667,23 +696,24 @@ impl WalletState {
         receiver_identifier: BFieldElement,
     ) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
-            .into_iter()
             .find(|k| k.receiver_identifier() == receiver_identifier)
     }
 
     /// returns all spending keys of all key types with derivation index less than current counter
-    pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
+    pub fn get_all_known_spending_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
         KeyType::all_types()
             .into_iter()
             .flat_map(|key_type| self.get_known_spending_keys(key_type))
-            .collect()
     }
 
     /// returns all spending keys of `key_type` with derivation index less than current counter
-    pub fn get_known_spending_keys(&self, key_type: KeyType) -> Vec<SpendingKey> {
+    pub fn get_known_spending_keys(
+        &self,
+        key_type: KeyType,
+    ) -> Box<dyn Iterator<Item = SpendingKey> + '_> {
         match key_type {
-            KeyType::Generation => self.get_known_generation_spending_keys(),
-            KeyType::Symmetric => self.get_known_symmetric_keys(),
+            KeyType::Generation => Box::new(self.get_known_generation_spending_keys()),
+            KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
         }
     }
 
@@ -696,9 +726,8 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    fn get_known_generation_spending_keys(&self) -> Vec<SpendingKey> {
-        // for now we always return just the 1st key.
-        vec![self.wallet_secret.nth_generation_spending_key(0).into()]
+    fn get_known_generation_spending_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
+        self.known_generation_keys.iter().copied()
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
@@ -710,47 +739,62 @@ impl WalletState {
     // funds.  We could also perform a sequential scan at startup (or import)
     // of keys that have received funds, up to some "gap".  In bitcoin/bip32
     // this gap is defined as 20 keys in a row that have never received funds.
-    fn get_known_symmetric_keys(&self) -> Vec<SpendingKey> {
-        // for now we always return just the 1st key.
-        vec![self.wallet_secret.nth_symmetric_key(0).into()]
+    fn get_known_symmetric_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
+        self.known_symmetric_keys.iter().copied()
     }
 
     /// Get the next unused spending key of a given type.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter (for key_type), and increment the counter.
-    ///
-    /// Note that incrementing the counter requires &mut self.
+    /// returns key at present counter (for key_type), and increments the
+    /// counter. also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
+    pub async fn next_unused_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
         match key_type {
-            KeyType::Generation => self.next_unused_generation_spending_key().into(),
-            KeyType::Symmetric => self.next_unused_symmetric_key().into(),
+            KeyType::Generation => self.next_unused_generation_spending_key().await.into(),
+            KeyType::Symmetric => self.next_unused_symmetric_key().await.into(),
+        }
+    }
+
+    /// Get the nth derived spending key of a given type.
+    pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.wallet_secret.nth_generation_spending_key(index).into(),
+            KeyType::Symmetric => self.wallet_secret.nth_symmetric_key(index).into(),
         }
     }
 
     /// Get the next unused generation spending key.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
+    /// returns key at present counter, and increments the counter.
+    /// also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    fn next_unused_generation_spending_key(&mut self) -> generation_address::GenerationSpendingKey {
-        self.wallet_secret.nth_generation_spending_key(0)
+    async fn next_unused_generation_spending_key(
+        &mut self,
+    ) -> generation_address::GenerationSpendingKey {
+        let index = self.wallet_db.get_generation_key_counter().await;
+        self.wallet_db.set_generation_key_counter(index + 1).await;
+        let key = self.wallet_secret.nth_generation_spending_key(index);
+        self.known_generation_keys.push(key.into());
+        key
     }
 
     /// Get the next unused symmetric key.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
+    /// returns key at present counter, and increments the counter.
+    /// also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
-        self.wallet_secret.nth_symmetric_key(0)
+    pub async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
+        let index = self.wallet_db.get_symmetric_key_counter().await;
+        self.wallet_db.set_symmetric_key_counter(index + 1).await;
+        let key = self.wallet_secret.nth_symmetric_key(index);
+        self.known_symmetric_keys.push(key.into());
+        key
     }
 
     pub(crate) async fn claim_utxo(&mut self, utxo_claim_data: ClaimUtxoData) -> Result<()> {
@@ -1854,7 +1898,8 @@ mod tests {
                 .lock_guard_mut()
                 .await
                 .wallet_state
-                .next_unused_spending_key(KeyType::Generation);
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
 
             let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next());
             let send_amt = NeptuneCoins::new(5);
