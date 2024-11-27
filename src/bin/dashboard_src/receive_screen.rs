@@ -8,6 +8,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::KeyType;
+use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
@@ -39,7 +40,7 @@ pub struct ReceiveScreen {
     fg: Color,
     bg: Color,
     in_focus: bool,
-    data: Arc<std::sync::Mutex<Option<String>>>,
+    data: Arc<std::sync::Mutex<Option<ReceivingAddress>>>,
     server: Arc<RPCClient>,
     generating: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
@@ -64,10 +65,9 @@ impl ReceiveScreen {
     fn populate_receiving_address_async(
         &self,
         rpc_client: Arc<RPCClient>,
-        data: Arc<Mutex<Option<String>>>,
+        data: Arc<Mutex<Option<ReceivingAddress>>>,
     ) {
         if data.lock().unwrap().is_none() {
-            let network = self.network;
             let escalatable_event = self.escalatable_event.clone();
 
             tokio::spawn(async move {
@@ -76,7 +76,7 @@ impl ReceiveScreen {
                     .next_receiving_address(context::current(), KeyType::Generation)
                     .await
                     .unwrap();
-                *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
+                *data.lock().unwrap() = Some(receiving_address);
                 *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
             });
         }
@@ -85,10 +85,9 @@ impl ReceiveScreen {
     fn generate_new_receiving_address_async(
         &self,
         rpc_client: Arc<RPCClient>,
-        data: Arc<Mutex<Option<String>>>,
+        data: Arc<Mutex<Option<ReceivingAddress>>>,
         generating: Arc<Mutex<bool>>,
     ) {
-        let network = self.network;
         let escalatable_event = self.escalatable_event.clone();
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
@@ -96,7 +95,7 @@ impl ReceiveScreen {
                 .next_receiving_address(context::current(), KeyType::Generation)
                 .await
                 .unwrap();
-            *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
+            *data.lock().unwrap() = Some(receiving_address);
             *generating.lock().unwrap() = false;
             *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
         });
@@ -122,7 +121,10 @@ impl ReceiveScreen {
                         KeyCode::Char('c') => {
                             if let Some(address) = self.data.lock().unwrap().as_ref() {
                                 return Ok(Some(DashboardEvent::ConsoleMode(
-                                    ConsoleIO::InputRequested(format!("{}\n\n", address)),
+                                    ConsoleIO::InputRequested(format!(
+                                        "{}\n\n",
+                                        address.to_bech32m(self.network).unwrap()
+                                    )),
                                 )));
                             }
                         }
@@ -189,13 +191,29 @@ impl Widget for ReceiveScreen {
         let mut vrecter = VerticalRectifier::new(inner);
 
         // display address
-        let mut address = match self.data.lock().unwrap().to_owned() {
-            Some(str) => str,
-            None => "-".to_string(),
+        let receiving_address = self.data.lock().unwrap().to_owned();
+        let (mut address, address_abbrev) = match receiving_address {
+            Some(addr) => (
+                addr.to_bech32m(self.network).unwrap(),
+                addr.to_bech32m_abbreviated(self.network).unwrap(),
+            ),
+            None => ("-".to_string(), "-".to_string()),
         };
         let width = max(0, inner.width as isize - 2) as usize;
         if width > 0 {
             let mut address_lines = vec![];
+
+            let address_abbrev_rect = vrecter.next(1 + 2);
+            let address_abbrev_display = Paragraph::new(Text::from(address_abbrev))
+                .style(style)
+                .block(Block::default().borders(Borders::ALL).title(Span::styled(
+                    "Receiving Address (abbreviated)",
+                    Style::default(),
+                )))
+                .alignment(Alignment::Left);
+            address_abbrev_display.render(address_abbrev_rect, buf);
+
+            vrecter.next(1);
 
             // TODO: Not sure how to handle this linting problem, as clippy suggestion doesn't work.
             #[allow(clippy::assigning_clones)]
