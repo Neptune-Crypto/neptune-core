@@ -55,7 +55,7 @@ impl Display for Coin {
 impl Coin {
     pub fn release_date(&self) -> Option<Timestamp> {
         if self.type_script_hash == TimeLock.hash() {
-            Some(Timestamp(BFieldElement::new(self.state[0].value())))
+            Some(Timestamp(self.state[0]))
         } else {
             None
         }
@@ -111,8 +111,7 @@ impl GetSize for Utxo {
 }
 
 impl From<(Digest, Vec<Coin>)> for Utxo {
-    fn from(v: (Digest, Vec<Coin>)) -> Self {
-        let (lock_script_hash, coins) = v;
+    fn from((lock_script_hash, coins): (Digest, Vec<Coin>)) -> Self {
         Self {
             lock_script_hash,
             coins,
@@ -154,12 +153,7 @@ impl Utxo {
 
     /// If the UTXO has a timelock, find out what the release date is.
     pub fn release_date(&self) -> Option<Timestamp> {
-        self.coins
-            .iter()
-            .find(|coin| coin.type_script_hash == TimeLock.hash())
-            .map(|coin| coin.state[0].value())
-            .map(BFieldElement::new)
-            .map(Timestamp)
+        self.coins.iter().filter_map(Coin::release_date).next()
     }
 
     /// Determine whether the UTXO has coins that contain only known type
@@ -212,27 +206,10 @@ impl Utxo {
             return false;
         }
 
-        // decode and test release date(s) (if any)
-        let mut have_future_release_date = false;
-        for state in self
-            .coins
+        self.coins
             .iter()
-            .filter(|c| c.type_script_hash == TimeLock.hash())
-            .map(|c| c.state.clone())
-        {
-            match Timestamp::decode(&state) {
-                Ok(release_date) => {
-                    if timestamp <= *release_date {
-                        have_future_release_date = true;
-                    }
-                }
-                Err(_) => {
-                    return false;
-                }
-            };
-        }
-
-        have_future_release_date
+            .filter_map(Coin::release_date)
+            .any(|release_date| timestamp <= release_date)
     }
 }
 
@@ -272,9 +249,11 @@ impl<'a> Arbitrary<'a> for Utxo {
 }
 #[cfg(test)]
 mod utxo_tests {
+    use proptest::prelude::*;
     use rand::thread_rng;
     use rand::Rng;
     use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+    use test_strategy::proptest;
     use tracing_test::traced_test;
     use twenty_first::math::other::random_elements;
 
@@ -315,22 +294,24 @@ mod utxo_tests {
         assert_eq!(utxo, utxo_again);
     }
 
-    #[test]
-    fn utxo_timelock_test() {
-        let mut rng = thread_rng();
-        let release_date = Timestamp(BFieldElement::new(rng.next_u64() >> 2));
-        let mut delta = release_date + Timestamp::seconds(1);
-        while delta > release_date {
-            delta = Timestamp(BFieldElement::new(rng.next_u64() >> 2));
-        }
-        let mut utxo = Utxo::new(
-            LockScript::new(Program::new(&[])),
-            NeptuneCoins::new(1).to_native_coins(),
-        );
-        utxo.coins.push(TimeLock::until(release_date));
-        assert!(!utxo.can_spend_at(release_date - delta));
-        assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
-        assert!(utxo.can_spend_at(release_date + delta));
-        assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
+    #[proptest]
+    fn utxo_timelock_test(
+        #[strategy(0_u64..1 << 63)]
+        #[map(|t| Timestamp(bfe!(t)))]
+        release_date: Timestamp,
+        #[strategy(0_u64..1 << 63)]
+        #[map(|t| Timestamp(bfe!(t)))]
+        #[filter(Timestamp::zero() < #delta && #delta <= #release_date)]
+        delta: Timestamp,
+    ) {
+        let no_lock = LockScript::new(triton_program!(halt));
+        let mut coins = NeptuneCoins::new(1).to_native_coins();
+        coins.push(TimeLock::until(release_date));
+        let utxo = Utxo::new(no_lock, coins);
+
+        prop_assert!(!utxo.can_spend_at(release_date - delta));
+        prop_assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
+        prop_assert!(utxo.can_spend_at(release_date + delta));
+        prop_assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
     }
 }

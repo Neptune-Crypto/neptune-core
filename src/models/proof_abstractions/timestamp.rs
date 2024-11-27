@@ -39,6 +39,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
     GetSize,
     Default,
     TasmObject,
+    Arbitrary,
 )]
 pub struct Timestamp(pub BFieldElement);
 
@@ -182,14 +183,6 @@ impl Display for Timestamp {
 impl Distribution<Timestamp> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Timestamp {
         Timestamp(rng.gen::<BFieldElement>())
-    }
-}
-
-impl<'a> Arbitrary<'a> for Timestamp {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Result::Ok(Timestamp(BFieldElement::new(
-            (u.arbitrary::<u128>()? % (BFieldElement::P as u128)) as u64,
-        )))
     }
 }
 
