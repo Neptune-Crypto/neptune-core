@@ -115,6 +115,11 @@ impl PeerInfo {
             .port_for_incoming_connections
             .map(|port| SocketAddr::new(self.peer_connection_info.connected_address.ip(), port))
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_connection_established(&mut self, new_timestamp: SystemTime) {
+        self.connection_established = new_timestamp;
+    }
 }
 
 trait Sanction {

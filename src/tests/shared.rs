@@ -145,7 +145,7 @@ pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
 }
 
 pub fn get_dummy_version() -> String {
-    "0.1.0".to_string()
+    "0.0.10".to_string()
 }
 
 /// Return a handshake object with a randomly set instance ID

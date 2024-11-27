@@ -193,7 +193,7 @@ where
     inner_ret
 }
 
-async fn answer_peer<S>(
+pub(crate) async fn answer_peer<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -218,7 +218,7 @@ where
     // Complete Neptune handshake
     let (peer_handshake_data, acceptance_code) = match peer.try_next().await? {
         Some(PeerMessage::Handshake(payload)) => {
-            let (v, handshake_data) = *payload;
+            let (v, peer_handshake_data) = *payload;
             if v != crate::MAGIC_STRING_REQUEST {
                 bail!("Expected magic value, got {:?}", v);
             }
@@ -230,11 +230,11 @@ where
             .await?;
 
             // Verify peer network before moving on
-            if handshake_data.network != own_handshake_data.network {
+            if peer_handshake_data.network != own_handshake_data.network {
                 bail!(
                     "Cannot connect with {}: Peer runs {}, this client runs {}.",
                     peer_address,
-                    handshake_data.network,
+                    peer_handshake_data.network,
                     own_handshake_data.network,
                 );
             }
@@ -243,7 +243,7 @@ where
             let connection_status = check_if_connection_is_allowed(
                 state.clone(),
                 &own_handshake_data,
-                &handshake_data,
+                &peer_handshake_data,
                 &peer_address,
             )
             .await;
@@ -263,8 +263,7 @@ where
                 }
             }
 
-            debug!("Got correct magic value request!");
-            (handshake_data, connection_status)
+            (peer_handshake_data, connection_status)
         }
         _ => {
             bail!("Didn't get handshake on connection attempt");
