@@ -276,7 +276,7 @@ where
     info!("Connection accepted from {}", peer_address);
 
     // If necessary, disconnect from another, existing peer.
-    if acceptance_code == ConnectionStatus::AcceptedMaxReached {
+    if acceptance_code == ConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
