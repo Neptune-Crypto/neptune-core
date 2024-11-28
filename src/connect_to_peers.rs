@@ -253,10 +253,6 @@ where
                 .await?;
 
             if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
-                peer.send(PeerMessage::ConnectionStatus(
-                    TransferConnectionStatus::Refused(refused_reason),
-                ))
-                .await?;
                 warn!("Incoming connection refused: {:?}", refused_reason);
                 bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
             }
