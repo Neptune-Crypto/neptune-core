@@ -733,7 +733,7 @@ impl MainLoopHandler {
             PeerTaskToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::PeerDiscoveryAnswer");
 
-                let max_peers = self.global_state_lock.cli().max_peers;
+                let max_peers = self.global_state_lock.cli().max_num_peers;
                 for pot_peer in pot_peers {
                     main_loop_state.potential_peers.add(
                         reported_by,
@@ -813,13 +813,40 @@ impl MainLoopHandler {
 
                 self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
             }
+            PeerTaskToMain::DisconnectFromLongestLivedPeer => {
+                let global_state = self.global_state_lock.lock_guard().await;
+
+                // get all peers
+                let all_peers = global_state.net.peer_map.iter();
+
+                // filter out CLI peers
+                let disconnect_candidates =
+                    all_peers.filter(|p| !global_state.cli_peers().contains(p.0));
+
+                // find the one with the oldest connection
+                let longest_lived_peer = disconnect_candidates.min_by(
+                    |(_socket_address_left, peer_info_left),
+                     (_socket_address_right, peer_info_right)| {
+                        peer_info_left
+                            .connection_established()
+                            .cmp(&peer_info_right.connection_established())
+                    },
+                );
+
+                // tell to disconnect
+                if let Some((peer_socket, _peer_info)) = longest_lived_peer {
+                    self.main_to_peer_broadcast_tx
+                        .send(MainToPeerTask::Disconnect(peer_socket.to_owned()))?;
+                }
+            }
         }
 
         Ok(())
     }
 
-    /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
-    /// to establish connections with one of those potential peers.
+    /// Perform peer discovery and (if necessary) reconnect to the peers listed
+    /// as CLI arguments. Peer discovery involves finding potential peers from
+    /// connected peers and attempts to establish connections with one of them.
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for read
@@ -833,7 +860,7 @@ impl MainLoopHandler {
         let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > cli_args.max_peers as usize {
+        if connected_peers.len() > cli_args.max_num_peers as usize {
             // If *all* peer connections were outgoing, then it's OK to exceed
             // the max-peer count. But in that case we don't want to connect to
             // more peers, so we should just stop execution of this scheduled
@@ -848,7 +875,7 @@ impl MainLoopHandler {
             warn!(
                 "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
                 connected_peers.len(),
-                self.global_state_lock.cli().max_peers
+                self.global_state_lock.cli().max_num_peers
             );
             let mut rng = thread_rng();
 
@@ -928,8 +955,9 @@ impl MainLoopHandler {
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
         // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == cli_args.max_peers as usize
-            || connected_peers.len() > 2 && connected_peers.len() - 1 == cli_args.max_peers as usize
+        if connected_peers.len() == cli_args.max_num_peers as usize
+            || connected_peers.len() > 2
+                && connected_peers.len() - 1 == cli_args.max_num_peers as usize
         {
             return Ok(());
         }
@@ -1575,7 +1603,9 @@ impl MainLoopHandler {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
+    use std::time::UNIX_EPOCH;
+
     use tracing_test::traced_test;
 
     use super::*;
@@ -1834,7 +1864,7 @@ mod tests {
             // Set CLI to ban incoming connections and all outgoing peer-discovery-
             // initiated connections.
             let mocked_cli = cli_args::Args {
-                max_peers: 0,
+                max_num_peers: 0,
                 ..Default::default()
             };
             main_loop_handler
@@ -1891,7 +1921,7 @@ mod tests {
 
             // Set CLI to attempt to make more connections
             let mocked_cli = cli_args::Args {
-                max_peers: 10,
+                max_num_peers: 10,
                 ..Default::default()
             };
             main_loop_handler
@@ -1931,6 +1961,211 @@ mod tests {
             drop(miner_to_main_rx);
             drop(rpc_server_to_main_rx);
             drop(main_to_peer_rx);
+        }
+    }
+
+    #[test]
+    fn older_systemtime_ranks_first() {
+        let start = UNIX_EPOCH;
+        let other = UNIX_EPOCH + Duration::from_secs(1000);
+        let mut instants = [start, other];
+
+        assert_eq!(
+            start,
+            instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
+        );
+
+        instants.reverse();
+
+        assert_eq!(
+            start,
+            instants.iter().copied().min_by(|l, r| l.cmp(r)).unwrap()
+        );
+    }
+    mod bootstrapper_mode {
+
+        use rand::Rng;
+
+        use crate::{
+            connect_to_peers::answer_peer,
+            models::peer::{ConnectionStatus, PeerMessage},
+            tests::shared::{get_dummy_peer_connection_data_genesis, to_bytes},
+        };
+
+        use super::*;
+
+        #[tokio::test]
+        #[traced_test]
+        async fn disconnect_from_oldest_peer_upon_connection_request() {
+            // Set up a node in bootstrapper mode and connected to a given
+            // number of peers, which is one less than the maximum. Initiate a
+            // connection request. Verify that the oldest of the existing
+            // connections is dropped.
+
+            let network = Network::Main;
+            let num_init_peers_outgoing = 5;
+            let test_setup = setup(num_init_peers_outgoing).await;
+            let TestSetup {
+                mut peer_to_main_rx,
+                miner_to_main_rx: _,
+                rpc_server_to_main_rx: _,
+                task_join_handles,
+                mut main_loop_handler,
+                mut main_to_peer_rx,
+            } = test_setup;
+
+            let mocked_cli = cli_args::Args {
+                max_num_peers: num_init_peers_outgoing as u16 + 1,
+                bootstrap: true,
+                network,
+                ..Default::default()
+            };
+            main_loop_handler
+                .global_state_lock
+                .set_cli(mocked_cli)
+                .await;
+
+            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+            // check sanity: at startup, we are connected to the initial number of peers
+            assert_eq!(
+                num_init_peers_outgoing as usize,
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .peer_map
+                    .len()
+            );
+
+            // randomize "connection established" timestamps
+            let mut rng = thread_rng();
+            let now = SystemTime::now();
+            let now_as_unix_timestamp = now.duration_since(UNIX_EPOCH).unwrap();
+            main_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .peer_map
+                .iter_mut()
+                .for_each(|(_socket_address, peer_info)| {
+                    peer_info.set_connection_established(
+                        UNIX_EPOCH
+                            + Duration::from_millis(
+                                rng.gen_range(0..(now_as_unix_timestamp.as_millis() as u64)),
+                            ),
+                    );
+                });
+
+            // compute which peer will be dropped, for later reference
+            let expected_drop_peer_socket_address = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .iter()
+                .min_by(|l, r| {
+                    l.1.connection_established()
+                        .cmp(&r.1.connection_established())
+                })
+                .map(|(socket_address, _peer_info)| socket_address)
+                .cloned()
+                .unwrap();
+
+            // simulate incoming connection
+            let (peer_handshake_data, peer_socket_address) =
+                get_dummy_peer_connection_data_genesis(network, 1).await;
+            let own_handshake_data = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .get_own_handshakedata()
+                .await;
+            assert_eq!(peer_handshake_data.network, own_handshake_data.network,);
+            assert_eq!(peer_handshake_data.version, own_handshake_data.version,);
+            let mock_stream = tokio_test::io::Builder::new()
+                .read(
+                    &to_bytes(&PeerMessage::Handshake(Box::new((
+                        crate::MAGIC_STRING_REQUEST.to_vec(),
+                        peer_handshake_data.clone(),
+                    ))))
+                    .unwrap(),
+                )
+                .write(
+                    &to_bytes(&PeerMessage::Handshake(Box::new((
+                        crate::MAGIC_STRING_RESPONSE.to_vec(),
+                        own_handshake_data.clone(),
+                    ))))
+                    .unwrap(),
+                )
+                .write(
+                    &to_bytes(&PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)).unwrap(),
+                )
+                .build();
+            let peer_to_main_tx_clone = main_loop_handler.peer_task_to_main_tx.clone();
+            let global_state_lock_clone = main_loop_handler.global_state_lock.clone();
+            let (_main_to_peer_tx_mock, main_to_peer_rx_mock) = tokio::sync::broadcast::channel(10);
+            let incoming_peer_task_handle = tokio::task::Builder::new()
+                .name("answer_peer_wrapper")
+                .spawn(async move {
+                    match answer_peer(
+                        mock_stream,
+                        global_state_lock_clone,
+                        peer_socket_address,
+                        main_to_peer_rx_mock,
+                        peer_to_main_tx_clone,
+                        own_handshake_data,
+                    )
+                    .await
+                    {
+                        Ok(()) => (),
+                        Err(err) => error!("Got error: {:?}", err),
+                    }
+                })
+                .unwrap();
+
+            // `answer_peer_wrapper` should send a
+            // `DisconnectFromLongestLivedPeer` message to main
+            let peer_to_main_message = peer_to_main_rx.recv().await.unwrap();
+            assert!(matches!(
+                peer_to_main_message,
+                PeerTaskToMain::DisconnectFromLongestLivedPeer,
+            ));
+
+            // process this message
+            main_loop_handler
+                .handle_peer_task_message(peer_to_main_message, &mut mutable_main_loop_state)
+                .await
+                .unwrap();
+
+            // main loop should send a `Disconnect` message
+            let main_to_peers_message = main_to_peer_rx.recv().await.unwrap();
+            assert!(matches!(
+                main_to_peers_message,
+                MainToPeerTask::Disconnect(_)
+            ));
+            let MainToPeerTask::Disconnect(observed_drop_peer_socket_address) =
+                main_to_peers_message
+            else {
+                unreachable!()
+            };
+
+            // matched observed droppee against expectation
+            assert_eq!(
+                expected_drop_peer_socket_address,
+                observed_drop_peer_socket_address
+            );
+
+            println!(
+                "Dropped connection with {}.",
+                expected_drop_peer_socket_address
+            );
+
+            // don't forget to terminate the peer task, which is still running
+            incoming_peer_task_handle.abort();
         }
     }
 }

@@ -198,7 +198,8 @@ impl PeerLoopHandler {
     /// in the batch.
     ///
     /// # Locking
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     ///
     /// # Panics
     ///
@@ -309,7 +310,8 @@ impl PeerLoopHandler {
     /// are passed down the pipeline.
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     async fn try_ensure_path<S>(
         &mut self,
         received_block: Box<Block>,
@@ -452,8 +454,9 @@ impl PeerLoopHandler {
     /// Otherwise returns OK(false).
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for read
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * Acquires `global_state_lock` for read.
+    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
+    ///     `self.reward(..)`.
     async fn handle_peer_message<S>(
         &mut self,
         msg: PeerMessage,
@@ -1430,7 +1433,7 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if global_state.net.peer_map.len() >= cli_args.max_peers as usize {
+        if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
 

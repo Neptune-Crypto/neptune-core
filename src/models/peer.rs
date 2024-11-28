@@ -115,6 +115,11 @@ impl PeerInfo {
             .port_for_incoming_connections
             .map(|port| SocketAddr::new(self.peer_connection_info.connected_address.ip(), port))
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_connection_established(&mut self, new_timestamp: SystemTime) {
+        self.connection_established = new_timestamp;
+    }
 }
 
 trait Sanction {
@@ -449,6 +454,7 @@ pub enum ConnectionRefusedReason {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Refused(ConnectionRefusedReason),
+    AcceptedMaxReached,
     Accepted,
 }
 
@@ -583,7 +589,8 @@ impl PeerMessage {
     }
 }
 
-/// `MutablePeerState` contains the part of the peer-loop's state that is mutable
+/// `MutablePeerState` contains information about the peer's blockchain state.
+/// Under normal conditions, this information varies across time.
 #[derive(Clone, Debug)]
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,

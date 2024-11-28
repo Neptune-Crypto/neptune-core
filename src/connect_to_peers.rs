@@ -100,7 +100,7 @@ async fn check_if_connection_is_allowed(
 
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
-        if (cli_arguments.max_peers as usize) <= global_state.net.peer_map.len() {
+        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len() {
             Some(ConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
@@ -134,10 +134,20 @@ async fn check_if_connection_is_allowed(
         return ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion);
     }
 
+    // If this connection touches the maximum number of peer connections, say
+    // so with special OK code.
+    if cli_arguments.max_num_peers as usize == global_state.net.peer_map.len() + 1 {
+        info!("ConnectionStatus::Accepted, but max # connections is now reached");
+        return ConnectionStatus::AcceptedMaxReached;
+    }
+
     info!("ConnectionStatus::Accepted");
     ConnectionStatus::Accepted
 }
 
+/// Respond to an incoming connection initiation.
+///
+/// Catch and process errors (if any) gracefully.
 pub(crate) async fn answer_peer_wrapper<S>(
     stream: S,
     state_lock: GlobalStateLock,
@@ -183,7 +193,7 @@ where
     inner_ret
 }
 
-async fn answer_peer<S>(
+pub(crate) async fn answer_peer<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -206,9 +216,9 @@ where
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
-    let peer_handshake_data: HandshakeData = match peer.try_next().await? {
+    let (peer_handshake_data, acceptance_code) = match peer.try_next().await? {
         Some(PeerMessage::Handshake(payload)) => {
-            let (v, hsd) = *payload;
+            let (v, peer_handshake_data) = *payload;
             if v != crate::MAGIC_STRING_REQUEST {
                 bail!("Expected magic value, got {:?}", v);
             }
@@ -220,11 +230,11 @@ where
             .await?;
 
             // Verify peer network before moving on
-            if hsd.network != own_handshake_data.network {
+            if peer_handshake_data.network != own_handshake_data.network {
                 bail!(
                     "Cannot connect with {}: Peer runs {}, this client runs {}.",
                     peer_address,
-                    hsd.network,
+                    peer_handshake_data.network,
                     own_handshake_data.network,
                 );
             }
@@ -233,28 +243,46 @@ where
             let connection_status = check_if_connection_is_allowed(
                 state.clone(),
                 &own_handshake_data,
-                &hsd,
+                &peer_handshake_data,
                 &peer_address,
             )
             .await;
 
-            peer.send(PeerMessage::ConnectionStatus(connection_status))
-                .await?;
-            if let ConnectionStatus::Refused(refused_reason) = connection_status {
-                warn!("Incoming connection refused: {:?}", refused_reason);
-                bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
+            match connection_status {
+                ConnectionStatus::Refused(refused_reason) => {
+                    peer.send(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(
+                        refused_reason,
+                    )))
+                    .await?;
+                    warn!("Incoming connection refused: {:?}", refused_reason);
+                    bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
+                }
+                ConnectionStatus::AcceptedMaxReached | ConnectionStatus::Accepted => {
+                    peer.send(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted))
+                        .await?;
+                }
             }
 
-            debug!("Got correct magic value request!");
-            hsd
+            (peer_handshake_data, connection_status)
         }
         _ => {
             bail!("Didn't get handshake on connection attempt");
         }
     };
 
-    // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
+    // Whether the incoming connection comes from a peer in bad standing is
+    // checked in `check_if_connection_is_allowed`. So if we get here, we are
+    // good to go.
     info!("Connection accepted from {}", peer_address);
+
+    // If necessary, disconnect from another, existing peer.
+    if acceptance_code == ConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
+        info!("Maximum # peers reached, so disconnecting from an existing peer.");
+        peer_task_to_main_tx
+            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
+            .await?;
+    }
+
     let peer_distance = 1; // All incoming connections have distance 1
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
@@ -411,6 +439,12 @@ where
         bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
     }
 
+    // By default, start by asking the peer for its peers. In an adversarial
+    // context, we want the network topology to be as robust as possible.
+    // Blockchain data can be obtained from other peers, if this connection
+    // fails.
+    peer.send(PeerMessage::PeerListRequest).await?;
+
     let mut peer_loop_handler = PeerLoopHandler::new(
         peer_task_to_main_tx,
         state,
@@ -516,6 +550,7 @@ mod connect_tests {
             .read(&to_bytes(&PeerMessage::ConnectionStatus(
                 ConnectionStatus::Accepted,
             ))?)
+            .write(&to_bytes(&PeerMessage::PeerListRequest)?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
@@ -582,7 +617,7 @@ mod connect_tests {
 
         // pretend --max_peers is 1.
         let mut cli = state_lock.cli().clone();
-        cli.max_peers = 1;
+        cli.max_num_peers = 1;
         state_lock.set_cli(cli.clone()).await;
 
         status = check_if_connection_is_allowed(
@@ -599,7 +634,7 @@ mod connect_tests {
         }
 
         // pretend --max-peers is 100
-        cli.max_peers = 100;
+        cli.max_num_peers = 100;
         state_lock.set_cli(cli.clone()).await;
 
         // Attempt to connect to already connected peer
@@ -890,7 +925,7 @@ mod connect_tests {
 
         // set max_peers to 2 to ensure failure on next connection attempt
         let mut cli = state_lock.cli().clone();
-        cli.max_peers = 2;
+        cli.max_num_peers = 2;
         state_lock.set_cli(cli).await;
 
         let answer = answer_peer(
