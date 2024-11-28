@@ -119,7 +119,8 @@ impl ArchivalState {
                 );
                 panic!(
                     "Could not open database; do not know how to proceed. Panicking.\n\
-                    If you suspect the database may be corrupted, consider renaming the directory {} or removing it altogether.",
+                    If you suspect the database may be corrupted, consider renaming the directory {}\
+                     or removing it altogether. Or perhaps a node is already running?",
                     ms_db_dir_path.display()
                 );
             }
