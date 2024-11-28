@@ -813,16 +813,16 @@ impl WalletState {
                     .get_membership_proof_for_block(new_block.kernel.header.prev_block_digest)
                 {
                     Some(ms_mp) => {
-                        debug!("Found valid mp for UTXO");
-                        let replacement_success = valid_membership_proofs_and_own_utxo_count
-                            .insert(
-                                StrongUtxoKey::new(utxo_digest, ms_mp.aocl_leaf_index),
-                                (ms_mp, i),
+                        let aocl_leaf_index = ms_mp.aocl_leaf_index;
+                        debug!("Found valid mp for UTXO with leaf index: {aocl_leaf_index}");
+                        let replaced = valid_membership_proofs_and_own_utxo_count
+                            .insert(StrongUtxoKey::new(utxo_digest, aocl_leaf_index), (ms_mp, i));
+
+                        if let Some(replaced) = replaced {
+                            panic!(
+                                "Strong key must be unique in wallet DB. utxo_digest: {utxo_digest}; ms_mp.aocl_leaf_index: {}.\n\n Existing value was: {replaced:?}", aocl_leaf_index
                             );
-                        assert!(
-                            replacement_success.is_none(),
-                            "Strong key must be unique in wallet DB"
-                        );
+                        }
                     }
                     None => {
                         // Was MUTXO marked as abandoned? Then this is fine. Otherwise, log a warning.
