@@ -82,7 +82,7 @@ pub struct WalletState {
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
 /// membership proof of a UTXO.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct IncomingUtxoRecoveryData {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
@@ -146,11 +146,12 @@ impl WalletState {
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {
-        // Open file
         #[cfg(test)]
         {
             tokio::fs::create_dir_all(self.wallet_directory_path.clone()).await?;
         }
+
+        // Open file
         let incoming_secrets_file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -181,6 +182,7 @@ impl WalletState {
     ///
     /// Uses non-blocking I/O via tokio.
     pub(crate) async fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
+        // Open file
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
             .write(false)
@@ -969,26 +971,16 @@ impl WalletState {
                 let new_own_membership_proof =
                     msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
 
-                // Add the data required to restore the UTXOs membership proof from public
-                // data to the secret's file.
-                let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
-                    utxo: utxo.clone(),
-                    sender_randomness,
-                    receiver_preimage,
-                    aocl_index: new_own_membership_proof.aocl_leaf_index,
-                };
-                incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
-
                 // Add the new UTXO to the list of monitored UTXOs
-                let mut mutxo = MonitoredUtxo::new(utxo, self.number_of_mps_per_utxo);
+                let mut mutxo = MonitoredUtxo::new(utxo.clone(), self.number_of_mps_per_utxo);
                 mutxo.confirmed_in_block = Some((
                     new_block.hash(),
                     new_block.kernel.header.timestamp,
                     new_block.kernel.header.height,
                 ));
 
-                let strong_key =
-                    StrongUtxoKey::new(utxo_digest, new_own_membership_proof.aocl_leaf_index);
+                let aocl_index = new_own_membership_proof.aocl_leaf_index;
+                let strong_key = StrongUtxoKey::new(utxo_digest, aocl_index);
                 if already_added.contains(&strong_key) {
                     debug!("Repeated monitored UTXO. Not adding new entry to monitored UTXOs");
                 } else {
@@ -996,6 +988,16 @@ impl WalletState {
                     valid_membership_proofs_and_own_utxo_count
                         .insert(strong_key, (new_own_membership_proof, mutxos_len));
                     monitored_utxos.push(mutxo).await;
+
+                    // Add the data required to restore the UTXOs membership proof from public
+                    // data to the secret's file.
+                    let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                        utxo,
+                        sender_randomness,
+                        receiver_preimage,
+                        aocl_index,
+                    };
+                    incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
                 }
             }
 
@@ -1119,7 +1121,7 @@ impl WalletState {
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
-        // write these to disk.
+        // write UTXO-recovery data to disk.
         for item in incoming_utxo_recovery_data_list.into_iter() {
             self.store_utxo_ms_recovery_data(item).await?;
         }
@@ -1476,6 +1478,84 @@ mod tests {
                 .all(|unlocker| unlocker.utxo.can_spend_at(block_1_timestamp)),
             "All allocated UTXOs must be spendable now"
         );
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn never_store_same_utxo_twice() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let bob_address = bob_spending_key.to_address();
+        let mut bob_global_lock =
+            mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
+                .await;
+        let mut bob = bob_global_lock.lock_guard_mut().await;
+
+        let genesis_block = Block::genesis_block(network);
+        let (new_block, cb_utxo, cb_sender_randomness) =
+            make_mock_block(&genesis_block, None, bob_address, rng.gen());
+
+        bob.wallet_state
+            .add_expected_utxo(ExpectedUtxo::new(
+                cb_utxo,
+                cb_sender_randomness,
+                bob_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMinerComposeBlock,
+            ))
+            .await;
+        assert!(
+            bob.wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .is_empty()
+                .await,
+            "Monitored UTXO list must be empty at init"
+        );
+        bob.wallet_state
+            .update_wallet_state_with_new_block(
+                &genesis_block.mutator_set_accumulator_after(),
+                &new_block,
+            )
+            .await
+            .unwrap();
+        assert_eq!(1, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(
+            1,
+            bob.wallet_state
+                .read_utxo_ms_recovery_data()
+                .await
+                .unwrap()
+                .len(),
+        );
+        let original_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
+        let original_recovery_entry =
+            &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
+
+        // Apply block again and verify that nothing new is stored.
+        bob.wallet_state
+            .update_wallet_state_with_new_block(
+                &genesis_block.mutator_set_accumulator_after(),
+                &new_block,
+            )
+            .await
+            .unwrap();
+        assert_eq!(1, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(
+            1,
+            bob.wallet_state
+                .read_utxo_ms_recovery_data()
+                .await
+                .unwrap()
+                .len(),
+        );
+
+        let new_mutxo = bob.wallet_state.wallet_db.monitored_utxos().get(0).await;
+        let new_recovery_entry = &bob.wallet_state.read_utxo_ms_recovery_data().await.unwrap()[0];
+
+        assert_eq!(original_mutxo, new_mutxo);
+        assert_eq!(original_recovery_entry, new_recovery_entry);
     }
 
     #[tokio::test]

@@ -12,7 +12,7 @@ use crate::models::state::archival_state::ArchivalState;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MonitoredUtxo {
     pub utxo: Utxo,
 
