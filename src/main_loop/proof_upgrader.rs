@@ -312,7 +312,7 @@ impl UpgradeJob {
                         proof_job_options,
                     )
                     .await?;
-                info!("Proof-upgrader: Done");
+                info!("Proof-upgrader, to single proof: Done");
 
                 Ok(Transaction {
                     kernel: kernel.to_owned(),
@@ -344,7 +344,7 @@ impl UpgradeJob {
                     proof_job_options,
                 )
                 .await?;
-                info!("Proof-upgrader: Done");
+                info!("Proof-upgrader, merge: Done");
 
                 Ok(ret)
             }
@@ -355,7 +355,7 @@ impl UpgradeJob {
                 let proof_collection =
                     ProofCollection::produce(&witness, triton_vm_job_queue, proof_job_options)
                         .await?;
-                info!("Proof-upgrader: Done");
+                info!("Proof-upgrader, proof collection: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
                     proof: TransactionProof::ProofCollection(proof_collection),
@@ -367,7 +367,7 @@ impl UpgradeJob {
                 info!("Proof-upgrader: Start producing single proof");
                 let proof =
                     SingleProof::produce(&witness, triton_vm_job_queue, proof_job_options).await?;
-                info!("Proof-upgrader: Done");
+                info!("Proof-upgrader, single proof: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
                     proof: TransactionProof::SingleProof(proof),
@@ -389,7 +389,7 @@ impl UpgradeJob {
                     proof_job_options,
                 )
                 .await?;
-                info!("Proof-upgrader: Done");
+                info!("Proof-upgrader, update: Done");
 
                 Ok(ret)
             }

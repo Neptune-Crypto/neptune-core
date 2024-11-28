@@ -1176,7 +1176,8 @@ impl MainLoopHandler {
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
         let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
-        let perform_ms_update_if_needed = false;
+        let perform_ms_update_if_needed =
+            self.global_state_lock.cli().proving_capability() == TxProvingCapability::SingleProof;
 
         let global_state_lock_clone = self.global_state_lock.clone();
         let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
