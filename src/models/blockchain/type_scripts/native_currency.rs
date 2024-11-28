@@ -21,6 +21,7 @@ use tasm_lib::Digest;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
+use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -163,38 +164,29 @@ impl ConsensusProgram for NativeCurrency {
         // get total output amount from outputs
         let mut total_output = NeptuneCoins::new(0);
         let mut total_timelocked_output = NeptuneCoins::new(0);
-        let three_years = Timestamp::years(3);
         i = 0;
         let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
         while i < num_outputs {
-            let num_coins: u32 = output_salted_utxos.utxos[i as usize].coins().len() as u32;
+            let utxo_i = output_salted_utxos.utxos[i as usize].clone();
+            let num_coins: u32 = utxo_i.coins().len() as u32;
             let mut total_amount_for_utxo = NeptuneCoins::new(0);
             let mut time_locked = false;
             let mut j = 0;
             while j < num_coins {
-                if output_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
-                    == self_digest
-                {
+                let coin_j = utxo_i.coins()[j as usize].clone();
+                if coin_j.type_script_hash == self_digest {
                     // decode state to get amount
-                    let amount: NeptuneCoins = *NeptuneCoins::decode(
-                        &output_salted_utxos.utxos[i as usize].coins()[j as usize].state,
-                    )
-                    .unwrap();
+                    let amount: NeptuneCoins = *NeptuneCoins::decode(&coin_j.state).unwrap();
 
                     // make sure amount is positive (or zero)
                     assert!(!amount.is_negative());
 
                     // safely add to total
                     total_amount_for_utxo = total_amount_for_utxo.safe_add(amount).unwrap();
-                } else if output_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
-                    == Self::TIME_LOCK_HASH
-                {
+                } else if coin_j.type_script_hash == Self::TIME_LOCK_HASH {
                     // decode state to get release date
-                    let release_date = *Timestamp::decode(
-                        &input_salted_utxos.utxos[i as usize].coins()[j as usize].state,
-                    )
-                    .unwrap();
-                    if release_date >= timestamp + three_years {
+                    let release_date = *Timestamp::decode(&coin_j.state).unwrap();
+                    if release_date >= timestamp + COINBASE_TIME_LOCK_PERIOD {
                         time_locked = true;
                     }
                 }
@@ -212,7 +204,14 @@ impl ConsensusProgram for NativeCurrency {
         // if coinbase is set, verify that half of it is time-locked
         let mut half_of_coinbase = some_coinbase;
         half_of_coinbase.div_two();
-        // assert!(half_of_coinbase < total_timelocked_input);
+        let mut half_of_fee = fee;
+        half_of_fee.div_two();
+        assert!(half_of_coinbase <= total_timelocked_output + half_of_fee,
+            "not enough funds timelocked -- half of coinbase == {} > total_timelocked_output + half_of_fee == {} whereas total output == {}",
+            half_of_coinbase,
+            total_timelocked_output + half_of_fee,
+            total_output,
+        );
 
         // test no-inflation equation
         let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
@@ -778,6 +777,7 @@ pub mod test {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
@@ -791,7 +791,7 @@ pub mod test {
                 &native_currency_witness.standard_input(),
                 native_currency_witness.nondeterminism(),
             )
-            .unwrap();
+            .expect("rust run should pass");
         prop_assert!(rust_result.is_empty());
 
         let tasm_result = match NativeCurrency.run_tasm(
@@ -812,6 +812,26 @@ pub mod test {
         prop_assert!(tasm_result.is_empty());
 
         Ok(())
+    }
+
+    fn prop_negative(native_currency_witness: NativeCurrencyWitness) {
+        let rust_result = NativeCurrency.run_rust(
+            &native_currency_witness.standard_input(),
+            native_currency_witness.nondeterminism(),
+        );
+        let tasm_result = NativeCurrency.run_tasm(
+            &native_currency_witness.standard_input(),
+            native_currency_witness.nondeterminism(),
+        );
+
+        assert!(
+            tasm_result.is_err(),
+            "tasm should have panicked, but didn't"
+        );
+        assert!(
+            rust_result.is_err(),
+            "rust should have panicked, but didn't"
+        );
     }
 
     #[test]
@@ -1034,7 +1054,7 @@ pub mod test {
     #[test]
     fn transaction_with_timelocked_coinbase_is_valid_deterministic() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1044,5 +1064,58 @@ pub mod test {
             kernel: primitive_witness.kernel,
         };
         assert!(prop_positive(native_currency_witness).is_ok());
+    }
+
+    #[test]
+    fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid() {
+        let mut test_runner = TestRunner::deterministic();
+        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+            .clone();
+        let delta = NeptuneCoins::from_nau(7.into()).unwrap();
+        let coinbase = primitive_witness.kernel.coinbase.unwrap();
+
+        // Modify the kernel so as to increase the coinbase but not the fee. The
+        // resulting transaction is imbalanced but in a non-inflationary way
+        // (like burning). So the no-inflation equation checks out. But now not
+        // enough coinbase funds are time-locked.
+        let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase + delta));
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
+        prop_negative(native_currency_witness);
+    }
+
+    #[test]
+    fn coinbase_transaction_with_too_early_release_is_invalid() {
+        let mut test_runner = TestRunner::deterministic();
+        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+            .clone();
+
+        // Modify the kernel's timestamp to push it later in time. As a result,
+        // the time-locks embedded in the coinbase UTXOs are less than the
+        // coinbase time-lock time.
+        let kernel_modifier = TransactionKernelModifier::default()
+            .timestamp(primitive_witness.kernel.timestamp + Timestamp::days(1));
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let native_currency_witness = NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        };
+        prop_negative(native_currency_witness);
+    }
+
+    #[test]
+    fn hardcoded_timelock_hash_matches_hash_of_timelock_program() {
+        assert_eq!(NativeCurrency::TIME_LOCK_HASH, TimeLock.hash());
     }
 }
