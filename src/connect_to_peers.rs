@@ -23,10 +23,11 @@ use tracing::warn;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
-use crate::models::peer::ConnectionStatus;
 use crate::models::peer::HandshakeData;
+use crate::models::peer::InternalConnectionStatus;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
+use crate::models::peer::TransferConnectionStatus;
 use crate::models::state::GlobalStateLock;
 use crate::peer_loop::PeerLoopHandler;
 use crate::MAGIC_STRING_REQUEST;
@@ -53,7 +54,7 @@ async fn check_if_connection_is_allowed(
     own_handshake: &HandshakeData,
     other_handshake: &HandshakeData,
     peer_address: &SocketAddr,
-) -> ConnectionStatus {
+) -> InternalConnectionStatus {
     let cli_arguments = global_state_lock.cli();
     let global_state = global_state_lock.lock_guard().await;
     fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
@@ -85,7 +86,7 @@ async fn check_if_connection_is_allowed(
             "Banned peer {} attempted to connect. Disallowing.",
             peer_address.ip()
         );
-        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
     // Disallow connection if peer is in bad standing
@@ -95,13 +96,13 @@ async fn check_if_connection_is_allowed(
         .await;
 
     if standing.is_some() && standing.unwrap().standing < -(cli_arguments.peer_tolerance as i32) {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
         if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len() {
-            Some(ConnectionStatus::Refused(
+            Some(InternalConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
         }
@@ -110,7 +111,7 @@ async fn check_if_connection_is_allowed(
             peer.instance_id() == other_handshake.instance_id
                 || *peer_address == peer.connected_address()
         }) {
-            Some(ConnectionStatus::Refused(
+            Some(InternalConnectionStatus::Refused(
                 ConnectionRefusedReason::AlreadyConnected,
             ))
         } else {
@@ -122,7 +123,7 @@ async fn check_if_connection_is_allowed(
 
     // Disallow connection to self
     if own_handshake.instance_id == other_handshake.instance_id {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
     }
 
     // Disallow connection if versions are incompatible
@@ -131,18 +132,18 @@ async fn check_if_connection_is_allowed(
             "Attempting to connect to incompatible version. You might have to upgrade, or the other node does. Own version: {}, other version: {}",
             own_handshake.version,
             other_handshake.version);
-        return ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion);
+        return InternalConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion);
     }
 
     // If this connection touches the maximum number of peer connections, say
     // so with special OK code.
     if cli_arguments.max_num_peers as usize == global_state.net.peer_map.len() + 1 {
         info!("ConnectionStatus::Accepted, but max # connections is now reached");
-        return ConnectionStatus::AcceptedMaxReached;
+        return InternalConnectionStatus::AcceptedMaxReached;
     }
 
     info!("ConnectionStatus::Accepted");
-    ConnectionStatus::Accepted
+    InternalConnectionStatus::Accepted
 }
 
 /// Respond to an incoming connection initiation.
@@ -248,19 +249,16 @@ where
             )
             .await;
 
-            match connection_status {
-                ConnectionStatus::Refused(refused_reason) => {
-                    peer.send(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(
-                        refused_reason,
-                    )))
-                    .await?;
-                    warn!("Incoming connection refused: {:?}", refused_reason);
-                    bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
-                }
-                ConnectionStatus::AcceptedMaxReached | ConnectionStatus::Accepted => {
-                    peer.send(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted))
-                        .await?;
-                }
+            peer.send(PeerMessage::ConnectionStatus(connection_status.into()))
+                .await?;
+
+            if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
+                peer.send(PeerMessage::ConnectionStatus(
+                    TransferConnectionStatus::Refused(refused_reason),
+                ))
+                .await?;
+                warn!("Incoming connection refused: {:?}", refused_reason);
+                bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
             }
 
             (peer_handshake_data, connection_status)
@@ -276,7 +274,7 @@ where
     info!("Connection accepted from {}", peer_address);
 
     // If necessary, disconnect from another, existing peer.
-    if acceptance_code == ConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
+    if acceptance_code == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
@@ -409,10 +407,10 @@ where
     };
 
     match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => {
+        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted)) => {
             info!("Outgoing connection accepted by {peer_address}");
         }
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
+        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
             bail!("Outgoing connection attempt refused. Reason: {:?}", reason);
         }
         _ => {
@@ -430,7 +428,7 @@ where
         &peer_address,
     )
     .await;
-    if let ConnectionStatus::Refused(refused_reason) = connection_status {
+    if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
         warn!(
             "Outgoing connection refused. Reason: {:?}\nNow hanging up.",
             refused_reason
@@ -518,7 +516,7 @@ mod connect_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::models::peer::ConnectionStatus;
+    use crate::models::peer::InternalConnectionStatus;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerInfo;
     use crate::models::peer::PeerMessage;
@@ -548,7 +546,7 @@ mod connect_tests {
                 other_handshake,
             ))))?)
             .read(&to_bytes(&PeerMessage::ConnectionStatus(
-                ConnectionStatus::Accepted,
+                TransferConnectionStatus::Accepted,
             ))?)
             .write(&to_bytes(&PeerMessage::PeerListRequest)?)
             .read(&to_bytes(&PeerMessage::Bye)?)
@@ -600,7 +598,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Accepted {
+        if status != InternalConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted");
         }
 
@@ -611,7 +609,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
+        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
@@ -627,7 +625,9 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
+        if status
+            != InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded)
+        {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
             );
@@ -650,7 +650,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
+        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
             );
@@ -669,7 +669,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
+        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
         }
 
@@ -684,7 +684,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Accepted {
+        if status != InternalConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted after unban");
         }
 
@@ -713,7 +713,7 @@ mod connect_tests {
             &peer_sa,
         )
         .await;
-        if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
+        if status != InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
         }
 
@@ -744,7 +744,7 @@ mod connect_tests {
                 own_handshake.clone(),
             ))))?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
-                ConnectionStatus::Accepted,
+                TransferConnectionStatus::Accepted,
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
@@ -854,7 +854,7 @@ mod connect_tests {
         )
         .await;
         assert_eq!(
-            ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion),
+            InternalConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion),
             connection_status,
             "Connection status must be refused for incompatible version"
         );
@@ -910,7 +910,7 @@ mod connect_tests {
                 own_handshake.clone(),
             ))))?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
-                ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
+                TransferConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
             ))?)
             .build();
 
@@ -960,7 +960,7 @@ mod connect_tests {
                 own_handshake.clone(),
             ))))?)
             .write(&to_bytes(&PeerMessage::ConnectionStatus(
-                ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
+                TransferConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
             ))?)
             .build();
 

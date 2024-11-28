@@ -1986,11 +1986,11 @@ mod test {
 
         use rand::Rng;
 
-        use crate::{
-            connect_to_peers::answer_peer,
-            models::peer::{ConnectionStatus, PeerMessage},
-            tests::shared::{get_dummy_peer_connection_data_genesis, to_bytes},
-        };
+        use crate::connect_to_peers::answer_peer;
+        use crate::models::peer::PeerMessage;
+        use crate::models::peer::TransferConnectionStatus;
+        use crate::tests::shared::get_dummy_peer_connection_data_genesis;
+        use crate::tests::shared::to_bytes;
 
         use super::*;
 
@@ -2102,7 +2102,10 @@ mod test {
                     .unwrap(),
                 )
                 .write(
-                    &to_bytes(&PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)).unwrap(),
+                    &to_bytes(&PeerMessage::ConnectionStatus(
+                        TransferConnectionStatus::Accepted,
+                    ))
+                    .unwrap(),
                 )
                 .build();
             let peer_to_main_tx_clone = main_loop_handler.peer_task_to_main_tx.clone();

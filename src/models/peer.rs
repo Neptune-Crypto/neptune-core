@@ -442,6 +442,23 @@ impl From<&BlockHeader> for PeerBlockNotification {
     }
 }
 
+/// A message sent between peers to inform them whether the connection was
+/// accepted or refused (and if so, for what reason).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TransferConnectionStatus {
+    Refused(ConnectionRefusedReason),
+    Accepted,
+}
+
+/// A success code for internal use, pertaining to the establishment
+/// of a connection to a peer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InternalConnectionStatus {
+    Refused(ConnectionRefusedReason),
+    AcceptedMaxReached,
+    Accepted,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
@@ -451,11 +468,17 @@ pub enum ConnectionRefusedReason {
     SelfConnect,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ConnectionStatus {
-    Refused(ConnectionRefusedReason),
-    AcceptedMaxReached,
-    Accepted,
+impl From<InternalConnectionStatus> for TransferConnectionStatus {
+    fn from(value: InternalConnectionStatus) -> Self {
+        match value {
+            InternalConnectionStatus::Refused(connection_refused_reason) => {
+                TransferConnectionStatus::Refused(connection_refused_reason)
+            }
+            InternalConnectionStatus::AcceptedMaxReached | InternalConnectionStatus::Accepted => {
+                TransferConnectionStatus::Accepted
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -513,7 +536,7 @@ pub(crate) enum PeerMessage {
     PeerListResponse(Vec<(SocketAddr, u128)>),
     /// Inform peer that we are disconnecting them.
     Bye,
-    ConnectionStatus(ConnectionStatus),
+    ConnectionStatus(TransferConnectionStatus),
 }
 
 impl PeerMessage {
