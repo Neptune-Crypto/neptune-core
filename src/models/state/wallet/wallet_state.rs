@@ -79,8 +79,8 @@ pub struct WalletState {
     mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
     mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<AnnouncedUtxo>>,
 
-    known_generation_keys: Vec<SpendingKey>,
-    known_symmetric_keys: Vec<SpendingKey>,
+    known_generation_keys: HashSet<SpendingKey>,
+    known_symmetric_keys: HashSet<SpendingKey>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -229,10 +229,10 @@ impl WalletState {
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
         // generate and cache all used generation keys
-        let mut known_generation_keys =
+        let mut known_generation_keys: HashSet<_> =
             (0..rusty_wallet_database.get_generation_key_counter().await)
                 .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
-                .collect_vec();
+                .collect();
 
         // this is a hack to appease existing tests that bypass
         // WalletState::next_unused_generation_spending_key() by
@@ -243,7 +243,7 @@ impl WalletState {
         // work with key-derivation in place.
         if known_generation_keys.is_empty() {
             let key = wallet_secret.nth_generation_spending_key(0);
-            known_generation_keys.push(key.into());
+            known_generation_keys.insert(key.into());
         }
 
         // generate and cache all used symmetric keys
@@ -767,7 +767,7 @@ impl WalletState {
         let index = self.wallet_db.get_generation_key_counter().await;
         self.wallet_db.set_generation_key_counter(index + 1).await;
         let key = self.wallet_secret.nth_generation_spending_key(index);
-        self.known_generation_keys.push(key.into());
+        self.known_generation_keys.insert(key.into());
         key
     }
 
@@ -782,7 +782,7 @@ impl WalletState {
         let index = self.wallet_db.get_symmetric_key_counter().await;
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
         let key = self.wallet_secret.nth_symmetric_key(index);
-        self.known_symmetric_keys.push(key.into());
+        self.known_symmetric_keys.insert(key.into());
         key
     }
 
