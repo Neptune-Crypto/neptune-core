@@ -149,7 +149,9 @@ async fn check_if_connection_is_allowed(
 /// Respond to an incoming connection initiation.
 ///
 /// Catch and process errors (if any) gracefully.
-pub(crate) async fn answer_peer_wrapper<S>(
+///
+/// All incoming connections from peers must go through this function.
+pub(crate) async fn answer_peer<S>(
     stream: S,
     state_lock: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -165,7 +167,7 @@ where
     let mut inner_ret: anyhow::Result<()> = Ok(());
 
     let panic_result = std::panic::AssertUnwindSafe(async {
-        inner_ret = answer_peer(
+        inner_ret = answer_peer_inner(
             stream,
             state_lock_clone,
             peer_address,
@@ -194,7 +196,7 @@ where
     inner_ret
 }
 
-pub(crate) async fn answer_peer<S>(
+async fn answer_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -294,9 +296,11 @@ where
     Ok(())
 }
 
-/// Perform handshake and establish connection to a new peer while handling any panics in the peer
-/// task gracefully.
-pub(crate) async fn call_peer_wrapper(
+/// Perform handshake and establish connection to a new peer while handling any
+/// panics in the peer task gracefully.
+///
+/// All outgoing connections to peers must go through this function.
+pub(crate) async fn call_peer(
     peer_address: std::net::SocketAddr,
     state: GlobalStateLock,
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
@@ -313,7 +317,7 @@ pub(crate) async fn call_peer_wrapper(
                 warn!("Failed to establish connection: {}", e);
             }
             Ok(stream) => {
-                match call_peer(
+                match call_peer_inner(
                     stream,
                     state,
                     peer_address,
@@ -349,7 +353,7 @@ pub(crate) async fn call_peer_wrapper(
     }
 }
 
-async fn call_peer<S>(
+async fn call_peer_inner<S>(
     stream: S,
     state: GlobalStateLock,
     peer_address: std::net::SocketAddr,
@@ -550,7 +554,7 @@ mod connect_tests {
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
-        call_peer(
+        call_peer_inner(
             mock,
             state.clone(),
             get_dummy_socket_address(0),
@@ -746,7 +750,7 @@ mod connect_tests {
             .build();
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 0).await?;
-        answer_peer(
+        answer_peer_inner(
             mock,
             state_lock.clone(),
             get_dummy_socket_address(0),
@@ -781,7 +785,7 @@ mod connect_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_test_genesis_setup(network, 0).await?;
 
-        let answer = answer_peer(
+        let answer = answer_peer_inner(
             mock,
             state,
             get_dummy_socket_address(0),
@@ -814,7 +818,7 @@ mod connect_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
 
-        let answer = answer_peer(
+        let answer = answer_peer_inner(
             mock,
             state,
             get_dummy_socket_address(0),
@@ -873,7 +877,7 @@ mod connect_tests {
             )
             .build();
 
-        let answer = answer_peer(
+        let answer = answer_peer_inner(
             mock,
             state_lock.clone(),
             get_dummy_socket_address(0),
@@ -924,7 +928,7 @@ mod connect_tests {
         cli.max_num_peers = 2;
         state_lock.set_cli(cli).await;
 
-        let answer = answer_peer(
+        let answer = answer_peer_inner(
             mock,
             state_lock.clone(),
             get_dummy_socket_address(2),
@@ -991,7 +995,7 @@ mod connect_tests {
             .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
             .await;
 
-        let answer = answer_peer(
+        let answer = answer_peer_inner(
             mock,
             state_lock.clone(),
             peer_address,

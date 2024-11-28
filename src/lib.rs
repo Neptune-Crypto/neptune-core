@@ -57,7 +57,7 @@ use tracing::info;
 use triton_vm::prelude::BFieldElement;
 
 use crate::config_models::data_directory::DataDirectory;
-use crate::connect_to_peers::call_peer_wrapper;
+use crate::connect_to_peers::call_peer;
 use crate::locks::tokio as sync_tokio;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::MainToMiner;
@@ -199,7 +199,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         let peer_join_handle = tokio::task::Builder::new()
             .name("call_peer_wrapper_3")
             .spawn(async move {
-                call_peer_wrapper(
+                call_peer(
                     peer_address,
                     peer_state_var.clone(),
                     main_to_peer_broadcast_rx_clone,

@@ -26,8 +26,8 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
-use crate::connect_to_peers::answer_peer_wrapper;
-use crate::connect_to_peers::call_peer_wrapper;
+use crate::connect_to_peers::answer_peer;
+use crate::connect_to_peers::call_peer;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::macros::fn_name;
@@ -939,7 +939,7 @@ impl MainLoopHandler {
             let outgoing_connection_task = tokio::task::Builder::new()
                 .name("call_peer_wrapper_1")
                 .spawn(async move {
-                    call_peer_wrapper(
+                    call_peer(
                         peer_with_lost_connection,
                         global_state_lock_clone,
                         main_to_peer_broadcast_rx,
@@ -996,7 +996,7 @@ impl MainLoopHandler {
         let outgoing_connection_task = tokio::task::Builder::new()
             .name("call_peer_wrapper_2")
             .spawn(async move {
-                call_peer_wrapper(
+                call_peer(
                     peer_candidate,
                     global_state_lock_clone,
                     main_to_peer_broadcast_rx,
@@ -1365,7 +1365,7 @@ impl MainLoopHandler {
                     let incoming_peer_task_handle = tokio::task::Builder::new()
                         .name("answer_peer_wrapper")
                         .spawn(async move {
-                        match answer_peer_wrapper(
+                        match answer_peer(
                             stream,
                             global_state_lock,
                             peer_address,
@@ -1986,13 +1986,11 @@ mod test {
 
         use rand::Rng;
 
-        use crate::connect_to_peers::answer_peer;
+        use super::*;
         use crate::models::peer::PeerMessage;
         use crate::models::peer::TransferConnectionStatus;
         use crate::tests::shared::get_dummy_peer_connection_data_genesis;
         use crate::tests::shared::to_bytes;
-
-        use super::*;
 
         #[tokio::test]
         #[traced_test]
