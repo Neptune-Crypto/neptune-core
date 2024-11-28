@@ -82,7 +82,7 @@ pub struct WalletState {
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
 /// membership proof of a UTXO.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 pub(crate) struct IncomingUtxoRecoveryData {
     pub utxo: Utxo,
     pub sender_randomness: Digest,

@@ -12,6 +12,7 @@ pub mod tx_proving_capability;
 pub mod wallet;
 
 use std::cmp::max;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -1028,8 +1029,16 @@ impl GlobalState {
                 .stream_values()
                 .await;
             pin_mut!(stream); // needed for iteration
+            let mut seen_recovery_entries = HashSet::<Digest>::default();
 
             '_outer: for incoming_utxo in incoming_utxos.into_iter() {
+                let new_value = seen_recovery_entries.insert(Tip5::hash(&incoming_utxo));
+                assert!(
+                    new_value,
+                    "Recovery data may not contain duplicated entries. Entry with AOCL index {} \
+                     was duplicated. Try removing the duplicated entry from the file.",
+                    incoming_utxo.aocl_index
+                );
                 'inner: while let Some(monitored_utxo) = stream.next().await {
                     if monitored_utxo.utxo == incoming_utxo.utxo {
                         let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
