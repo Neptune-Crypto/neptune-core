@@ -311,13 +311,19 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
 
     /// a [symmetric_key]
     Symmetric(symmetric_key::SymmetricKey),
+}
+
+impl std::hash::Hash for SpendingKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&self.privacy_preimage(), state)
+    }
 }
 
 impl From<generation_address::GenerationSpendingKey> for SpendingKey {
