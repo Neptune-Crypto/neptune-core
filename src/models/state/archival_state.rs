@@ -2506,12 +2506,13 @@ mod archival_state_tests {
                         found_block_digest,
                         "AOCL leaf index {aocl_index} must be found in expected block."
                     );
-                    min_aocl_index = min_aocl_index_next;
                 }
+
+                min_aocl_index = min_aocl_index_next;
             }
         }
 
-        // Any indices beyond lat known AOCL index must return None.
+        // Any indices beyond last known AOCL index must return None.
         for term in [
             1,
             2,
