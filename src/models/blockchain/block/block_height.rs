@@ -5,6 +5,7 @@ use std::ops::Sub;
 
 use arbitrary::Arbitrary;
 use get_size::GetSize;
+use num_traits::ConstZero;
 use num_traits::One;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -47,12 +48,21 @@ impl BlockHeight {
         Self(self.0 - BFieldElement::one())
     }
 
-    pub fn genesis() -> Self {
-        Self(BFieldElement::zero())
+    pub const fn genesis() -> Self {
+        Self(BFieldElement::ZERO)
     }
 
     pub fn is_genesis(&self) -> bool {
         self.0.is_zero()
+    }
+
+    pub(crate) fn arithmetic_mean(left: Self, right: Self) -> Self {
+        // Calculate arithmetic mean, without risk of overflow.
+        let left = left.0.value();
+        let right = right.0.value();
+        let ret = (left / 2) + (right / 2) + (left % 2 + right % 2) / 2;
+
+        Self(BFieldElement::new(ret))
     }
 }
 

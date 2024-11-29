@@ -24,6 +24,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::database::BlockFileLocation;
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
@@ -332,6 +333,12 @@ impl ArchivalState {
             // Update block index database with newly stored block
             let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
             let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
+            let num_additions: u64 = new_block
+                .mutator_set_update()
+                .additions
+                .len()
+                .try_into()
+                .expect("Num addition records cannot exceed u64::MAX");
             let block_record_value: BlockIndexValue =
                 BlockIndexValue::Block(Box::new(BlockRecord {
                     block_header: new_block.header().clone(),
@@ -340,6 +347,9 @@ impl ArchivalState {
                         offset: file_offset,
                         block_length: serialized_block_size as usize,
                     },
+                    min_aocl_index: new_block.mutator_set_accumulator_after().aocl.num_leafs()
+                        - num_additions,
+                    num_additions,
                 }));
 
             block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
@@ -419,13 +429,11 @@ impl ArchivalState {
         .await?
     }
 
-    /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
-    /// if tip is genesis, then `None` is returned
-    async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
+    async fn tip_block_record(&self) -> Option<BlockRecord> {
         let tip_digest = self.block_index_db.get(BlockIndexKey::BlockTipDigest).await;
         let tip_digest: Digest = match tip_digest {
             Some(digest) => digest.as_tip_digest(),
-            None => return Ok(None),
+            None => return None,
         };
 
         let tip_block_record: BlockRecord = self
@@ -435,9 +443,94 @@ impl ArchivalState {
             .unwrap()
             .as_block_record();
 
+        Some(tip_block_record)
+    }
+
+    /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
+    /// if tip is genesis, then `None` is returned
+    async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
+        let tip_block_record = self.tip_block_record().await;
+        let Some(tip_block_record) = tip_block_record else {
+            return Ok(None);
+        };
+
         let block: Block = self.get_block_from_block_record(tip_block_record).await?;
 
         Ok(Some(block))
+    }
+
+    /// Return the block digest of the block in which an AOCL leaf with
+    /// specified index is contained.
+    pub(crate) async fn canonical_block_digest_of_aocl_index(
+        &self,
+        aocl_leaf_index: u64,
+    ) -> Result<Option<Digest>> {
+        // Is AOCL leaf contained in genesis block? Special-case this, as
+        // genesis block does not have a block record.
+        let genesis_tx: TransactionKernelProxy =
+            self.genesis_block.body().transaction_kernel.clone().into();
+        if aocl_leaf_index < genesis_tx.outputs.len().try_into().unwrap() {
+            return Ok(Some(self.genesis_block.hash()));
+        }
+
+        let (mut record, mut block_hash) = match self
+            .block_index_db
+            .get(BlockIndexKey::BlockTipDigest)
+            .await
+            .map(|record| record.as_tip_digest())
+        {
+            Some(tip_digest) => {
+                let record = self
+                    .block_index_db
+                    .get(BlockIndexKey::Block(tip_digest))
+                    .await
+                    .unwrap()
+                    .as_block_record();
+                (record, tip_digest)
+            }
+            None => {
+                // Tip is genesis block. But genesis block was checked. So this
+                // leaf index is not known.
+                return Ok(None);
+            }
+        };
+
+        // Is AOCL leaf index after current tip?
+        if aocl_leaf_index > record.max_aocl_index() {
+            return Ok(None);
+        }
+
+        let mut min_block_height = BlockHeight::genesis().next();
+        let mut max_block_height = record.block_header.height;
+        let mut earliest_known_canonical = block_hash;
+
+        // Do binary search to find block
+        loop {
+            if aocl_leaf_index < record.min_aocl_index {
+                // Look below current height
+                max_block_height = record.block_header.height.previous();
+                earliest_known_canonical = block_hash;
+            } else if aocl_leaf_index > record.max_aocl_index() {
+                // Look above current height
+                min_block_height = record.block_header.height.next();
+            } else {
+                return Ok(Some(block_hash));
+            };
+
+            let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
+            block_hash = self
+                .block_height_to_canonical_block_digest(new_guess_height, earliest_known_canonical)
+                .await
+                .unwrap_or_else(|| {
+                    panic!("Block record for height {new_guess_height} must exist.")
+                });
+            record = self
+                .block_index_db
+                .get(BlockIndexKey::Block(block_hash))
+                .await
+                .unwrap()
+                .as_block_record();
+        }
     }
 
     /// searches max `max_search_depth` from tip for a matching transaction
@@ -1061,6 +1154,7 @@ mod archival_state_tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
+    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use super::*;
@@ -2373,6 +2467,99 @@ mod archival_state_tests {
             assert!(genesis_archival_state
                 .get_mutator_set_update_to_tip(&current_msa, i)
                 .await
+                .is_none());
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn find_canonical_block_with_aocl_index_five_blocks() {
+        let network = Network::Main;
+        let wallet = WalletSecret::new_random();
+        let mut rng = thread_rng();
+        let mut archival_state = make_test_archival_state(network).await;
+        let mut current_block = Block::genesis_block(network);
+        let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
+        let mut blocks = vec![current_block.clone()];
+        let mut min_aocl_index = 0u64;
+        for _block_height in 1..=5 {
+            let (next_block, _, _) =
+                make_mock_block(&current_block, None, cb_beneficiary, rng.gen());
+            add_block_to_archival_state(&mut archival_state, next_block.clone())
+                .await
+                .unwrap();
+            current_block = next_block;
+            blocks.push(current_block.clone());
+
+            // After each applied block, all AOCL leaf indices must match
+            // expected values.
+            for block in blocks.iter() {
+                let min_aocl_index_next = block.mutator_set_accumulator_after().aocl.num_leafs();
+                for aocl_index in min_aocl_index..min_aocl_index_next {
+                    let found_block_digest = archival_state
+                        .canonical_block_digest_of_aocl_index(aocl_index)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        block.hash(),
+                        found_block_digest,
+                        "AOCL leaf index {aocl_index} must be found in expected block."
+                    );
+                    min_aocl_index = min_aocl_index_next;
+                }
+            }
+        }
+
+        // Any indices beyond lat known AOCL index must return None.
+        for term in [
+            1,
+            2,
+            100,
+            10_000,
+            u32::MAX as u64,
+            u64::MAX - min_aocl_index,
+        ] {
+            let aocl_index = min_aocl_index + term;
+            assert!(
+                archival_state
+                    .canonical_block_digest_of_aocl_index(aocl_index)
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "AOCL leaf index {aocl_index} does not exist yet."
+            );
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn find_canonical_block_with_aocl_index_genesis() {
+        for network in Network::iter() {
+            let archival_state = make_test_archival_state(network).await;
+            let genesis_block_digest = archival_state.genesis_block().hash();
+            let num_premine_outputs = Block::premine_utxos(network).len() as u64;
+
+            // Verify correct result for all premine outputs
+            for aocl_leaf_index in 0..num_premine_outputs {
+                let needle = archival_state
+                    .canonical_block_digest_of_aocl_index(aocl_leaf_index)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(genesis_block_digest, needle);
+            }
+
+            // Verify that indices beyond return None
+            assert!(archival_state
+                .canonical_block_digest_of_aocl_index(num_premine_outputs)
+                .await
+                .unwrap()
+                .is_none());
+            assert!(archival_state
+                .canonical_block_digest_of_aocl_index(num_premine_outputs + 1)
+                .await
+                .unwrap()
                 .is_none());
         }
     }
