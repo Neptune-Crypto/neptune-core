@@ -244,7 +244,7 @@ impl<'a> Arbitrary<'a> for Utxo {
     }
 }
 #[cfg(test)]
-mod utxo_tests {
+mod test {
     use proptest::prelude::*;
     use rand::thread_rng;
     use rand::Rng;

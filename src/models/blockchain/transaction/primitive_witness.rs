@@ -4,6 +4,7 @@ use std::fmt::Display;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
+use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
@@ -439,7 +440,7 @@ impl PrimitiveWitness {
         )
             .prop_flat_map(
                 move |(
-                    total_amount,
+                    mut total_amount,
                     input_address_seeds,
                     input_dist,
                     output_address_seeds,
@@ -471,8 +472,12 @@ impl PrimitiveWitness {
                                 .skip(1)
                                 .cloned()
                                 .sum::<NeptuneCoins>();
-                            *input_amounts.last_mut().unwrap() =
-                                total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                            if let Some(last_input) = input_amounts.last_mut() {
+                                *last_input =
+                                    total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                            } else {
+                                total_amount = NeptuneCoins::zero();
+                            }
 
                             let (input_utxos, input_lock_scripts_and_witnesses) =
                                 Self::transaction_inputs_from_address_seeds_and_amounts(
@@ -503,7 +508,11 @@ impl PrimitiveWitness {
                         .map(|utxo| utxo.get_native_currency_amount())
                         .sum::<NeptuneCoins>();
 
-                    assert_eq!(maybe_coinbase.unwrap_or(total_inputs), total_outputs + fee);
+                    assert_eq!(
+                        maybe_coinbase.unwrap_or(total_inputs),
+                        total_outputs + fee,
+                        "total outputs: {total_outputs:?} fee: {fee:?}"
+                    );
 
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
@@ -1215,7 +1224,6 @@ mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
-        println!("generated primitive witness.");
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {
             amount
         } else {
