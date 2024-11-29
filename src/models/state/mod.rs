@@ -12,6 +12,7 @@ pub mod tx_proving_capability;
 pub mod wallet;
 
 use std::cmp::max;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -81,6 +82,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 use crate::VERSION;
@@ -1011,27 +1013,28 @@ impl GlobalState {
             Tip:\n{tip_hash};\nsync label:\n{asm_sync_label}"
         );
 
-        // Fetch all incoming UTXOs from recovery data
+        // Fetch all incoming UTXOs from recovery data. Then make a HashMap for
+        // fast lookup.
         let incoming_utxos = self.wallet_state.read_utxo_ms_recovery_data().await?;
         let incoming_utxo_count = incoming_utxos.len();
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
-        // Loop over all `incoming_utxos` and check if they have a corresponding
-        // monitored UTXO in the database. All monitored UTXOs are fetched outside
-        // of the loop to avoid DB access/IO inside the loop.
         let mut recovery_data_for_missing_mutxos = vec![];
-
         {
-            let stream = self
+            // Two UTXOs are considered the same iff their AOCL index and
+            // their addition record agree. Otherwise, they are different.
+            let mutxos: HashMap<(u64, AdditionRecord), MonitoredUtxo> = self
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
                 .stream_values()
+                .await
+                .map(|x| ((x.aocl_index(), x.addition_record()), x))
+                .collect()
                 .await;
-            pin_mut!(stream); // needed for iteration
             let mut seen_recovery_entries = HashSet::<Digest>::default();
 
-            '_outer: for incoming_utxo in incoming_utxos.into_iter() {
+            for incoming_utxo in incoming_utxos {
                 let new_value = seen_recovery_entries.insert(Tip5::hash(&incoming_utxo));
                 assert!(
                     new_value,
@@ -1039,20 +1042,13 @@ impl GlobalState {
                      was duplicated. Try removing the duplicated entry from the file.",
                     incoming_utxo.aocl_index
                 );
-                'inner: while let Some(monitored_utxo) = stream.next().await {
-                    if monitored_utxo.utxo == incoming_utxo.utxo {
-                        let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
-                        let msmp = match msmp_res {
-                            Some((_blockh_hash, msmp_val)) => msmp_val,
-                            None => continue 'inner,
-                        };
 
-                        // If UTXO matches, then check if the AOCL index is also a match.
-                        // If it is, then the UTXO is already in the wallet database.
-                        if msmp.aocl_leaf_index == incoming_utxo.aocl_index {
-                            continue '_outer;
-                        }
-                    }
+                if mutxos
+                    .get(&(incoming_utxo.aocl_index, incoming_utxo.addition_record()))
+                    .map(|x| x.get_latest_membership_proof_entry())
+                    .is_some()
+                {
+                    continue;
                 }
 
                 // If no match is found, add the UTXO to the list of missing UTXOs
@@ -1108,6 +1104,25 @@ impl GlobalState {
             let mut restored_mutxo =
                 MonitoredUtxo::new(incoming_utxo.utxo, self.wallet_state.number_of_mps_per_utxo);
             restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
+
+            // Add block info for restored MUTXO
+            let confirming_block_digest = self
+                .chain
+                .archival_state()
+                .canonical_block_digest_of_aocl_index(incoming_utxo.aocl_index)
+                .await?
+                .expect("Confirming block must exist");
+            let confirming_block_header = self
+                .chain
+                .archival_state()
+                .get_block_header(confirming_block_digest)
+                .await
+                .expect("Confirming block header must exist");
+            restored_mutxo.confirmed_in_block = Some((
+                confirming_block_digest,
+                confirming_block_header.timestamp,
+                confirming_block_header.height,
+            ));
 
             self.wallet_state
                 .wallet_db
@@ -1819,7 +1834,7 @@ mod global_state_tests {
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis_block(network);
-        let (mock_block_1, cb_utxo, cb_sender_randomness) =
+        let (block1, cb_utxo, cb_sender_randomness) =
             make_mock_block(&genesis_block, None, own_address, rng.gen());
         global_state_lock
             .lock_guard_mut()
@@ -1832,10 +1847,7 @@ mod global_state_tests {
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
-        global_state_lock
-            .set_new_tip(mock_block_1.clone())
-            .await
-            .unwrap();
+        global_state_lock.set_new_tip(block1.clone()).await.unwrap();
 
         // Delete everything from monitored UTXO (premined UTXO and block-1 coinbase)
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -1856,11 +1868,12 @@ mod global_state_tests {
         }
 
         // Recover the MUTXO from the recovery data, and verify that MUTXOs are restored
-        global_state
-            .restore_monitored_utxos_from_recovery_data()
-            .await
-            .unwrap();
-        {
+        // Also verify that this operation is idempotent by running it multiple times.
+        for _ in 0..3 {
+            global_state
+                .restore_monitored_utxos_from_recovery_data()
+                .await
+                .unwrap();
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert_eq!(
                 2,
@@ -1868,8 +1881,28 @@ mod global_state_tests {
                 "MUTXO must have genesis element and premine after recovery"
             );
 
+            let mutxos = monitored_utxos.get_all().await;
+            assert_eq!(
+                Some((
+                    genesis_block.hash(),
+                    genesis_block.header().timestamp,
+                    genesis_block.header().height
+                )),
+                mutxos[0].confirmed_in_block,
+                "Historical information must be restored for premine TX"
+            );
+            assert_eq!(
+                Some((
+                    block1.hash(),
+                    block1.header().timestamp,
+                    block1.header().height
+                )),
+                mutxos[1].confirmed_in_block,
+                "Historical information must be restored for coinbase TX"
+            );
+
             // Verify that the restored MUTXOs have MSMPs
-            for mutxo in monitored_utxos.get_all().await {
+            for mutxo in mutxos {
                 let ms_item = Hash::hash(&mutxo.utxo);
                 assert!(global_state
                     .chain
@@ -1880,7 +1913,7 @@ mod global_state_tests {
                         &mutxo.get_latest_membership_proof_entry().unwrap().1,
                     ));
                 assert_eq!(
-                    mock_block_1.hash(),
+                    block1.hash(),
                     mutxo.get_latest_membership_proof_entry().unwrap().0,
                     "MUTXO must have the correct latest block digest value"
                 );

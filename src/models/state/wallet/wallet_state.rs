@@ -12,6 +12,7 @@ use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::prelude::Tip5;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -62,6 +63,7 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
@@ -90,12 +92,19 @@ pub(crate) struct IncomingUtxoRecoveryData {
     pub aocl_index: u64,
 }
 
+impl IncomingUtxoRecoveryData {
+    pub(crate) fn addition_record(&self) -> AdditionRecord {
+        let item = Tip5::hash(&self.utxo);
+        commit(item, self.sender_randomness, self.receiver_preimage.hash())
+    }
+}
+
 impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
     type Error = anyhow::Error;
 
     fn try_from(value: &MonitoredUtxo) -> std::result::Result<Self, Self::Error> {
         let Some((_block_digest, msmp)) = value.get_latest_membership_proof_entry() else {
-            bail!("Cannot create recovery data before transaction registered as confirmed.");
+            bail!("Cannot create recovery data without a membership proof.");
         };
 
         Ok(Self {
