@@ -245,18 +245,6 @@ impl WalletState {
                 .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
                 .collect();
 
-        // this is a hack to appease existing tests that bypass
-        // WalletState::next_unused_generation_spending_key() by
-        // calling WalletSecret::nth_generation_spending_key_for_tests().
-        //
-        // In the future all such tests should be fixed, however for
-        // right now, we want to demonstrate that the existing tests
-        // work with key-derivation in place.
-        if known_generation_keys.is_empty() {
-            let key = wallet_secret.nth_generation_spending_key(0);
-            known_generation_keys.insert(key.into());
-        }
-
         // generate and cache all used symmetric keys
         let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
             .map(|idx| wallet_secret.nth_symmetric_key(idx).into())
@@ -272,6 +260,18 @@ impl WalletState {
             known_generation_keys,
             known_symmetric_keys,
         };
+
+        // Generation key 0 is reserved for coinbase and pre-mine.  this ensures
+        // derivation-index=0 key is known to wallet, so coinbase and premine
+        // claiming works. See comment in mine_loop::make_coinbase_transaction()
+        // for rationale why coinbase always goes to key 0.
+        //
+        // wallets start at index 1 for all non-coinbase tx.
+        if wallet_state.known_generation_keys.is_empty() {
+            let _ = wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
+        }
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
         // from genesis would be unspendable. This should only be done *once* though.
