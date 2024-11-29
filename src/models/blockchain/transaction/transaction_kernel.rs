@@ -24,11 +24,11 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 /// TransactionKernel is immutable and its hash never changes.
 ///
-/// See [TransactionKernelModifier] for generating modified copies.
+/// See [`TransactionKernelModifier`] for generating modified copies.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, GetSize, BFieldCodec, TasmObject)]
 #[readonly::make]
 pub struct TransactionKernel {
-    // note: see field descriptions in TransactionKernelProxy
+    // note: see field descriptions in [`TransactionKernelProxy`]
     pub inputs: Vec<RemovalRecord>,
     pub outputs: Vec<AdditionRecord>,
     pub public_announcements: Vec<PublicAnnouncement>,

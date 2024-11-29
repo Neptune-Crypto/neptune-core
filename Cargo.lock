@@ -3373,14 +3373,13 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2086093477a23c66dc1cfcbb3b3cd6eb9cbc96ab0b6d0b9f796ea14942760e"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=bc50c3320b7ca7527a0066e2b28455f4b4e18003#bc50c3320b7ca7527a0066e2b28455f4b4e18003"
 dependencies = [
  "anyhow",
  "arbitrary",
  "const_format",
  "hex",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "ndarray",
  "num",
  "num-traits",
@@ -3395,8 +3394,7 @@ dependencies = [
 [[package]]
 name = "tasm-object-derive"
 version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "018472cead7ee1ecfdf8114ba9021f857cdf511977e9a9e591ea796bfe7e5f12"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=bc50c3320b7ca7527a0066e2b28455f4b4e18003#bc50c3320b7ca7527a0066e2b28455f4b4e18003"
 dependencies = [
  "proc-macro2",
  "quote",
