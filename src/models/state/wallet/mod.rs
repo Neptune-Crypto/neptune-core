@@ -203,8 +203,6 @@ impl WalletSecret {
         &self,
         index: u64,
     ) -> generation_address::GenerationSpendingKey {
-        // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
-        // in case you don't know with what counter you made the address
         let key_seed = Hash::hash_varlen(
             &[
                 self.secret_seed.0.encode(),

@@ -81,8 +81,11 @@ pub struct WalletState {
     mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
     mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<AnnouncedUtxo>>,
 
-    known_generation_keys: HashSet<SpendingKey>,
-    known_symmetric_keys: HashSet<SpendingKey>,
+    // these fields represent all known keys that have been handed out,
+    // ie keys with derivation index in 0..self.spending_key_counter(key_type)
+    // derivation order is preserved and each key must be unique.
+    known_generation_keys: Vec<SpendingKey>,
+    known_symmetric_keys: Vec<SpendingKey>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -240,15 +243,14 @@ impl WalletState {
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
         // generate and cache all used generation keys
-        let mut known_generation_keys: HashSet<_> =
-            (0..rusty_wallet_database.get_generation_key_counter().await)
-                .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
-                .collect();
+        let known_generation_keys = (0..rusty_wallet_database.get_generation_key_counter().await)
+            .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
+            .collect_vec();
 
         // generate and cache all used symmetric keys
         let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
             .map(|idx| wallet_secret.nth_symmetric_key(idx).into())
-            .collect();
+            .collect_vec();
 
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
@@ -267,6 +269,8 @@ impl WalletState {
         // for rationale why coinbase always goes to key 0.
         //
         // wallets start at index 1 for all non-coinbase tx.
+        //
+        // note: this makes test known_keys_are_unique() pass.
         if wallet_state.known_generation_keys.is_empty() {
             let _ = wallet_state
                 .next_unused_spending_key(KeyType::Generation)
@@ -356,14 +360,17 @@ impl WalletState {
 
                 let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
 
-                let announced_from_addition = self
+                // scan tx for utxo we can claim because we are expecting them (offchain)
+                let announced_utxos_from_expected_utxos = self
                     .scan_addition_records_for_expected_utxos(&tx.kernel.outputs)
                     .await;
 
-                let announced_utxos = self
-                    .scan_for_announced_utxos(&tx.kernel)
-                    .chain(announced_from_addition)
-                    .unique()
+                // scan tx for utxo with public-announcements we can claim
+                let announced_utxos_from_public_announcements =
+                    self.scan_for_announced_utxos(&tx.kernel);
+
+                let announced_utxos = announced_utxos_from_public_announcements
+                    .chain(announced_utxos_from_expected_utxos)
                     .collect_vec();
 
                 let tx_id = tx.kernel.txid();
@@ -757,6 +764,14 @@ impl WalletState {
         }
     }
 
+    /// Get index of the next unused spending key of a given type.
+    pub async fn spending_key_counter(&self, key_type: KeyType) -> u64 {
+        match key_type {
+            KeyType::Generation => self.wallet_db.get_generation_key_counter().await,
+            KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter().await,
+        }
+    }
+
     /// Get the nth derived spending key of a given type.
     pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
         match key_type {
@@ -778,7 +793,7 @@ impl WalletState {
         let index = self.wallet_db.get_generation_key_counter().await;
         self.wallet_db.set_generation_key_counter(index + 1).await;
         let key = self.wallet_secret.nth_generation_spending_key(index);
-        self.known_generation_keys.insert(key.into());
+        self.known_generation_keys.push(key.into());
         key
     }
 
@@ -793,7 +808,7 @@ impl WalletState {
         let index = self.wallet_db.get_symmetric_key_counter().await;
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
         let key = self.wallet_secret.nth_symmetric_key(index);
-        self.known_symmetric_keys.insert(key.into());
+        self.known_symmetric_keys.push(key.into());
         key
     }
 
@@ -1999,6 +2014,135 @@ mod tests {
             );
 
             Ok(())
+        }
+    }
+
+    mod key_derivation {
+        use super::*;
+
+        /// tests that all known keys are unique, for all key types.
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn known_keys_are_unique() {
+            for key_type in KeyType::all_types() {
+                worker::known_keys_are_unique(key_type).await
+            }
+        }
+
+        /// tests that spending key counter persists across restart for all key types.
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn derivation_counter_persists_across_restart() -> Result<()> {
+            for key_type in KeyType::all_types() {
+                worker::derivation_counter_persists_across_restart(key_type).await?
+            }
+            Ok(())
+        }
+
+        mod worker {
+            use super::*;
+            use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
+            use crate::tests::shared::unit_test_data_directory;
+
+            /// tests that all known keys are unique for a given key-type
+            ///
+            /// 1. Generate a mock WalletState
+            /// 2. Request 20 spending keys
+            /// 3. Verify there are 20 known keys
+            /// 4. Verify all keys are unique.
+            pub(super) async fn known_keys_are_unique(key_type: KeyType) {
+                info!("key_type: {}", key_type);
+
+                // 1. Generate a mock WalletState
+                let mut wallet =
+                    mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+
+                let num_known_keys = wallet.get_known_spending_keys(key_type).count();
+                let num_to_derive = 20;
+
+                // 2. Request 20 spending keys
+                for _ in 0..num_to_derive {
+                    let _ = wallet.next_unused_spending_key(key_type).await;
+                }
+
+                let expected_num_known_keys = num_known_keys + num_to_derive;
+                let known_keys = wallet.get_known_spending_keys(key_type).collect_vec();
+
+                // 3. Verify there are 20 known keys
+                assert_eq!(expected_num_known_keys, known_keys.len());
+
+                // 4. Verify all keys are unique.
+                assert!(known_keys.iter().all_unique());
+            }
+
+            /// tests that spending key counter persists across restart given key type.
+            ///
+            /// 1. create new wallet and generate 20 keys
+            /// 2. record wallet counter and known-keys
+            /// 3. persist wallet
+            /// 4. forget wallet
+            /// 5. instantiate 2nd wallet instance with same data_dir and secret as the first
+            /// 6. verify counter persisted between wallet instantiations
+            /// 7. verify known-keys persisted between wallet instantiations
+            /// 8. verify all keys are unique
+            pub(super) async fn derivation_counter_persists_across_restart(
+                key_type: KeyType,
+            ) -> Result<()> {
+                info!("key_type: {}", key_type);
+
+                let network = Network::RegTest;
+                let wallet_secret = WalletSecret::new_random();
+                let data_dir = unit_test_data_directory(network)?;
+
+                // 1. create new wallet and generate 20 keys
+                // 2. record wallet counter and known-keys
+                // 3. persist wallet.
+                // 4. forget wallet (dropped)
+                let (orig_counter, orig_known_keys) = {
+                    let mut wallet = mock_genesis_wallet_state_with_data_dir(
+                        wallet_secret.clone(),
+                        Network::RegTest,
+                        &data_dir,
+                    )
+                    .await;
+
+                    for _ in 0..20 {
+                        let _ = wallet.next_unused_spending_key(key_type).await;
+                    }
+
+                    wallet.wallet_db.persist().await;
+
+                    (
+                        wallet.spending_key_counter(key_type).await,
+                        wallet.get_known_spending_keys(key_type).collect_vec(),
+                    )
+                };
+
+                // 5. instantiate 2nd wallet instance with same data_dir and secret as the first
+                let wallet = mock_genesis_wallet_state_with_data_dir(
+                    wallet_secret,
+                    Network::RegTest,
+                    &data_dir,
+                )
+                .await;
+
+                let persisted_counter = wallet.spending_key_counter(key_type).await;
+                let persisted_known_keys = wallet.get_known_spending_keys(key_type).collect_vec();
+
+                // 6. verify counter persisted between wallet instantiations
+                assert_eq!(orig_counter, persisted_counter);
+                assert_eq!(orig_known_keys.len(), persisted_known_keys.len());
+
+                // 7. verify known-keys persisted between wallet instantiations
+                assert_eq!(orig_known_keys, persisted_known_keys);
+
+                // 8. verify all keys are unique.
+                assert!(persisted_known_keys.iter().all_unique());
+
+                Ok(())
+            }
         }
     }
 

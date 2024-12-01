@@ -270,7 +270,7 @@ impl Widget for AddressScreen {
                 vec![
                     KeyType::from(key).to_string(),
                     key.to_address()
-                        .to_bech32m_abbreviated(self.network)
+                        .to_display_bech32m_abbreviated(self.network)
                         .unwrap(),
                 ]
             })

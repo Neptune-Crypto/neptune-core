@@ -59,72 +59,13 @@ enum ClaimUtxoFormat {
     },
 }
 
-/// AddressEnum is used by send and send-to-many to distinguish between
-/// key-types when writing utxo-transfer file(s) for any off-chain-serialized
-/// utxos.
-///
-/// the issue is that it is useful to display the address in the file, or even an
-/// abbreviation in the filename. This aids the sender in identifying the utxo
-/// and routing it to the intended recipient.
-///
-/// however this should never be done for symmetric keys as it would expose the
-/// private key, so we only display the receiver_identifier.
-///
-/// normally unowned utxo-transfer would not be using symmetric keys, however
-/// there are some use cases for it such as when a person or org holds multiple
-/// wallets and is transferrng between them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum AddressEnum {
-    Generation {
-        address_abbrev: String,
-        address: String,
-        receiver_identifier: String,
-    },
-    Symmetric {
-        receiver_identifier: String,
-    },
-}
-
-impl AddressEnum {
-    fn new(addr: ReceivingAddress, network: Network) -> Self {
-        match addr {
-            ReceivingAddress::Generation(addr) => Self::Generation {
-                address_abbrev: addr
-                    .to_bech32m_abbreviated(network)
-                    .expect("Must be able to convert to abbreviated Bech32"),
-                address: addr
-                    .to_bech32m(network)
-                    .expect("Bech32m encoding must succeed"),
-                receiver_identifier: addr.receiver_identifier.to_string(),
-            },
-            ReceivingAddress::Symmetric(_) => Self::Symmetric {
-                receiver_identifier: addr.receiver_identifier().to_string(),
-            },
-        }
-    }
-}
-
-impl AddressEnum {
-    fn short_id(&self) -> &str {
-        match *self {
-            Self::Generation {
-                ref address_abbrev, ..
-            } => address_abbrev,
-            Self::Symmetric {
-                ref receiver_identifier,
-                ..
-            } => receiver_identifier,
-        }
-    }
-}
-
 /// represents a UtxoTransfer entry in a utxo-transfer file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UtxoTransferEntry {
     pub data_format: String,
+    pub recipient_abbrev: String,
     pub recipient: String,
     pub ciphertext: String,
-    pub address_info: AddressEnum,
 }
 
 impl UtxoTransferEntry {
@@ -586,7 +527,7 @@ async fn main() -> Result<()> {
             let rec_addr = client
                 .next_receiving_address(ctx, KeyType::Generation)
                 .await?;
-            println!("{}", rec_addr.to_bech32m(args.network).unwrap())
+            println!("{}", rec_addr.to_display_bech32m(args.network).unwrap())
         }
         Command::MempoolTxCount => {
             let count: usize = client.mempool_tx_count(ctx).await?;
@@ -892,15 +833,18 @@ fn process_utxo_notifications(
 
         let entry = UtxoTransferEntry {
             data_format: UtxoTransferEntry::data_format(),
+            recipient_abbrev: entry
+                .recipient_address
+                .to_display_bech32m_abbreviated(network)
+                .expect("String encoding of address must succeed"),
             recipient: entry
                 .recipient_address
-                .to_bech32m(network)
+                .to_display_bech32m(network)
                 .expect("String encoding of address must succeed"),
             ciphertext: entry.ciphertext,
-            address_info: AddressEnum::new(entry.recipient_address, network),
         };
 
-        let file_name = format!("{}-{}.json", entry.address_info.short_id(), timestamp);
+        let file_name = format!("{}-{}.json", entry.recipient_abbrev, timestamp);
         let file_path = file_dir.join(&file_name);
         println!("creating file: {}", file_path.display());
         let file = std::fs::File::create_new(&file_path)?;
