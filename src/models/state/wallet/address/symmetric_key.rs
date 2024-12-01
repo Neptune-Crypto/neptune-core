@@ -233,6 +233,19 @@ impl SymmetricKey {
         }
     }
 
+    /// returns the privacy_preimage() digest encoded as bech32m string.
+    /// this is suitable for display purposes as it does not give away the
+    /// secret key.
+    pub fn to_display_bech32m(&self, network: Network) -> anyhow::Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(&self.privacy_preimage())?;
+        let variant = bech32::Variant::Bech32m;
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => bail!("Could not encode SymmetricKey as bech32m because error: {e}"),
+        }
+    }
+
     /// decodes a key from bech32m with network-specific prefix
     pub fn from_bech32m(encoded: &str, network: Network) -> anyhow::Result<Self> {
         let (hrp, data, variant) = bech32::decode(encoded)?;

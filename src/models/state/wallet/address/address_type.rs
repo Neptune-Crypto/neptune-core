@@ -28,7 +28,7 @@ use crate::BFieldElement;
 // actually stored in PublicAnnouncement.
 
 /// enumerates available cryptographic key implementations for sending and receiving funds.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(u8)]
 pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
@@ -221,9 +221,14 @@ impl ReceivingAddress {
 
     /// encodes this address as bech32m
     ///
-    /// note: this will return an error for symmetric keys as they do not impl
-    ///       bech32m at present.  There is no need to give them out to 3rd
-    ///       parties in a serialized form.
+    /// For any key-type, the resulting bech32m can be provided as input to
+    /// Self::from_bech32m() and will generate the original ReceivingAddress.
+    ///
+    /// Security: for key-type==Symmetric the resulting string exposes
+    /// the secret-key.  As such, great care must be taken and it should
+    /// never be used for display purposes.
+    ///
+    /// For most uses, prefer [Self::to_diplay_bech32m()] instead.
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
@@ -231,7 +236,11 @@ impl ReceivingAddress {
         }
     }
 
-    /// returns an abbreviated address.
+    /// returns an abbreviated bech32m encoded address.
+    ///
+    /// This method *may* reveal secret-key information for some key-types.  For
+    /// general display purposes, prefer
+    /// [Self::to_display_bech32m_abbreviated()].
     ///
     /// The idea is that this suitable for human recognition purposes
     ///
@@ -239,29 +248,56 @@ impl ReceivingAddress {
     /// format:  <hrp><start>...<end>
     ///
     ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
-    ///   8 start of address.
-    ///   8 end of address.
+    ///   12 start of address.
+    ///   12 end of address.
     /// ```
-    ///
-    /// security: note that if this is used on a symmetric key it will display 16 chars
-    /// of the bech32m encoded key.  This seriously reduces the key's strength and it
-    /// may be possible to brute-force it.  In general it is best practice to avoid
-    /// display of any part of a symmetric key.
-    ///
-    /// todo:
-    ///
-    /// it would be nice to standardize on a single prefix-len.  6 chars seems a
-    /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
-    /// ngkm --> neptune-generation-key-mainnet
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
-        let bech32 = self.to_bech32m(network)?;
-        let first_len = self.get_hrp(network).len() + 8usize;
-        let last_len = 8usize;
+        self.bech32m_abbreviate(self.to_bech32m(network)?, network)
+    }
 
-        assert!(bech32.len() > first_len + last_len);
+    /// returns a bech32m string suitable for display purposes.
+    ///
+    /// This method does not reveal secret-key information for any key-type.
+    ///
+    /// The resulting bech32m string is not guaranteed to result in the same
+    /// [ReceivingAddress] if provided as input to [Self::from_bech32m()].  For
+    /// that, [Self::to_bech32m()] should be used instead.
+    ///
+    /// For [generation::Generation] keys, this is equivalent to calling [Self::to_bech32m()].
+    /// For [symmetric::Symmetric] keys, this returns the privacy_preimage hash bech32m encoded
+    /// instead of the key itself.
+    pub fn to_display_bech32m(&self, network: Network) -> anyhow::Result<String> {
+        match self {
+            Self::Generation(k) => k.to_bech32m(network),
+            Self::Symmetric(k) => k.to_display_bech32m(network),
+        }
+    }
 
-        let (first, _) = bech32.split_at(first_len);
-        let (_, last) = bech32.split_at(bech32.len() - last_len);
+    /// returns an abbreviated address suitable for display purposes.
+    ///
+    /// This method does not reveal secret-key information for any key-type.
+    ///
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// ```text
+    /// format:  <hrp><start>...<end>
+    ///
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   12 start of address.
+    ///   12 end of address.
+    /// ```
+    pub fn to_display_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        self.bech32m_abbreviate(self.to_display_bech32m(network)?, network)
+    }
+
+    fn bech32m_abbreviate(&self, bech32m: String, network: Network) -> Result<String> {
+        let first_len = self.get_hrp(network).len() + 12usize;
+        let last_len = 12usize;
+
+        assert!(bech32m.len() > first_len + last_len);
+
+        let (first, _) = bech32m.split_at(first_len);
+        let (_, last) = bech32m.split_at(bech32m.len() - last_len);
 
         Ok(format!("{}...{}", first, last))
     }
