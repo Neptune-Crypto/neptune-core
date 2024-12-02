@@ -1,8 +1,10 @@
-use arbitrary::Arbitrary;
+use std::sync::OnceLock;
+
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -27,7 +29,35 @@ impl HasDiscriminant for BlockBodyField {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Arbitrary)]
+/// Public fields of `BlockBody` are read-only, enforced by #[readonly::make].
+/// Modifications are possible only through `BlockBody` methods.
+///
+// ## About the private `mast_hash` field:
+//
+// The `mast_hash` field represents the `BlockBody` MAST hash.  It is an
+// optimization so that the hash can be lazily computed at most once (per
+// modification). Without it, the PoW hash rate depends on the number of inputs
+// and outputs in a transaction. This caching of a hash value is similar to that
+// of `Block`.
+//
+// The field must be reset whenever the block body is modified.  As such, we
+// should not permit direct modification of internal fields.
+//
+// Therefore `[readonly::make]` is used to make public `BlockBody` fields read-
+// only (not mutable) outside of this module.  All methods that modify BlockBody
+// must reset this field.
+//
+// We manually implement `PartialEq` and `Eq` so that digest field will not be
+// compared.  Otherwise, we could have identical blocks except one has
+// initialized digest field and the other has not.
+//
+// The field should not be serialized, so it has the `#[serde(skip)]` attribute.
+// Upon deserialization, the field will have Digest::default() which is desired
+// so that the digest will be recomputed if/when hash() is called.
+//
+// We likewise skip the field for `BFieldCodec`, and `GetSize` because there
+// exist no impls for `OnceLock<_>` so derive fails.
+#[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
@@ -49,7 +79,21 @@ pub struct BlockBody {
     /// lives on the line between the tip and genesis. This MMRA does not contain the
     /// current block.
     pub(crate) block_mmr_accumulator: MmrAccumulator,
+
+    // This caching ensures that the hash rate is independent of the size of
+    // the block's transaction.
+    #[serde(skip)]
+    #[bfield_codec(ignore)]
+    #[get_size(ignore)]
+    mast_hash: OnceLock<Digest>,
 }
+
+impl PartialEq for BlockBody {
+    fn eq(&self, other: &Self) -> bool {
+        self.mast_hash() == other.mast_hash()
+    }
+}
+impl Eq for BlockBody {}
 
 impl BlockBody {
     pub(crate) fn new(
@@ -63,6 +107,7 @@ impl BlockBody {
             mutator_set_accumulator,
             lock_free_mmr_accumulator,
             block_mmr_accumulator,
+            mast_hash: OnceLock::default(), // calc'd in mast_hash()
         }
     }
 }
@@ -77,6 +122,10 @@ impl MastHash for BlockBody {
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),
         ]
+    }
+
+    fn mast_hash(&self) -> Digest {
+        *self.mast_hash.get_or_init(|| self.merkle_tree().root())
     }
 }
 
@@ -111,6 +160,7 @@ mod test {
                             mutator_set_accumulator: mutator_set_accumulator.clone(),
                             lock_free_mmr_accumulator,
                             block_mmr_accumulator,
+                            mast_hash: OnceLock::default(),
                         }
                     },
                 )

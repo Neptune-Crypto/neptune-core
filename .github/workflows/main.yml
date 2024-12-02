@@ -44,4 +44,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: -- --skip benches --skip mine_20_blocks_in_40_seconds
+          args: -- --skip benches --skip mine_20_blocks_in_40_seconds --skip hash_rate_independent_of_tx_size

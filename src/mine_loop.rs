@@ -726,6 +726,7 @@ pub(crate) mod mine_loop_tests {
     use block_body::BlockBody;
     use block_header::block_header_tests::random_block_header;
     use difficulty_control::Difficulty;
+    use itertools::Itertools;
     use num_bigint::BigUint;
     use num_traits::Pow;
     use num_traits::Zero;
@@ -749,6 +750,7 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::random_transaction_kernel;
     use crate::triton_vm;
     use crate::triton_vm::stark::Stark;
+    use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
@@ -771,6 +773,7 @@ pub(crate) mod mine_loop_tests {
     async fn estimate_own_hash_rate(
         target_block_interval: Option<Timestamp>,
         sleepy_guessing: bool,
+        num_outputs: usize,
     ) -> f64 {
         let mut rng = thread_rng();
         let network = Network::RegTest;
@@ -790,10 +793,13 @@ pub(crate) mod mine_loop_tests {
             .clone();
 
         let (transaction, _coinbase_utxo_info) = {
+            let outputs = (0..num_outputs)
+                .map(|_| pseudorandom_addition_record(rng.gen()))
+                .collect_vec();
             (
                 make_mock_transaction_with_mutator_set_hash(
                     vec![],
-                    vec![],
+                    outputs,
                     previous_block.mutator_set_accumulator_after().hash(),
                 ),
                 dummy_expected_utxo(),
@@ -1243,7 +1249,9 @@ pub(crate) mod mine_loop_tests {
 
         // set initial difficulty in accordance with own hash rate
         let sleepy_guessing = false;
-        let hash_rate = estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing).await;
+        let num_outputs = 0;
+        let hash_rate =
+            estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing, num_outputs).await;
         println!("estimating hash rate at {} per millisecond", hash_rate);
         let prepare_time = estimate_block_preparation_time_invalid_proof().await;
         println!("estimating block preparation time at {prepare_time} ms");
@@ -1377,6 +1385,26 @@ pub(crate) mod mine_loop_tests {
     async fn mine_20_blocks_in_40_seconds() -> Result<()> {
         mine_m_blocks_in_n_seconds::<20, 40>().await.unwrap();
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn hash_rate_independent_of_tx_size() {
+        // It's crucial that the hash rate is independent of the size of the
+        // block, since miners are otherwise heavily incentivized to mine small
+        // or empty blocks.
+        let sleepy_guessing = false;
+        let hash_rate_empty_tx = estimate_own_hash_rate(None, sleepy_guessing, 0).await;
+        println!("hash_rate_empty_tx: {hash_rate_empty_tx}");
+
+        let hash_rate_big_tx = estimate_own_hash_rate(None, sleepy_guessing, 1000).await;
+        println!("hash_rate_big_tx: {hash_rate_big_tx}");
+
+        assert!(
+            hash_rate_empty_tx * 1.1 > hash_rate_big_tx
+                && hash_rate_empty_tx * 0.9 < hash_rate_big_tx,
+            "Hash rate for big and small block must be within 10 %"
+        );
     }
 
     #[test]
