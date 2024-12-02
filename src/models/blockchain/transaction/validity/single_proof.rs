@@ -14,9 +14,10 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 use tracing::info;
 
+use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;
+use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::UpdateBranch;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_type_scripts_claim::GenerateCollectTypeScriptsClaim;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_k2o_claim::GenerateK2oClaim;
@@ -26,59 +27,27 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
-use crate::models::blockchain::transaction::validity::merge::Merge;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::update::Update;
+
+use super::tasm::single_proof::merge_branch::MergeWitness;
+use super::tasm::single_proof::update_branch::UpdateWitness;
+
+pub(crate) const DISCRIMINANT_FOR_PROOF_COLLECTION: u64 = 0;
+pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 1;
+pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 
 const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_040;
 const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_041;
 
-#[derive(Debug, Clone, BFieldCodec, TasmObject)]
-pub(crate) struct WitnessOfUpdate {
-    proof: Proof,
-    new_kernel_mast_hash: Digest,
-}
-
-impl WitnessOfUpdate {
-    /// [`Claim`] that some transaction was updated.
-    pub(crate) fn claim_of_update(&self) -> Claim {
-        let own_program_digest = SingleProof.hash();
-        let public_input = [self.new_kernel_mast_hash, own_program_digest]
-            .map(|d| d.reversed().values())
-            .concat();
-
-        Claim::new(Update.hash()).with_input(public_input)
-    }
-}
-
-#[derive(Debug, Clone, BFieldCodec, TasmObject)]
-pub(crate) struct WitnessOfMerge {
-    proof: Proof,
-    new_kernel_mast_hash: Digest,
-}
-
-impl WitnessOfMerge {
-    /// [`Claim`] that two transactions were merged.
-    pub(crate) fn claim_of_merge(&self) -> Claim {
-        let own_program_digest = SingleProof.hash();
-        let public_input = [self.new_kernel_mast_hash, own_program_digest]
-            .map(|d| d.reversed().values())
-            .concat();
-
-        Claim::new(Merge.hash()).with_input(public_input)
-    }
-}
-
 #[derive(Debug, Clone, BFieldCodec)]
 pub(crate) enum SingleProofWitness {
     Collection(Box<ProofCollection>),
-    Update(WitnessOfUpdate),
-    Merger(WitnessOfMerge),
+    Update(UpdateWitness),
+    Merger(MergeWitness),
     // Wait for Hard Fork One:
     // IntegralMempool(IntegralMempoolMembershipWitness)
 }
@@ -88,18 +57,12 @@ impl SingleProofWitness {
         Self::Collection(Box::new(proof_collection))
     }
 
-    pub fn from_update(update_proof: Proof, new_kernel: &TransactionKernel) -> Self {
-        Self::Update(WitnessOfUpdate {
-            proof: update_proof,
-            new_kernel_mast_hash: new_kernel.mast_hash(),
-        })
+    pub fn from_update(witness: UpdateWitness) -> Self {
+        Self::Update(witness)
     }
 
-    pub(crate) fn from_merge(merge_proof: Proof, new_kernel: &TransactionKernel) -> Self {
-        Self::Merger(WitnessOfMerge {
-            proof: merge_proof,
-            new_kernel_mast_hash: new_kernel.mast_hash(),
-        })
+    pub(crate) fn from_merge(merge_witness: MergeWitness) -> Self {
+        Self::Merger(merge_witness)
     }
 }
 
@@ -132,10 +95,6 @@ impl TasmObject for SingleProofWitness {
     fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
         iterator: &mut Itr,
     ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
-        const COLLECTION_DISCRIMINANT: u64 = 0;
-        const UPDATE_DISCRIMINANT: u64 = 1;
-        const MERGE_DISCRIMINANT: u64 = 2;
-
         let discriminant = iterator
             .next()
             .ok_or(Box::new(BFieldCodecError::EmptySequence))?;
@@ -148,11 +107,15 @@ impl TasmObject for SingleProofWitness {
         let field_data = iterator.take(field_size).collect_vec();
 
         match discriminant.value() {
-            COLLECTION_DISCRIMINANT => Ok(Box::new(Self::Collection(Box::new(
+            DISCRIMINANT_FOR_PROOF_COLLECTION => Ok(Box::new(Self::Collection(Box::new(
                 *BFieldCodec::decode(&field_data)?,
             )))),
-            UPDATE_DISCRIMINANT => Ok(Box::new(Self::Update(*BFieldCodec::decode(&field_data)?))),
-            MERGE_DISCRIMINANT => Ok(Box::new(Self::Merger(*BFieldCodec::decode(&field_data)?))),
+            DISCRIMINANT_FOR_UPDATE => {
+                Ok(Box::new(Self::Update(*BFieldCodec::decode(&field_data)?)))
+            }
+            DISCRIMINANT_FOR_MERGE => {
+                Ok(Box::new(Self::Merger(*BFieldCodec::decode(&field_data)?)))
+            }
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
     }
@@ -163,7 +126,7 @@ impl SecretWitness for SingleProofWitness {
         let kernel_mast_hash = match self {
             Self::Collection(pc) => pc.kernel_mast_hash,
             Self::Update(witness) => witness.new_kernel_mast_hash,
-            SingleProofWitness::Merger(witness) => witness.new_kernel_mast_hash,
+            Self::Merger(witness) => witness.new_kernel.mast_hash(),
         };
         kernel_mast_hash.reversed().values().into()
     }
@@ -244,19 +207,11 @@ impl SecretWitness for SingleProofWitness {
                     stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
                 }
             }
-            SingleProofWitness::Update(witness_of_update) => {
-                stark_verify_snippet.update_nondeterminism(
-                    &mut nondeterminism,
-                    &witness_of_update.proof,
-                    &witness_of_update.claim_of_update(),
-                );
+            SingleProofWitness::Update(witness) => {
+                witness.populate_nd_digests(&mut nondeterminism);
             }
             SingleProofWitness::Merger(witness_of_merge) => {
-                stark_verify_snippet.update_nondeterminism(
-                    &mut nondeterminism,
-                    &witness_of_merge.proof,
-                    &witness_of_merge.claim_of_merge(),
-                );
+                witness_of_merge.populate_nd_streams(&mut nondeterminism);
             }
         }
 
@@ -309,10 +264,6 @@ impl ConsensusProgram for SingleProof {
         let stark: Stark = Stark::default();
         let own_program_digest: Digest = tasmlib::own_program_digest();
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let input_for_claims_about_update_or_merge: Vec<BFieldElement> =
-            [txk_digest, own_program_digest]
-                .map(|d| d.reversed().values())
-                .concat();
 
         match tasmlib::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS) {
             SingleProofWitness::Collection(pc) => {
@@ -355,33 +306,23 @@ impl ConsensusProgram for SingleProof {
                     i += 1;
                 }
             }
-            SingleProofWitness::Update(witness_of_update) => {
-                debug_assert_eq!(txk_digest, witness_of_update.new_kernel_mast_hash);
-                let claim_of_update: Claim =
-                    Claim::new(Update.hash()).with_input(input_for_claims_about_update_or_merge);
-                tasmlib::verify_stark(stark, &claim_of_update, &witness_of_update.proof);
+            SingleProofWitness::Update(witness) => {
+                debug_assert_eq!(txk_digest, witness.new_kernel_mast_hash);
+                witness.branch_source(own_program_digest, txk_digest);
             }
-            SingleProofWitness::Merger(witness_of_merge) => {
-                debug_assert_eq!(txk_digest, witness_of_merge.new_kernel_mast_hash);
-                let claim_of_merge: Claim =
-                    Claim::new(Merge.hash()).with_input(input_for_claims_about_update_or_merge);
-                tasmlib::verify_stark(stark, &claim_of_merge, &witness_of_merge.proof);
+            SingleProofWitness::Merger(witness) => {
+                witness.branch_source(own_program_digest, txk_digest)
             }
         }
     }
 
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
-        const DISCRIMINANT_FOR_PROOF_COLLECTION: isize = 0;
-        const DISCRIMINANT_FOR_UPDATE: isize = 1;
-        const DISCRIMINANT_FOR_MERGE: isize = 2;
-
         let mut library = Library::new();
 
         // imports
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
-        let new_claim = library.import(Box::new(NewClaim));
         let assemble_rri_claim = library.import(Box::new(GenerateRriClaim));
         let assemble_k2o_claim = library.import(Box::new(GenerateK2oClaim));
         let assemble_cls_claim = library.import(Box::new(GenerateCollectLockScriptsClaim));
@@ -402,12 +343,11 @@ impl ConsensusProgram for SingleProof {
         let proof_collection_field_lock_scripts_halt = field!(ProofCollection::lock_scripts_halt);
         let proof_collection_field_type_scripts_halt = field!(ProofCollection::type_scripts_halt);
 
+        let update_branch = library.import(Box::new(UpdateBranch));
+        let merge_branch = library.import(Box::new(MergeBranch));
+
         let audit_witness_of_proof_collection =
             library.import(Box::new(VerifyNdSiIntegrity::<ProofCollection>::default()));
-        let audit_witness_of_update =
-            library.import(Box::new(VerifyNdSiIntegrity::<WitnessOfUpdate>::default()));
-        let audit_witness_of_merge =
-            library.import(Box::new(VerifyNdSiIntegrity::<WitnessOfMerge>::default()));
 
         let claim_field_with_size_output = triton_asm!(read_mem 1 addi 1 place 1 addi -1);
 
@@ -653,107 +593,8 @@ impl ConsensusProgram for SingleProof {
                 call {verify_scripts_loop_label}
 
                 pop 5 pop 4
-                addi {-DISCRIMINANT_FOR_PROOF_COLLECTION - 1}
+                addi {-(DISCRIMINANT_FOR_PROOF_COLLECTION as isize) - 1}
                 // [txk_digest] *spw -1
-
-                return
-        };
-
-        let construct_claim_about_program_digest = |Digest([d0, d1, d2, d3, d4])| {
-            triton_asm! {
-                // BEFORE: _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
-                // AFTER:  _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim
-
-                /* construct Claim */
-                push {Digest::LEN * 2}      hint claim_input_len = stack[0]
-                push 0                      hint claim_output_len = stack[0]
-                call {new_claim}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input *program_digest
-
-                /* populate Claim's program digest */
-                push {d4} push {d3} push {d2} push {d1} push {d0}
-                pick 5
-                write_mem 5
-                pop 1
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input
-
-                /* populate Claim's input */
-                dup 5
-                dup 7
-                dup 9
-                dup 11
-                dup 13
-                pick 5
-                write_mem {Digest::LEN}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output *input'
-
-                dup 14 dup 14 dup 14 dup 14 dup 14
-                pick 1 pick 2 pick 3 pick 4         // reverse digest
-                pick 5 write_mem {Digest::LEN}
-                pop 1
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *output
-
-                pop 1
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim
-            }
-        };
-
-        let update_case_label = "neptune_transaction_single_proof_case_update";
-        let update_case_body = triton_asm! {
-            // BEFORE: _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
-            // AFTER:  _ [own_digest; 5] [txk_digest] *single_proof_witness -1
-            {update_case_label}:
-                {&construct_claim_about_program_digest(Update.hash())}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim
-
-                dup 2
-                addi 2                      hint witness_of_update = stack[0]
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update
-
-                dup 0
-                call {audit_witness_of_update}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update size
-
-                pop 1
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_update
-
-                {&field!(WitnessOfUpdate::proof)}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *proof_of_update
-
-                call {stark_verify}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
-
-                addi {-DISCRIMINANT_FOR_UPDATE - 1}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness -1
-
-                return
-        };
-
-        let merge_case_label = "neptune_transaction_single_proof_case_merge";
-        let merge_case_body = triton_asm! {
-            {merge_case_label}:
-                {&construct_claim_about_program_digest(Merge.hash())}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim
-
-                dup 2
-                addi 2                      hint witness_of_merge = stack[0]
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge
-
-                dup 0
-                call {audit_witness_of_merge}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge size
-
-                pop 1
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *witness_of_merge
-
-                {&field!(WitnessOfMerge::proof)}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant *claim *proof_of_merge
-
-                call {stark_verify}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
-
-                addi {-DISCRIMINANT_FOR_MERGE - 1}
-                // _ [own_digest; 5] [txk_digest] *single_proof_witness -1
 
                 return
         };
@@ -786,31 +627,31 @@ impl ConsensusProgram for SingleProof {
             // _
 
             dup 15 dup 15 dup 15 dup 15 dup 15
-            // _ [own_digest; 5]
+            // _ [own_digest]
 
             read_io 5
-            // _ [own_digest; 5] [txk_digest]
+            // _ [own_digest] [txk_digest]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // _ [own_digest; 5] [txk_digest] *single_proof_witness
+            // _ [own_digest] [txk_digest] *single_proof_witness
 
             read_mem 1 addi 1 swap 1
-            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            // _ [own_digest] [txk_digest] *single_proof_witness discriminant
 
             {&verify_discriminant_has_legal_value}
-            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            // _ [own_digest] [txk_digest] *single_proof_witness discriminant
 
             /* match discriminant */
             dup 0 push {DISCRIMINANT_FOR_PROOF_COLLECTION} eq
             skiz call {proof_collection_case_label}
 
             dup 0 push {DISCRIMINANT_FOR_UPDATE} eq
-            skiz call {update_case_label}
+            skiz call {update_branch}
 
             dup 0 push {DISCRIMINANT_FOR_MERGE} eq
-            skiz call {merge_case_label}
+            skiz call {merge_branch}
 
-            // _ [own_digest; 5] [txk_digest] *single_proof_witness discriminant
+            // _ [own_digest] [txk_digest] *single_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
             push -1
@@ -826,8 +667,6 @@ impl ConsensusProgram for SingleProof {
         let code = triton_asm! {
             {&main}
             {&proof_collection_case_body}
-            {&update_case_body}
-            {&merge_case_body}
             {&verify_scripts_loop_body}
             {&library.all_imports()}
         };
@@ -855,16 +694,25 @@ mod test {
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::merge::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
-    use crate::models::blockchain::transaction::validity::update::test::deterministic_update_witness_only_additions;
-    use crate::models::blockchain::transaction::validity::update::Update;
+    use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness;
+    use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+
+    impl SingleProofWitness {
+        pub(crate) fn into_update(self) -> UpdateWitness {
+            let SingleProofWitness::Update(witness) = self else {
+                panic!("Expected update witness.");
+            };
+
+            witness
+        }
+    }
 
     #[tokio::test]
     async fn invalid_discriminant_crashes_execution() {
@@ -977,72 +825,255 @@ mod test {
         assert_eq!(rust_result, tasm_result);
     }
 
-    #[tokio::test]
-    async fn can_verify_via_valid_update() {
-        let witness_for_update = deterministic_update_witness_only_additions(2, 2, 2).await;
+    mod merge_tests {
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness_with_coinbase;
 
-        let claim_for_update = witness_for_update.claim();
-        let nondeterminism_for_update = witness_for_update.nondeterminism();
-        let proof = Update
-            .prove(
-                claim_for_update.clone(),
-                nondeterminism_for_update,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
-        Stark::default().verify(&claim_for_update, &proof).unwrap();
+        use super::*;
 
-        let witness_of_update = WitnessOfUpdate {
-            proof,
-            new_kernel_mast_hash: witness_for_update.new_kernel_mast_hash(),
-        };
-        assert_eq!(
-            witness_for_update.claim(),
-            witness_of_update.claim_of_update()
-        );
+        #[tokio::test]
+        async fn can_verify_transaction_merger_without_coinbase() {
+            let merge_witness = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
+            let merge_witness = SingleProofWitness::Merger(merge_witness);
 
-        let single_proof_witness = SingleProofWitness::Update(witness_of_update);
-        let single_proof_claim = single_proof_witness.claim();
-        let nondeterminism = single_proof_witness.nondeterminism();
+            let claim = merge_witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, merge_witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, merge_witness.nondeterminism());
 
-        let public_input = single_proof_claim.input.into();
-        let rust_result = SingleProof.run_rust(&public_input, nondeterminism.clone());
-        let tasm_result = SingleProof.run_tasm(&public_input, nondeterminism);
-        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
+
+        #[tokio::test]
+        async fn can_verify_transaction_merger_with_coinbase() {
+            let merge_witness = deterministic_merge_witness_with_coinbase(3, 3, 3).await;
+            let merge_witness = SingleProofWitness::Merger(merge_witness);
+
+            let claim = merge_witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, merge_witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, merge_witness.nondeterminism());
+
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
     }
 
-    #[tokio::test]
-    async fn can_verify_via_valid_merge() {
-        let witness_for_merge = deterministic_merge_witness((2, 2, 2), (2, 2, 2)).await;
+    mod update_tests {
+        use rand::random;
+        use rand::rngs::StdRng;
+        use rand::Rng;
+        use rand::SeedableRng;
+        use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+        use twenty_first::prelude::Mmr;
 
-        let claim_for_merge = witness_for_merge.claim();
-        let nondeterminism_for_witness = witness_for_merge.nondeterminism();
-        let proof = Merge
-            .prove(
-                claim_for_merge.clone(),
-                nondeterminism_for_witness,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
+        use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR;
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::INPUT_SETS_NOT_EQUAL_ERROR;
+        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
+        use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
+        use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
+
+        use super::*;
+
+        fn positive_prop(witness: UpdateWitness) {
+            let witness = SingleProofWitness::from_update(witness);
+            let claim = witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = witness.nondeterminism();
+
+            let rust_result = SingleProof.run_rust(&input, nondeterminism.clone());
+
+            let tasm_result = SingleProof.run_tasm(&input, nondeterminism);
+
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
+
+        #[tokio::test]
+        async fn only_additions_small() {
+            positive_prop(deterministic_update_witness_only_additions(2, 2, 2).await);
+        }
+
+        #[tokio::test]
+        async fn only_additions_medium() {
+            positive_prop(deterministic_update_witness_only_additions(4, 4, 4).await);
+        }
+
+        #[tokio::test]
+        async fn addition_and_removals_tiny() {
+            positive_prop(deterministic_update_witness_additions_and_removals(1, 1, 1).await);
+        }
+
+        #[tokio::test]
+        async fn addition_and_removals_small() {
+            positive_prop(deterministic_update_witness_additions_and_removals(2, 2, 2).await);
+        }
+
+        #[tokio::test]
+        async fn addition_and_removals_midi() {
+            positive_prop(deterministic_update_witness_additions_and_removals(3, 3, 3).await);
+        }
+
+        #[tokio::test]
+        async fn addition_and_removals_medium() {
+            positive_prop(deterministic_update_witness_additions_and_removals(4, 4, 4).await);
+        }
+
+        fn new_timestamp_older_than_old(good_witness: &UpdateWitness) {
+            let mut bad_witness = good_witness.to_owned();
+
+            bad_witness.new_kernel = TransactionKernelModifier::default()
+                .timestamp(bad_witness.old_kernel.timestamp - Timestamp::hours(1))
+                .modify(bad_witness.new_kernel);
+            bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+
+            let bad_witness = SingleProofWitness::from_update(bad_witness);
+            let claim = bad_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = bad_witness.nondeterminism();
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+            );
+        }
+
+        fn bad_new_aocl(good_witness: &UpdateWitness) {
+            let good_witness = SingleProofWitness::from_update(good_witness.to_owned());
+            let claim = good_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let mut nondeterminism = good_witness.nondeterminism();
+
+            let witness_again: SingleProofWitness = *SingleProofWitness::decode_from_memory(
+                &nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             )
-            .await
             .unwrap();
-        Stark::default().verify(&claim_for_merge, &proof).unwrap();
+            let mut witness_again = witness_again.into_update();
+            witness_again.new_aocl.append(random());
+            let witness_again = SingleProofWitness::from_update(witness_again);
+            encode_to_memory(
+                &mut nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &witness_again,
+            );
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+            );
+        }
 
-        let witness_of_merge = WitnessOfMerge {
-            proof,
-            new_kernel_mast_hash: witness_for_merge.new_kernel_mast_hash(),
-        };
-        assert_eq!(witness_for_merge.claim(), witness_of_merge.claim_of_merge());
+        fn bad_old_aocl(good_witness: &UpdateWitness) {
+            let good_witness = SingleProofWitness::from_update(good_witness.to_owned());
+            let claim = good_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let mut nondeterminism = good_witness.nondeterminism();
 
-        let single_proof_witness = SingleProofWitness::Merger(witness_of_merge);
-        let single_proof_claim = single_proof_witness.claim();
-        let nondeterminism = single_proof_witness.nondeterminism();
+            let witness_again: SingleProofWitness = *SingleProofWitness::decode_from_memory(
+                &nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            )
+            .unwrap();
+            let mut witness_again = witness_again.into_update();
+            witness_again.old_aocl.append(random());
+            let witness_again = SingleProofWitness::from_update(witness_again);
+            encode_to_memory(
+                &mut nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &witness_again,
+            );
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+            );
+        }
 
-        let public_input = single_proof_claim.input.into();
-        let rust_result = SingleProof.run_rust(&public_input, nondeterminism.clone());
-        let tasm_result = SingleProof.run_tasm(&public_input, nondeterminism);
-        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
+            let mut bad_witness = good_witness.clone();
+
+            let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+            new_inputs[0]
+                .absolute_indices
+                .decrement_bloom_filter_index(10);
+
+            bad_witness.new_kernel = TransactionKernelModifier::default()
+                .inputs(new_inputs)
+                .modify(bad_witness.new_kernel);
+            bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+
+            let bad_witness = SingleProofWitness::from_update(bad_witness);
+            let claim = bad_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = bad_witness.nondeterminism();
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[INPUT_SETS_NOT_EQUAL_ERROR],
+            );
+        }
+
+        fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
+            let mut bad_witness = good_witness.clone();
+
+            let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+            new_inputs.remove(0);
+            bad_witness.new_kernel = TransactionKernelModifier::default()
+                .inputs(new_inputs)
+                .modify(bad_witness.new_kernel);
+            bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+
+            let bad_witness = SingleProofWitness::from_update(bad_witness);
+            let claim = bad_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = bad_witness.nondeterminism();
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[INPUT_SETS_NOT_EQUAL_ERROR],
+            );
+        }
+
+        fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
+            let mut rng = StdRng::seed_from_u64(0);
+            let mut bad_witness = good_witness.clone();
+
+            let mut new_inputs = bad_witness.new_kernel.inputs.clone();
+            new_inputs.push(pseudorandom_removal_record(rng.gen()));
+
+            bad_witness.new_kernel = TransactionKernelModifier::default()
+                .inputs(new_inputs)
+                .modify(bad_witness.new_kernel);
+            bad_witness.new_kernel_mast_hash = bad_witness.new_kernel.mast_hash();
+
+            let bad_witness = SingleProofWitness::from_update(bad_witness);
+            let claim = bad_witness.claim();
+            let input = PublicInput::new(claim.input.clone());
+            let nondeterminism = bad_witness.nondeterminism();
+            consensus_program_negative_test(
+                SingleProof,
+                &input,
+                nondeterminism,
+                &[INPUT_SETS_NOT_EQUAL_ERROR],
+            );
+        }
+
+        #[tokio::test]
+        async fn update_witness_negative_tests() {
+            // It takes a long time to generate the witness, so we reuse it across
+            // multiple tests
+            let good_witness = deterministic_update_witness_only_additions(2, 2, 2).await;
+            positive_prop(good_witness.clone());
+            new_timestamp_older_than_old(&good_witness);
+            bad_new_aocl(&good_witness);
+            bad_old_aocl(&good_witness);
+            bad_absolute_index_set_value(&good_witness);
+            bad_absolute_index_set_length_too_short(&good_witness);
+            bad_absolute_index_set_length_too_long(&good_witness);
+        }
     }
 }

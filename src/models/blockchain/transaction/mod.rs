@@ -36,13 +36,11 @@ use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use utxo::Utxo;
-use validity::merge::Merge;
-use validity::merge::MergeWitness;
 use validity::proof_collection::ProofCollection;
 use validity::single_proof::SingleProof;
 use validity::single_proof::SingleProofWitness;
-use validity::update::Update;
-use validity::update::UpdateWitness;
+use validity::tasm::single_proof::merge_branch::MergeWitness;
+use validity::tasm::single_proof::update_branch::UpdateWitness;
 
 use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
@@ -242,20 +240,20 @@ impl Transaction {
             calculated_new_mutator_set,
             aocl_successor_proof,
         );
-        let update_claim = update_witness.claim();
-        let update_nondeterminism = update_witness.nondeterminism();
-        info!("updating transaction; starting update proof ...");
-        let update_proof = Update
-            .prove(
-                update_claim,
-                update_nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
-            .await?;
-        info!("done.");
+        // let update_claim = update_witness.claim();
+        // let update_nondeterminism = update_witness.nondeterminism();
+        // info!("updating transaction; starting update proof ...");
+        // let update_proof = Update
+        //     .prove(
+        //         update_claim,
+        //         update_nondeterminism,
+        //         triton_vm_job_queue,
+        //         proof_job_options,
+        //     )
+        //     .await?;
+        // info!("done.");
 
-        let new_single_proof_witness = SingleProofWitness::from_update(update_proof, &new_kernel);
+        let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
         let new_single_proof_claim = new_single_proof_witness.claim();
 
         info!("starting single proof via update ...");
@@ -319,21 +317,10 @@ impl Transaction {
             other_single_proof,
             shuffle_seed,
         );
-        info!("Start: creating merge proof");
-        let merge_claim = merge_witness.claim();
-        let merge_proof = Merge
-            .prove(
-                merge_claim,
-                merge_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
-            .await?;
-        info!("Done: creating merge proof");
-        let new_single_proof_witness =
-            SingleProofWitness::from_merge(merge_proof, &merge_witness.new_kernel);
+        let new_kernel = merge_witness.new_kernel.clone();
+        let new_single_proof_witness = SingleProofWitness::from_merge(merge_witness);
         let new_single_proof_claim = new_single_proof_witness.claim();
-        info!("Start: creating new single proof");
+        info!("Start: creating new single proof through merge");
         let new_single_proof = SingleProof
             .prove(
                 new_single_proof_claim,
@@ -342,10 +329,10 @@ impl Transaction {
                 proof_job_options,
             )
             .await?;
-        info!("Done: creating new single proof");
+        info!("Done: creating new single proof through merge");
 
         Ok(Transaction {
-            kernel: merge_witness.new_kernel,
+            kernel: new_kernel,
             proof: TransactionProof::SingleProof(new_single_proof),
         })
     }

@@ -24,12 +24,10 @@ mod tests {
             transaction::validity::collect_lock_scripts::CollectLockScripts,
             transaction::validity::collect_type_scripts::CollectTypeScripts,
             transaction::validity::kernel_to_outputs::KernelToOutputs,
-            transaction::validity::merge::Merge,
             type_scripts::native_currency::NativeCurrency,
             transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
             transaction::validity::single_proof::SingleProof,
             type_scripts::time_lock::TimeLock,
-            transaction::validity::update::Update,
             // todo: what about those?
             // block_validity::coinbase_is_valid::CoinbaseIsValid,
             // block_validity::correct_control_parameter_update::CorrectControlParameterUpdate,
