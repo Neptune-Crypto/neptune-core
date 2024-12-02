@@ -1,11 +1,15 @@
 use std::sync::OnceLock;
 
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::prelude::MerkleTree;
+use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -85,7 +89,7 @@ pub struct BlockBody {
     #[serde(skip)]
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
-    mast_hash: OnceLock<Digest>,
+    merkle_tree: OnceLock<MerkleTree>,
 }
 
 impl PartialEq for BlockBody {
@@ -107,7 +111,7 @@ impl BlockBody {
             mutator_set_accumulator,
             lock_free_mmr_accumulator,
             block_mmr_accumulator,
-            mast_hash: OnceLock::default(), // calc'd in mast_hash()
+            merkle_tree: OnceLock::default(), // calc'd in merkle_tree()
         }
     }
 }
@@ -124,8 +128,23 @@ impl MastHash for BlockBody {
         ]
     }
 
-    fn mast_hash(&self) -> Digest {
-        *self.mast_hash.get_or_init(|| self.merkle_tree().root())
+    fn merkle_tree(&self) -> MerkleTree {
+        self.merkle_tree
+            .get_or_init(|| {
+                let mut digests = self
+                    .mast_sequences()
+                    .into_iter()
+                    .map(|seq| crate::models::blockchain::shared::Hash::hash_varlen(&seq))
+                    .collect_vec();
+
+                // pad until length is a power of two
+                while digests.len() & (digests.len() - 1) != 0 {
+                    digests.push(Digest::default());
+                }
+
+                twenty_first::prelude::CpuParallel::from_digests(&digests).unwrap()
+            })
+            .clone()
     }
 }
 
@@ -160,7 +179,7 @@ mod test {
                             mutator_set_accumulator: mutator_set_accumulator.clone(),
                             lock_free_mmr_accumulator,
                             block_mmr_accumulator,
-                            mast_hash: OnceLock::default(),
+                            merkle_tree: OnceLock::default(),
                         }
                     },
                 )
