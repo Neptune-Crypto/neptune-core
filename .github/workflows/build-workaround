@@ -9,4 +9,5 @@
 - name: Update RUSTFLAGS with --cfg tokio_unstable (Windows)
   if: runner.os == 'Windows'
   shell: pwsh
-  run: echo "RUSTFLAGS=`$Env:RUSTFLAGS --cfg tokio_unstable" >> $Env:GITHUB_ENV
+  run: echo "RUSTFLAGS=$Env:RUSTFLAGS --cfg tokio_unstable" >> $Env:GITHUB_ENV
+
