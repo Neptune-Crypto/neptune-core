@@ -180,6 +180,6 @@ git push --force-with-lease
 ### Check Release Artifacts & Page
 
 Pushing the git tag(s) triggers CI once more.
-After [has done its job](https://github.com/Neptune-Crypto/neptune-core/actions), check the [release page](https://github.com/Neptune-Crypto/neptune-core/releases) if everything looks okay.
+After [CI has done its job](https://github.com/Neptune-Crypto/neptune-core/actions), check the [release page](https://github.com/Neptune-Crypto/neptune-core/releases) to see if everything looks okay.
 
 > 🎉 Congrats on the new release!

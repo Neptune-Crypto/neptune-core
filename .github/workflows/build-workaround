@@ -2,5 +2,12 @@
 # https://github.com/axodotdev/cargo-dist/issues/1571
 # using
 # https://opensource.axo.dev/cargo-dist/book/ci/customizing.html#customizing-build-setup
-- name: Update RUSTFLAGS with --cfg tokio_unstable
+- name: Update RUSTFLAGS with --cfg tokio_unstable (Linux/MacOS)
+  if: runner.os != 'Windows'
   run: echo RUSTFLAGS="$RUSTFLAGS --cfg tokio_unstable" >> "$GITHUB_ENV"
+
+- name: Update RUSTFLAGS with --cfg tokio_unstable (Windows)
+  if: runner.os == 'Windows'
+  shell: pwsh
+  run: echo "RUSTFLAGS=$Env:RUSTFLAGS --cfg tokio_unstable" >> $Env:GITHUB_ENV
+
