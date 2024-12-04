@@ -1470,7 +1470,6 @@ mod rpc_server_tests {
     use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
-    use ReceivingAddress;
 
     use super::*;
     use crate::config_models::cli_args;
@@ -1478,7 +1477,6 @@ mod rpc_server_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
-    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -2141,150 +2139,6 @@ mod rpc_server_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn send_to_many_test() -> Result<()> {
-        // --- Init.  Basics ---
-        let mut rng = StdRng::seed_from_u64(1814);
-        let network = Network::Main;
-        let mut rpc_server = test_rpc_server(
-            network,
-            WalletSecret::new_pseudorandom(rng.gen()),
-            2,
-            cli_args::Args::default(),
-        )
-        .await;
-        let ctx = context::current();
-
-        // --- Init.  get wallet spending key ---
-        let genesis_block = Block::genesis_block(network);
-        let wallet_spending_key = rpc_server
-            .state
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .next_unused_spending_key(KeyType::Generation)
-            .await;
-
-        // --- Init.  generate a block, with coinbase going to our wallet ---
-        let timestamp = network.launch_date() + Timestamp::days(1);
-        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
-            &genesis_block,
-            Some(timestamp),
-            wallet_spending_key.to_address().try_into()?,
-            rng.gen(),
-        );
-
-        {
-            let state_lock = rpc_server.state.lock_guard().await;
-            let original_balance = state_lock
-                .wallet_state
-                .confirmed_balance(genesis_block.hash(), timestamp)
-                .await;
-            assert!(original_balance.is_zero(), "Original balance assumed zero");
-        };
-
-        // --- Init.  append the block to blockchain ---
-        rpc_server
-            .state
-            .set_new_self_mined_tip(
-                block_1.clone(),
-                vec![ExpectedUtxo::new(
-                    cb_utxo,
-                    cb_output_randomness,
-                    wallet_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )],
-            )
-            .await?;
-
-        {
-            let state_lock = rpc_server.state.lock_guard().await;
-            let new_balance = state_lock
-                .wallet_state
-                .confirmed_balance(block_1.hash(), timestamp)
-                .await;
-            assert_eq!(
-                Block::block_subsidy(block_1.header().height),
-                new_balance,
-                "New balance must be exactly 1 mining reward"
-            );
-        };
-
-        // --- Setup. generate an output that our wallet cannot claim. ---
-        let output1 = (
-            ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
-            NeptuneCoins::new(5),
-        );
-
-        // --- Setup. generate an output that our wallet can claim. ---
-        let output2 = {
-            let spending_key = rpc_server
-                .state
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .next_unused_spending_key(KeyType::Generation)
-                .await;
-            (spending_key.to_address(), NeptuneCoins::new(25))
-        };
-
-        // --- Setup. assemble outputs and fee ---
-        let outputs = vec![output1, output2];
-        let fee = NeptuneCoins::new(1);
-
-        // --- Store: store num expected utxo before spend ---
-        let num_expected_utxo = rpc_server
-            .state
-            .lock_guard()
-            .await
-            .wallet_state
-            .wallet_db
-            .expected_utxos()
-            .len()
-            .await;
-
-        // --- Operation: perform send_to_many
-        // It's important to call a method where you get to inject the
-        // timestamp. Otherwise, proofs cannot be reused, and CI will
-        // fail. CI might also fail if you don't set an explicit proving
-        // capability.
-        let result = rpc_server
-            .clone()
-            .send_to_many_inner(
-                ctx,
-                outputs,
-                (
-                    UtxoNotificationMedium::OffChain,
-                    UtxoNotificationMedium::OffChain,
-                ),
-                fee,
-                timestamp,
-                TxProvingCapability::ProofCollection,
-            )
-            .await;
-
-        // --- Test: verify op returns a value.
-        assert!(result.is_ok());
-
-        // --- Test: verify expected_utxos.len() has increased by 2.
-        //           (one off-chain utxo + one change utxo)
-        assert_eq!(
-            rpc_server
-                .state
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .expected_utxos()
-                .len()
-                .await,
-            num_expected_utxo + 2
-        );
-
-        Ok(())
-    }
-
-    #[traced_test]
-    #[tokio::test]
     async fn cannot_initiate_transaction_if_notx_flag_is_set() {
         let network = Network::Main;
         let ctx = context::current();
@@ -2682,6 +2536,200 @@ mod rpc_server_tests {
                         bob_rpc_server.synced_balance(context::current()).await,
                     );
                 }
+                Ok(())
+            }
+        }
+    }
+
+    mod send_tests {
+        use super::*;
+
+        /// sends a tx with two outputs: one self, one external, for each key type.
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn send_to_many() -> Result<()> {
+            for key_type in KeyType::all_types() {
+                worker::send_to_many(key_type).await?;
+            }
+            Ok(())
+        }
+
+        mod worker {
+            use super::*;
+            use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+            use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
+
+            // sends a tx with two outputs: one self, one external.
+            //
+            // input: recipient_key_type: can be symmetric or generation.
+            //
+            // Steps:
+            // --- Init.  Basics ---
+            // --- Init.  get wallet spending key ---
+            // --- Init.  generate a block, with coinbase going to our wallet ---
+            // --- Init.  append the block to blockchain ---
+            // --- Setup. generate an output that our wallet cannot claim. ---
+            // --- Setup. generate an output that our wallet can claim. ---
+            // --- Setup. assemble outputs and fee ---
+            // --- Store: store num expected utxo before spend ---
+            // --- Operation: perform send_to_many
+            // --- Test: bech32m serialize/deserialize roundtrip.
+            // --- Test: verify op returns a value.
+            // --- Test: verify expected_utxos.len() has increased by 2.
+            pub(super) async fn send_to_many(recipient_key_type: KeyType) -> Result<()> {
+                info!("recipient_key_type: {}", recipient_key_type);
+
+                // --- Init.  Basics ---
+                let mut rng = StdRng::seed_from_u64(1814);
+                let network = Network::Main;
+                let mut rpc_server = test_rpc_server(
+                    network,
+                    WalletSecret::new_pseudorandom(rng.gen()),
+                    2,
+                    cli_args::Args::default(),
+                )
+                .await;
+                let ctx = context::current();
+
+                // --- Init.  get wallet spending key ---
+                let genesis_block = Block::genesis_block(network);
+                let wallet_spending_key = rpc_server
+                    .state
+                    .lock_guard_mut()
+                    .await
+                    .wallet_state
+                    .next_unused_spending_key(KeyType::Generation)
+                    .await;
+
+                // --- Init.  generate a block, with coinbase going to our wallet ---
+                let timestamp = network.launch_date() + Timestamp::days(1);
+                let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
+                    &genesis_block,
+                    Some(timestamp),
+                    wallet_spending_key.to_address().try_into()?,
+                    rng.gen(),
+                );
+
+                {
+                    let state_lock = rpc_server.state.lock_guard().await;
+                    let original_balance = state_lock
+                        .wallet_state
+                        .confirmed_balance(genesis_block.hash(), timestamp)
+                        .await;
+                    assert!(original_balance.is_zero(), "Original balance assumed zero");
+                };
+
+                // --- Init.  append the block to blockchain ---
+                rpc_server
+                    .state
+                    .set_new_self_mined_tip(
+                        block_1.clone(),
+                        vec![ExpectedUtxo::new(
+                            cb_utxo,
+                            cb_output_randomness,
+                            wallet_spending_key.privacy_preimage(),
+                            UtxoNotifier::OwnMinerComposeBlock,
+                        )],
+                    )
+                    .await?;
+
+                {
+                    let state_lock = rpc_server.state.lock_guard().await;
+                    let new_balance = state_lock
+                        .wallet_state
+                        .confirmed_balance(block_1.hash(), timestamp)
+                        .await;
+                    assert_eq!(
+                        Block::block_subsidy(block_1.header().height),
+                        new_balance,
+                        "New balance must be exactly 1 mining reward"
+                    );
+                };
+
+                // --- Setup. generate an output that our wallet cannot claim. ---
+                let external_receiving_address: ReceivingAddress = match recipient_key_type {
+                    KeyType::Generation => {
+                        GenerationReceivingAddress::derive_from_seed(rng.gen()).into()
+                    }
+                    KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
+                };
+                let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
+
+                // --- Setup. generate an output that our wallet can claim. ---
+                let output2 = {
+                    let spending_key = rpc_server
+                        .state
+                        .lock_guard_mut()
+                        .await
+                        .wallet_state
+                        .next_unused_spending_key(recipient_key_type)
+                        .await;
+                    (spending_key.to_address(), NeptuneCoins::new(25))
+                };
+
+                // --- Setup. assemble outputs and fee ---
+                let outputs = vec![output1, output2];
+                let fee = NeptuneCoins::new(1);
+
+                // --- Store: store num expected utxo before spend ---
+                let num_expected_utxo = rpc_server
+                    .state
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .wallet_db
+                    .expected_utxos()
+                    .len()
+                    .await;
+
+                // --- Operation: perform send_to_many
+                // It's important to call a method where you get to inject the
+                // timestamp. Otherwise, proofs cannot be reused, and CI will
+                // fail. CI might also fail if you don't set an explicit proving
+                // capability.
+                let result = rpc_server
+                    .clone()
+                    .send_to_many_inner(
+                        ctx,
+                        outputs,
+                        (
+                            UtxoNotificationMedium::OffChain,
+                            UtxoNotificationMedium::OffChain,
+                        ),
+                        fee,
+                        timestamp,
+                        TxProvingCapability::ProofCollection,
+                    )
+                    .await;
+
+                // --- Test: bech32m serialize/deserialize roundtrip.
+                assert_eq!(
+                    external_receiving_address,
+                    ReceivingAddress::from_bech32m(
+                        &external_receiving_address.to_bech32m(network)?,
+                        network,
+                    )?
+                );
+
+                // --- Test: verify op returns a value.
+                assert!(result.is_ok());
+
+                // --- Test: verify expected_utxos.len() has increased by 2.
+                //           (one off-chain utxo + one change utxo)
+                assert_eq!(
+                    rpc_server
+                        .state
+                        .lock_guard()
+                        .await
+                        .wallet_state
+                        .wallet_db
+                        .expected_utxos()
+                        .len()
+                        .await,
+                    num_expected_utxo + 2
+                );
+
                 Ok(())
             }
         }
