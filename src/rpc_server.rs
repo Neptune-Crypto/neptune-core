@@ -242,6 +242,17 @@ pub trait RPC {
     /// Get CPU temperature.
     async fn cpu_temp() -> Option<f32>;
 
+    /******** BLOCKCHAIN STATISTICS ********/
+    // Place all endpoints that relate to statistics of the blockchain here
+
+    /// Return the block intervals of a range of blocks. Return value is the
+    /// number of milliseconds it took to mine the (canonical) block with the
+    /// specified height.
+    async fn block_intervals(
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    ) -> Option<Vec<(u64, u64)>>;
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -1360,6 +1371,45 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
+    async fn block_intervals(
+        self,
+        _context: tarpc::context::Context,
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    ) -> Option<Vec<(u64, u64)>> {
+        log_slow_scope!(fn_name!());
+
+        let state = self.state.lock_guard().await;
+        let last_block = last_block.as_digest(&state).await?;
+        let mut intervals = vec![];
+        let mut current = state
+            .chain
+            .archival_state()
+            .get_block_header(last_block)
+            .await
+            .expect("If digest can be found, block header should also be known");
+        let mut parent = state
+            .chain
+            .archival_state()
+            .get_block_header(current.prev_block_digest)
+            .await;
+        while parent.is_some() && max_num_blocks.is_none_or(|max_num| max_num > intervals.len()) {
+            let parent_ = parent.unwrap();
+            let interval = current.timestamp.to_millis() - parent_.timestamp.to_millis();
+            let block_height: u64 = current.height.into();
+            intervals.push((block_height, interval));
+            current = parent_;
+            parent = state
+                .chain
+                .archival_state()
+                .get_block_header(current.prev_block_digest)
+                .await;
+        }
+
+        Some(intervals)
+    }
+
+    // documented in trait. do not add doc-comment.
     async fn mempool_overview(
         self,
         _context: ::tarpc::context::Context,
@@ -1543,6 +1593,10 @@ mod rpc_server_tests {
         let _ = rpc_server
             .clone()
             .validate_address(ctx, "Not a valid address".to_owned(), Network::Testnet)
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_intervals(ctx, BlockSelector::Tip, None)
             .await;
         let _ = rpc_server.clone().mempool_overview(ctx, 0, 20).await;
         let _ = rpc_server.clone().clear_all_standings(ctx).await;

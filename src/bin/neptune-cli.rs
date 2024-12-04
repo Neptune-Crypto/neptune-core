@@ -16,6 +16,7 @@ use clap::Parser;
 use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
+use itertools::Itertools;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
@@ -212,6 +213,31 @@ enum Command {
     ListCoins,
     MempoolTxCount,
     MempoolSize,
+
+    /******** BLOCKCHAIN STATISTICS ********/
+    /// Show block intervals in milliseconds, in reverse chronological order.
+    BlockIntervals {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
+
+    /// Show mean block interval in milliseconds within the specified range.
+    MeanBlockInterval {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
+
+    /// Show biggest block interval in the specified range.
+    MaxBlockInterval {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
+
+    /// Show smallest block interval in the specified range.
+    MinBlockInterval {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
 
     /******** CHANGE STATE ********/
     Shutdown,
@@ -557,6 +583,100 @@ async fn main() -> Result<()> {
         Command::MempoolSize => {
             let size_in_bytes: usize = client.mempool_size(ctx).await?;
             println!("{} bytes", size_in_bytes);
+        }
+
+        /******** BLOCKCHAIN STATISTICS ********/
+        Command::BlockIntervals {
+            last_block,
+            max_num_blocks,
+        } => {
+            let data = client
+                .block_intervals(ctx, last_block, max_num_blocks)
+                .await?;
+            match data {
+                Some(intervals) => {
+                    println!(
+                        "{}",
+                        intervals
+                            .iter()
+                            .map(|(height, interval)| format!("{height}: {interval}"))
+                            .join("\n")
+                    )
+                }
+                None => println!("Not found"),
+            }
+        }
+
+        Command::MeanBlockInterval {
+            last_block,
+            max_num_blocks,
+        } => {
+            let intervals = client
+                .block_intervals(ctx, last_block, max_num_blocks)
+                .await?;
+            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
+                println!("Not found");
+                return Ok(());
+            }
+            let intervals = intervals.unwrap();
+
+            let num_samples: u64 = intervals.len().try_into().unwrap();
+            let mut acc = 0;
+            let mut acc_squared = 0;
+            for (_height, interval) in intervals {
+                acc += interval;
+                acc_squared += interval * interval;
+            }
+
+            let fst_moment = acc / num_samples;
+            let snd_moment = acc_squared / num_samples;
+            let std_dev = (snd_moment as f64).sqrt();
+
+            println!(
+                "Average block interval of specified range: {fst_moment}, std. dev: {std_dev}."
+            )
+        }
+
+        Command::MaxBlockInterval {
+            last_block,
+            max_num_blocks,
+        } => {
+            let intervals = client
+                .block_intervals(ctx, last_block, max_num_blocks)
+                .await?;
+            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
+                println!("Not found");
+                return Ok(());
+            }
+            let intervals = intervals.unwrap();
+
+            let (height, interval) = intervals
+                .iter()
+                .max_by_key(|(_height, interval)| interval)
+                .unwrap();
+
+            println!("Biggest block interval in specified range:\n{interval}ms at block height {height}.")
+        }
+
+        Command::MinBlockInterval {
+            last_block,
+            max_num_blocks,
+        } => {
+            let intervals = client
+                .block_intervals(ctx, last_block, max_num_blocks)
+                .await?;
+            if intervals.as_ref().is_none_or(|x| x.is_empty()) {
+                println!("Not found");
+                return Ok(());
+            }
+            let intervals = intervals.unwrap();
+
+            let (height, interval) = intervals
+                .iter()
+                .min_by_key(|(_height, interval)| interval)
+                .unwrap();
+
+            println!("Smallest block interval in specified range:\n{interval}ms at block height {height}.")
         }
 
         /******** CHANGE STATE ********/
