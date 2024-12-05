@@ -13,7 +13,9 @@ use bech32::ToBase32;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
+use zeroize::Zeroize;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
@@ -84,10 +86,34 @@ pub struct SymmetricKey {
     seed: Digest,
 }
 
+impl Zeroize for SymmetricKey {
+    fn zeroize(&mut self) {
+        self.seed = Default::default();
+    }
+}
+
 impl SymmetricKey {
     /// instantiate `SymmetricKey` from a random seed
+    ///
+    /// security:
+    ///
+    /// It is critical that the seed is generated in a random fashion or itself
+    /// derived from a randomly generated seed.  Failure to do so can result in
+    /// a loss of funds.
+    ///
+    /// perf:
+    ///
+    /// cheap. only copies the seed.
     pub fn from_seed(seed: Digest) -> Self {
         Self { seed }
+    }
+
+    /// derives a child-key at index
+    ///
+    /// note that index 0 is the first child.
+    pub fn derive_child(&self, index: common::DerivationIndex) -> Self {
+        let child_seed = Hash::hash_varlen(&[self.seed.encode(), index.encode()].concat());
+        Self::from_seed(child_seed)
     }
 
     /// returns the secret key
