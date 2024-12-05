@@ -14,6 +14,7 @@ use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::structure::tasm_object::DEFAULT_MAX_DYN_FIELD_SIZE;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -43,6 +44,9 @@ const BAD_SALTED_UTXOS_ERROR: i128 = 1_000_031;
 const NO_INFLATION_VIOLATION: i128 = 1_000_032;
 const BAD_STATE_SIZE_ERROR: i128 = 1_000_033;
 const COINBASE_TIMELOCK_INSUFFICIENT: i128 = 1_000_034;
+const UTXO_SIZE_TOO_LARGE_ERROR: i128 = 1_000_035;
+const TOO_BIG_COIN_FIELD_SIZE_ERROR: i128 = 1_000_036;
+const STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR: i128 = 1_000_037;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -661,7 +665,6 @@ impl ConsensusProgram for NativeCurrency {
                 hint coins_j_si = stack[8]
                 hint j = stack[9]
                 hint emm = stack[10]
-                break
 
                 push 0 push 0 push 0 push 0
                 push 0
@@ -679,7 +682,8 @@ impl ConsensusProgram for NativeCurrency {
                 pick 7 pick 7 pick 7 pick 7
                 // _ N i *utxos[i]_si M M *coins[M]_si [amount'] [timelocked_amount']
 
-                dup 12 push 1 add
+                // prepare next iteration
+                dup 12 addi 1
                 // _ N i *utxos[i]_si M M *coins[M]_si [amount'] [timelocked_amount'] (i+1)
 
                 swap 13 pop 1
@@ -687,6 +691,11 @@ impl ConsensusProgram for NativeCurrency {
 
                 dup 11 read_mem 1 push 2 add
                 // _ N (i+1) *utxos[i]_si M M *coins[M]_si [amount'] [timelocked_amount'] size(utxos[i]) *utxos[i]
+
+                push  {DEFAULT_MAX_DYN_FIELD_SIZE}
+                dup 2
+                lt
+                assert error_id {UTXO_SIZE_TOO_LARGE_ERROR}
 
                 add swap 12 pop 1
                 // _ N (i+1) *utxos[i+1]_si M M *coins[M]_si [amount'] [timelocked_amount']
@@ -776,6 +785,13 @@ impl ConsensusProgram for NativeCurrency {
                 dup 13 read_mem 1 push 2 add
                 // _ M (j+1) *coins[j]_si [amount] [timelocked_amount]  [utxo_amount] utxo_is_timelocked size(coins[j]) *coins[j]
 
+                /* Range-check on size */
+                push {DEFAULT_MAX_DYN_FIELD_SIZE}
+                dup 2
+                lt
+                assert error_id {TOO_BIG_COIN_FIELD_SIZE_ERROR}
+                // _ M (j+1) *coins[j]_si [amount] [timelocked_amount]  [utxo_amount] utxo_is_timelocked size(coins[j]) *coins[j]
+
                 add
                 // _ M (j+1) *coins[j]_si [amount] [timelocked_amount]  [utxo_amount] utxo_is_timelocked *coins[j+1]_si
 
@@ -801,7 +817,7 @@ impl ConsensusProgram for NativeCurrency {
                     // _ M j *coins[j]_si [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked state[0] state.len()
 
                     // time lock states must encode exactly one element
-                    assert
+                    assert error_id {STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR}
                     // _ M j *coins[j]_si [amount] [timelocked_amount] [utxo_amount'] utxo_is_timelocked utxo_release_date
 
                     split
