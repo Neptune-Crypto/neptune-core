@@ -24,10 +24,12 @@ use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use zeroize::Zeroize;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
@@ -62,6 +64,21 @@ pub struct GenerationReceivingAddress {
     pub spending_lock: Digest,
 }
 
+impl Zeroize for GenerationSpendingKey {
+    // unsafe: we use unsafe std::mem::zeroed() to zero the
+    // SecretKey because it does not impl Zeroize or Default and
+    // it is expensive to create a new random key.
+    //
+    // It should be updated to impl Zeroize in twenty-first crate
+    fn zeroize(&mut self) {
+        self.receiver_identifier = Default::default();
+        self.decryption_key = unsafe { std::mem::zeroed() };
+        self.privacy_preimage = Default::default();
+        self.unlock_key = Default::default();
+        self.seed = Default::default();
+    }
+}
+
 impl GenerationSpendingKey {
     pub fn to_address(&self) -> GenerationReceivingAddress {
         let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
@@ -79,7 +96,7 @@ impl GenerationSpendingKey {
         LockScriptAndWitness::hash_lock(self.unlock_key)
     }
 
-    pub fn derive_from_seed(seed: Digest) -> Self {
+    pub fn from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
@@ -108,6 +125,14 @@ impl GenerationSpendingKey {
         );
 
         spending_key
+    }
+
+    /// derives a child-key at index
+    ///
+    /// note that index 0 is the first child.
+    pub fn derive_child(&self, index: common::DerivationIndex) -> Self {
+        let child_seed = Hash::hash_varlen(&[self.seed.0.encode(), index.encode()].concat());
+        Self::from_seed(child_seed)
     }
 
     /// Decrypt a Generation Address ciphertext
@@ -162,7 +187,7 @@ impl GenerationReceivingAddress {
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
-        let spending_key = GenerationSpendingKey::derive_from_seed(seed);
+        let spending_key = GenerationSpendingKey::from_seed(seed);
         Self::from_spending_key(&spending_key)
     }
 

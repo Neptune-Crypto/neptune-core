@@ -2245,7 +2245,7 @@ mod rpc_server_tests {
         let network = Network::Main;
         let ctx = context::current();
         let mut rng = thread_rng();
-        let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
+        let address = GenerationSpendingKey::from_seed(rng.gen()).to_address();
         let amount = NeptuneCoins::new(rng.gen_range(0..10));
 
         // set flag on, verify non-initiation

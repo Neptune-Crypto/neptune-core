@@ -48,7 +48,7 @@ const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet";
 pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct SecretKeyMaterial(XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {
@@ -65,6 +65,9 @@ pub struct WalletSecret {
 
     secret_seed: SecretKeyMaterial,
     version: u8,
+
+    master_generation_key: generation_address::GenerationSpendingKey,
+    master_symmetric_key: symmetric_key::SymmetricKey,
 }
 
 /// Struct for containing file paths for secrets. To be communicated to user upon
@@ -94,6 +97,8 @@ impl WalletSecret {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
             version: STANDARD_WALLET_VERSION,
+            master_generation_key: Self::gen_master_generation_key(secret_seed),
+            master_symmetric_key: Self::gen_master_symmetric_key(secret_seed),
         }
     }
 
@@ -106,11 +111,7 @@ impl WalletSecret {
     /// Create a new `Wallet` and populate it by expanding a given seed.
     pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        Self {
-            name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(rng.gen()),
-            version: STANDARD_WALLET_VERSION,
-        }
+        Self::new(SecretKeyMaterial(rng.gen()))
     }
 
     /// Create a `Wallet` with a fixed digest
@@ -121,7 +122,7 @@ impl WalletSecret {
             BFieldElement::new(2090171368883726200),
         ]));
 
-        WalletSecret::new(secret_seed)
+        Self::new(secret_seed)
     }
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
@@ -203,17 +204,31 @@ impl WalletSecret {
         &self,
         index: u64,
     ) -> generation_address::GenerationSpendingKey {
+        self.master_generation_key.derive_child(index)
+    }
+
+    fn gen_master_generation_key(
+        secret_seed: SecretKeyMaterial,
+    ) -> generation_address::GenerationSpendingKey {
         let key_seed = Hash::hash_varlen(
             &[
-                self.secret_seed.0.encode(),
-                vec![
-                    generation_address::GENERATION_FLAG,
-                    BFieldElement::new(index),
-                ],
+                secret_seed.0.encode(),
+                generation_address::GENERATION_FLAG.encode(),
             ]
             .concat(),
         );
-        generation_address::GenerationSpendingKey::derive_from_seed(key_seed)
+        generation_address::GenerationSpendingKey::from_seed(key_seed)
+    }
+
+    fn gen_master_symmetric_key(secret_seed: SecretKeyMaterial) -> symmetric_key::SymmetricKey {
+        let key_seed = Hash::hash_varlen(
+            &[
+                secret_seed.0.encode(),
+                symmetric_key::SYMMETRIC_KEY_FLAG.encode(),
+            ]
+            .concat(),
+        );
+        symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
     /// derives a symmetric key at `index`

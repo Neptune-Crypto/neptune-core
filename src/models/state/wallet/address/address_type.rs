@@ -375,6 +375,13 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
 }
 
 impl SpendingKey {
+    pub fn derive_child(&self, index: common::DerivationIndex) -> SpendingKey {
+        match self {
+            Self::Generation(k) => k.derive_child(index).into(),
+            Self::Symmetric(k) => k.derive_child(index).into(),
+        }
+    }
+
     /// returns the address that corresponds to this spending key.
     pub fn to_address(&self) -> ReceivingAddress {
         match self {
@@ -509,7 +516,7 @@ mod test {
     /// tests scanning for announced utxos with an asymmetric (generation) key
     #[proptest]
     fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(GenerationSpendingKey::derive_from_seed(seed).into())
+        worker::scan_for_announced_utxos(GenerationSpendingKey::from_seed(seed).into())
     }
 
     /// tests encrypting and decrypting with a symmetric key
@@ -521,7 +528,7 @@ mod test {
     /// tests encrypting and decrypting with an asymmetric (generation) key
     #[proptest]
     fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::derive_from_seed(seed).into())
+        worker::test_encrypt_decrypt(GenerationSpendingKey::from_seed(seed).into())
     }
 
     /// tests keygen, sign, and verify with a symmetric key
@@ -537,7 +544,7 @@ mod test {
     #[proptest]
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
         worker::test_keypair_validity(
-            GenerationSpendingKey::derive_from_seed(seed).into(),
+            GenerationSpendingKey::from_seed(seed).into(),
             GenerationReceivingAddress::derive_from_seed(seed).into(),
         );
     }

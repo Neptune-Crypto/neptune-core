@@ -159,9 +159,7 @@ impl PrimitiveWitness {
     ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
         let input_spending_keys = address_seeds
             .iter()
-            .map(|address_seed| {
-                generation_address::GenerationSpendingKey::derive_from_seed(*address_seed)
-            })
+            .map(|address_seed| generation_address::GenerationSpendingKey::from_seed(*address_seed))
             .collect_vec();
 
         let input_lock_scripts_and_witnesses = input_spending_keys
@@ -231,7 +229,7 @@ impl PrimitiveWitness {
             .zip(output_amounts)
             .map(|(seed, amount)| {
                 Utxo::new(
-                    generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                    generation_address::GenerationSpendingKey::from_seed(*seed)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
