@@ -38,6 +38,7 @@ use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
+use crate::models::state::wallet::address::KeyType;
 use crate::Hash;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
@@ -795,6 +796,7 @@ impl Arbitrary for TimeLockWitness {
                     // generate inputs
                     let (mut input_utxos, input_lock_scripts_and_witnesses) =
                         PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                            KeyType::Generation,
                             &input_address_seeds,
                             &input_amounts,
                         );
@@ -822,6 +824,7 @@ impl Arbitrary for TimeLockWitness {
                     let output_utxos =
                         PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                             &output_amounts,
+                            KeyType::Generation,
                             &output_address_seeds,
                             None,
                         );
@@ -988,6 +991,7 @@ fn arbitrary_primitive_witness_with_timelocks(
 
                 let (mut input_utxos, input_lock_scripts_and_witnesses) =
                     PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                        KeyType::Generation,
                         &input_address_seeds,
                         &input_amounts,
                     );
@@ -1000,6 +1004,7 @@ fn arbitrary_primitive_witness_with_timelocks(
                 let mut output_utxos =
                     PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
+                        KeyType::Generation,
                         &output_address_seeds,
                         None,
                     );

@@ -5,7 +5,6 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
-use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
@@ -43,7 +42,8 @@ use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::blockchain::type_scripts::TypeScriptWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::KeyType;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -294,15 +294,17 @@ impl PrimitiveWitness {
         )
     }
 
+    // note: this is used by tests and probably should be inside a #[cfg(test)]
+    // however it is called by an impl Arbitrary that is not #[cfg(test)], so leaving
+    // as-is for now.
     pub fn transaction_inputs_from_address_seeds_and_amounts(
+        key_type: KeyType,
         address_seeds: &[Digest],
         input_amounts: &[NeptuneCoins],
     ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
         let input_spending_keys = address_seeds
             .iter()
-            .map(|address_seed| {
-                generation_address::GenerationSpendingKey::derive_from_seed(*address_seed)
-            })
+            .map(|address_seed| SpendingKey::from_seed(*address_seed, key_type))
             .collect_vec();
 
         let input_lock_scripts_and_witnesses = input_spending_keys
@@ -380,11 +382,16 @@ impl PrimitiveWitness {
         }
     }
 
+    // note: this is used by tests and probably should be inside a #[cfg(test)]
+    // however it is called by an impl Arbitrary that is not #[cfg(test)], so leaving
+    // as-is for now.
+
     /// Generate valid output UTXOs from the amounts and seeds for the
     /// addresses. If some release date is supplied, generate twice as many
     /// UTXOs such that half the total amount is time-locked.
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
+        key_type: KeyType,
         address_seeds: &[Digest],
         timelock_until: Option<Timestamp>,
     ) -> Vec<Utxo> {
@@ -397,7 +404,7 @@ impl PrimitiveWitness {
                     amount.div_two();
                 }
                 let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                    SpendingKey::from_seed(*seed, key_type)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
@@ -405,7 +412,7 @@ impl PrimitiveWitness {
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                        SpendingKey::from_seed(*seed, key_type)
                             .to_address()
                             .lock_script(),
                         [
@@ -559,6 +566,10 @@ impl PrimitiveWitness {
         true
     }
 
+    // note: this is used by tests and should be inside a #[cfg(test)]
+    // however it is called by a bench, so leaving as-is for now.
+    // todo: move into a feature flag.
+
     /// Strategy for generating a `PrimitiveWitness` with the given number of
     /// inputs, outputs, and public announcements. If `num_inputs` is set to
     /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
@@ -567,6 +578,8 @@ impl PrimitiveWitness {
         num_outputs: usize,
         num_public_announcements: usize,
     ) -> BoxedStrategy<Self> {
+        use num_traits::Zero;
+
         // Primitive witnesses may not simultaneously have inputs and set a
         // coinbase. In combination with a rule in `Block::is_valid` that
         // requires that block transactions have at least one input, this
@@ -638,6 +651,7 @@ impl PrimitiveWitness {
 
                             let (input_utxos, input_lock_scripts_and_witnesses) =
                                 Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    KeyType::Generation,
                                     &input_address_seeds,
                                     &input_amounts,
                                 );
@@ -673,6 +687,7 @@ impl PrimitiveWitness {
 
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
+                        KeyType::Generation,
                         &output_address_seeds,
                         maybe_coinbase.map(|_| timestamp + MINING_REWARD_TIME_LOCK_PERIOD),
                     );
@@ -1089,6 +1104,7 @@ mod test {
                             .zip_eq(input_address_seedss)
                             .map(|(input_amounts, input_address_seeds)| {
                                 Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    KeyType::Generation,
                                     &input_address_seeds,
                                     input_amounts,
                                 )
@@ -1355,7 +1371,9 @@ mod test {
         /// given fee. The fee can be negative or even an invalid amount:
         /// greater than the maximum number of nau. It does *not* work for fees
         /// smaller than the minimum number of nau.
+        #[cfg(test)]
         pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
+            let key_type = KeyType::Generation;
             let fee_as_i128 = std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap();
             let total_amount_strategy = match (fee.is_negative(), fee.abs() > NeptuneCoins::max()) {
                 (false, false) => {
@@ -1420,6 +1438,7 @@ mod test {
 
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
+                                key_type,
                                 &[input_address_seed],
                                 &[total_amount],
                             );

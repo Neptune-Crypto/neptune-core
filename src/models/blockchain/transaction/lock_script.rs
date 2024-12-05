@@ -208,6 +208,7 @@ mod test {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::state::wallet::address::KeyType;
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(
@@ -216,7 +217,11 @@ mod test {
         #[strategy(NeptuneCoins::arbitrary_non_negative())] amount: NeptuneCoins,
     ) {
         let (_utxos, lock_scripts_and_witnesses) =
-            PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(&[seed], &[amount]);
+            PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                KeyType::Generation,
+                &[seed],
+                &[amount],
+            );
         prop_assert!(lock_scripts_and_witnesses.into_iter().all(|lsaw| lsaw
             .halts_gracefully(PublicInput::new(txk_mast_hash.reversed().values().to_vec()))));
     }
@@ -228,7 +233,11 @@ mod test {
         let amount = NeptuneCoins::zero();
 
         let (_utxos, lock_scripts_and_witnesses) =
-            PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(&[seed], &[amount]);
+            PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                KeyType::Generation,
+                &[seed],
+                &[amount],
+            );
         assert!(lock_scripts_and_witnesses.into_iter().all(|lsaw| lsaw
             .halts_gracefully(PublicInput::new(txk_mast_hash.reversed().values().to_vec()))));
     }
