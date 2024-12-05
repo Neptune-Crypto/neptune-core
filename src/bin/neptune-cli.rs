@@ -239,6 +239,18 @@ enum Command {
         max_num_blocks: Option<usize>,
     },
 
+    /// Show difficulties for a list of blocks.
+    BlockDifficulties {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
+
+    /// Show largest difficulty in the specified range.
+    MaxBlockDifficulty {
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    },
+
     /******** CHANGE STATE ********/
     Shutdown,
     ClearAllStandings,
@@ -677,6 +689,45 @@ async fn main() -> Result<()> {
                 .unwrap();
 
             println!("Smallest block interval in specified range:\n{interval}ms at block height {height}.")
+        }
+
+        Command::BlockDifficulties {
+            last_block,
+            max_num_blocks,
+        } => {
+            let difficulties = client
+                .block_difficulties(ctx, last_block, max_num_blocks)
+                .await?;
+
+            println!(
+                "{}",
+                difficulties
+                    .iter()
+                    .map(|(height, difficulty)| format!("{height}: {difficulty}"))
+                    .join("\n")
+            )
+        }
+
+        Command::MaxBlockDifficulty {
+            last_block,
+            max_num_blocks,
+        } => {
+            let difficulties = client
+                .block_difficulties(ctx, last_block, max_num_blocks)
+                .await?;
+            if difficulties.is_empty() {
+                println!("Not found");
+                return Ok(());
+            }
+
+            let (height, difficulty) = difficulties
+                .iter()
+                .max_by_key(|(_height, difficulty)| difficulty)
+                .unwrap();
+
+            println!(
+                "Greatest difficulty in specified range:\n{difficulty} at block height {height}."
+            )
         }
 
         /******** CHANGE STATE ********/

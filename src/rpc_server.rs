@@ -34,6 +34,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -252,6 +253,12 @@ pub trait RPC {
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
     ) -> Option<Vec<(u64, u64)>>;
+
+    /// Return the difficulties of a range of blocks.
+    async fn block_difficulties(
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    ) -> Vec<(u64, Difficulty)>;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -1409,6 +1416,43 @@ impl RPC for NeptuneRPCServer {
         Some(intervals)
     }
 
+    async fn block_difficulties(
+        self,
+        _context: tarpc::context::Context,
+        last_block: BlockSelector,
+        max_num_blocks: Option<usize>,
+    ) -> Vec<(u64, Difficulty)> {
+        log_slow_scope!(fn_name!());
+
+        let state = self.state.lock_guard().await;
+        let last_block = last_block.as_digest(&state).await;
+        let Some(last_block) = last_block else {
+            return vec![];
+        };
+
+        let mut difficulties = vec![];
+
+        let mut current = state
+            .chain
+            .archival_state()
+            .get_block_header(last_block)
+            .await;
+        while current.is_some()
+            && max_num_blocks.is_none_or(|max_num| max_num >= difficulties.len())
+        {
+            let current_ = current.unwrap();
+            let height: u64 = current_.height.into();
+            difficulties.push((height, current_.difficulty));
+            current = state
+                .chain
+                .archival_state()
+                .get_block_header(current_.prev_block_digest)
+                .await;
+        }
+
+        difficulties
+    }
+
     // documented in trait. do not add doc-comment.
     async fn mempool_overview(
         self,
@@ -1597,6 +1641,10 @@ mod rpc_server_tests {
         let _ = rpc_server
             .clone()
             .block_intervals(ctx, BlockSelector::Tip, None)
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_difficulties(ctx, BlockSelector::Tip, None)
             .await;
         let _ = rpc_server.clone().mempool_overview(ctx, 0, 20).await;
         let _ = rpc_server.clone().clear_all_standings(ctx).await;
