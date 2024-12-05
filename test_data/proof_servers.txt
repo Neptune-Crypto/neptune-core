@@ -1,1 +1,2 @@
 http://neptunefundamentals.org:42580/
+http://explorer.neptune.cash:42580/
