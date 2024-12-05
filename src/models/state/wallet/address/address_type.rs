@@ -28,7 +28,7 @@ use crate::BFieldElement;
 // actually stored in PublicAnnouncement.
 
 /// enumerates available cryptographic key implementations for sending and receiving funds.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(u8)]
 pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]

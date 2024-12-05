@@ -9,6 +9,7 @@ use crate::database::storage::storage_schema::RustyKey;
 use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
+use crate::models::state::wallet::address::DerivationIndex;
 use crate::prelude::twenty_first;
 
 pub struct RustyWalletDatabase {
@@ -28,11 +29,11 @@ pub struct RustyWalletDatabase {
 
     // counts derived generation keys
     // The counter value represents derive index of next unused key.
-    generation_key_counter: DbtSingleton<u64>,
+    generation_key_counter: DbtSingleton<DerivationIndex>,
 
     // counts derived symmetric keys
     // The counter value represents derive index of next unused key.
-    symmetric_key_counter: DbtSingleton<u64>,
+    symmetric_key_counter: DbtSingleton<DerivationIndex>,
 }
 
 impl RustyWalletDatabase {
@@ -114,22 +115,22 @@ impl RustyWalletDatabase {
     }
 
     /// retrieve wallet derivation counter for generation keys
-    pub async fn get_generation_key_counter(&self) -> u64 {
+    pub async fn get_generation_key_counter(&self) -> DerivationIndex {
         self.generation_key_counter.get().await
     }
 
     /// set wallet derivation counter for generation keys
-    pub async fn set_generation_key_counter(&mut self, counter: u64) {
+    pub async fn set_generation_key_counter(&mut self, counter: DerivationIndex) {
         self.generation_key_counter.set(counter).await;
     }
 
     /// retrieve wallet derivation counter for symmetric keys
-    pub async fn get_symmetric_key_counter(&self) -> u64 {
+    pub async fn get_symmetric_key_counter(&self) -> DerivationIndex {
         self.symmetric_key_counter.get().await
     }
 
     /// set wallet derivation counter for symmetric keys
-    pub async fn set_symmetric_key_counter(&mut self, counter: u64) {
+    pub async fn set_symmetric_key_counter(&mut self, counter: DerivationIndex) {
         self.symmetric_key_counter.set(counter).await;
     }
 }

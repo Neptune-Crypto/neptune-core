@@ -59,6 +59,8 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::wallet::address::DerivationIndex;
+use crate::models::state::wallet::address::SpendingKeyRangeIter;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -735,6 +737,34 @@ impl WalletState {
     // this gap is defined as 20 keys in a row that have never received funds.
     fn get_known_generation_spending_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
         self.known_generation_keys.iter().copied()
+    }
+
+    pub async fn known_spending_keys_iter(
+        &self,
+    ) -> impl Iterator<Item = SpendingKeyRangeIter> + '_ {
+        let mut counters: HashMap<KeyType, DerivationIndex> = Default::default();
+        for key_type in KeyType::all_types() {
+            counters.insert(key_type, self.spending_key_counter(key_type).await);
+        }
+
+        KeyType::all_types()
+            .into_iter()
+            .map(move |key_type| SpendingKeyRangeIter {
+                first: self.wallet_secret.master_key(key_type),
+                curr: 0,
+                last: counters[&key_type],
+            })
+    }
+
+    pub async fn known_spending_keys_by_keytype_iter(
+        &self,
+        key_type: KeyType,
+    ) -> SpendingKeyRangeIter {
+        SpendingKeyRangeIter {
+            first: self.wallet_secret.master_key(key_type),
+            curr: 0,
+            last: self.spending_key_counter(key_type).await,
+        }
     }
 
     // TODO: These spending keys should probably be derived dynamically from some

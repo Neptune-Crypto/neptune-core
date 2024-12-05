@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use address::generation_address;
 use address::symmetric_key;
+use address::KeyType;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
@@ -36,6 +37,7 @@ use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::state::SpendingKey;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
@@ -205,6 +207,13 @@ impl WalletSecret {
         index: u64,
     ) -> generation_address::GenerationSpendingKey {
         self.master_generation_key.derive_child(index)
+    }
+
+    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.master_generation_key.into(),
+            KeyType::Symmetric => self.master_symmetric_key.into(),
+        }
     }
 
     fn gen_master_generation_key(
