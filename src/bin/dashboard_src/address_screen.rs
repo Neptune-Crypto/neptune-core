@@ -10,7 +10,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::KeyType;
-use neptune_cash::models::state::wallet::address::SpendingKey;
+use neptune_cash::models::state::wallet::address::SpendingKeyRange;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -34,7 +34,7 @@ use unicode_width::UnicodeWidthStr;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-type AddressUpdate = SpendingKey;
+type AddressUpdate = SpendingKeyRange;
 type AddressUpdateArc = Arc<std::sync::Mutex<Vec<AddressUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -260,19 +260,25 @@ impl Widget for AddressScreen {
         let selected_style = style.add_modifier(Modifier::REVERSED);
         let header = vec!["type", "address (abbreviated)"];
 
+        // derive all the known keys and generate data matrix.
+        //
+        // todo: only derive and render the keys that will actually be displayed.
+        // eg if we have 5000 known keys and 10 are displayed at a time, we should
+        // only derive those 10 keys.
         let matrix = self
             .data
             .lock()
             .unwrap()
             .iter()
-            .rev()
-            .map(|key| {
-                vec![
-                    KeyType::from(key).to_string(),
-                    key.to_address()
-                        .to_display_bech32m_abbreviated(self.network)
-                        .unwrap(),
-                ]
+            .flat_map(|known_keys| {
+                known_keys.iter().map(|key| {
+                    vec![
+                        KeyType::from(&key).to_string(),
+                        key.to_address()
+                            .to_display_bech32m_abbreviated(self.network)
+                            .unwrap(),
+                    ]
+                })
             })
             .collect_vec();
         let ncols = header.len();

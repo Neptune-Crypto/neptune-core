@@ -390,7 +390,7 @@ mod tests {
         // generate a new receiving address that is not from our wallet.
         let mut rng = rand::thread_rng();
         let seed: Digest = rng.gen();
-        let address = GenerationReceivingAddress::derive_from_seed(seed);
+        let address = GenerationReceivingAddress::from_seed(seed);
 
         let amount = NeptuneCoins::one();
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);

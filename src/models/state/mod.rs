@@ -3145,7 +3145,7 @@ mod global_state_tests {
             };
 
             // in alice wallet: send pre-mined funds to bob
-            let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
+            let an_address = GenerationReceivingAddress::from_seed(rng.gen());
             let block_1 = {
                 let vm_job_queue = alice_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;

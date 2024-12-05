@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use address::generation_address;
 use address::symmetric_key;
+use address::KeyType;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
@@ -36,6 +37,8 @@ use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::state::wallet::address::DerivationIndex;
+use crate::models::state::SpendingKey;
 use crate::prelude::twenty_first;
 use crate::Hash;
 
@@ -48,7 +51,7 @@ const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet";
 pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct SecretKeyMaterial(XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {
@@ -65,6 +68,9 @@ pub struct WalletSecret {
 
     secret_seed: SecretKeyMaterial,
     version: u8,
+
+    master_generation_key: generation_address::GenerationSpendingKey,
+    master_symmetric_key: symmetric_key::SymmetricKey,
 }
 
 /// Struct for containing file paths for secrets. To be communicated to user upon
@@ -94,6 +100,8 @@ impl WalletSecret {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
             version: STANDARD_WALLET_VERSION,
+            master_generation_key: Self::gen_master_generation_key(secret_seed),
+            master_symmetric_key: Self::gen_master_symmetric_key(secret_seed),
         }
     }
 
@@ -106,11 +114,7 @@ impl WalletSecret {
     /// Create a new `Wallet` and populate it by expanding a given seed.
     pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        Self {
-            name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(rng.gen()),
-            version: STANDARD_WALLET_VERSION,
-        }
+        Self::new(SecretKeyMaterial(rng.gen()))
     }
 
     /// Create a `Wallet` with a fixed digest
@@ -121,7 +125,7 @@ impl WalletSecret {
             BFieldElement::new(2090171368883726200),
         ]));
 
-        WalletSecret::new(secret_seed)
+        Self::new(secret_seed)
     }
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
@@ -193,6 +197,45 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
+    fn gen_master_generation_key(
+        secret_seed: SecretKeyMaterial,
+    ) -> generation_address::GenerationSpendingKey {
+        let key_seed = Hash::hash_varlen(
+            &[
+                secret_seed.0.encode(),
+                generation_address::GENERATION_FLAG.encode(),
+            ]
+            .concat(),
+        );
+        generation_address::GenerationSpendingKey::from_seed(key_seed)
+    }
+
+    fn gen_master_symmetric_key(secret_seed: SecretKeyMaterial) -> symmetric_key::SymmetricKey {
+        let key_seed = Hash::hash_varlen(
+            &[
+                secret_seed.0.encode(),
+                symmetric_key::SYMMETRIC_KEY_FLAG.encode(),
+            ]
+            .concat(),
+        );
+        symmetric_key::SymmetricKey::from_seed(key_seed)
+    }
+
+    /// get the master key of a given KeyType
+    ///
+    /// all keys are derived from the master key.
+    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.master_generation_key.into(),
+            KeyType::Symmetric => self.master_symmetric_key.into(),
+        }
+    }
+
+    /// Get the nth derived spending key of a given type.
+    pub fn nth_spending_key(&mut self, key_type: KeyType, index: DerivationIndex) -> SpendingKey {
+        self.master_key(key_type).derive_child(index)
+    }
+
     /// derives a generation spending key at `index`
     ///
     /// note: this is a read-only method and does not modify wallet state.  When
@@ -201,19 +244,9 @@ impl WalletSecret {
     /// which takes &mut self.
     pub fn nth_generation_spending_key(
         &self,
-        index: u64,
+        index: DerivationIndex,
     ) -> generation_address::GenerationSpendingKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![
-                    generation_address::GENERATION_FLAG,
-                    BFieldElement::new(index),
-                ],
-            ]
-            .concat(),
-        );
-        generation_address::GenerationSpendingKey::derive_from_seed(key_seed)
+        self.master_generation_key.derive_child(index)
     }
 
     /// derives a symmetric key at `index`
@@ -222,15 +255,8 @@ impl WalletSecret {
     /// requesting a new key for purposes of a new wallet receiving address,
     /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
     /// which takes &mut self.
-    pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
-            ]
-            .concat(),
-        );
-        symmetric_key::SymmetricKey::from_seed(key_seed)
+    pub fn nth_symmetric_key(&self, index: DerivationIndex) -> symmetric_key::SymmetricKey {
+        self.master_symmetric_key.derive_child(index)
     }
 
     // note: legacy tests were written to call nth_generation_spending_key()
@@ -244,7 +270,7 @@ impl WalletSecret {
         &self,
         counter: u64,
     ) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(counter)
+        self.nth_generation_spending_key(counter.into())
     }
 
     // note: legacy tests were written to call nth_symmetric_key()
@@ -255,7 +281,7 @@ impl WalletSecret {
     // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
     #[cfg(test)]
     pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(counter)
+        self.nth_symmetric_key(counter.into())
     }
 
     /// Return a deterministic seed that can be used to seed an RNG

@@ -355,7 +355,7 @@ impl PrimitiveWitness {
                     amount.div_two();
                 }
                 let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                    generation_address::GenerationSpendingKey::from_seed(*seed)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
@@ -363,7 +363,7 @@ impl PrimitiveWitness {
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                        generation_address::GenerationSpendingKey::from_seed(*seed)
                             .to_address()
                             .lock_script(),
                         [
@@ -906,7 +906,7 @@ pub mod neptune_arbitrary {
             let input_spending_keys = address_seeds
                 .iter()
                 .map(|address_seed| {
-                    generation_address::GenerationSpendingKey::derive_from_seed(*address_seed)
+                    generation_address::GenerationSpendingKey::from_seed(*address_seed)
                 })
                 .collect_vec();
 

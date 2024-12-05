@@ -25,9 +25,11 @@ use bech32::Variant;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
+use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
+use zeroize::Zeroize;
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
@@ -71,7 +73,7 @@ impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
         D: serde::de::Deserializer<'de>,
     {
         let seed = Digest::deserialize(deserializer)?;
-        Ok(Self::derive_from_seed(seed))
+        Ok(Self::from_seed(seed))
     }
 }
 
@@ -87,7 +89,22 @@ pub struct GenerationReceivingAddress {
 impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let seed = Digest::arbitrary(u)?;
-        Ok(Self::derive_from_seed(seed))
+        Ok(Self::from_seed(seed))
+    }
+}
+
+impl Zeroize for GenerationSpendingKey {
+    // unsafe: we use unsafe std::mem::zeroed() to zero the
+    // SecretKey because it does not impl Zeroize or Default and
+    // it is expensive to create a new random key.
+    //
+    // It should be updated to impl Zeroize in twenty-first crate
+    fn zeroize(&mut self) {
+        self.receiver_identifier = Default::default();
+        self.decryption_key = unsafe { std::mem::zeroed() };
+        self.privacy_preimage = Default::default();
+        self.unlock_key = Default::default();
+        self.seed = Default::default();
     }
 }
 
@@ -108,7 +125,19 @@ impl GenerationSpendingKey {
         LockScriptAndWitness::hash_lock(self.unlock_key)
     }
 
-    pub fn derive_from_seed(seed: Digest) -> Self {
+    /// creates a GenerationSpendingKey from a seed
+    ///
+    /// security:
+    ///
+    /// It is critical that the seed is generated in a random fashion or itself
+    /// derived from a randomly generated seed.  Failure to do so can result in
+    /// a loss of funds.
+    ///
+    /// perf:
+    ///
+    /// not cheap. performs several hash ops, serialization, and lattice::kem
+    /// key-generation.
+    pub fn from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
@@ -125,18 +154,29 @@ impl GenerationSpendingKey {
             seed: seed.to_owned(),
         };
 
-        // Sanity check that spending key's receiver address can be encoded to
-        // bech32m without loss of information.
-        let receiving_address = spending_key.to_address();
-        let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
-        let decoded_address =
-            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
-        assert_eq!(
-            receiving_address, decoded_address,
-            "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
-        );
+        #[cfg(debug_assertions)]
+        {
+            // Sanity check that spending key's receiver address can be encoded to
+            // bech32m without loss of information.
+            let receiving_address = spending_key.to_address();
+            let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
+            let decoded_address =
+                GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
+            assert_eq!(
+                receiving_address, decoded_address,
+                "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
+            );
+        }
 
         spending_key
+    }
+
+    /// derives a child-key at index
+    ///
+    /// note that index 0 is the first child.
+    pub fn derive_child(&self, index: common::DerivationIndex) -> Self {
+        let child_seed = Hash::hash_varlen(&[self.seed.0.encode(), index.encode()].concat());
+        Self::from_seed(child_seed)
     }
 
     /// Decrypt a Generation Address ciphertext
@@ -203,8 +243,8 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub fn derive_from_seed(seed: Digest) -> Self {
-        let spending_key = GenerationSpendingKey::derive_from_seed(seed);
+    pub fn from_seed(seed: Digest) -> Self {
+        let spending_key = GenerationSpendingKey::from_seed(seed);
         Self::from_spending_key(&spending_key)
     }
 

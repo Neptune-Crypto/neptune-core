@@ -848,7 +848,7 @@ pub(crate) async fn valid_successor_for_tests(
     let mut rng = StdRng::from_seed(seed);
 
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::derive_from_seed(rng.gen()).into(),
+        GenerationReceivingAddress::from_seed(rng.gen()).into(),
         rng.gen(),
         0.5f64,
     );

@@ -59,6 +59,8 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::wallet::address::DerivationIndex;
+use crate::models::state::wallet::address::SpendingKeyRange;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -284,7 +286,9 @@ impl WalletState {
         // outputs.
         if sync_label == Digest::default() {
             // Check if we are premine recipients
-            let own_spending_key = wallet_state.nth_spending_key(KeyType::Generation, 0);
+            let own_spending_key = wallet_state
+                .wallet_secret
+                .nth_spending_key(KeyType::Generation, 0);
             let own_receiving_address = own_spending_key.to_address();
             for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
@@ -738,6 +742,29 @@ impl WalletState {
         self.known_generation_keys.iter().copied()
     }
 
+    pub async fn known_spending_keys(&self) -> impl Iterator<Item = SpendingKeyRange> + '_ {
+        let mut counters: HashMap<KeyType, DerivationIndex> = Default::default();
+        for key_type in KeyType::all_types() {
+            counters.insert(key_type, self.spending_key_counter(key_type).await);
+        }
+
+        KeyType::all_types().into_iter().map(move |key_type| {
+            SpendingKeyRange::new(
+                self.wallet_secret.master_key(key_type),
+                0,
+                counters[&key_type],
+            )
+        })
+    }
+
+    pub async fn known_spending_keys_by_keytype(&self, key_type: KeyType) -> SpendingKeyRange {
+        SpendingKeyRange::new(
+            self.wallet_secret.master_key(key_type),
+            0,
+            self.spending_key_counter(key_type).await,
+        )
+    }
+
     // TODO: These spending keys should probably be derived dynamically from some
     // state in the wallet. And we should allow for other types than just generation
     // addresses.
@@ -766,18 +793,10 @@ impl WalletState {
     }
 
     /// Get index of the next unused spending key of a given type.
-    pub async fn spending_key_counter(&self, key_type: KeyType) -> u64 {
+    pub async fn spending_key_counter(&self, key_type: KeyType) -> DerivationIndex {
         match key_type {
             KeyType::Generation => self.wallet_db.get_generation_key_counter().await,
             KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter().await,
-        }
-    }
-
-    /// Get the nth derived spending key of a given type.
-    pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
-        match key_type {
-            KeyType::Generation => self.wallet_secret.nth_generation_spending_key(index).into(),
-            KeyType::Symmetric => self.wallet_secret.nth_symmetric_key(index).into(),
         }
     }
 
@@ -1948,7 +1967,7 @@ mod tests {
 
                 // generate an output that our wallet cannot claim.
                 let outputs = vec![(
-                    ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rng.gen())),
+                    ReceivingAddress::from(GenerationReceivingAddress::from_seed(rng.gen())),
                     send_amt,
                 )];
 

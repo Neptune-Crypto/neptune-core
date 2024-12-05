@@ -131,6 +131,7 @@ mod test {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -159,6 +160,7 @@ mod test {
 
     #[test]
     fn asymptotic_limit_is_42_million() {
+        let network = Network::Alpha;
         let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next());
 
         // Genesis block does not contain block subsidy so it must be subtracted
@@ -182,7 +184,7 @@ mod test {
         assert!(relative_premine < 0.0198, "Premine may not exceed promise");
 
         // Designated premine is less than or equal to allocation
-        let actual_premine = Block::premine_distribution()
+        let actual_premine = Block::premine_distribution(network)
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NeptuneCoins>();
