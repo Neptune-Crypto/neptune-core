@@ -1204,6 +1204,7 @@ mod tests {
             &bob,
             guesser_fraction,
             in_eight_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -1284,6 +1285,7 @@ mod tests {
             &alice,
             guesser_fraction,
             block_5_timestamp,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();

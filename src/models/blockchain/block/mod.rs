@@ -1215,10 +1215,15 @@ mod block_tests {
                 mock_genesis_global_state(network, 0, wallet, cli_args::Args::default()).await;
 
             let guesser_fraction = 0f64;
-            let (block_tx, _expected_utxo) =
-                make_coinbase_transaction(&genesis_block, &genesis_state, guesser_fraction, now)
-                    .await
-                    .unwrap();
+            let (block_tx, _expected_utxo) = make_coinbase_transaction(
+                &genesis_block,
+                &genesis_state,
+                guesser_fraction,
+                now,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
             let mut block1 = Block::make_block_template_with_valid_proof(
                 &genesis_block,
                 block_tx,
