@@ -749,22 +749,22 @@ impl WalletState {
 
         KeyType::all_types()
             .into_iter()
-            .map(move |key_type| SpendingKeyRangeIter {
-                first: self.wallet_secret.master_key(key_type),
-                curr: 0,
-                last: counters[&key_type],
-            })
+            .map(move |key_type| SpendingKeyRangeIter::new(
+                self.wallet_secret.master_key(key_type),
+                0,
+                counters[&key_type],
+            ))
     }
 
     pub async fn known_spending_keys_by_keytype_iter(
         &self,
         key_type: KeyType,
     ) -> SpendingKeyRangeIter {
-        SpendingKeyRangeIter {
-            first: self.wallet_secret.master_key(key_type),
-            curr: 0,
-            last: self.spending_key_counter(key_type).await,
-        }
+        SpendingKeyRangeIter::new(
+            self.wallet_secret.master_key(key_type),
+            0,
+            self.spending_key_counter(key_type).await,
+        )
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
