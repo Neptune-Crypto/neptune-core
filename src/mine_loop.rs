@@ -336,7 +336,7 @@ pub(crate) async fn make_coinbase_transaction(
     // There is no reason to put coinbase UTXO notifications on chain, because:
     // Both sender randomness and receiver preimage are derived
     // deterministically from the wallet's seed.
-    let Some(amount_to_prover) = coinbase_amount.checked_sub(&guesser_fee) else {
+    let Some(amount_to_composer) = coinbase_amount.checked_sub(&guesser_fee) else {
         bail!(
             "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}.",
             coinbase_amount.to_nau(),
@@ -345,8 +345,16 @@ pub(crate) async fn make_coinbase_transaction(
     };
 
     info!(
-        "Setting coinbase amount to {coinbase_amount}; and amount to prover to {amount_to_prover}"
+        "Setting coinbase amount to {coinbase_amount}; and amount to prover to {amount_to_composer}"
     );
+
+    let mut liquid_composer_amount = amount_to_composer;
+    liquid_composer_amount.div_two();
+
+    let timelocked_composer_amount = amount_to_composer
+        .checked_sub(&liquid_composer_amount)
+        .expect("Amount to composer must be larger than liquid amount to composer.");
+
     let sender_randomness: Digest = global_state_lock
         .lock_guard()
         .await
@@ -354,18 +362,31 @@ pub(crate) async fn make_coinbase_transaction(
         .wallet_secret
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
 
-    // TODO: Produce two outputs here, one timelocked and one not.
     let owned = true;
-    let coinbase_output = TxOutput::offchain_native_currency(
-        amount_to_prover,
+    let liquid_coinbase_output = TxOutput::offchain_native_currency(
+        liquid_composer_amount,
         sender_randomness,
         receiving_address.into(),
         owned,
     );
 
+    // Set the time lock to 3 years (minimum) plus 30 minutes margin, since the
+    // timestamp might be bumped by future merges.
+    let timelocked_coinbase_output = TxOutput::offchain_native_currency(
+        timelocked_composer_amount,
+        sender_randomness,
+        receiving_address.into(),
+        owned,
+    )
+    .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD + Timestamp::minutes(30));
+
     let transaction_details = TransactionDetails::new_with_coinbase(
         vec![],
-        vec![coinbase_output.clone()].into(),
+        vec![
+            liquid_coinbase_output.clone(),
+            timelocked_coinbase_output.clone(),
+        ]
+        .into(),
         coinbase_amount,
         guesser_fee,
         timestamp,
@@ -398,13 +419,22 @@ pub(crate) async fn make_coinbase_transaction(
     info!("Done: generating single proof for coinbase transaction");
 
     let composer_utxo_not_timelocked = ExpectedUtxo::new(
-        coinbase_output.utxo(),
-        coinbase_output.sender_randomness(),
+        liquid_coinbase_output.utxo(),
+        liquid_coinbase_output.sender_randomness(),
+        coinbase_recipient_spending_key.privacy_preimage,
+        UtxoNotifier::OwnMinerComposeBlock,
+    );
+    let composer_utxo_timelocked = ExpectedUtxo::new(
+        timelocked_coinbase_output.utxo(),
+        timelocked_coinbase_output.sender_randomness(),
         coinbase_recipient_spending_key.privacy_preimage,
         UtxoNotifier::OwnMinerComposeBlock,
     );
 
-    Ok((transaction, vec![composer_utxo_not_timelocked]))
+    Ok((
+        transaction,
+        vec![composer_utxo_not_timelocked, composer_utxo_timelocked],
+    ))
 }
 
 /// Create the transaction that goes into the block template. The transaction is
