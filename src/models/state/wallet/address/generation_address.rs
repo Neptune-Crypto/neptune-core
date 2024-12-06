@@ -45,19 +45,41 @@ use crate::prelude::twenty_first;
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// note: we serde(skip) fields that can be computed from the seed in order to
+// keep the serialized (including bech32m) representation small.
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize)]
 pub struct GenerationSpendingKey {
-    pub receiver_identifier: BFieldElement,
-    pub decryption_key: lattice::kem::SecretKey,
-    pub privacy_preimage: Digest,
-    unlock_key: Digest,
     pub seed: Digest,
+
+    #[serde(skip)]
+    pub receiver_identifier: BFieldElement,
+
+    #[serde(skip)]
+    pub decryption_key: lattice::kem::SecretKey,
+
+    #[serde(skip)]
+    pub privacy_preimage: Digest,
+
+    #[serde(skip)]
+    unlock_key: Digest,
+}
+
+// manually impl Deserialize so we can derive all other fields from the seed.
+impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let seed = Digest::deserialize(deserializer)?;
+        Ok(Self::derive_from_seed(seed))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenerationReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,
+
     pub privacy_digest: Digest,
     pub spending_lock: Digest,
 }
