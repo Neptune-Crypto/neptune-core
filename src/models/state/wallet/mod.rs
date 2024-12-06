@@ -247,14 +247,7 @@ impl WalletSecret {
     /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
     /// which takes &mut self.
     pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![symmetric_key::SYMMETRIC_KEY_FLAG, BFieldElement::new(index)],
-            ]
-            .concat(),
-        );
-        symmetric_key::SymmetricKey::from_seed(key_seed)
+        self.master_symmetric_key.derive_child(index)
     }
 
     // note: legacy tests were written to call nth_generation_spending_key()
