@@ -286,7 +286,7 @@ impl WalletState {
         // outputs.
         if sync_label == Digest::default() {
             // Check if we are premine recipients
-            let own_spending_key = wallet_state.nth_spending_key(KeyType::Generation, 0);
+            let own_spending_key = wallet_state.wallet_secret.nth_spending_key(KeyType::Generation, 0);
             let own_receiving_address = own_spending_key.to_address();
             for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
@@ -795,18 +795,10 @@ impl WalletState {
     }
 
     /// Get index of the next unused spending key of a given type.
-    pub async fn spending_key_counter(&self, key_type: KeyType) -> u64 {
+    pub async fn spending_key_counter(&self, key_type: KeyType) -> DerivationIndex {
         match key_type {
             KeyType::Generation => self.wallet_db.get_generation_key_counter().await,
             KeyType::Symmetric => self.wallet_db.get_symmetric_key_counter().await,
-        }
-    }
-
-    /// Get the nth derived spending key of a given type.
-    pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
-        match key_type {
-            KeyType::Generation => self.wallet_secret.nth_generation_spending_key(index).into(),
-            KeyType::Symmetric => self.wallet_secret.nth_symmetric_key(index).into(),
         }
     }
 

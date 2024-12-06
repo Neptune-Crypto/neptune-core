@@ -36,6 +36,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
+use crate::models::state::wallet::address::DerivationIndex;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::state::SpendingKey;
 use crate::prelude::twenty_first;
@@ -220,6 +221,21 @@ impl WalletSecret {
         symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
+    /// get the master key of a given KeyType
+    ///
+    /// all keys are derived from the master key.
+    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.master_generation_key.into(),
+            KeyType::Symmetric => self.master_symmetric_key.into(),
+        }
+    }
+
+    /// Get the nth derived spending key of a given type.
+    pub fn nth_spending_key(&mut self, key_type: KeyType, index: DerivationIndex) -> SpendingKey {
+        self.master_key(key_type).derive_child(index)
+    }
+
     /// derives a generation spending key at `index`
     ///
     /// note: this is a read-only method and does not modify wallet state.  When
@@ -231,13 +247,6 @@ impl WalletSecret {
         index: DerivationIndex,
     ) -> generation_address::GenerationSpendingKey {
         self.master_generation_key.derive_child(index)
-    }
-
-    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
-        match key_type {
-            KeyType::Generation => self.master_generation_key.into(),
-            KeyType::Symmetric => self.master_symmetric_key.into(),
-        }
     }
 
     /// derives a symmetric key at `index`
@@ -261,7 +270,7 @@ impl WalletSecret {
         &self,
         counter: u64,
     ) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(counter)
+        self.nth_generation_spending_key(counter.into())
     }
 
     // note: legacy tests were written to call nth_symmetric_key()
@@ -272,7 +281,7 @@ impl WalletSecret {
     // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
     #[cfg(test)]
     pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(counter)
+        self.nth_symmetric_key(counter.into())
     }
 
     /// Return a deterministic seed that can be used to seed an RNG

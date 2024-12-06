@@ -59,11 +59,11 @@ impl RustyWalletDatabase {
 
         let generation_key_counter = storage
             .schema
-            .new_singleton::<u64>("generation_key_counter")
+            .new_singleton::<DerivationIndex>("generation_key_counter")
             .await;
         let symmetric_key_counter = storage
             .schema
-            .new_singleton::<u64>("symmetric_key_counter")
+            .new_singleton::<DerivationIndex>("symmetric_key_counter")
             .await;
 
         Self {
