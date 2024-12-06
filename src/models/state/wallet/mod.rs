@@ -196,26 +196,6 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
-    /// derives a generation spending key at `index`
-    ///
-    /// note: this is a read-only method and does not modify wallet state.  When
-    /// requesting a new key for purposes of a new wallet receiving address,
-    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
-    /// which takes &mut self.
-    pub fn nth_generation_spending_key(
-        &self,
-        index: u64,
-    ) -> generation_address::GenerationSpendingKey {
-        self.master_generation_key.derive_child(index)
-    }
-
-    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
-        match key_type {
-            KeyType::Generation => self.master_generation_key.into(),
-            KeyType::Symmetric => self.master_symmetric_key.into(),
-        }
-    }
-
     fn gen_master_generation_key(
         secret_seed: SecretKeyMaterial,
     ) -> generation_address::GenerationSpendingKey {
@@ -240,13 +220,33 @@ impl WalletSecret {
         symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
+    /// derives a generation spending key at `index`
+    ///
+    /// note: this is a read-only method and does not modify wallet state.  When
+    /// requesting a new key for purposes of a new wallet receiving address,
+    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    /// which takes &mut self.
+    pub fn nth_generation_spending_key(
+        &self,
+        index: DerivationIndex,
+    ) -> generation_address::GenerationSpendingKey {
+        self.master_generation_key.derive_child(index)
+    }
+
+    pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
+        match key_type {
+            KeyType::Generation => self.master_generation_key.into(),
+            KeyType::Symmetric => self.master_symmetric_key.into(),
+        }
+    }
+
     /// derives a symmetric key at `index`
     ///
     /// note: this is a read-only method and does not modify wallet state.  When
     /// requesting a new key for purposes of a new wallet receiving address,
     /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
     /// which takes &mut self.
-    pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
+    pub fn nth_symmetric_key(&self, index: DerivationIndex) -> symmetric_key::SymmetricKey {
         self.master_symmetric_key.derive_child(index)
     }
 
