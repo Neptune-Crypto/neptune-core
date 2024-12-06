@@ -10,6 +10,7 @@ use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::KeyType;
+use neptune_cash::models::state::wallet::address::SpendingKeyRangeIter;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -29,7 +30,6 @@ use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use unicode_width::UnicodeWidthStr;
-use neptune_cash::models::state::wallet::address::SpendingKeyRangeIter;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
@@ -266,14 +266,14 @@ impl Widget for AddressScreen {
             .unwrap()
             .iter()
             .flat_map(|iter| {
-                iter.clone().map(|key|
+                iter.clone().map(|key| {
                     vec![
                         KeyType::from(&key).to_string(),
                         key.to_address()
                             .to_display_bech32m_abbreviated(self.network)
                             .unwrap(),
                     ]
-                )
+                })
             })
             .collect_vec();
         let ncols = header.len();

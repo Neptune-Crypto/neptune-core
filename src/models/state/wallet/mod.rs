@@ -36,8 +36,8 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
-use crate::models::state::wallet::address::DerivationIndex;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::state::wallet::address::DerivationIndex;
 use crate::models::state::SpendingKey;
 use crate::prelude::twenty_first;
 use crate::Hash;

@@ -286,7 +286,9 @@ impl WalletState {
         // outputs.
         if sync_label == Digest::default() {
             // Check if we are premine recipients
-            let own_spending_key = wallet_state.wallet_secret.nth_spending_key(KeyType::Generation, 0);
+            let own_spending_key = wallet_state
+                .wallet_secret
+                .nth_spending_key(KeyType::Generation, 0);
             let own_receiving_address = own_spending_key.to_address();
             for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
@@ -747,13 +749,13 @@ impl WalletState {
             counters.insert(key_type, self.spending_key_counter(key_type).await);
         }
 
-        KeyType::all_types()
-            .into_iter()
-            .map(move |key_type| SpendingKeyRangeIter::new(
+        KeyType::all_types().into_iter().map(move |key_type| {
+            SpendingKeyRangeIter::new(
                 self.wallet_secret.master_key(key_type),
                 0,
                 counters[&key_type],
-            ))
+            )
+        })
     }
 
     pub async fn known_spending_keys_by_keytype_iter(
