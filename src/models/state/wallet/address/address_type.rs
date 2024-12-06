@@ -10,6 +10,7 @@ use tracing::warn;
 use super::common;
 use super::generation_address;
 use super::symmetric_key;
+use super::SpendingKeyIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -359,6 +360,15 @@ pub enum SpendingKey {
 impl std::hash::Hash for SpendingKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::hash::Hash::hash(&self.privacy_preimage(), state)
+    }
+}
+
+impl IntoIterator for SpendingKey {
+    type Item = Self;
+    type IntoIter = SpendingKeyIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SpendingKeyIter::new(self)
     }
 }
 
