@@ -876,9 +876,15 @@ pub(crate) async fn valid_block_for_tests(
     guesser_fraction: f64,
 ) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    let (cb, _) = make_coinbase_transaction(&current_tip, state_lock, guesser_fraction, timestamp)
-        .await
-        .unwrap();
+    let (cb, _) = make_coinbase_transaction(
+        &current_tip,
+        state_lock,
+        guesser_fraction,
+        timestamp,
+        TxProvingCapability::SingleProof,
+    )
+    .await
+    .unwrap();
     valid_block_from_tx_for_tests(&current_tip, cb, seed).await
 }
 
