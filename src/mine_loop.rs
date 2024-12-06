@@ -765,6 +765,7 @@ pub(crate) mod mine_loop_tests {
     use difficulty_control::Difficulty;
     use itertools::Itertools;
     use num_bigint::BigUint;
+    use num_traits::One;
     use num_traits::Pow;
     use num_traits::Zero;
     use rand::thread_rng;
@@ -1458,6 +1459,58 @@ pub(crate) mod mine_loop_tests {
             hash_rate_empty_tx * 1.1 > hash_rate_big_tx
                 && hash_rate_empty_tx * 0.9 < hash_rate_big_tx,
             "Hash rate for big and small block must be within 10 %"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn coinbase_has_expected_timelocked_outputs() {
+        let network = Network::Main;
+        let global_state_lock = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+        let genesis_block = Block::genesis_block(network);
+        let launch_date = genesis_block.header().timestamp;
+
+        let (transaction, coinbase_utxo_info) = make_coinbase_transaction(
+            &genesis_block,
+            &global_state_lock,
+            0f64,
+            launch_date,
+            TxProvingCapability::PrimitiveWitness,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            2,
+            coinbase_utxo_info.len(),
+            "Expected two expected UTXOs for composer."
+        );
+        assert!(
+            coinbase_utxo_info
+                .iter()
+                .filter(|x| x.utxo.release_date().is_some())
+                .count()
+                .is_one(),
+            "Expected one timelocked coinbase UTXO"
+        );
+        assert!(
+            coinbase_utxo_info
+                .iter()
+                .filter(|x| x.utxo.release_date().is_none())
+                .count()
+                .is_one(),
+            "Expected one liquid coinbase UTXO"
+        );
+        assert_eq!(
+            2,
+            transaction.kernel.outputs.len(),
+            "Expected two outputs in coinbase tx"
         );
     }
 
