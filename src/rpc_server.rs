@@ -2752,9 +2752,7 @@ mod rpc_server_tests {
 
                 // --- Setup. generate an output that our wallet cannot claim. ---
                 let external_receiving_address: ReceivingAddress = match recipient_key_type {
-                    KeyType::Generation => {
-                        GenerationReceivingAddress::derive_from_seed(rng.gen()).into()
-                    }
+                    KeyType::Generation => GenerationReceivingAddress::from_seed(rng.gen()).into(),
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
                 };
                 let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));

@@ -186,7 +186,7 @@ impl GenerationReceivingAddress {
         }
     }
 
-    pub fn derive_from_seed(seed: Digest) -> Self {
+    pub fn from_seed(seed: Digest) -> Self {
         let spending_key = GenerationSpendingKey::from_seed(seed);
         Self::from_spending_key(&spending_key)
     }
