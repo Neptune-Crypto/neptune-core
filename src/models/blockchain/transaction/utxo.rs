@@ -207,6 +207,27 @@ impl Utxo {
             .filter_map(Coin::release_date)
             .any(|release_date| timestamp <= release_date)
     }
+
+    /// Adds a time-lock coin, if necessary.
+    ///
+    /// Does nothing if there is a time lock present already whose release date
+    /// is later than the argument.
+    pub(crate) fn with_time_lock(self, release_date: Timestamp) -> Self {
+        if self.release_date().is_some_and(|x| x >= release_date) {
+            self
+        } else {
+            let mut coins = self
+                .coins
+                .into_iter()
+                .filter(|c| c.type_script_hash != TimeLock.hash())
+                .collect_vec();
+            coins.push(TimeLock::until(release_date));
+            Self {
+                lock_script_hash: self.lock_script_hash,
+                coins,
+            }
+        }
+    }
 }
 
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.

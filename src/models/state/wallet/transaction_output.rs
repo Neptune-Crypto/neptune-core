@@ -12,6 +12,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
@@ -252,6 +253,20 @@ impl TxOutput {
                 ))
             }
             UtxoNotifyMethod::None => None,
+        }
+    }
+
+    /// Adds a time lock coin, if necessary.
+    ///
+    /// Does nothing if there already is a time lock coin whose release date is
+    /// later than the argument.
+    pub(crate) fn with_time_lock(self, release_date: Timestamp) -> Self {
+        Self {
+            utxo: self.utxo.with_time_lock(release_date),
+            sender_randomness: self.sender_randomness,
+            receiver_digest: self.receiver_digest,
+            notification_method: self.notification_method,
+            owned: self.owned,
         }
     }
 }
