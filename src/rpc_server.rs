@@ -51,7 +51,7 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKey;
+use crate::models::state::wallet::address::SpendingKeyRangeIter;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -218,10 +218,10 @@ pub trait RPC {
     async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
 
     /// Return all known keys, for every [KeyType]
-    async fn known_keys() -> Vec<SpendingKey>;
+    async fn known_keys() -> Vec<SpendingKeyRangeIter>;
 
     /// Return known keys for the provided [KeyType]
-    async fn known_keys_by_keytype(key_type: KeyType) -> Vec<SpendingKey>;
+    async fn known_keys_by_keytype(key_type: KeyType) -> SpendingKeyRangeIter;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -1035,14 +1035,15 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKey> {
+    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKeyRangeIter> {
         log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
             .await
             .wallet_state
-            .get_all_known_spending_keys()
+            .known_spending_keys_iter()
+            .await
             .collect()
     }
 
@@ -1051,15 +1052,15 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         key_type: KeyType,
-    ) -> Vec<SpendingKey> {
+    ) -> SpendingKeyRangeIter {
         log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
             .await
             .wallet_state
-            .get_known_spending_keys(key_type)
-            .collect()
+            .known_spending_keys_by_keytype_iter(key_type)
+            .await
     }
 
     // documented in trait. do not add doc-comment.
@@ -2245,7 +2246,7 @@ mod rpc_server_tests {
         let network = Network::Main;
         let ctx = context::current();
         let mut rng = thread_rng();
-        let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
+        let address = GenerationSpendingKey::from_seed(rng.gen()).to_address();
         let amount = NeptuneCoins::new(rng.gen_range(0..10));
 
         // set flag on, verify non-initiation
@@ -2751,9 +2752,7 @@ mod rpc_server_tests {
 
                 // --- Setup. generate an output that our wallet cannot claim. ---
                 let external_receiving_address: ReceivingAddress = match recipient_key_type {
-                    KeyType::Generation => {
-                        GenerationReceivingAddress::derive_from_seed(rng.gen()).into()
-                    }
+                    KeyType::Generation => GenerationReceivingAddress::from_seed(rng.gen()).into(),
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
                 };
                 let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
