@@ -1199,6 +1199,104 @@ mod test {
                 )
                 .boxed()
         }
+
+        /// A strategy for primitive witnesses with 1 input, 2 outputs, and the
+        /// given fee. The fee can be negative or even an invalid amount
+        /// (greater than the maximum number of nau).
+        pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
+            let total_amount_strategy = if fee.is_negative() {
+                (-fee).to_nau().try_into().unwrap()..(u128::MAX >> 1)
+            } else {
+                std::convert::TryInto::<u128>::try_into(fee.to_nau()).unwrap()..(u128::MAX >> 1)
+            };
+            let num_outputs = 2;
+            (
+                total_amount_strategy,
+                arb::<Digest>(),
+                vec(arb::<Digest>(), num_outputs),
+                arb::<Timestamp>(),
+            )
+                .prop_flat_map(
+                    move |(amount, input_address_seed, output_seeds, mut timestamp)| {
+                        while timestamp + COINBASE_TIME_LOCK_PERIOD < timestamp {
+                            timestamp = Timestamp::millis(timestamp.to_millis() >> 1);
+                        }
+
+                        let total_amount = NeptuneCoins::from_raw_u128(amount);
+                        let (input_utxos, input_lock_scripts_and_witnesses) =
+                            Self::transaction_inputs_from_address_seeds_and_amounts(
+                                &[input_address_seed],
+                                &[total_amount],
+                            );
+
+                        let output_utxos = if fee.is_negative() {
+                            let mut timelocked_amount = -fee;
+                            timelocked_amount.div_two();
+                            let timelocked_output = Utxo::new_native_currency(
+                                LockScript::hash_lock(output_seeds[0]),
+                                timelocked_amount,
+                            )
+                            .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
+
+                            let liquid_amount = NeptuneCoins::from_raw_u128(
+                                u128::try_from(total_amount.to_nau())
+                                    .unwrap()
+                                    .checked_sub(
+                                        u128::try_from(timelocked_amount.to_nau()).unwrap(),
+                                    )
+                                    .unwrap()
+                                    .checked_add(u128::try_from((-fee).to_nau()).unwrap())
+                                    .unwrap(),
+                            );
+                            let liquid_output = Utxo::new_native_currency(
+                                LockScript::hash_lock(output_seeds[0]),
+                                liquid_amount,
+                            );
+
+                            vec![timelocked_output, liquid_output]
+                        } else {
+                            let mut first_amount = fee;
+                            first_amount.div_two();
+                            while total_amount
+                                .checked_sub(&fee)
+                                .unwrap()
+                                .checked_sub(&first_amount)
+                                .is_none()
+                            {
+                                first_amount.div_two();
+                            }
+                            let first_output = Utxo::new_native_currency(
+                                LockScript::hash_lock(output_seeds[0]),
+                                first_amount,
+                            )
+                            .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
+
+                            let second_amount = total_amount
+                                .checked_sub(&first_amount)
+                                .unwrap()
+                                .checked_sub(&fee)
+                                .unwrap();
+                            let second_output = Utxo::new_native_currency(
+                                LockScript::hash_lock(output_seeds[1]),
+                                second_amount,
+                            );
+
+                            vec![first_output, second_output]
+                        };
+
+                        Self::arbitrary_primitive_witness_with_timestamp_and(
+                            &input_utxos,
+                            &input_lock_scripts_and_witnesses,
+                            &output_utxos,
+                            &[],
+                            fee,
+                            None,
+                            timestamp,
+                        )
+                    },
+                )
+                .boxed()
+        }
     }
 
     #[proptest(cases = 5, async = "tokio")]

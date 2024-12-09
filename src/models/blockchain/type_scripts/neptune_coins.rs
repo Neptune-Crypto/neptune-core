@@ -447,7 +447,7 @@ impl<'a> Arbitrary<'a> for NeptuneCoins {
 }
 
 #[cfg(test)]
-mod amount_tests {
+pub(crate) mod test {
     use std::ops::ShlAssign;
     use std::str::FromStr;
 
@@ -457,6 +457,8 @@ mod amount_tests {
     use itertools::Itertools;
     use num_bigint::Sign;
     use num_traits::FromPrimitive;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
     use proptest_arbitrary_interop::arb;
     use rand::thread_rng;
     use rand::Rng;
@@ -464,6 +466,18 @@ mod amount_tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    impl NeptuneCoins {
+        pub(crate) fn from_raw_u128(int: u128) -> Self {
+            Self(int)
+        }
+    }
+
+    pub(crate) fn invalid_amount() -> BoxedStrategy<NeptuneCoins> {
+        ((NeptuneCoins::MAX_NAU + 1)..(u128::MAX >> 1))
+            .prop_map(NeptuneCoins)
+            .boxed()
+    }
 
     #[test]
     fn test_slice_conversion() {
