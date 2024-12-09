@@ -2320,6 +2320,7 @@ mod global_state_tests {
             &premine_receiver,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2612,6 +2613,7 @@ mod global_state_tests {
             &premine_receiver,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2667,10 +2669,15 @@ mod global_state_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
         let guesser_fraction = 0f64;
-        let (cb, _) =
-            make_coinbase_transaction(&genesis_block, &global_state_lock, guesser_fraction, now)
-                .await
-                .unwrap();
+        let (cb, _) = make_coinbase_transaction(
+            &genesis_block,
+            &global_state_lock,
+            guesser_fraction,
+            now,
+            TxProvingCapability::SingleProof,
+        )
+        .await
+        .unwrap();
         let block_1 = Block::compose(
             &genesis_block,
             cb,
@@ -2720,21 +2727,18 @@ mod global_state_tests {
                 global_state_lock,
                 guesser_fraction,
                 timestamp,
+                TxProvingCapability::PrimitiveWitness,
             )
             .await
             .unwrap();
 
-            Block::compose(
+            Block::block_template_invalid_proof(
                 &genesis_block,
                 cb,
                 timestamp,
                 Digest::default(),
                 None,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
             )
-            .await
-            .unwrap()
         }
 
         let network = Network::Main;

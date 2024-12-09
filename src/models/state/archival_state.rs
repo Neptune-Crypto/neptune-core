@@ -1867,6 +1867,7 @@ mod archival_state_tests {
             &genesis,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2104,6 +2105,7 @@ mod archival_state_tests {
             &genesis,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
