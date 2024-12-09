@@ -1021,6 +1021,7 @@ pub mod test {
     use std::panic;
 
     use itertools::Itertools;
+    use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::strategy::ValueTree;
@@ -1037,11 +1038,11 @@ pub mod test {
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
@@ -1076,24 +1077,13 @@ pub mod test {
         Ok(())
     }
 
-    fn assert_both_rust_and_tasm_fail(native_currency_witness: NativeCurrencyWitness) {
-        let rust_result = NativeCurrency.run_rust(
-            &native_currency_witness.standard_input(),
-            native_currency_witness.nondeterminism(),
-        );
-        let tasm_result = NativeCurrency.run_tasm(
-            &native_currency_witness.standard_input(),
-            native_currency_witness.nondeterminism(),
-        );
-
-        assert!(
-            tasm_result.is_err(),
-            "tasm should have panicked, but didn't"
-        );
-        assert!(
-            rust_result.is_err(),
-            "rust should have panicked, but didn't"
-        );
+    fn assert_both_rust_and_tasm_fail(
+        native_currency_witness: NativeCurrencyWitness,
+        expected_error_ids: &[i128],
+    ) {
+        let stdin = native_currency_witness.standard_input();
+        let nd = native_currency_witness.nondeterminism();
+        consensus_program_negative_test(NativeCurrency, &stdin, nd, expected_error_ids);
     }
 
     #[test]
@@ -1120,7 +1110,7 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
-    #[proptest(cases = 1)]
+    #[proptest(cases = 50)]
     fn balanced_transaction_is_valid(
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
@@ -1133,7 +1123,7 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness)?;
     }
 
-    #[proptest(cases = 10)]
+    #[proptest(cases = 50)]
     fn native_currency_is_valid_for_primitive_witness_with_timelock(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
@@ -1170,7 +1160,7 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
-    #[proptest(cases = 20)]
+    #[proptest(cases = 50)]
     fn unbalanced_transaction_without_coinbase_is_invalid_prop(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -1203,7 +1193,7 @@ pub mod test {
         )?;
     }
 
-    #[proptest(cases = 20)]
+    #[proptest(cases = 50)]
     fn unbalanced_transaction_with_coinbase_is_invalid(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -1312,28 +1302,8 @@ pub mod test {
             .unwrap()
             .current();
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        println!(
-            "coinbase amount: {:?}",
-            TransactionKernelProxy::from(native_currency_witness.kernel.clone())
-                .coinbase
-                .unwrap()
-        );
         let mut fee = native_currency_witness.kernel.fee;
         fee.div_two();
-        println!(
-            "amount time-locked: {:?}",
-            native_currency_witness
-                .salted_output_utxos()
-                .utxos
-                .iter()
-                .filter(|utxo| utxo
-                    .coins()
-                    .iter()
-                    .any(|coin| coin.type_script_hash == TimeLock.hash()))
-                .map(|utxo| utxo.get_native_currency_amount())
-                .chain([fee])
-                .sum::<NeptuneCoins>()
-        );
 
         assert!(assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).is_ok());
     }
@@ -1381,35 +1351,78 @@ pub mod test {
 
     #[proptest]
     fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
+            None,
+            #_num_outputs,
+            #_num_public_announcements
+        ))]
         mut primitive_witness: PrimitiveWitness,
+        #[strategy(arb())]
+        #[filter(NeptuneCoins::zero() < #delta)]
+        delta: NeptuneCoins,
     ) {
-        let delta = NeptuneCoins::from_nau(7.into()).unwrap();
-        let coinbase = primitive_witness.kernel.coinbase.unwrap();
-
         // Modify the kernel so as to increase the coinbase but not the fee. The
-        // resulting transaction is imbalanced but in a non-inflationary way
-        // (like burning). So the no-inflation equation checks out. But now not
-        // enough coinbase funds are time-locked.
+        // resulting transaction is imbalanced but since the timelocked coinbase
+        // amount is checked prior to the input/output balancing check, we know
+        // which assert will be hit.
+        let coinbase = primitive_witness.kernel.coinbase.unwrap();
         let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase + delta));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
     }
 
     #[proptest]
-    fn coinbase_transaction_with_too_early_release_is_invalid(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+    fn coinbase_transaction_with_too_early_release_is_invalid_fixed_delta(
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
+            None,
+            #_num_outputs,
+            #_num_public_announcements
+        ))]
         mut primitive_witness: PrimitiveWitness,
     ) {
         // Modify the kernel's timestamp to push it later in time. As a result,
         // the time-locks embedded in the coinbase UTXOs are less than the
         // coinbase time-lock time.
+        let delta = Timestamp::days(1);
         let kernel_modifier = TransactionKernelModifier::default()
-            .timestamp(primitive_witness.kernel.timestamp + Timestamp::days(1));
+            .timestamp(primitive_witness.kernel.timestamp + delta);
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        assert_both_rust_and_tasm_fail(native_currency_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
+    }
+
+    #[proptest(cases = 50)]
+    fn coinbase_transaction_with_too_early_release_is_invalid_prop_delta(
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
+            None,
+            #_num_outputs,
+            #_num_public_announcements
+        ))]
+        mut primitive_witness: PrimitiveWitness,
+        #[strategy(arb())]
+        #[filter(Timestamp::zero() < #delta)]
+        delta: Timestamp,
+    ) {
+        // Modify the kernel's timestamp to push it later in time. As a result,
+        // the time-locks embedded in the coinbase UTXOs are less than the
+        // coinbase time-lock time.
+        // Skip test-cases that wrap around on the timestamp value, as this
+        // represents an earlier timestamp.
+        prop_assume!(
+            primitive_witness.kernel.timestamp + delta >= primitive_witness.kernel.timestamp
+        );
+        let kernel_modifier = TransactionKernelModifier::default()
+            .timestamp(primitive_witness.kernel.timestamp + delta);
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness, &[COINBASE_TIMELOCK_INSUFFICIENT]);
     }
 
     #[test]
