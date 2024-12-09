@@ -1045,7 +1045,9 @@ pub mod test {
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
-    fn prop_positive(native_currency_witness: NativeCurrencyWitness) -> Result<(), TestCaseError> {
+    fn assert_both_rust_and_tasm_halt_gracefully(
+        native_currency_witness: NativeCurrencyWitness,
+    ) -> Result<(), TestCaseError> {
         let rust_result = NativeCurrency
             .run_rust(
                 &native_currency_witness.standard_input(),
@@ -1074,7 +1076,7 @@ pub mod test {
         Ok(())
     }
 
-    fn prop_negative(native_currency_witness: NativeCurrencyWitness) {
+    fn assert_both_rust_and_tasm_fail(native_currency_witness: NativeCurrencyWitness) {
         let rust_result = NativeCurrency.run_rust(
             &native_currency_witness.standard_input(),
             native_currency_witness.nondeterminism(),
@@ -1104,7 +1106,7 @@ pub mod test {
             .unwrap()
             .current();
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_positive(native_currency_witness).unwrap();
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
     #[test]
@@ -1115,7 +1117,7 @@ pub mod test {
             .unwrap()
             .current();
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_positive(native_currency_witness).unwrap();
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
     #[proptest(cases = 1)]
@@ -1128,7 +1130,7 @@ pub mod test {
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_positive(native_currency_witness)?;
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness)?;
     }
 
     #[proptest(cases = 10)]
@@ -1149,7 +1151,7 @@ pub mod test {
 
         // there are inputs so there can be no coinbase and we are testing a
         // regular transaction
-        prop_positive(native_currency_witness)?;
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness)?;
     }
 
     #[test]
@@ -1165,7 +1167,7 @@ pub mod test {
             .current();
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
 
-        prop_positive(native_currency_witness).unwrap();
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
     #[proptest(cases = 20)]
@@ -1299,7 +1301,7 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_positive(native_currency_witness).unwrap();
+        assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).unwrap();
     }
 
     #[test]
@@ -1333,7 +1335,7 @@ pub mod test {
                 .sum::<NeptuneCoins>()
         );
 
-        assert!(prop_positive(native_currency_witness).is_ok());
+        assert!(assert_both_rust_and_tasm_halt_gracefully(native_currency_witness).is_ok());
     }
 
     #[test]
@@ -1392,7 +1394,7 @@ pub mod test {
         let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase + delta));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_negative(native_currency_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness);
     }
 
     #[proptest]
@@ -1407,7 +1409,7 @@ pub mod test {
             .timestamp(primitive_witness.kernel.timestamp + Timestamp::days(1));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
-        prop_negative(native_currency_witness);
+        assert_both_rust_and_tasm_fail(native_currency_witness);
     }
 
     #[test]
