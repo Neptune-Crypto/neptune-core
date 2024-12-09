@@ -25,6 +25,7 @@ use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
 use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -910,6 +911,16 @@ pub struct NativeCurrencyWitness {
     pub kernel: TransactionKernel,
 }
 
+impl From<PrimitiveWitness> for NativeCurrencyWitness {
+    fn from(primitive_witness: PrimitiveWitness) -> Self {
+        NativeCurrencyWitness {
+            salted_input_utxos: primitive_witness.input_utxos,
+            salted_output_utxos: primitive_witness.output_utxos,
+            kernel: primitive_witness.kernel,
+        }
+    }
+}
+
 /// The part of witness data that is read from memory
 ///
 /// Factored out since this makes auditing the preloaded data much cheaper as
@@ -1092,11 +1103,7 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_positive(native_currency_witness).unwrap();
     }
 
@@ -1107,11 +1114,7 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_positive(native_currency_witness).unwrap();
     }
 
@@ -1124,11 +1127,7 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_positive(native_currency_witness)?;
     }
 
@@ -1146,11 +1145,7 @@ pub mod test {
         ))]
         primitive_witness: PrimitiveWitness,
     ) {
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
 
         // there are inputs so there can be no coinbase and we are testing a
         // regular transaction
@@ -1168,11 +1163,7 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
 
         prop_positive(native_currency_witness).unwrap();
     }
@@ -1201,11 +1192,7 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let witness = NativeCurrencyWitness::from(primitive_witness);
 
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
@@ -1241,11 +1228,7 @@ pub mod test {
         // with high probability the amounts (which are random) do not add up
         // and since the coinbase is set, the coinbase-timelock test might fail
         // before the no-inflation test.
-        let witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(witness.kernel.coinbase.is_some(), "coinbase is none");
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
@@ -1265,11 +1248,7 @@ pub mod test {
         let salted_input_utxos_hash = Hash::hash(&primitive_witness.input_utxos);
         let salted_output_utxos_hash = Hash::hash(&primitive_witness.output_utxos);
 
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         let type_script_and_witness = TypeScriptAndWitness::new_with_nondeterminism(
             NativeCurrency.program(),
             native_currency_witness.nondeterminism(),
@@ -1319,11 +1298,7 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_positive(native_currency_witness).unwrap();
     }
 
@@ -1334,11 +1309,7 @@ pub mod test {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         println!(
             "coinbase amount: {:?}",
             TransactionKernelProxy::from(native_currency_witness.kernel.clone())
@@ -1396,11 +1367,7 @@ pub mod test {
             .current()
             .clone();
             // with high probability the amounts (which are random) do not add up
-            let witness = NativeCurrencyWitness {
-                salted_input_utxos: primitive_witness.input_utxos,
-                salted_output_utxos: primitive_witness.output_utxos,
-                kernel: primitive_witness.kernel,
-            };
+            let witness = NativeCurrencyWitness::from(primitive_witness);
             let result = NativeCurrency.test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -1424,11 +1391,7 @@ pub mod test {
         // enough coinbase funds are time-locked.
         let kernel_modifier = TransactionKernelModifier::default().coinbase(Some(coinbase + delta));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_negative(native_currency_witness);
     }
 
@@ -1443,11 +1406,7 @@ pub mod test {
         let kernel_modifier = TransactionKernelModifier::default()
             .timestamp(primitive_witness.kernel.timestamp + Timestamp::days(1));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
-        let native_currency_witness = NativeCurrencyWitness {
-            salted_input_utxos: primitive_witness.input_utxos,
-            salted_output_utxos: primitive_witness.output_utxos,
-            kernel: primitive_witness.kernel,
-        };
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         prop_negative(native_currency_witness);
     }
 
