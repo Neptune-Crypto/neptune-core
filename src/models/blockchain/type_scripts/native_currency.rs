@@ -1040,6 +1040,7 @@ pub mod test {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::type_scripts::neptune_coins::test::invalid_amount;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
@@ -1439,5 +1440,41 @@ pub mod test {
             assert!(f, "This assertion will fail");
         });
         prop_assert!(result.is_err());
+    }
+
+    #[proptest]
+    fn fee_can_be_positive(
+        #[strategy(arb::<NeptuneCoins>())] _fee: NeptuneCoins,
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
+    }
+
+    #[proptest]
+    fn fee_can_be_negative(
+        #[strategy(arb::<NeptuneCoins>())] _fee: NeptuneCoins,
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
+    }
+
+    #[proptest]
+    fn positive_fee_cannot_exceed_max_nau(
+        #[strategy(invalid_amount())] _fee: NeptuneCoins,
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        assert_both_rust_and_tasm_fail(NativeCurrencyWitness::from(primitive_witness));
+    }
+
+    #[proptest]
+    fn negative_fee_cannot_exceed_negative_max_nau(
+        #[strategy(invalid_amount())] _fee: NeptuneCoins,
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        assert_both_rust_and_tasm_fail(NativeCurrencyWitness::from(primitive_witness));
     }
 }
