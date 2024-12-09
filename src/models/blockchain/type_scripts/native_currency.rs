@@ -1410,14 +1410,11 @@ pub mod test {
         }
     }
 
-    #[test]
-    fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid() {
-        let mut test_runner = TestRunner::deterministic();
-        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current()
-            .clone();
+    #[proptest]
+    fn coinbase_transaction_with_not_enough_funds_timelocked_is_invalid(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        mut primitive_witness: PrimitiveWitness,
+    ) {
         let delta = NeptuneCoins::from_nau(7.into()).unwrap();
         let coinbase = primitive_witness.kernel.coinbase.unwrap();
 
@@ -1435,15 +1432,11 @@ pub mod test {
         prop_negative(native_currency_witness);
     }
 
-    #[test]
-    fn coinbase_transaction_with_too_early_release_is_invalid() {
-        let mut test_runner = TestRunner::deterministic();
-        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current()
-            .clone();
-
+    #[proptest]
+    fn coinbase_transaction_with_too_early_release_is_invalid(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        mut primitive_witness: PrimitiveWitness,
+    ) {
         // Modify the kernel's timestamp to push it later in time. As a result,
         // the time-locks embedded in the coinbase UTXOs are less than the
         // coinbase time-lock time.
