@@ -148,17 +148,14 @@ impl ConsensusProgram for NativeCurrency {
         let mut i: u32 = 0;
         let num_inputs: u32 = input_salted_utxos.utxos.len() as u32;
         while i < num_inputs {
-            let num_coins: u32 = input_salted_utxos.utxos[i as usize].coins().len() as u32;
+            let utxo_i = &input_salted_utxos.utxos[i as usize];
+            let num_coins: u32 = utxo_i.coins().len() as u32;
             let mut j = 0;
             while j < num_coins {
-                if input_salted_utxos.utxos[i as usize].coins()[j as usize].type_script_hash
-                    == self_digest
-                {
+                if utxo_i.coins()[j as usize].type_script_hash == self_digest {
                     // decode state to get amount
-                    let amount: NeptuneCoins = *NeptuneCoins::decode(
-                        &input_salted_utxos.utxos[i as usize].coins()[j as usize].state,
-                    )
-                    .unwrap();
+                    let amount: NeptuneCoins =
+                        *NeptuneCoins::decode(&utxo_i.coins()[j as usize].state).unwrap();
 
                     // safely add to total
                     total_input = total_input.safe_add(amount).unwrap();
@@ -171,6 +168,7 @@ impl ConsensusProgram for NativeCurrency {
         // get total output amount from outputs
         let mut total_output = NeptuneCoins::new(0);
         let mut total_timelocked_output = NeptuneCoins::new(0);
+
         i = 0;
         let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
         while i < num_outputs {
@@ -221,8 +219,7 @@ impl ConsensusProgram for NativeCurrency {
 
         // test no-inflation equation
         let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
-        assert!(!fee.is_negative());
-        let total_output_plus_fee: NeptuneCoins = total_output.safe_add(fee).unwrap();
+        let total_output_plus_fee: NeptuneCoins = total_output.checked_add_negative(&fee).unwrap();
         assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
     }
 
