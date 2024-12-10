@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use get_size::GetSize;
 use itertools::Itertools;
+use num_traits::CheckedAdd;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::DataType;
@@ -48,6 +49,7 @@ const COINBASE_TIMELOCK_INSUFFICIENT: i128 = 1_000_034;
 const UTXO_SIZE_TOO_LARGE_ERROR: i128 = 1_000_035;
 const TOO_BIG_COIN_FIELD_SIZE_ERROR: i128 = 1_000_036;
 const STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR: i128 = 1_000_037;
+const FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR: i128 = 1_000_038;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -158,7 +160,7 @@ impl ConsensusProgram for NativeCurrency {
                         *NeptuneCoins::decode(&utxo_i.coins()[j as usize].state).unwrap();
 
                     // safely add to total
-                    total_input = total_input.safe_add(amount).unwrap();
+                    total_input = total_input.checked_add(&amount).unwrap();
                 }
                 j += 1;
             }
@@ -187,7 +189,7 @@ impl ConsensusProgram for NativeCurrency {
                     assert!(!amount.is_negative());
 
                     // safely add to total
-                    total_amount_for_utxo = total_amount_for_utxo.safe_add(amount).unwrap();
+                    total_amount_for_utxo = total_amount_for_utxo.checked_add(&amount).unwrap();
                 } else if coin_j.type_script_hash == Self::TIME_LOCK_HASH {
                     // decode state to get release date
                     let release_date = *Timestamp::decode(&coin_j.state).unwrap();
@@ -197,10 +199,10 @@ impl ConsensusProgram for NativeCurrency {
                 }
                 j += 1;
             }
-            total_output = total_output.safe_add(total_amount_for_utxo).unwrap();
+            total_output = total_output.checked_add(&total_amount_for_utxo).unwrap();
             if time_locked {
                 total_timelocked_output = total_timelocked_output
-                    .safe_add(total_amount_for_utxo)
+                    .checked_add(&total_amount_for_utxo)
                     .unwrap();
             }
             i += 1;
@@ -218,7 +220,8 @@ impl ConsensusProgram for NativeCurrency {
             total_output,);
 
         // test no-inflation equation
-        let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
+        let total_input_plus_coinbase: NeptuneCoins =
+            total_input.checked_add(&some_coinbase).unwrap();
         let total_output_plus_fee: NeptuneCoins = total_output.checked_add_negative(&fee).unwrap();
         assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
     }
@@ -1463,7 +1466,10 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
-        assert_both_rust_and_tasm_fail(NativeCurrencyWitness::from(primitive_witness));
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness),
+            &[FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR],
+        );
     }
 
     #[proptest]
@@ -1472,6 +1478,9 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
-        assert_both_rust_and_tasm_fail(NativeCurrencyWitness::from(primitive_witness));
+        assert_both_rust_and_tasm_fail(
+            NativeCurrencyWitness::from(primitive_witness),
+            &[FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR],
+        );
     }
 }
