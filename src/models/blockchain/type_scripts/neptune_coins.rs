@@ -20,6 +20,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
@@ -42,27 +43,77 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// program related to block validity, it is important to use `safe_add` rather than `+` as
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, BFieldCodec, TasmObject, Default)]
-pub struct NeptuneCoins(u128);
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default)]
+pub struct NeptuneCoins(i128);
+
+impl BFieldCodec for NeptuneCoins {
+    type Error = BFieldCodecError;
+
+    fn decode(
+        sequence: &[tasm_lib::triton_vm::prelude::BFieldElement],
+    ) -> Result<Box<Self>, Self::Error> {
+        std::result::Result::Ok(Box::new(Self((*u128::decode(sequence)?) as i128)))
+    }
+
+    fn encode(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
+        (self.0 as u128).encode()
+    }
+
+    fn static_length() -> Option<usize> {
+        u128::static_length()
+    }
+}
+
+impl TasmObject for NeptuneCoins {
+    fn label_friendly_name() -> String {
+        "NeptuneCoins".to_owned()
+    }
+
+    fn get_field(_: &str) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
+        unimplemented!()
+    }
+
+    fn get_field_with_size(_: &str) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
+        unimplemented!()
+    }
+
+    fn get_field_start_with_jump_distance(
+        _: &str,
+    ) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
+        unimplemented!()
+    }
+
+    fn compute_size_and_assert_valid_size_indicator(
+        library: &mut tasm_lib::prelude::Library,
+    ) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
+        u128::compute_size_and_assert_valid_size_indicator(library)
+    }
+
+    fn decode_iter<Itr: Iterator<Item = tasm_lib::triton_vm::prelude::BFieldElement>>(
+        iterator: &mut Itr,
+    ) -> std::result::Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
+        let inner = *u128::decode_iter(iterator)? as i128;
+
+        std::result::Result::Ok(Box::new(NeptuneCoins(inner)))
+    }
+}
 
 impl NeptuneCoins {
-    const MAX_NAU: u128 = 42000000 * Self::conversion_factor();
+    const MAX_NAU: i128 = 42000000 * Self::conversion_factor();
 
     /// The conversion factor is 10^30 * 2^2.
     /// It is such that 42 000 000 * 10^30 * 2^2 is just one bit shy of being 128 bits
     /// wide. The one shy bit is used for the sign.
-    const fn conversion_factor() -> u128 {
-        let mut product = 1u128;
-        let ten = 10u128;
-        // for _ in 0..30 {
+    const fn conversion_factor() -> i128 {
+        let mut product = 1i128;
+        let ten = 10i128;
         let mut i = 0;
         while i < 30 {
             product *= ten;
             i += 1;
         }
 
-        let two = 2u128;
-        // for _ in 0..2 {
+        let two = 2i128;
         i = 0;
         while i < 2 {
             product *= two;
@@ -73,7 +124,7 @@ impl NeptuneCoins {
 
     /// Return the element that corresponds to 1. Use in tests only.
     pub fn one() -> NeptuneCoins {
-        NeptuneCoins(1u128)
+        NeptuneCoins(1i128)
     }
 
     /// Create an Amount object of the given number of coins.
@@ -82,7 +133,7 @@ impl NeptuneCoins {
             num_coins <= 42000000,
             "Number of coins must be less than 42000000"
         );
-        let number: u128 = num_coins.into();
+        let number: i128 = num_coins.into();
         Self(Self::conversion_factor() * number)
     }
 
@@ -119,7 +170,7 @@ impl NeptuneCoins {
 
     /// Convert the amount to Neptune atomic units (nau)
     pub fn to_nau(&self) -> BigInt {
-        BigInt::from_u128(self.0).unwrap()
+        BigInt::from_i128(self.0).unwrap()
     }
 
     /// Convert the number of Neptune atomic units (nau) to an amount of Neptune coins
@@ -134,7 +185,7 @@ impl NeptuneCoins {
         // flip and recurse if we are dealing with negative numbers
         if sign == num_bigint::Sign::Minus {
             let positive_nau = Self::from_nau(-nau)?;
-            return Some(Self(u128::MAX - positive_nau.0 + 1u128));
+            return Some(-positive_nau);
         }
 
         // pad with zeros if necessary
@@ -150,27 +201,18 @@ impl NeptuneCoins {
 
         // compute and return conversion
         let number = (limbs[0] as u128) | ((limbs[1] as u128) << 64);
-        Some(Self(number))
+        Some(Self(number as i128))
     }
 
     pub fn is_negative(&self) -> bool {
-        self.0 & (1 << 127) != 0
+        self.0 < 0
     }
 
     pub fn scalar_mul(&self, factor: u32) -> Self {
-        let factor_as_u128 = factor as u128;
-        NeptuneCoins(factor_as_u128 * self.0)
-    }
-
-    /// Add two amounts of Neptune coins but return None if the top bit in the
-    /// sum is set (which would make the sum negative). Also: catch overflow.
-    pub fn safe_add(&self, other: NeptuneCoins) -> Option<NeptuneCoins> {
-        let number = self.0.checked_add(other.0)?;
-        if number & (1u128 << 127) == 0 {
-            Some(NeptuneCoins(number))
-        } else {
-            None
-        }
+        let factor_as_i128 = factor as i128;
+        let (res, overflow) = self.0.overflowing_mul(factor_as_i128);
+        assert!(!overflow, "Overflow on scalar multiplication not allowed.");
+        NeptuneCoins(res)
     }
 
     /// Multiply a coin amount with a fraction, in a lossy manner. Result is
@@ -226,8 +268,10 @@ impl NeptuneCoins {
         if self.is_negative() && rhs.is_negative() {
             return None;
         }
-        let value = self.0.wrapping_add(rhs.0);
-        if value > Self::MAX_NAU {
+
+        let value = self.0.checked_add(rhs.0)?;
+
+        if value > Self::MAX_NAU || value.is_negative() {
             None
         } else {
             Some(Self(value))
@@ -281,7 +325,7 @@ impl CheckedSub for NeptuneCoins {
     /// Return Some(self-other) if the result is positive (or zero); otherwise
     /// return None.
     fn checked_sub(&self, v: &Self) -> Option<Self> {
-        if self >= v {
+        if !self.is_negative() && !v.is_negative() && self >= v {
             Some(NeptuneCoins(self.0 - v.0))
         } else {
             None
@@ -290,18 +334,16 @@ impl CheckedSub for NeptuneCoins {
 }
 
 impl CheckedAdd for NeptuneCoins {
-    /// Return Some(self+other) if (there is no u128-overflow and) the result is
+    /// Return Some(self+other) if (there is no i128-overflow and) the result is
     /// smaller than the maximum number of nau.
     fn checked_add(&self, v: &Self) -> Option<Self> {
-        if let Some(value) = self.0.checked_add(v.0) {
-            if value > Self::MAX_NAU {
+        self.0.checked_add(v.0).and_then(|sum| {
+            if sum > Self::MAX_NAU {
                 None
             } else {
-                Some(Self(value))
+                Some(Self(sum))
             }
-        } else {
-            None
-        }
+        })
     }
 }
 
@@ -309,7 +351,7 @@ impl Neg for NeptuneCoins {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self((u128::MAX - self.0).wrapping_add(1u128))
+        Self(-self.0)
     }
 }
 
@@ -327,11 +369,11 @@ impl PartialOrd for NeptuneCoins {
 
 impl Zero for NeptuneCoins {
     fn zero() -> Self {
-        NeptuneCoins(0u128)
+        NeptuneCoins(0)
     }
 
     fn is_zero(&self) -> bool {
-        self.0 == 0u128
+        self.0 == 0
     }
 }
 
@@ -354,10 +396,10 @@ impl TryFrom<f64> for NeptuneCoins {
             Err(FloatConversionError::Infinity)
         } else if value < 0.0 {
             Err(FloatConversionError::Negative)
-        } else if value > u128::MAX as f64 {
+        } else if value > Self::MAX_NAU as f64 {
             Err(FloatConversionError::Overflow)
         } else {
-            Ok(value as u128)
+            Ok(value as i128)
         }?;
         let bi = BigInt::from(u);
         match Self::from_nau(bi) {
@@ -401,7 +443,7 @@ impl FromStr for NeptuneCoins {
             BigInt::zero()
         } else {
             let denominator = decimal_shift;
-            let conversion_factor = BigInt::from_u128(Self::conversion_factor()).unwrap();
+            let conversion_factor = BigInt::from_i128(Self::conversion_factor()).unwrap();
             let nau_rational = BigRational::new(numerator * conversion_factor, denominator).round();
             match sign {
                 num_bigint::Sign::Minus => -nau_rational.numer(),
@@ -421,11 +463,7 @@ impl Display for NeptuneCoins {
         let conversion_factor = Self::conversion_factor();
         let sign = self.is_negative();
         let sign_symbol = if sign { "-" } else { "" };
-        let nau = if sign {
-            u128::MAX - self.0 + 1u128
-        } else {
-            self.0
-        };
+        let nau = if sign { -self.0 } else { self.0 };
         let rational = (nau as f64) / (conversion_factor as f64);
         let rounded = (100.0 * rational).round();
         if rounded.is_zero() {
@@ -448,7 +486,7 @@ impl Display for NeptuneCoins {
 impl<'a> Arbitrary<'a> for NeptuneCoins {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let nau: u128 = u.arbitrary()?;
-        Ok(NeptuneCoins(nau >> 10))
+        Ok(NeptuneCoins((nau as i128) >> 10))
     }
 }
 
@@ -465,6 +503,9 @@ pub(crate) mod test {
     use num_traits::FromPrimitive;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
     use rand::thread_rng;
     use rand::Rng;
@@ -474,13 +515,13 @@ pub(crate) mod test {
     use super::*;
 
     impl NeptuneCoins {
-        pub(crate) fn from_raw_u128(int: u128) -> Self {
+        pub(crate) fn from_raw_i128(int: i128) -> Self {
             Self(int)
         }
     }
 
     pub(crate) fn invalid_amount() -> BoxedStrategy<NeptuneCoins> {
-        ((NeptuneCoins::MAX_NAU + 1)..(u128::MAX >> 1))
+        ((NeptuneCoins::MAX_NAU + 1)..(i128::MAX >> 1))
             .prop_map(NeptuneCoins)
             .boxed()
     }
@@ -626,7 +667,7 @@ pub(crate) mod test {
     #[test]
     fn conversion_factor_is_optimal() {
         let forty_two_million = BigInt::from_i32(42000000).unwrap();
-        let conversion_factor = BigInt::from_u128(NeptuneCoins::conversion_factor()).unwrap();
+        let conversion_factor = BigInt::from_i128(NeptuneCoins::conversion_factor()).unwrap();
         let mut two_pow_127 = BigInt::one();
         two_pow_127.shl_assign(127);
         assert!(conversion_factor.clone() * forty_two_million.clone() < two_pow_127);
@@ -643,7 +684,7 @@ pub(crate) mod test {
     fn from_decimal_test() {
         let parsed = NeptuneCoins::from_str("-10.125").unwrap();
         let cf = NeptuneCoins::conversion_factor() >> 3;
-        let fixed = -(NeptuneCoins::from_nau(BigInt::from_u128(cf).unwrap()).unwrap()
+        let fixed = -(NeptuneCoins::from_nau(BigInt::from_i128(cf).unwrap()).unwrap()
             + NeptuneCoins::new(10));
         assert_eq!(parsed.clone(), fixed);
         assert!(parsed.is_negative());
@@ -701,14 +742,81 @@ pub(crate) mod test {
         #[strategy(arb())] a0: NeptuneCoins,
         #[strategy(arb())] a1: NeptuneCoins,
     ) {
-        a0.safe_add(a1).unwrap();
+        a0.checked_add(&a1).unwrap();
+    }
+
+    #[proptest]
+    fn checked_add_proptest(lhs: i128, rhs: i128) {
+        let lhs = NeptuneCoins(lhs >> 1);
+        let rhs = NeptuneCoins(rhs >> 1);
+        prop_assert!(lhs.checked_add(&rhs).is_some());
+    }
+
+    #[proptest]
+    fn checked_add_overflow_proptest(rhs: u128) {
+        let lhs = NeptuneCoins(NeptuneCoins::MAX_NAU);
+        let rhs = NeptuneCoins((rhs >> 2) as i128);
+        prop_assume!(!rhs.is_zero());
+        prop_assert!(lhs.checked_add(&rhs).is_none());
+    }
+
+    #[test]
+    fn checked_add_overflow_unit_test() {
+        let one_nau = NeptuneCoins(1);
+        let max_value = NeptuneCoins(NeptuneCoins::MAX_NAU);
+        assert!(max_value.checked_add(&one_nau).is_none());
+        assert!(max_value.checked_add(&NeptuneCoins::zero()).is_some());
+    }
+
+    #[test]
+    fn expected_coins_static_length() {
+        assert_eq!(Some(4), NeptuneCoins::static_length());
+    }
+
+    #[proptest]
+    fn to_and_from_nau_identity(
+        #[strategy(-NeptuneCoins::MAX_NAU..=NeptuneCoins::MAX_NAU)] num_naus: i128,
+    ) {
+        let val = NeptuneCoins(num_naus);
+        prop_assert_eq!(val, NeptuneCoins::from_nau(val.to_nau()).unwrap());
+    }
+
+    #[proptest]
+    fn scalar_mul_2_div_2_is_identity(
+        #[strategy(-NeptuneCoins::MAX_NAU/2..=NeptuneCoins::MAX_NAU/2)] num_naus: i128,
+    ) {
+        let original = NeptuneCoins(num_naus);
+        let mut calculated = original.scalar_mul(2);
+        calculated.div_two();
+        prop_assert_eq!(original, calculated);
+    }
+
+    #[proptest]
+    fn new_and_display_consistency_proptest(#[strategy(0u32..=42000000)] num_coins: u32) {
+        let val = NeptuneCoins::new(num_coins);
+        assert_eq!(format!("{val}"), num_coins.to_string());
+    }
+
+    #[proptest]
+    fn encode_decode_identity(val: i128) {
+        let val = NeptuneCoins(val >> 1);
+        prop_assert!(val == *NeptuneCoins::decode(&val.encode()).unwrap());
+    }
+
+    #[proptest]
+    fn outer_ordering_agrees_with_inner(lhs: i128, rhs: i128) {
+        let inner_cmp = lhs < rhs;
+        let lhs = NeptuneCoins(lhs >> 1);
+        let rhs = NeptuneCoins(rhs >> 1);
+        let outer_cmp = lhs < rhs;
+        prop_assert!(inner_cmp == outer_cmp);
     }
 
     #[test]
     fn unsafe_amounts_fail() {
-        let a0 = NeptuneCoins(1u128 << 126);
-        let a1 = NeptuneCoins(1u128 << 126);
-        assert!(a0.safe_add(a1).is_none());
+        let a0 = NeptuneCoins(1i128 << 126);
+        let a1 = NeptuneCoins(1i128 << 126);
+        assert!(a0.checked_add(&a1).is_none());
     }
 
     #[test]

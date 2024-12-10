@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use anyhow::Result;
 use itertools::Itertools;
+use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use serde_derive::Deserialize;
@@ -460,8 +461,9 @@ impl WalletState {
                     .sum(),
             )
             .expect("balance must never be negative")
-            .safe_add(
-                self.mempool_unspent_utxos_iter()
+            .checked_add(
+                &self
+                    .mempool_unspent_utxos_iter()
                     .map(|u| u.get_native_currency_amount())
                     .sum(),
             )
