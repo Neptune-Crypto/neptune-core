@@ -1295,9 +1295,9 @@ mod wallet_tests {
                 .filter(|x| x.is_synced_to(block_3_b.hash()))
                 .collect();
         assert_eq!(
-            4,
+            5,
             alice_monitored_utxos_3b.len(),
-            "List of monitored and unspent UTXOs have length 4 after receiving two"
+            "List of monitored and unspent UTXOs have length 5 after receiving two"
         );
         assert_eq!(
             0,
@@ -1447,8 +1447,8 @@ mod wallet_tests {
         // be valid in other respects. We don't care about PoW, though.
         assert!(block_1.is_valid(&genesis_block, in_seven_months));
 
-        // 3 outputs: 1 coinbase, 1 for recipient of tx, 1 for change.
-        assert_eq!(3, block_1.body().transaction_kernel.outputs.len());
+        // 4 outputs: 2 coinbases, 1 for recipient of tx, 1 for change.
+        assert_eq!(4, block_1.body().transaction_kernel.outputs.len());
     }
 
     #[tokio::test]

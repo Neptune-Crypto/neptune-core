@@ -1746,21 +1746,19 @@ mod archival_state_tests {
     async fn allow_multiple_inputs_and_outputs_in_block() {
         // Test various parts of the state update when a block contains multiple inputs and outputs
         let network = Network::Main;
-        let genesis_wallet_state =
+        let premine_rec_ws =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
-        let genesis_spending_key = genesis_wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
-        let mut genesis = mock_genesis_global_state(
+        let premine_rec_spending_key = premine_rec_ws.wallet_secret.nth_generation_spending_key(0);
+        let mut premine_rec = mock_genesis_global_state(
             network,
             3,
-            genesis_wallet_state.wallet_secret,
+            premine_rec_ws.wallet_secret,
             cli_args::Args::default(),
         )
         .await;
         assert_eq!(
             1,
-            genesis
+            premine_rec
                 .lock_guard()
                 .await
                 .wallet_state
@@ -1768,7 +1766,7 @@ mod archival_state_tests {
                 .monitored_utxos()
                 .len()
                 .await,
-            "Genesis receiver must have non-empty list of monitored UTXOs"
+            "Premine receiver must have non-empty list of monitored UTXOs"
         );
 
         let mut rng = StdRng::seed_from_u64(41251549301u64);
@@ -1785,11 +1783,12 @@ mod archival_state_tests {
                 .await;
 
         let genesis_block = Block::genesis_block(network);
-        let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
+        let launch_date = genesis_block.header().timestamp;
+        let in_seven_months = launch_date + Timestamp::months(7);
 
         println!("Generated initial states and genesis block");
 
-        // Send two outputs each to Alice and Bob, from genesis receiver
+        // Send two outputs each to Alice and Bob, from premine receiver
         let sender_randomness: Digest = rng.gen();
         let alice_address = alice_spending_key.to_address();
         let receiver_data_for_alice = vec![
@@ -1827,14 +1826,14 @@ mod archival_state_tests {
 
         println!("Before tx creation");
         let fee = NeptuneCoins::new(1);
-        let change_key = genesis
+        let change_key = premine_rec
             .global_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Symmetric)
             .await;
-        let (tx_to_alice_and_bob, change_utxo) = genesis
+        let (tx_to_alice_and_bob, change_utxo) = premine_rec
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1856,15 +1855,15 @@ mod archival_state_tests {
         println!("Generated transaction for Alice and Bob.");
 
         let guesser_fraction = 0f64;
-        let (cbtx, expected_composer_utxos) = make_coinbase_transaction(
-            &genesis
+        let (cbtx, composer_expected_utxos) = make_coinbase_transaction(
+            &premine_rec
                 .global_state_lock
                 .lock_guard()
                 .await
                 .chain
                 .light_state()
                 .clone(),
-            &genesis,
+            &premine_rec,
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
@@ -1908,20 +1907,20 @@ mod archival_state_tests {
 
         // Expect coinbase and change UTXO
         {
-            let mut genesis_state = genesis.lock_guard_mut().await;
-            let expected_utxos = genesis_state
+            let mut premine_rec = premine_rec.lock_guard_mut().await;
+            let expected_utxos = premine_rec
                 .wallet_state
                 .extract_expected_utxos(vec![change_utxo.unwrap()].into(), UtxoNotifier::Cli);
             assert_eq!(expected_utxos.len(), 1);
-            genesis_state
+            premine_rec
                 .wallet_state
                 .add_expected_utxos(expected_utxos)
                 .await;
 
-            assert_eq!(expected_composer_utxos.len(), 1);
-            genesis_state
+            assert_eq!(2, composer_expected_utxos.len());
+            premine_rec
                 .wallet_state
-                .add_expected_utxos(expected_composer_utxos)
+                .add_expected_utxos(composer_expected_utxos)
                 .await;
         }
 
@@ -1950,18 +1949,18 @@ mod archival_state_tests {
         }
 
         // Update chain states
-        for state_lock in [&mut genesis, &mut alice, &mut bob] {
+        for state_lock in [&mut premine_rec, &mut alice, &mut bob] {
             state_lock.set_new_tip(block_1.clone()).await.unwrap();
         }
 
         {
             assert_eq!(
-                3,
-                genesis.lock_guard().await
+                4,
+                premine_rec.lock_guard().await
                     .wallet_state
                     .wallet_db
                     .monitored_utxos()
-                    .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+                    .len().await, "Premine receiver must have 4 UTXOs after block 1: 1 change from transaction, 2 coinbases from block 1, and 1 spent premine UTXO"
             );
         }
 
@@ -1983,13 +1982,17 @@ mod archival_state_tests {
                 .await
                 .synced_unspent_available_amount(in_seven_months)
         );
+
+        let block_subsidy = Block::block_subsidy(block_1.header().height);
+        let mut liquid_reward = block_subsidy;
+        liquid_reward.div_two();
         assert_eq!(
-            // genesis receiver mined block 1: So new balance is:
-            // premine + block_reward - sent_to_alice - sent_to_bob - tx-fee
-            // = 20 + 128 - 10 - 5 - 1
-            // = 132
-            Block::block_subsidy(block_1.header().height) + NeptuneCoins::new(20 - 10 - 5 - 1),
-            genesis
+            // premine receiver mined block 1: So new balance is:
+            // premine + block_reward / 2 - sent_to_alice - sent_to_bob - tx-fee
+            // = 20 + 64 - 10 - 5 - 1
+            // = 68
+            liquid_reward + NeptuneCoins::new(20 - 10 - 5 - 1),
+            premine_rec
                 .lock_guard()
                 .await
                 .get_wallet_status_for_tip()
@@ -1997,22 +2000,33 @@ mod archival_state_tests {
                 .synced_unspent_available_amount(in_seven_months)
         );
 
+        let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
+        assert_eq!(
+            block_subsidy + NeptuneCoins::new(20 - 10 - 5 - 1),
+            premine_rec
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_available_amount(after_cb_timelock_expiration)
+        );
+
         println!("Transactions were received in good order.");
 
-        // Make two transactions: Alice sends two UTXOs to Genesis (1 + 8 coins and 1 in fee)
-        // and Bob sends three UTXOs to genesis (1 + 1 + 1 and 1 in fee)
-        let genesis_address = genesis_spending_key.to_address();
+        // Make two transactions: Alice sends two UTXOs to premine rec (1 + 8 coins and 1 in fee)
+        // and Bob sends three UTXOs to premine rec (1 + 1 + 1 and 1 in fee)
+        let premine_rec_addr = premine_rec_spending_key.to_address();
         let outputs_from_alice: TxOutputList = vec![
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
-                genesis_address.into(),
+                premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(8),
                 rng.gen(),
-                genesis_address.into(),
+                premine_rec_addr.into(),
                 false,
             ),
         ]
@@ -2046,19 +2060,19 @@ mod archival_state_tests {
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
-                genesis_address.into(),
+                premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
-                genesis_address.into(),
+                premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
                 NeptuneCoins::new(2),
                 rng.gen(),
-                genesis_address.into(),
+                premine_rec_addr.into(),
                 false,
             ),
         ]
@@ -2093,16 +2107,16 @@ mod archival_state_tests {
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
-        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
+        // - 7 outputs: 2 from Alice to premine rec, 3 from Bob to premine rec, and 2 coinbases to premine rec
         let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction(
-            &genesis
+            &premine_rec
                 .global_state_lock
                 .lock_guard()
                 .await
                 .chain
                 .light_state()
                 .clone(),
-            &genesis,
+            &premine_rec,
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
@@ -2142,20 +2156,20 @@ mod archival_state_tests {
 
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
-        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
+        assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
         assert!(block_2.is_valid(&block_1, in_seven_months));
 
         // Expect incoming UTXOs
         {
-            let mut genesis = genesis.lock_guard_mut().await;
-            let expected = genesis.wallet_state.extract_expected_utxos(
+            let mut premine_rec = premine_rec.lock_guard_mut().await;
+            let expected = premine_rec.wallet_state.extract_expected_utxos(
                 outputs_from_bob.concat_with(outputs_from_alice),
                 UtxoNotifier::Cli,
             );
-            genesis.wallet_state.add_expected_utxos(expected).await;
+            premine_rec.wallet_state.add_expected_utxos(expected).await;
         }
 
-        genesis
+        premine_rec
             .lock_guard_mut()
             .await
             .wallet_state
@@ -2163,7 +2177,7 @@ mod archival_state_tests {
             .await;
 
         // Update chain states
-        for state_lock in [&mut genesis, &mut alice, &mut bob] {
+        for state_lock in [&mut premine_rec, &mut alice, &mut bob] {
             state_lock.set_new_tip(block_2.clone()).await.unwrap();
         }
 
@@ -2184,16 +2198,16 @@ mod archival_state_tests {
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO
         assert_eq!(
-            9,
-            genesis.lock_guard().await
+            11,
+            premine_rec.lock_guard().await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .len().await, "Genesis receiver must have 9 UTXOs after block 2: 3 after block 1, and 6 added by block 2"
+                .len().await, "Premine receiver must have 11 UTXOs after block 2: 4 after block 1, and 7 added by block 2"
         );
 
         // Verify that mutator sets are updated correctly and that last block is block 2
-        for state_lock in [&genesis, &alice, &bob] {
+        for state_lock in [&premine_rec, &alice, &bob] {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(
@@ -2219,13 +2233,21 @@ mod archival_state_tests {
         // and outputs.
         positive_prop_ms_update_to_tip(
             &genesis_block.mutator_set_accumulator_after(),
-            genesis.lock_guard_mut().await.chain.archival_state_mut(),
+            premine_rec
+                .lock_guard_mut()
+                .await
+                .chain
+                .archival_state_mut(),
             2,
         )
         .await;
         positive_prop_ms_update_to_tip(
             &block_1.mutator_set_accumulator_after(),
-            genesis.lock_guard_mut().await.chain.archival_state_mut(),
+            premine_rec
+                .lock_guard_mut()
+                .await
+                .chain
+                .archival_state_mut(),
             2,
         )
         .await;

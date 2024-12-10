@@ -1917,6 +1917,8 @@ mod tests {
                 .await;
 
             let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next());
+            let mut half_coinbase_amt = coinbase_amt;
+            half_coinbase_amt.div_two();
             let send_amt = NeptuneCoins::new(5);
 
             let timestamp = Block::genesis_block(network).header().timestamp + Timestamp::hours(1);
@@ -1928,19 +1930,19 @@ mod tests {
                     .hash();
 
             let tx = {
-                // verify that confirmed and unconfirmed balance are both 100.
+                // verify that confirmed and unconfirmed balances.
                 let gs = global_state_lock.lock_guard().await;
                 assert_eq!(
                     gs.wallet_state
                         .confirmed_balance(tip_digest, timestamp)
                         .await,
-                    coinbase_amt
+                    half_coinbase_amt
                 );
                 assert_eq!(
                     gs.wallet_state
                         .unconfirmed_balance(tip_digest, timestamp)
                         .await,
-                    coinbase_amt
+                    half_coinbase_amt
                 );
 
                 // generate an output that our wallet cannot claim.
@@ -1962,7 +1964,7 @@ mod tests {
                         UtxoNotificationMedium::OnChain,
                         NeptuneCoins::zero(),
                         timestamp,
-                        TxProvingCapability::SingleProof,
+                        TxProvingCapability::PrimitiveWitness,
                         &TritonVmJobQueue::dummy(),
                     )
                     .await?;
@@ -1978,20 +1980,18 @@ mod tests {
                 .await;
 
             {
-                // verify that confirmed balance is still `coinbase amt`
                 let gs = global_state_lock.lock_guard().await;
                 assert_eq!(
                     gs.wallet_state
                         .confirmed_balance(tip_digest, timestamp)
                         .await,
-                    coinbase_amt
+                    half_coinbase_amt
                 );
-                // verify that unconfirmed balance is now `coinbase amt - 5`.
                 assert_eq!(
                     gs.wallet_state
                         .unconfirmed_balance(tip_digest, timestamp)
                         .await,
-                    coinbase_amt.checked_sub(&send_amt).unwrap()
+                    half_coinbase_amt.checked_sub(&send_amt).unwrap()
                 );
             }
 
@@ -2010,7 +2010,7 @@ mod tests {
                     .wallet_state
                     .unconfirmed_balance(tip_digest, timestamp)
                     .await,
-                coinbase_amt
+                half_coinbase_amt
             );
 
             Ok(())

@@ -132,6 +132,12 @@ impl Utxo {
         Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }
 
+    pub(crate) fn has_native_currency(&self) -> bool {
+        self.coins
+            .iter()
+            .any(|coin| coin.type_script_hash == NativeCurrency.hash())
+    }
+
     /// Get the amount of Neptune coins that are encapsulated in this UTXO,
     /// regardless of which other coins are present. (Even if that makes the
     /// Neptune coins unspendable.)

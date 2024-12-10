@@ -2477,14 +2477,14 @@ mod global_state_tests {
         }
 
         assert_eq!(
-            3,
+            4,
             premine_receiver
                 .lock_guard_mut()
                 .await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .len().await, "Genesis receiver must have 3 monitored UTXOs after block 1: change from transaction, coinbase from block 1, and premine UTXO"
+                .len().await, "Premine receiver must have 4 monitored UTXOs after block 1: change from transaction, 2 coinbases from block 1, and premine UTXO"
         );
 
         assert_eq!(
@@ -2601,7 +2601,7 @@ mod global_state_tests {
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
-        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase
+        // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
         let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction(
             &premine_receiver
                 .global_state_lock
@@ -2649,7 +2649,7 @@ mod global_state_tests {
         assert!(block_2.is_valid(&block_1, in_eight_months));
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
-        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
+        assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
     }
 
     #[traced_test]
