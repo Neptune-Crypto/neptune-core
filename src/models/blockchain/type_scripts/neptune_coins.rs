@@ -162,10 +162,10 @@ impl NeptuneCoins {
         NeptuneCoins(factor_as_u128 * self.0)
     }
 
-    /// Add two amounts of Neptune coins but return None if the top bit in the sum is set
-    /// (which would make the sum negative)
+    /// Add two amounts of Neptune coins but return None if the top bit in the
+    /// sum is set (which would make the sum negative). Also: catch overflow.
     pub fn safe_add(&self, other: NeptuneCoins) -> Option<NeptuneCoins> {
-        let number = self.0 + other.0;
+        let number = self.0.checked_add(other.0)?;
         if number & (1u128 << 127) == 0 {
             Some(NeptuneCoins(number))
         } else {
@@ -216,10 +216,16 @@ impl NeptuneCoins {
         )
     }
 
-    /// Add two [`NeptuneCoin`]s, of which at least one is negative. If the
-    /// result is negative, or if it is larger than the maximum number of nau,
-    /// return `None`. Otherwise, return the result wrapped in a `Some`.
+    /// Add two [`NeptuneCoin`]s, of which at most one is negative.
+    ///
+    /// The following cases generate `None`:
+    ///  - adding two negative numbers
+    ///  - adding two numbers whose sum is negative
+    ///  - adding two numbers whose sum is greater than the max. amount of nau.
     pub(crate) fn checked_add_negative(&self, rhs: &Self) -> Option<Self> {
+        if self.is_negative() && rhs.is_negative() {
+            return None;
+        }
         let value = self.0.wrapping_add(rhs.0);
         if value > Self::MAX_NAU {
             None
