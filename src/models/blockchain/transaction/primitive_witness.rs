@@ -34,6 +34,7 @@ use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::blockchain::type_scripts::TypeScriptWitness;
@@ -107,6 +108,16 @@ impl SaltedUtxos {
                 .try_into()
                 .unwrap(),
         }
+    }
+}
+
+impl IntoIterator for SaltedUtxos {
+    type Item = Utxo;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.utxos.into_iter()
     }
 }
 
@@ -697,16 +708,31 @@ impl PrimitiveWitness {
 
         let num_inputs = input_utxos.len();
         let num_outputs = output_utxos.len();
-        let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
-            let native_currency_type_script_witness = NativeCurrencyWitness {
-                salted_input_utxos: salted_input_utxos.clone(),
-                salted_output_utxos: salted_output_utxos.clone(),
-                kernel: kernel.clone(),
-            };
-            vec![native_currency_type_script_witness.type_script_and_witness()]
-        } else {
-            vec![]
-        };
+        let mut type_scripts_and_witnesses = vec![];
+        if num_inputs + num_outputs > 0 {
+            let all_utxos = salted_input_utxos
+                .utxos
+                .iter()
+                .chain(salted_output_utxos.utxos.iter());
+            if all_utxos.clone().any(|utxo| utxo.has_native_currency()) {
+                let native_currency_type_script_witness = NativeCurrencyWitness {
+                    salted_input_utxos: salted_input_utxos.clone(),
+                    salted_output_utxos: salted_output_utxos.clone(),
+                    kernel: kernel.clone(),
+                };
+                type_scripts_and_witnesses
+                    .push(native_currency_type_script_witness.type_script_and_witness());
+            }
+
+            if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
+                let time_lock_witness = TimeLockWitness::new(
+                    kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                );
+                type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
+            }
+        }
 
         PrimitiveWitness {
             lock_scripts_and_witnesses: input_lock_scripts_and_witnesses.to_owned(),
@@ -797,6 +823,7 @@ mod test {
                 // assert that index lies in the range [0;N)
                 assert!(index < N);
             }
+
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -861,18 +888,20 @@ mod test {
                                 .collect_vec()
                         });
 
+                        let coinbase = |i: usize| {
+                            coinbase_and_index.and_then(|(coinbase, index)| {
+                                if index == i {
+                                    Some(coinbase)
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+
                         for i in 0..N {
-                            let maybe_coinbase =
-                                coinbase_and_index.and_then(|(coinbase, index)| {
-                                    if index == i {
-                                        Some(coinbase)
-                                    } else {
-                                        None
-                                    }
-                                });
                             Self::find_balanced_output_amounts_and_fee(
                                 input_amounts_per_tx[i],
-                                maybe_coinbase,
+                                coinbase(i),
                                 &mut output_utxo_amounts_per_tx[i],
                                 &mut fees[i],
                             );
@@ -881,10 +910,27 @@ mod test {
                         output_utxos
                             .iter_mut()
                             .zip(output_utxo_amounts_per_tx)
-                            .for_each(|(utxos, amounts)| {
-                                utxos.iter_mut().zip_eq(amounts).for_each(|(utxo, amount)| {
+                            .enumerate()
+                            .for_each(|(i, (utxos, amounts))| {
+                                // half_of_coinbase <= total_timelocked_output + half_of_fee =>
+                                // half_of_coinbase - half_of_fee <= total_timelocked_output
+                                let mut timelocked_cb_acc = NeptuneCoins::zero();
+                                let mut min_timelocked_cb = coinbase(i)
+                                    .unwrap_or(NeptuneCoins::zero())
+                                    .checked_sub(&fees[i])
+                                    .unwrap_or(NeptuneCoins::zero());
+                                min_timelocked_cb.div_two();
+                                for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
-                                })
+                                    if timelocked_cb_acc < min_timelocked_cb {
+                                        // Notice that we're in the general case timelocking more than we have to here.
+                                        let max_timestamp = *timestamps.iter().max().unwrap();
+                                        *utxo = utxo.clone().with_time_lock(
+                                            max_timestamp + COINBASE_TIME_LOCK_PERIOD,
+                                        );
+                                        timelocked_cb_acc = timelocked_cb_acc + amount;
+                                    }
+                                }
                             });
 
                         let utxos_and_lock_scripts_and_witnesses = input_amountss
@@ -947,9 +993,9 @@ mod test {
                                         output_utxos_,
                                     )| {
                                         let maybe_coinbase =
-                                            coinbase_and_index.and_then(|(coinbase, i)| {
+                                            coinbase_and_index.and_then(|(cb, i)| {
                                                 if index == i {
-                                                    Some(coinbase)
+                                                    Some(cb)
                                                 } else {
                                                     None
                                                 }

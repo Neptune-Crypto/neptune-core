@@ -689,6 +689,7 @@ mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -778,6 +779,7 @@ mod test {
         );
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
         let mut test_runner = TestRunner::deterministic();
@@ -800,8 +802,6 @@ mod test {
         .await
         .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
-
-        println!("Have proof collection. \\o/");
 
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let txk_mast_hash_as_input_as_public_input =
