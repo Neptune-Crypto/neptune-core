@@ -776,12 +776,12 @@ impl Arbitrary for TimeLockWitness {
         let num_inputs = release_dates.len();
         (
             vec(arb::<Digest>(), num_inputs),
-            vec(arb::<NeptuneCoins>(), num_inputs),
+            vec(NeptuneCoins::arbitrary_non_negative(), num_inputs),
             vec(arb::<Digest>(), num_outputs),
-            vec(arb::<NeptuneCoins>(), num_outputs),
+            vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
             vec(arb::<PublicAnnouncement>(), num_public_announcements),
             arb::<Option<NeptuneCoins>>(),
-            arb::<NeptuneCoins>(),
+            NeptuneCoins::arbitrary_non_negative(),
         )
             .prop_flat_map(
                 move |(
@@ -914,7 +914,7 @@ fn arbitrary_primitive_witness_with_timelocks(
     release_dates: Vec<Timestamp>,
 ) -> BoxedStrategy<PrimitiveWitness> {
     (
-        arb::<NeptuneCoins>(),
+        NeptuneCoins::arbitrary_non_negative(),
         vec(arb::<Digest>(), num_inputs),
         vec(arb::<u64>(), num_inputs),
         vec(arb::<Digest>(), num_outputs),

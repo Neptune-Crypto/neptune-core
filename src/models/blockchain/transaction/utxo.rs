@@ -258,11 +258,11 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
 impl<'a> Arbitrary<'a> for Utxo {
     /// Produce a strategy for "arbitrary" UTXOs where "arbitrary" means:
     ///  - lock script corresponding to an arbitrary generation address
-    ///  - one coin of type NativeCurrency and arbitrary amount.
+    ///  - one coin of type NativeCurrency and arbitrary, non-negative amount.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let lock_script_hash: Digest = Digest::arbitrary(u)?;
         let type_script_hash = NativeCurrency.hash();
-        let amount = NeptuneCoins::arbitrary(u)?;
+        let amount = NeptuneCoins::arbitrary(u)?.abs();
         let coins = vec![Coin {
             type_script_hash,
             state: amount.encode(),

@@ -16,6 +16,9 @@ use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
 use num_traits::One;
 use num_traits::Zero;
+use proptest::prelude::BoxedStrategy;
+use proptest::prelude::Strategy;
+use proptest_arbitrary_interop::arb;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -204,10 +207,6 @@ impl NeptuneCoins {
         Some(Self(number as i128))
     }
 
-    pub fn is_negative(&self) -> bool {
-        self.0 < 0
-    }
-
     pub fn scalar_mul(&self, factor: u32) -> Self {
         let factor_as_i128 = factor as i128;
         let (res, overflow) = self.0.overflowing_mul(factor_as_i128);
@@ -276,6 +275,16 @@ impl NeptuneCoins {
         } else {
             Some(Self(value))
         }
+    }
+}
+
+impl NeptuneCoins {
+    pub(crate) fn abs(&self) -> Self {
+        Self(self.0.abs())
+    }
+
+    pub fn is_negative(&self) -> bool {
+        self.0.is_negative()
     }
 }
 
@@ -487,6 +496,14 @@ impl<'a> Arbitrary<'a> for NeptuneCoins {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let nau: u128 = u.arbitrary()?;
         Ok(NeptuneCoins((nau as i128) >> 10))
+    }
+}
+
+impl NeptuneCoins {
+    pub(crate) fn arbitrary_non_negative() -> BoxedStrategy<Self> {
+        arb::<u128>()
+            .prop_map(|uint| NeptuneCoins((uint >> 10) as i128))
+            .boxed()
     }
 }
 

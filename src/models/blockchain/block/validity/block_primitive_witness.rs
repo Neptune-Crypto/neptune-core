@@ -234,7 +234,7 @@ pub(crate) mod test {
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
             (
-                arb::<NeptuneCoins>(),
+                NeptuneCoins::arbitrary_non_negative(),
                 vec(0f64..1f64, NUM_INPUTS - 1),
                 vec(arb::<Digest>(), NUM_INPUTS),
                 vec(arb::<Digest>(), NUM_INPUTS),

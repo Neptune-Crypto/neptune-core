@@ -207,6 +207,24 @@ impl PrimitiveWitness {
         output_amounts_suggestion: &mut [NeptuneCoins],
         fee_suggestion: &mut NeptuneCoins,
     ) {
+        assert!(
+            coinbase.is_none_or(|x| !x.is_negative()),
+            "If coinbase is set, it must be non-negative. Got:\n{coinbase:?}"
+        );
+        assert!(
+            !fee_suggestion.is_negative(),
+            "Amount balancer only accepts non-negative fee suggestions. Got:\n{fee_suggestion}"
+        );
+        assert!(
+            !total_input_amount.is_negative(),
+            "Amount balancer only accepts non-negative total input amount. Got:\n{total_input_amount}"
+        );
+        assert!(
+            output_amounts_suggestion
+                .iter()
+                .all(|input_amount_sugg| !input_amount_sugg.is_negative()),
+            "Amount balancer only accepts non-negative output amount suggestsions. Got:\n\n{output_amounts_suggestion:?}"
+        );
         let mut total_output_amount = output_amounts_suggestion
             .iter()
             .cloned()
@@ -441,7 +459,7 @@ impl PrimitiveWitness {
         //  - fee
         //  - timestamp
         (
-            arb::<NeptuneCoins>(),
+            NeptuneCoins::arbitrary_non_negative(),
             vec(arb::<Digest>(), num_inputs),
             vec(arb::<u64>(), num_inputs),
             vec(arb::<Digest>(), num_outputs),
@@ -803,7 +821,10 @@ mod test {
             param_sets: [(usize, usize, usize); N],
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
             (arb::<Option<NeptuneCoins>>(), 0..N)
-                .prop_flat_map(move |(maybe_coinbase, coinbase_index)| {
+                .prop_flat_map(move |(mut maybe_coinbase, coinbase_index)| {
+                    // Force coinbase to be non-negative, if set
+                    maybe_coinbase = maybe_coinbase.map(|x| x.abs());
+
                     Self::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
                         param_sets,
                         maybe_coinbase.map(|coinbase| (coinbase, coinbase_index)),
@@ -830,8 +851,9 @@ mod test {
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<PublicAnnouncement>(), count));
-            let nested_vec_strategy_amounts =
-                |counts: [usize; N]| counts.map(|count| vec(arb::<NeptuneCoins>(), count));
+            let nested_vec_strategy_amounts = |counts: [usize; N]| {
+                counts.map(|count| vec(NeptuneCoins::arbitrary_non_negative(), count))
+            };
             let nested_vec_strategy_utxos =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Utxo>(), count));
             let input_counts: [usize; N] = param_sets.map(|p| p.0);
@@ -845,7 +867,7 @@ mod test {
                     nested_vec_strategy_digests(input_counts),
                     nested_vec_strategy_utxos(output_counts),
                     nested_vec_strategy_pubann(announcement_counts),
-                    [arb::<NeptuneCoins>(); N],
+                    vec(NeptuneCoins::arbitrary_non_negative(), N),
                     vec(arb::<Digest>(), total_num_inputs),
                     vec(arb::<Digest>(), total_num_inputs),
                 ),
@@ -972,7 +994,7 @@ mod test {
                                     public_announcements_nested.clone(),
                                     output_sender_randomnesses_nested.clone(),
                                     output_receiver_digests_nested.clone(),
-                                    fees,
+                                    fees.clone(),
                                     inputs_salts,
                                     outputs_salts,
                                     input_utxoss.clone(),
@@ -1036,7 +1058,7 @@ mod test {
             (
                 (0..total_num_outputs),
                 (0..total_num_announcements),
-                arb::<NeptuneCoins>(),
+                NeptuneCoins::arbitrary_non_negative(),
             )
                 .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
                     let parameter_sets = [
@@ -1111,8 +1133,8 @@ mod test {
             timestamp: Timestamp,
         ) -> BoxedStrategy<Self> {
             (
-                vec(arb::<NeptuneCoins>(), num_outputs),
-                arb::<NeptuneCoins>(),
+                vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
+                NeptuneCoins::arbitrary_non_negative(),
                 vec(arb::<Digest>(), num_outputs),
                 vec(arb::<Digest>(), num_outputs),
                 vec(arb::<Digest>(), num_outputs),
@@ -1320,10 +1342,12 @@ mod test {
 
     #[proptest]
     fn amounts_balancer_works_with_coinbase(
-        #[strategy(arb::<NeptuneCoins>())] total_input_amount: NeptuneCoins,
-        #[strategy(arb::<NeptuneCoins>())] coinbase: NeptuneCoins,
-        #[strategy(vec(arb::<NeptuneCoins>(), 1..4))] mut output_amounts: Vec<NeptuneCoins>,
-        #[strategy(arb::<NeptuneCoins>())] mut fee: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] total_input_amount: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] coinbase: NeptuneCoins,
+        #[strategy(vec(NeptuneCoins::arbitrary_non_negative(), 1..4))] mut output_amounts: Vec<
+            NeptuneCoins,
+        >,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] mut fee: NeptuneCoins,
     ) {
         PrimitiveWitness::find_balanced_output_amounts_and_fee(
             total_input_amount,
@@ -1344,9 +1368,11 @@ mod test {
 
     #[proptest]
     fn amounts_balancer_works_without_coinbase(
-        #[strategy(arb::<NeptuneCoins>())] total_input_amount: NeptuneCoins,
-        #[strategy(vec(arb::<NeptuneCoins>(), 1..4))] mut output_amounts: Vec<NeptuneCoins>,
-        #[strategy(arb::<NeptuneCoins>())] mut fee: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] total_input_amount: NeptuneCoins,
+        #[strategy(vec(NeptuneCoins::arbitrary_non_negative(), 1..4))] mut output_amounts: Vec<
+            NeptuneCoins,
+        >,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] mut fee: NeptuneCoins,
     ) {
         PrimitiveWitness::find_balanced_output_amounts_and_fee(
             total_input_amount,

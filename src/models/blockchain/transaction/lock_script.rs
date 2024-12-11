@@ -213,7 +213,7 @@ mod test {
     fn lock_script_halts_gracefully_prop(
         #[strategy(arb::<Digest>())] txk_mast_hash: Digest,
         #[strategy(arb::<Digest>())] seed: Digest,
-        #[strategy(arb::<NeptuneCoins>())] amount: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] amount: NeptuneCoins,
     ) {
         let (_utxos, lock_scripts_and_witnesses) =
             PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(&[seed], &[amount]);

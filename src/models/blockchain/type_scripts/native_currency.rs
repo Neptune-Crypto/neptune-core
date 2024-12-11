@@ -1326,7 +1326,7 @@ pub mod test {
                 sample(vec(arb::<LockScriptAndWitness>(), 3), &mut tr);
             let output_utxos = sample(vec(arb::<Utxo>(), 3), &mut tr);
             let public_announcements = sample(vec(arb(), 3), &mut tr);
-            let fee = sample(arb::<NeptuneCoins>(), &mut tr);
+            let fee = sample(NeptuneCoins::arbitrary_non_negative(), &mut tr);
             let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
                 &input_utxos,
                 &input_lock_scripts_and_witnesses,
@@ -1444,7 +1444,7 @@ pub mod test {
 
     #[proptest]
     fn fee_can_be_positive(
-        #[strategy(arb::<NeptuneCoins>())] _fee: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1453,7 +1453,7 @@ pub mod test {
 
     #[proptest]
     fn fee_can_be_negative(
-        #[strategy(arb::<NeptuneCoins>())] _fee: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
