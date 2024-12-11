@@ -83,7 +83,7 @@ impl TasmObject for NeptuneCoins {
 }
 
 impl NeptuneCoins {
-    const MAX_NAU: i128 = 42000000 * Self::conversion_factor();
+    pub(crate) const MAX_NAU: i128 = 42000000 * Self::conversion_factor();
 
     /// The maximum amount that is still valid.
     pub(crate) fn max() -> Self {
@@ -338,7 +338,7 @@ impl CheckedAdd for NeptuneCoins {
     /// smaller than the maximum number of nau.
     fn checked_add(&self, v: &Self) -> Option<Self> {
         self.0.checked_add(v.0).and_then(|sum| {
-            if sum > Self::MAX_NAU {
+            if sum > Self::MAX_NAU || sum < -Self::MAX_NAU {
                 None
             } else {
                 Some(Self(sum))
@@ -762,19 +762,35 @@ pub(crate) mod test {
     }
 
     #[proptest]
-    fn checked_add_overflow_proptest(rhs: u128) {
+    fn checked_add_positive_overflow_proptest(rhs: u128) {
         let lhs = NeptuneCoins(NeptuneCoins::MAX_NAU);
         let rhs = NeptuneCoins((rhs >> 2) as i128);
         prop_assume!(!rhs.is_zero());
         prop_assert!(lhs.checked_add(&rhs).is_none());
     }
 
+    #[proptest]
+    fn checked_add_negative_overflow_proptest(rhs: u128) {
+        let lhs = NeptuneCoins(-NeptuneCoins::MAX_NAU);
+        let rhs = -NeptuneCoins((rhs >> 2) as i128);
+        prop_assume!(!rhs.is_zero());
+        prop_assert!(lhs.checked_add(&rhs).is_none());
+    }
+
     #[test]
-    fn checked_add_overflow_unit_test() {
+    fn checked_add_positive_overflow_unit_test() {
         let one_nau = NeptuneCoins(1);
         let max_value = NeptuneCoins(NeptuneCoins::MAX_NAU);
         assert!(max_value.checked_add(&one_nau).is_none());
         assert!(max_value.checked_add(&NeptuneCoins::zero()).is_some());
+    }
+
+    #[test]
+    fn checked_add_negative_overflow_unit_test() {
+        let minus_one_nau = -NeptuneCoins(1);
+        let min_value = -NeptuneCoins(NeptuneCoins::MAX_NAU);
+        assert!(min_value.checked_add(&minus_one_nau).is_none());
+        assert!(min_value.checked_add(&NeptuneCoins::zero()).is_some());
     }
 
     #[test]

@@ -16,12 +16,11 @@ use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-
-use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::warn;
 
@@ -1229,9 +1228,10 @@ mod test {
         /// (greater than the maximum number of nau).
         pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
             let total_amount_strategy = if fee.is_negative() {
-                (-fee).to_nau().try_into().unwrap()..(i128::MAX)
+                (-fee).to_nau().try_into().unwrap()..(NeptuneCoins::MAX_NAU)
             } else {
-                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()..(i128::MAX)
+                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()
+                    ..(NeptuneCoins::MAX_NAU)
             };
             let num_outputs = 2;
             (

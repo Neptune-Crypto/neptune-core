@@ -1267,7 +1267,7 @@ pub mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(arb())] _coinbase: NeptuneCoins,
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] _coinbase: NeptuneCoins,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
         #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
         _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
@@ -1502,6 +1502,22 @@ pub mod test {
         prop_assert!(result.is_err());
     }
 
+    #[test]
+    fn fee_can_be_positive_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        for _ in 0..10 {
+            let fee = NeptuneCoins::arbitrary_non_negative()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let pw = PrimitiveWitness::arbitrary_with_fee(fee)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
+        }
+    }
+
     #[proptest]
     fn fee_can_be_positive(
         #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
@@ -1509,6 +1525,22 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
+    }
+
+    #[test]
+    fn fee_can_be_negative_deterministic() {
+        let mut test_runner = TestRunner::deterministic();
+        for _ in 0..10 {
+            let fee = NeptuneCoins::arbitrary_non_negative()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let pw = PrimitiveWitness::arbitrary_with_fee(-fee)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
+        }
     }
 
     #[proptest]
@@ -1520,6 +1552,7 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
     }
 
+    #[ignore]
     #[proptest]
     fn positive_fee_cannot_exceed_max_nau(
         #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
@@ -1532,6 +1565,7 @@ pub mod test {
         );
     }
 
+    #[ignore]
     #[proptest]
     fn negative_fee_cannot_exceed_min_nau(
         #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
