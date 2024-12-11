@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,8 +15,8 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+
+use tasm_lib::prelude::Digest;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;

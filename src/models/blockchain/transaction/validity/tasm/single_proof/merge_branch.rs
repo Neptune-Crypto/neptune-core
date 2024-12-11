@@ -8,8 +8,7 @@ use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
-use tasm_lib::arithmetic::u128::safe_add::SafeAddU128;
-use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
+use tasm_lib::arithmetic::u128::safe_add::SafeAdd;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -21,12 +20,11 @@ use tasm_lib::list::higher_order::map::ChainMap;
 use tasm_lib::list::higher_order::map::Map;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::prelude::BasicSnippet;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -428,7 +426,7 @@ impl BasicSnippet for MergeBranch {
 
         let neptune_coins_size = NeptuneCoins::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
-        let safe_add_u128 = library.import(Box::new(SafeAddU128));
+        let safe_add_u128 = library.import(Box::new(SafeAdd));
         let compare_u128 = DataType::U128.compare();
 
         let assert_new_fee_is_sum_of_left_and_right = triton_asm!(
@@ -521,7 +519,7 @@ impl BasicSnippet for MergeBranch {
             // _ *left_txk *right_txk *new_txk
         );
 
-        let lt_u64 = library.import(Box::new(LtU64ConsumeArgs));
+        let lt_u64 = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
         let kernel_field_timestamp = field!(TransactionKernel::timestamp);
         let authenticate_kernel_field_timestamp = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Timestamp,

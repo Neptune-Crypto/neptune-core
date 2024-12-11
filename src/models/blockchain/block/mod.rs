@@ -23,7 +23,7 @@ use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use difficulty_control::Difficulty;
 use difficulty_control::ProofOfWork;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
 use num_traits::CheckedSub;
@@ -38,7 +38,7 @@ use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use validity::appendix_witness::AppendixWitness;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;

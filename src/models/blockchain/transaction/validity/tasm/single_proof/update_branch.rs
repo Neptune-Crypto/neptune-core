@@ -1,5 +1,4 @@
 use strum::EnumCount;
-use tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -360,7 +359,7 @@ impl BasicSnippet for UpdateBranch {
         let hash_removal_record_index_set =
             library.import(Box::new(HashRemovalRecordIndexSets::<1>));
         let multiset_eq_digests = library.import(Box::new(MultisetEqualityDigests));
-        let u64_lt = library.import(Box::new(LtU64ConsumeArgs));
+        let u64_lt = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
 
         let old_txk_digest_alloc = library.kmalloc(Digest::LEN as u32);
 

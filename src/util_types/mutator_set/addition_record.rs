@@ -1,5 +1,5 @@
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -37,7 +37,6 @@ impl AdditionRecord {
 #[cfg(test)]
 mod addition_record_tests {
     use rand::random;
-    use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;

@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
 use tasm_lib::twenty_first::prelude::Mmr;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -135,8 +135,7 @@ pub(crate) mod test {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::triton_vm::prelude::Tip5;
-    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-    use tasm_lib::Digest;
+    use tasm_lib::prelude::Digest;
 
     use super::BlockPrimitiveWitness;
     use crate::job_queue::triton_vm::TritonVmJobPriority;

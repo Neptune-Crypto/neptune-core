@@ -558,7 +558,6 @@ mod test {
         use super::*;
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::prelude::twenty_first::prelude::Tip5;
-        use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
         use crate::util_types::mutator_set::commit;
 
         /// this tests the generate_public_announcement() and

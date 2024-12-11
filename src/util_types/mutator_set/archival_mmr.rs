@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;

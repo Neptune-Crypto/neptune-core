@@ -13,7 +13,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorPr
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::environment::ND_INDIVIDUAL_TOKEN;
 use super::environment::ND_MEMORY;

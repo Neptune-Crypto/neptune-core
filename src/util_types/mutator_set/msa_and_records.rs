@@ -6,10 +6,10 @@ use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::active_window::ActiveWindow;
 use super::chunk::Chunk;
@@ -281,7 +281,7 @@ mod test {
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::Digest;
+    use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::MsaAndRecords;

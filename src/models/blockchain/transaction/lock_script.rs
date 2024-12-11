@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use rand::thread_rng;
 use rand::Rng;

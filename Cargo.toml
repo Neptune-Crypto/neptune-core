@@ -65,7 +65,7 @@ crossterm = "0.27"
 directories = "5.0"
 field_count = "0.1"
 futures = "0.3"
-get-size = { version = "0.1", features = ["derive"] }
+get-size2 = { version = "=0.1.2", features = ["derive"] }
 itertools = "0.11"
 memmap2 = "0.9"
 num-bigint = { version = "0.4", features = ["serde"] }
@@ -214,4 +214,4 @@ name = "consensus"
 harness = false
 
 [patch.crates-io]
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "bc50c3320b7ca7527a0066e2b28455f4b4e18003" }
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "22a558c7c6335962769bd22da7010e85d2782d9d" }

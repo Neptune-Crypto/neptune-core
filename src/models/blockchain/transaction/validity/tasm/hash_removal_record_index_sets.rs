@@ -79,7 +79,7 @@ mod tests {
     use tasm_lib::traits::function::FunctionInitialState;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use twenty_first::prelude::AlgebraicHasher;
+
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 
 use tasm_lib::triton_vm::prelude::NonDeterminism;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 thread_local! {
     pub(super) static PUB_INPUT: RefCell<VecDeque<BFieldElement>> = const {RefCell::new(VecDeque::new())};

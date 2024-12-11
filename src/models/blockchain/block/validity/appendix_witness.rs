@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,7 +15,7 @@ use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;

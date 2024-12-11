@@ -19,19 +19,18 @@ pub mod validity;
 use anyhow::bail;
 use anyhow::Result;
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
-use tasm_lib::Digest;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -368,10 +367,9 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::Digest;
+    use tasm_lib::prelude::Digest;
     use tests::primitive_witness::SaltedUtxos;
     use triton_vm::prelude::Tip5;
-    use twenty_first::prelude::AlgebraicHasher;
 
     use super::*;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -513,7 +511,6 @@ mod transaction_tests {
     use tracing_test::traced_test;
     use transaction_tests::utxo::Utxo;
     use triton_vm::prelude::Tip5;
-    use twenty_first::prelude::AlgebraicHasher;
 
     use super::*;
     use crate::config_models::network::Network;

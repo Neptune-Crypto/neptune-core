@@ -12,7 +12,7 @@ use tracing::trace;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;

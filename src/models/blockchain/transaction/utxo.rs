@@ -3,7 +3,7 @@ use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -275,7 +275,6 @@ mod test {
     use proptest::prelude::*;
     use rand::thread_rng;
     use rand::Rng;
-    use tasm_lib::twenty_first::prelude::AlgebraicHasher;
     use test_strategy::proptest;
     use tracing_test::traced_test;
     use twenty_first::math::other::random_elements;

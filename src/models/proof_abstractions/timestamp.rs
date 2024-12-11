@@ -11,7 +11,7 @@ use chrono::DateTime;
 use chrono::Local;
 use chrono::NaiveDateTime;
 use chrono::Utc;
-use get_size::GetSize;
+use get_size2::GetSize;
 use num_traits::Zero;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;

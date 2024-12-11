@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;

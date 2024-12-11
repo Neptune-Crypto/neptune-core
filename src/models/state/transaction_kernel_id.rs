@@ -1,12 +1,12 @@
 use std::fmt::Display;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
 use tasm_lib::twenty_first::prelude::CpuParallel;
 use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 

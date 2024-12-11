@@ -244,11 +244,13 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "attribute-derive"
-version = "0.6.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c124f12ade4e670107b132722d0ad1a5c9790bcbc1b265336369ea05626b4498"
+checksum = "0053e96dd3bec5b4879c23a138d6ef26f2cb936c9cdc96274ac2b9ed44b5bb54"
 dependencies = [
  "attribute-derive-macro",
+ "derive-where",
+ "manyhow",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -256,13 +258,13 @@ dependencies = [
 
 [[package]]
 name = "attribute-derive-macro"
-version = "0.6.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b217a07446e0fb086f83401a98297e2d81492122f5874db5391bd270a185f88"
+checksum = "463b53ad0fd5b460af4b1915fe045ff4d946d025fb6c4dc3337752eaa980f71b"
 dependencies = [
  "collection_literals",
  "interpolator",
- "proc-macro-error",
+ "manyhow",
  "proc-macro-utils",
  "proc-macro2",
  "quote",
@@ -1237,23 +1239,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "get-size"
-version = "0.1.4"
+name = "get-size-derive2"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b61e2dab7eedce93a83ab3468b919873ff16bac5a3e704011ff836d22b2120"
-dependencies = [
- "get-size-derive",
-]
-
-[[package]]
-name = "get-size-derive"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13a1bcfb855c1f340d5913ab542e36f25a1c56f57de79022928297632435dec2"
+checksum = "1fd26d3a97ea14d289c8b54180243ecfe465f3fa9c279a6336d7a003698fc39d"
 dependencies = [
  "attribute-derive",
  "quote",
  "syn 2.0.87",
+]
+
+[[package]]
+name = "get-size2"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "159c430715e540d2198fa981d39cd45563ccc60900de187f5b152b33b1cb408e"
+dependencies = [
+ "get-size-derive2",
 ]
 
 [[package]]
@@ -1831,6 +1833,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "manyhow"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b33efb3ca6d3b07393750d4030418d594ab1139cee518f0dc88db70fec873587"
+dependencies = [
+ "manyhow-macros",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "manyhow-macros"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46fce34d199b78b6e6073abf984c9cf5fd3e9330145a93ee0738a7443e371495"
+dependencies = [
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1975,7 +2000,7 @@ dependencies = [
  "divan",
  "field_count",
  "futures",
- "get-size",
+ "get-size2",
  "itertools 0.11.0",
  "leveldb-sys",
  "memmap2",
@@ -2491,34 +2516,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
-dependencies = [
- "proc-macro-error-attr",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
- "version_check",
-]
-
-[[package]]
-name = "proc-macro-error-attr"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
-dependencies = [
- "proc-macro2",
- "quote",
- "version_check",
-]
-
-[[package]]
 name = "proc-macro-utils"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f59e109e2f795a5070e69578c4dc101068139f74616778025ae1011d4cd41a8"
+checksum = "eeaf08a13de400bc215877b5bdc088f241b12eb42f0a548d3390dc1c56bb7071"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2613,22 +2614,21 @@ dependencies = [
 
 [[package]]
 name = "quote-use"
-version = "0.7.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7b5abe3fe82fdeeb93f44d66a7b444dedf2e4827defb0a8e69c437b2de2ef94"
+checksum = "9619db1197b497a36178cfc736dc96b271fe918875fbf1344c436a7e93d0321e"
 dependencies = [
  "quote",
  "quote-use-macros",
- "syn 2.0.87",
 ]
 
 [[package]]
 name = "quote-use-macros"
-version = "0.7.2"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97ea44c7e20f16017a76a245bb42188517e13d16dcb1aa18044bc406cdc3f4af"
+checksum = "82ebfb7faafadc06a7ab141a6f67bcfb24cb8beb158c6fe933f2f035afa99f35"
 dependencies = [
- "derive-where",
+ "proc-macro-utils",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -3373,7 +3373,7 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.43.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=bc50c3320b7ca7527a0066e2b28455f4b4e18003#bc50c3320b7ca7527a0066e2b28455f4b4e18003"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=22a558c7c6335962769bd22da7010e85d2782d9d#22a558c7c6335962769bd22da7010e85d2782d9d"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3394,7 +3394,7 @@ dependencies = [
 [[package]]
 name = "tasm-object-derive"
 version = "0.43.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=bc50c3320b7ca7527a0066e2b28455f4b4e18003#bc50c3320b7ca7527a0066e2b28455f4b4e18003"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=22a558c7c6335962769bd22da7010e85d2782d9d#22a558c7c6335962769bd22da7010e85d2782d9d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3850,9 +3850,9 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b8fe8a3218c33c6355de52ceabdcf30d328598cc750f5d52518d36aadb9cadf"
+checksum = "2ac5aa5da5e481817bb0deb1ec5e402b2f0c0b7d335003652990d7d42bde5131"
 dependencies = [
  "arbitrary",
  "itertools 0.13.0",
@@ -3864,9 +3864,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-builder"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4f55397448ef663636c44eda9079db6aa09b1cff029dad271c8a897def6fcd"
+checksum = "c4e10c6053f0c522247f55442fbda23a36587b6082065776cd11435c146d8c2a"
 dependencies = [
  "itertools 0.13.0",
  "prettyplease",
@@ -3882,9 +3882,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3420bac9a3188c6f53dfdd8f07811eea7dd2a42d3a615b1a91e78fb7a631b8a"
+checksum = "b5a37cc08e9158c7bfb74a635f8ccb6c3a772b9e636318e8b475ab516bf64cf4"
 dependencies = [
  "arbitrary",
  "itertools 0.13.0",
@@ -3897,12 +3897,12 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd6c3f1a58e165309b3228e6f1e222aed443d4a345c07bfac09066997ca531b"
+checksum = "d7393742c032f7911e1417fb204371465cc1e52b3c2e608157ec1f32adeb5878"
 dependencies = [
  "arbitrary",
- "get-size",
+ "get-size2",
  "itertools 0.13.0",
  "lazy_static",
  "nom",
@@ -3915,14 +3915,14 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05e71ae69a3db5d90022449f4db16ee44f4c16567dfea008474365d6963682dd"
+checksum = "e998b723f9041637b885a1c4c6d8344106495502e2ef9a8e83750b661e4c29eb"
 dependencies = [
  "arbitrary",
  "colored",
  "criterion",
- "get-size",
+ "get-size2",
  "indexmap 2.6.0",
  "itertools 0.13.0",
  "lazy_static",
@@ -3954,14 +3954,14 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.43.0"
+version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7df8f51d2792092a8ad01824714872c598216e8b42280da672c913160f39c051"
+checksum = "844bed1d7d96a2f0f4699c9b10bd70341b844d7f6bc3f5f2b707d327239e8740"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
- "get-size",
- "hashbrown 0.14.5",
+ "get-size2",
+ "hashbrown 0.15.1",
  "hex",
  "itertools 0.13.0",
  "lazy_static",
@@ -3976,7 +3976,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sha3",
- "thiserror 1.0.65",
+ "thiserror 2.0.3",
 ]
 
 [[package]]

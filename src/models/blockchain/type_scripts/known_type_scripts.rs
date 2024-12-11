@@ -1,4 +1,4 @@
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::native_currency::NativeCurrency;
 use super::native_currency::NativeCurrencyWitness;

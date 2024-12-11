@@ -16,7 +16,6 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::prelude::twenty_first::math::digest::Digest;
-use crate::prelude::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 

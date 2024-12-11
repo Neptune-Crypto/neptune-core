@@ -8,15 +8,14 @@ use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use native_currency::NativeCurrency;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;

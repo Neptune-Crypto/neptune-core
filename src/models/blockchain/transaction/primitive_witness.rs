@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
@@ -20,8 +20,8 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+
+use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::warn;
 

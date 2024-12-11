@@ -84,7 +84,7 @@ mod test {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
-    use tasm_lib::Digest;
+    use tasm_lib::prelude::Digest;
 
     use super::GenerateLockScriptClaimTemplate;
     use crate::job_queue::triton_vm::TritonVmJobPriority;

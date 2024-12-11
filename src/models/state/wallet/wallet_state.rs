@@ -26,7 +26,7 @@ use tracing::trace;
 use tracing::warn;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 
 use super::address::generation_address;
 use super::address::symmetric_key;

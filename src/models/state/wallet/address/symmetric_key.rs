@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;

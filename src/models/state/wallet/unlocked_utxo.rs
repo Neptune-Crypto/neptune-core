@@ -1,10 +1,9 @@
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 
 use super::address::SpendingKey;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::tasm_lib::Digest;
+use crate::tasm_lib::prelude::Digest;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;

@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -178,7 +178,6 @@ impl ActiveWindow {
 mod active_window_tests {
     use rand::thread_rng;
     use rand::RngCore;
-    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;

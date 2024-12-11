@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use num_bigint::BigInt;
 use num_bigint::ToBigInt;
 use num_rational::BigRational;
@@ -130,7 +130,7 @@ impl NeptuneCoins {
         NeptuneCoins(1i128)
     }
 
-    /// Create an Amount object of the given number of coins.
+    /// Create an NeptuneCoins object of the given number of coins.
     pub fn new(num_coins: u32) -> NeptuneCoins {
         assert!(
             num_coins <= 42000000,
@@ -514,7 +514,7 @@ pub(crate) mod test {
 
     use arbitrary::Arbitrary;
     use arbitrary::Unstructured;
-    use get_size::GetSize;
+    use get_size2::GetSize;
     use itertools::Itertools;
     use num_bigint::Sign;
     use num_traits::FromPrimitive;

@@ -11,7 +11,7 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;

@@ -85,7 +85,7 @@ mod tests {
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithmInitialState;
     use tasm_lib::traits::read_only_algorithm::ShadowedReadOnlyAlgorithm;
     use tasm_lib::traits::rust_shadow::RustShadow;
-    use twenty_first::prelude::AlgebraicHasher;
+
     use twenty_first::prelude::MerkleTreeInclusionProof;
 
     use super::*;

@@ -1,5 +1,5 @@
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;

@@ -40,7 +40,7 @@ use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;

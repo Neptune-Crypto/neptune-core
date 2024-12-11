@@ -5,7 +5,7 @@ use std::ops::Shr;
 use std::ops::ShrAssign;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::Zero;

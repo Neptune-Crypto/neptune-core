@@ -2,10 +2,9 @@ use std::error::Error;
 use std::fmt;
 
 use itertools::Itertools;
+use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::Sponge;
-use tasm_lib::Digest;
+use tasm_lib::twenty_first::prelude::Sponge;
 
 use self::addition_record::AdditionRecord;
 use self::shared::BATCH_SIZE;

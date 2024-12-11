@@ -6,7 +6,7 @@ use tasm_lib::library::Library;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 use tracing::debug;
 
 use super::environment;
@@ -276,7 +276,6 @@ pub mod test {
     use reqwest::header::HeaderValue;
     use reqwest::Url;
     use tasm_lib::triton_vm;
-    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use tracing::debug;
     use tracing::Span;
 

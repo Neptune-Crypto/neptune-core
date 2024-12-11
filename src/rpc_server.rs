@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::Deserialize;
@@ -20,7 +20,6 @@ use serde::Serialize;
 use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tracing::error;
 use tracing::info;

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use tasm_lib::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use tasm_lib::prelude::Digest;
+
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk_dictionary::ChunkDictionary;

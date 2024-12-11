@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use num_traits::Zero;
@@ -14,14 +14,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::Digest;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;

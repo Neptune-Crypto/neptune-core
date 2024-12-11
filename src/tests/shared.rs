@@ -41,7 +41,7 @@ use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::config_models::cli_args;

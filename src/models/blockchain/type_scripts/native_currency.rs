@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
 use serde::Deserialize;
@@ -13,14 +13,13 @@ use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::tasm_object::DEFAULT_MAX_DYN_FIELD_SIZE;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
@@ -250,15 +249,12 @@ impl ConsensusProgram for NativeCurrency {
         let hash_timestamp = library.import(Box::new(HashStaticSize {
             size: timestamp_size,
         }));
-        let u128_safe_add =
-            library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAddU128));
+        let u128_safe_add = library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAdd));
         let u128_shr1 = library.import(Box::new(
-            tasm_lib::arithmetic::u128::shift_right_static_u128::ShiftRightStaticU128::<1_u8>,
+            tasm_lib::arithmetic::u128::shift_right_static::ShiftRightStatic::<1_u8>,
         ));
-        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt_u128::LtU128));
-        let u64_lt = library.import(Box::new(
-            tasm_lib::arithmetic::u64::lt_u64::LtU64ConsumeArgs,
-        ));
+        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let u64_lt = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
             NativeCurrencyWitnessMemory,

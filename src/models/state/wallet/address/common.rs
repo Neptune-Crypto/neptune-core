@@ -6,7 +6,7 @@ use sha3::Shake256;
 use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;

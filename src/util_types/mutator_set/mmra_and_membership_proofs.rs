@@ -6,7 +6,7 @@ use proptest::strategy::Strategy;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::root_and_paths::RootAndPaths;
 

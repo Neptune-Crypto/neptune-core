@@ -2,7 +2,7 @@ use anyhow::bail;
 use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
-use get_size::GetSize;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldCodec;

@@ -4,7 +4,7 @@ use std::ops::Add;
 use std::ops::Sub;
 
 use arbitrary::Arbitrary;
-use get_size::GetSize;
+use get_size2::GetSize;
 use num_traits::ConstZero;
 use num_traits::One;
 use num_traits::Zero;

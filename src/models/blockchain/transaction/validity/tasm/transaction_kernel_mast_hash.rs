@@ -204,6 +204,7 @@ impl BasicSnippet for TransactionKernelMastHash {
 mod tests {
     use std::collections::HashMap;
 
+    use isa::twenty_first::util_types::sponge::Domain;
     use num_traits::One;
     use rand::rngs::StdRng;
     use rand::Rng;
@@ -219,8 +220,6 @@ mod tests {
     use tasm_lib::InitVmState;
     use twenty_first::math::bfield_codec::BFieldCodec;
     use twenty_first::math::tip5::Digest;
-    use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-    use twenty_first::util_types::algebraic_hasher::Domain;
 
     use super::*;
     use crate::models::blockchain::shared::Hash;

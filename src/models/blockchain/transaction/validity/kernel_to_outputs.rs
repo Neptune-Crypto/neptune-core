@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use field_count::FieldCount;
-use get_size::GetSize;
+use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::DataType;
@@ -15,7 +15,7 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::bfieldcodec_derive::BFieldCodec;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

@@ -12,9 +12,9 @@ use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::Digest;
+use tasm_lib::prelude::Digest;
 
 use super::appendix_witness::AppendixWitness;
 use crate::models::blockchain::block::block_body::BlockBody;

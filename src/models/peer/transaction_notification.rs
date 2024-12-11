@@ -7,7 +7,7 @@ use super::transfer_transaction::TransactionProofQuality;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::tasm_lib::Digest;
+use crate::tasm_lib::prelude::Digest;
 
 /// Data structure for communicating knowledge of transactions.
 ///

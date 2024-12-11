@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,8 +7,8 @@ use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+
+use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;

@@ -85,7 +85,7 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::prelude::*;
-    use tasm_lib::Digest;
+    use tasm_lib::prelude::Digest;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

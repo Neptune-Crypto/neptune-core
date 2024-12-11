@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::iter::Rev;
 
 use bytesize::ByteSize;
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
