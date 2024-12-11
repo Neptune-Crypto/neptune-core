@@ -23,7 +23,6 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
@@ -46,26 +45,8 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 /// program related to block validity, it is important to use `safe_add` rather than `+` as
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default, BFieldCodec)]
 pub struct NeptuneCoins(i128);
-
-impl BFieldCodec for NeptuneCoins {
-    type Error = BFieldCodecError;
-
-    fn decode(
-        sequence: &[tasm_lib::triton_vm::prelude::BFieldElement],
-    ) -> Result<Box<Self>, Self::Error> {
-        std::result::Result::Ok(Box::new(Self((*u128::decode(sequence)?) as i128)))
-    }
-
-    fn encode(&self) -> Vec<tasm_lib::triton_vm::prelude::BFieldElement> {
-        (self.0 as u128).encode()
-    }
-
-    fn static_length() -> Option<usize> {
-        u128::static_length()
-    }
-}
 
 impl TasmObject for NeptuneCoins {
     fn label_friendly_name() -> String {
