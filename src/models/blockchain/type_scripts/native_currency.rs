@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::DataType;
@@ -48,7 +49,8 @@ const COINBASE_TIMELOCK_INSUFFICIENT: i128 = 1_000_034;
 const UTXO_SIZE_TOO_LARGE_ERROR: i128 = 1_000_035;
 const TOO_BIG_COIN_FIELD_SIZE_ERROR: i128 = 1_000_036;
 const STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR: i128 = 1_000_037;
-const FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR: i128 = 1_000_038;
+const FEE_EXCEEDS_MAX: i128 = 1_000_038;
+const FEE_EXCEEDS_MIN: i128 = 1_000_039;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -68,12 +70,19 @@ const FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR: i128 = 1_000_038;
 pub struct NativeCurrency;
 
 impl NativeCurrency {
+    // const TIME_LOCK_HASH: Digest = Digest([
+    //     BFieldElement::new(1099415371751974362_u64),
+    //     BFieldElement::new(274457847644817458_u64),
+    //     BFieldElement::new(5749046657545930452_u64),
+    //     BFieldElement::new(4873191867236712662_u64),
+    //     BFieldElement::new(6955338650254959680_u64),
+    // ]);
     const TIME_LOCK_HASH: Digest = Digest([
-        BFieldElement::new(1099415371751974362_u64),
-        BFieldElement::new(274457847644817458_u64),
-        BFieldElement::new(5749046657545930452_u64),
-        BFieldElement::new(4873191867236712662_u64),
-        BFieldElement::new(6955338650254959680_u64),
+        BFieldElement::new(7207785320433617162_u64),
+        BFieldElement::new(890210137924970311_u64),
+        BFieldElement::new(7901065193700473067_u64),
+        BFieldElement::new(7504530257290336718_u64),
+        BFieldElement::new(9848604556451651092_u64),
     ]);
 }
 
@@ -207,12 +216,15 @@ impl ConsensusProgram for NativeCurrency {
             i += 1;
         }
 
+        assert!(fee >= NeptuneCoins::min(), "fee exceeds amount lower bound");
+        assert!(fee <= NeptuneCoins::max(), "fee exceeds amount upper bound");
+
         // if coinbase is set, verify that half of it is time-locked
         let mut half_of_coinbase = some_coinbase;
         half_of_coinbase.div_two();
         let mut half_of_fee = fee;
         half_of_fee.div_two();
-        assert!(half_of_coinbase <= total_timelocked_output + half_of_fee,
+        assert!(some_coinbase.is_zero() || half_of_coinbase <= total_timelocked_output + half_of_fee,
             "not enough funds timelocked -- half of coinbase == {} > total_timelocked_output + half_of_fee == {} whereas total output == {}",
             half_of_coinbase,
             total_timelocked_output + half_of_fee,
@@ -250,10 +262,14 @@ impl ConsensusProgram for NativeCurrency {
             size: timestamp_size,
         }));
         let u128_safe_add = library.import(Box::new(tasm_lib::arithmetic::u128::safe_add::SafeAdd));
-        let u128_shr1 = library.import(Box::new(
-            tasm_lib::arithmetic::u128::shift_right_static::ShiftRightStatic::<1_u8>,
+        let u128_overflowing_add = library.import(Box::new(
+            tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
+        ));
+        let i128_shr = library.import(Box::new(
+            tasm_lib::arithmetic::i128::shift_right::ShiftRight,
         ));
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let i128_lt = library.import(Box::new(tasm_lib::arithmetic::i128::lt::Lt));
         let u64_lt = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
         let coinbase_pointer_to_amount = library.import(Box::new(CoinbaseAmount));
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
@@ -335,6 +351,17 @@ impl ConsensusProgram for NativeCurrency {
             assert error_id {BAD_COINBASE_SIZE_ERROR}
             // _ coinbase_size
         );
+
+        let push_amount = |amount: NeptuneCoins| {
+            amount
+                .encode()
+                .into_iter()
+                .rev()
+                .map(|b| triton_instr!(push  b ))
+                .collect_vec()
+        };
+        let push_max_amount = push_amount(NeptuneCoins::max());
+        let push_min_amount = push_amount(NeptuneCoins::min());
 
         let digest_eq = DataType::Digest.compare();
 
@@ -544,21 +571,20 @@ impl ConsensusProgram for NativeCurrency {
             push 0 push 0 push 0
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0
 
-            dup 6
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 *fee
+            push 0
+            push 0
+            push 0
+            push 0
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [total_output]
 
-            push {coin_size - 1} add
-            read_mem {coin_size} pop 1
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [fee]
-
-            hint fee = stack[0..4]
+            hint total_output = stack[0..4]
             hint utxos_i_si = stack[7]
             hint i = stack[8]
             hint enn = stack[9]
 
             push 0 push 0 push 0 push 0
             hint timelocked_amount = stack[0..4]
-            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [fee] [timelocked_amount]
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N 0 *output_utxos[0]_si 0 0 0 [total_output] [timelocked_amount]
 
             call {loop_utxos_add_amounts}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount]
@@ -570,12 +596,13 @@ impl ConsensusProgram for NativeCurrency {
             pop 1
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [fee]
 
-            call {u128_shr1}
-            call {u128_safe_add}
+            push 1
+            call {i128_shr}
+            call {u128_overflowing_add}
+            pop 1
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [total_timelocked]
 
             hint total_timelocked : u128 = stack[0..4]
-            hint total_output : u128 = stack[4..8]
 
             pick 8 pop 1
             pick 8 pop 1
@@ -593,32 +620,78 @@ impl ConsensusProgram for NativeCurrency {
             pick 12 pop 1
             pick 12 pop 1
             pick 12 pop 1
-            pick 12 pop 1
-            // _ [txkmh] *ncw *coinbase [total_input] [total_output] [total_timelocked]
+            // _ [txkmh] *ncw *coinbase *fee [total_input] [total_output] [total_timelocked]
 
-            pick 12
+            pick 13
             call {coinbase_pointer_to_amount}
-            // _ [txkmh] *ncw [total_input] [total_output] [total_timelocked] [coinbase]
+            // _ [txkmh] *ncw *fee [total_input] [total_output] [total_timelocked] [coinbase]
             hint coinbase = stack[0..4]
 
-            call {u128_shr1}
-            // _ [txkmh] *ncw [total_input] [total_output] [total_timelocked] [coinbase/2]
+            push 1
+            call {i128_shr}
+            // _ [txkmh] *ncw *fee [total_input] [total_output] [total_timelocked] [coinbase/2]
 
             pick 7
             pick 7
             pick 7
             pick 7
             call {u128_lt}
-            // _ [txkmh] *ncw [total_input] [total_output] (total_timelocked < coinbase/2)
+            // _ [txkmh] *ncw *fee [total_input] [total_output] (total_timelocked < coinbase/2)
 
             push 0 eq
-            // _ [txkmh] *ncw [total_input] [total_output] (total_timelocked >= coinbase/2)
+            // _ [txkmh] *ncw *fee [total_input] [total_output] (total_timelocked >= coinbase/2)
 
             assert error_id {COINBASE_TIMELOCK_INSUFFICIENT}
-            // _ [txkmh] *ncw [total_input] [total_output]
+            // _ [txkmh] *ncw *fee [total_input] [total_output]
+
+            pick 8 addi {coin_size-1}
+            read_mem {coin_size}
+            pop 1
+            hint fee = stack[0..4]
+            // _ [txkmh] *ncw [total_input] [total_output] [fee]
+
+            dup 3
+            dup 3
+            dup 3
+            dup 3
+            {&push_max_amount}
+            hint max_amount = stack[0..4]
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] [fee] [max_amount]
+
+            call {i128_lt}
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] (max_amount < fee)
+
+            push 0 eq
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] (fee <= max_amount)
+
+            assert error_id {FEE_EXCEEDS_MAX}
+            // _ [txkmh] *ncw [total_input] [total_output] [fee]
+
+            {&push_min_amount}
+            hint min_amount = stack[0..4]
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] [min_amount]
+
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] [min_amount] [fee]
+
+            call {i128_lt}
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] (fee < min_amount)
+
+            push 0 eq
+            // _ [txkmh] *ncw [total_input] [total_output] [fee] (fee >= min_amount)
+
+            assert error_id {FEE_EXCEEDS_MIN}
+            // _ [txkmh] *ncw [total_input] [total_output] [fee]
+
+            call {u128_overflowing_add}
+            pop 1
+            // _ [txkmh] *ncw [total_input] [total_output']
 
             {&compare_coin_amount}
-            // _ [txkmh] *ncw (total_input == total_output)
+            // _ [txkmh] *ncw (total_input == total_output')
 
             assert error_id {NO_INFLATION_VIOLATION}
             // _ [txkmh] *ncw
@@ -1016,7 +1089,6 @@ impl SecretWitness for NativeCurrencyWitness {
 pub mod test {
     use std::panic;
 
-    use itertools::Itertools;
     use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -1036,7 +1108,7 @@ pub mod test {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::type_scripts::neptune_coins::test::invalid_amount;
+    use crate::models::blockchain::type_scripts::neptune_coins::test::invalid_positive_amount;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
@@ -1268,20 +1340,6 @@ pub mod test {
         );
     }
 
-    #[test]
-    fn hardcoded_time_lock_hash_matches_hash_of_time_lock_program() {
-        assert_eq!(
-            TimeLock.hash(),
-            NativeCurrency::TIME_LOCK_HASH,
-            "time lock hash: {}\nhardcoded value: {}",
-            TimeLock.hash().values().into_iter().join(","),
-            NativeCurrency::TIME_LOCK_HASH
-                .values()
-                .into_iter()
-                .join(",")
-        );
-    }
-
     #[proptest]
     fn transaction_with_timelocked_coinbase_is_valid(
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
@@ -1423,8 +1481,14 @@ pub mod test {
     }
 
     #[test]
-    fn hardcoded_timelock_hash_matches_hash_of_timelock_program() {
-        assert_eq!(NativeCurrency::TIME_LOCK_HASH, TimeLock.hash());
+    fn hardcoded_time_lock_hash_matches_hash_of_time_lock_program() {
+        let calculated = TimeLock.hash();
+        assert_eq!(
+            NativeCurrency::TIME_LOCK_HASH,
+            calculated,
+            "Timelock.hash():\n{}",
+            calculated
+        );
     }
 
     #[proptest]
@@ -1458,25 +1522,25 @@ pub mod test {
 
     #[proptest]
     fn positive_fee_cannot_exceed_max_nau(
-        #[strategy(invalid_amount())] _fee: NeptuneCoins,
+        #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
         assert_both_rust_and_tasm_fail(
             NativeCurrencyWitness::from(primitive_witness),
-            &[FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR],
+            &[FEE_EXCEEDS_MAX],
         );
     }
 
     #[proptest]
-    fn negative_fee_cannot_exceed_negative_max_nau(
-        #[strategy(invalid_amount())] _fee: NeptuneCoins,
+    fn negative_fee_cannot_exceed_min_nau(
+        #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
         assert_both_rust_and_tasm_fail(
             NativeCurrencyWitness::from(primitive_witness),
-            &[FEE_AMOUNT_EXCEEDS_MAX_AMOUNT_ERROR],
+            &[FEE_EXCEEDS_MIN],
         );
     }
 }

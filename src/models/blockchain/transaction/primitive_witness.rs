@@ -1229,9 +1229,9 @@ mod test {
         /// (greater than the maximum number of nau).
         pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
             let total_amount_strategy = if fee.is_negative() {
-                (-fee).to_nau().try_into().unwrap()..(i128::MAX >> 1)
+                (-fee).to_nau().try_into().unwrap()..(i128::MAX)
             } else {
-                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()..(i128::MAX >> 1)
+                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()..(i128::MAX)
             };
             let num_outputs = 2;
             (
@@ -1269,8 +1269,7 @@ mod test {
                                         i128::try_from(timelocked_amount.to_nau()).unwrap(),
                                     )
                                     .unwrap()
-                                    .checked_add(i128::try_from((-fee).to_nau()).unwrap())
-                                    .unwrap(),
+                                    .wrapping_add(i128::try_from((-fee).to_nau()).unwrap()),
                             );
                             let liquid_output = Utxo::new_native_currency(
                                 LockScript::hash_lock(output_seeds[0]),

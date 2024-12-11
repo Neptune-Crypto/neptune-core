@@ -85,6 +85,16 @@ impl TasmObject for NeptuneCoins {
 impl NeptuneCoins {
     const MAX_NAU: i128 = 42000000 * Self::conversion_factor();
 
+    /// The maximum amount that is still valid.
+    pub(crate) fn max() -> Self {
+        Self(Self::MAX_NAU)
+    }
+
+    /// The minimum amount that is still valid.
+    pub(crate) fn min() -> Self {
+        Self(-Self::MAX_NAU)
+    }
+
     /// The conversion factor is 10^30 * 2^2.
     /// It is such that 42 000 000 * 10^30 * 2^2 is just one bit shy of being 128 bits
     /// wide. The one shy bit is used for the sign.
@@ -518,8 +528,9 @@ pub(crate) mod test {
         }
     }
 
-    pub(crate) fn invalid_amount() -> BoxedStrategy<NeptuneCoins> {
-        ((NeptuneCoins::MAX_NAU + 1)..(i128::MAX >> 1))
+    pub(crate) fn invalid_positive_amount() -> BoxedStrategy<NeptuneCoins> {
+        let i128_max = (u128::MAX >> 1) as i128;
+        ((NeptuneCoins::MAX_NAU + 1)..=i128_max)
             .prop_map(NeptuneCoins)
             .boxed()
     }
