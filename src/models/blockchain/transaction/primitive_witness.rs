@@ -1224,62 +1224,105 @@ mod test {
         }
 
         /// A strategy for primitive witnesses with 1 input, 2 outputs, and the
-        /// given fee. The fee can be negative or even an invalid amount
-        /// (greater than the maximum number of nau).
+        /// given fee. The fee can be negative or even an invalid amount:
+        /// greater than the maximum number of nau. It does *not* work for fees
+        /// smaller than the minimum number of nau.
         pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
-            let total_amount_strategy = if fee.is_negative() {
-                (-fee).to_nau().try_into().unwrap()..(NeptuneCoins::MAX_NAU)
-            } else {
-                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()
-                    ..(NeptuneCoins::MAX_NAU)
+            let fee_as_i128 = std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap();
+            let total_amount_strategy = match (fee.is_negative(), fee.abs() > NeptuneCoins::max()) {
+                (false, false) => {
+                    // positive or zero fee, valid amount
+                    // ensure that total amount > fee
+                    fee_as_i128..NeptuneCoins::MAX_NAU
+                }
+                (false, true) => {
+                    // positive fee, greater than max nau
+                    // ensure that total_amount > fee
+                    fee_as_i128..i128::MAX
+                }
+                (true, false) => {
+                    // negative fee, valid amount
+                    // timelocked_amount = -fee/2
+                    // liquid_amount = total_amount - timelocked_amount - fee
+                    // so:
+                    //  * total_amount > timelocked_amount
+                    //  * total_amount - timelocked_amount - fee <= NeptuneCoins::max
+                    // or rephrased:
+                    //  * -fee/2  <  total_amount  <=  NeptuneCoins::max + fee/2
+                    // ensure that total_amount - fee < MAX_NAU
+                    (-fee_as_i128 >> 1)..(NeptuneCoins::MAX_NAU + fee_as_i128 + 1)
+                }
+                (true, true) => {
+                    // negative fee, smaller than min nau
+                    // timelocked_amount = -fee/2
+                    // liquid_amount = total_amount - timelocked_amount - fee
+                    // so:
+                    //  * total_amount > timelocked_amount  (otherwise bad sub)
+                    //  * total_amount - timelocked_amount - fee <= NeptuneCoins::max  (otherwise bad add)
+                    // or rephrased:
+                    //  * -fee/2  <  total_amount  <=  NeptuneCoins::max + fee/2
+                    // except, this can only work if 0 < NeptuneCoins::max + fee
+                    // which would imply that fee was a valid amount. So in
+                    // other words, this case should never happen.
+                    panic!("fees smaller than minimum amount of nau are not supported");
+                }
             };
             let num_outputs = 2;
+
             (
                 total_amount_strategy,
                 arb::<Digest>(),
                 vec(arb::<Digest>(), num_outputs),
                 arb::<Timestamp>(),
+                NeptuneCoins::arbitrary_non_negative(),
             )
                 .prop_flat_map(
-                    move |(amount, input_address_seed, output_seeds, mut timestamp)| {
+                    move |(
+                        amount,
+                        input_address_seed,
+                        output_seeds,
+                        mut timestamp,
+                        extra_amount,
+                    )| {
                         while timestamp + COINBASE_TIME_LOCK_PERIOD < timestamp {
                             timestamp = Timestamp::millis(timestamp.to_millis() >> 1);
                         }
 
                         let total_amount = NeptuneCoins::from_raw_i128(amount);
+
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
                                 &[input_address_seed],
                                 &[total_amount],
                             );
 
+                        // populate outputs differently depending on sign of fee
                         let output_utxos = if fee.is_negative() {
+                            // If you set a negative fee, then half of the
+                            // absolute value of that fee must be time-locked.
                             let mut timelocked_amount = -fee;
                             timelocked_amount.div_two();
+                            assert!(total_amount >= timelocked_amount);
                             let timelocked_output = Utxo::new_native_currency(
                                 LockScript::hash_lock(output_seeds[0]),
                                 timelocked_amount,
                             )
                             .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
 
-                            let liquid_amount = NeptuneCoins::from_raw_i128(
-                                i128::try_from(total_amount.to_nau())
-                                    .unwrap()
-                                    .checked_sub(
-                                        i128::try_from(timelocked_amount.to_nau()).unwrap(),
-                                    )
-                                    .unwrap()
-                                    .wrapping_add(i128::try_from((-fee).to_nau()).unwrap()),
-                            );
+                            let mut liquid_amount =
+                                total_amount.checked_sub(&timelocked_amount).unwrap();
+                            liquid_amount = liquid_amount.checked_add(&(-fee)).unwrap();
                             let liquid_output = Utxo::new_native_currency(
                                 LockScript::hash_lock(output_seeds[0]),
                                 liquid_amount,
                             );
 
+                            assert_eq!(timelocked_amount + liquid_amount + fee, total_amount);
+
                             vec![timelocked_output, liquid_output]
                         } else {
-                            let mut first_amount = fee;
-                            first_amount.div_two();
+                            // positive fee
+                            let mut first_amount = extra_amount;
                             while total_amount
                                 .checked_sub(&fee)
                                 .unwrap()

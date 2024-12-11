@@ -51,6 +51,8 @@ const TOO_BIG_COIN_FIELD_SIZE_ERROR: i128 = 1_000_036;
 const STATE_LENGTH_FOR_TIME_LOCK_NOT_ONE_ERROR: i128 = 1_000_037;
 const FEE_EXCEEDS_MAX: i128 = 1_000_038;
 const FEE_EXCEEDS_MIN: i128 = 1_000_039;
+const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_040;
+const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_041;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -588,6 +590,44 @@ impl ConsensusProgram for NativeCurrency {
 
             call {loop_utxos_add_amounts}
             // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount]
+
+            // sanity check total output
+            dup 7
+            dup 7
+            dup 7
+            dup 7
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [total_output]
+
+            {&push_max_amount}
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [total_output] [max_nau]
+
+            call {i128_lt}
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (max_nau < total_output)
+
+            push 0 eq
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (max_nau >= total_output)
+
+            assert error_id {SUM_OF_OUTPUTS_EXCEEDS_MAX}
+
+            push 0
+            push 0
+            push 0
+            push 0
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [0]
+
+            dup 11
+            dup 11
+            dup 11
+            dup 11
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] [0] [total_output]
+
+            call {i128_lt}
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (total_output < 0)
+
+            push 0 eq
+            // _ [txkmh] *ncw *coinbase *fee *salted_output_utxos N N *input_utxos[N]_si * * * [total_input] *fee N N *output_utxos[N]_si * * * [total_output] [timelocked_amount] (total_output >= 0)
+
+            assert error_id {SUM_OF_OUTPUTS_IS_NEGATIVE}
 
             // add half of fee to timelocked amount
             dup 14
@@ -1527,22 +1567,6 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
     }
 
-    #[test]
-    fn fee_can_be_negative_deterministic() {
-        let mut test_runner = TestRunner::deterministic();
-        for _ in 0..10 {
-            let fee = NeptuneCoins::arbitrary_non_negative()
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            let pw = PrimitiveWitness::arbitrary_with_fee(-fee)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
-            assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(pw)).unwrap();
-        }
-    }
-
     #[proptest]
     fn fee_can_be_negative(
         #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
@@ -1552,7 +1576,6 @@ pub mod test {
         assert_both_rust_and_tasm_halt_gracefully(NativeCurrencyWitness::from(primitive_witness))?;
     }
 
-    #[ignore]
     #[proptest]
     fn positive_fee_cannot_exceed_max_nau(
         #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
@@ -1576,5 +1599,8 @@ pub mod test {
             NativeCurrencyWitness::from(primitive_witness),
             &[FEE_EXCEEDS_MIN],
         );
+
+        // It is actually impossible to trigger this assert error id -- or is it?
+        // I'm not convinced.
     }
 }

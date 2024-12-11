@@ -338,7 +338,7 @@ impl CheckedAdd for NeptuneCoins {
     /// smaller than the maximum number of nau.
     fn checked_add(&self, v: &Self) -> Option<Self> {
         self.0.checked_add(v.0).and_then(|sum| {
-            if sum > Self::MAX_NAU || sum < -Self::MAX_NAU {
+            if !(-Self::MAX_NAU..=Self::MAX_NAU).contains(&sum) {
                 None
             } else {
                 Some(Self(sum))
