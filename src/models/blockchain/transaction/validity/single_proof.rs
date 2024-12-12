@@ -5,13 +5,13 @@ use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;
@@ -40,8 +40,8 @@ pub(crate) const DISCRIMINANT_FOR_PROOF_COLLECTION: u64 = 0;
 pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 1;
 pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 
-const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_040;
-const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_041;
+const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_050;
+const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 
 #[derive(Debug, Clone, BFieldCodec)]
 pub(crate) enum SingleProofWitness {
