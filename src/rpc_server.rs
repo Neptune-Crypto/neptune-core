@@ -188,6 +188,9 @@ pub trait RPC {
     /// Returns information about the specified block if found
     async fn block_info(block_selector: BlockSelector) -> Option<BlockInfo>;
 
+    /// Return the digests of known blocks with specified height.
+    async fn block_digests_by_height(height: BlockHeight) -> Vec<Digest>;
+
     /// Return the digest for the specified block if found
     async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
 
@@ -798,6 +801,23 @@ impl RPC for NeptuneRPCServer {
             archival_state.genesis_block().hash(),
             state.chain.light_state().hash(),
         ))
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn block_digests_by_height(
+        self,
+        _: context::Context,
+        height: BlockHeight,
+    ) -> Vec<Digest> {
+        log_slow_scope!(fn_name!());
+
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .block_height_to_block_digests(height)
+            .await
     }
 
     // documented in trait. do not add doc-comment.
@@ -1515,6 +1535,14 @@ mod rpc_server_tests {
         let _ = rpc_server.clone().own_instance_id(ctx).await;
         let _ = rpc_server.clone().block_height(ctx).await;
         let _ = rpc_server.clone().peer_info(ctx).await;
+        let _ = rpc_server
+            .clone()
+            .block_digests_by_height(ctx, 42u64.into())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .block_digests_by_height(ctx, 0u64.into())
+            .await;
         let _ = rpc_server.clone().all_punished_peers(ctx).await;
         let _ = rpc_server.clone().latest_tip_digests(ctx, 2).await;
         let _ = rpc_server
