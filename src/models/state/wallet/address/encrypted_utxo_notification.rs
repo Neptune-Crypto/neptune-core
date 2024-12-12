@@ -12,7 +12,7 @@ use super::SpendingKey;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::address::common::network_hrp_char;
-use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 
 /// an encrypted wrapper for UTXO notifications.
 ///

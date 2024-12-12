@@ -1885,7 +1885,7 @@ mod tests {
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
-        use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+        use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::models::state::TransactionOrigin;
         use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
 

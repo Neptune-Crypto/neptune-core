@@ -6,8 +6,8 @@ use tasm_lib::prelude::Digest;
 use tracing::error;
 
 use super::wallet::transaction_output::TxOutput;
-use super::wallet::transaction_output::UtxoNotifyMethod;
 use super::wallet::unlocked_utxo::UnlockedUtxo;
+use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -45,24 +45,45 @@ impl TransactionDetails {
         amount_liquid.div_two();
         let amount_timelocked = gobbled_fee.checked_sub(&amount_liquid).unwrap();
 
-        let tx_outputs = vec![
-            TxOutput::native_currency(
-                amount_liquid,
-                sender_randomness,
-                notification_method.clone(),
-                true,
+        let (time_locked_txo, liquid_txo) = match notification_method {
+            UtxoNotifyMethod::OnChain(receiving_address) => (
+                TxOutput::onchain_native_currency(
+                    amount_timelocked,
+                    sender_randomness,
+                    receiving_address.clone(),
+                    true,
+                ),
+                TxOutput::onchain_native_currency(
+                    amount_liquid,
+                    sender_randomness,
+                    receiving_address,
+                    true,
+                )
+                .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
             ),
-            TxOutput::native_currency(
-                amount_timelocked,
-                sender_randomness,
-                notification_method,
-                true,
-            )
-            .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
-        ];
+            UtxoNotifyMethod::OffChain(receiving_address) => (
+                TxOutput::offchain_native_currency(
+                    amount_timelocked,
+                    sender_randomness,
+                    receiving_address.clone(),
+                    true,
+                ),
+                TxOutput::offchain_native_currency(
+                    amount_liquid,
+                    sender_randomness,
+                    receiving_address,
+                    true,
+                )
+                .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
+            ),
+            UtxoNotifyMethod::None => {
+                panic!("Cannot produce fee gobbler transaction without UTXO notification")
+            }
+        };
+
         TransactionDetails::new_without_coinbase(
             vec![],
-            tx_outputs.into(),
+            vec![time_locked_txo, liquid_txo].into(),
             -gobbled_fee,
             now,
             mutator_set_accumulator,
@@ -170,5 +191,75 @@ impl TransactionDetails {
             timestamp,
             mutator_set_accumulator,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
+    use super::*;
+
+    #[proptest]
+    fn test_fee_gobbler_properties(
+        #[strategy(NeptuneCoins::arbitrary_non_negative())] gobbled_fee: NeptuneCoins,
+        #[strategy(arb())] sender_randomness: Digest,
+        #[strategy(arb())] mutator_set_accumulator: MutatorSetAccumulator,
+        #[strategy(arb())] now: Timestamp,
+        #[filter(#notification_method != UtxoNotifyMethod::None)]
+        #[strategy(arb())]
+        notification_method: UtxoNotifyMethod,
+    ) {
+        let fee_gobbler = TransactionDetails::fee_gobbler(
+            gobbled_fee,
+            sender_randomness,
+            mutator_set_accumulator,
+            now,
+            notification_method,
+        );
+
+        assert!(
+            fee_gobbler.tx_inputs.is_empty(),
+            "fee gobbler must have no inputs"
+        );
+
+        assert_eq!(
+            NeptuneCoins::zero(),
+            fee_gobbler
+                .tx_outputs
+                .iter()
+                .map(|txo| txo.utxo().get_native_currency_amount())
+                .sum::<NeptuneCoins>()
+                + fee_gobbler.fee,
+            "total transaction amount must be zero for fee gobbler"
+        );
+
+        assert!(
+            fee_gobbler.fee.is_negative() || fee_gobbler.fee.is_zero(),
+            "fee must be negative or zero; got {}",
+            fee_gobbler.fee
+        );
+
+        let mut half_of_fee = fee_gobbler.fee;
+        half_of_fee.div_two();
+
+        let time_locked_amount = fee_gobbler
+            .tx_outputs
+            .iter()
+            .map(|txo| txo.utxo())
+            .filter(|utxo| match utxo.release_date() {
+                Some(date) => date >= fee_gobbler.timestamp + MINING_REWARD_TIME_LOCK_PERIOD,
+                None => false,
+            })
+            .map(|utxo| utxo.get_native_currency_amount())
+            .sum::<NeptuneCoins>();
+        assert!(
+            -half_of_fee
+                <= time_locked_amount,
+            "at least half of negative-fee must be time-locked\nhalf of negative fee: {}\ntime-locked amount: {}",
+            -half_of_fee,
+            time_locked_amount,
+        );
     }
 }

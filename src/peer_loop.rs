@@ -1515,7 +1515,7 @@ mod peer_loop_tests {
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;

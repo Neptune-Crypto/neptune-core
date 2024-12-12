@@ -11,7 +11,7 @@ use crossterm::event::KeyEventKind;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
-use neptune_cash::models::state::wallet::transaction_output::UtxoNotificationMedium;
+use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::layout::Alignment;

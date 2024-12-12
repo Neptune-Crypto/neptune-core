@@ -5,6 +5,7 @@ pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod transaction_output;
 pub mod unlocked_utxo;
+pub mod utxo_notification;
 pub mod wallet_state;
 pub mod wallet_status;
 
@@ -431,7 +432,7 @@ mod wallet_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;

@@ -820,7 +820,7 @@ mod tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::GlobalStateLock;
     use crate::models::state::TritonVmJobQueue;

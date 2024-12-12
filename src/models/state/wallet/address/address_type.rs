@@ -2,6 +2,7 @@
 
 use anyhow::bail;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -17,7 +18,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
@@ -97,7 +98,7 @@ impl KeyType {
 /// This enum provides an abstraction API for Address types, so that
 /// a method or struct may simply accept a `ReceivingAddress` and be
 /// forward-compatible with new types of Address as they are implemented.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub enum ReceivingAddress {
     /// a [generation_address]
     Generation(Box<generation_address::GenerationReceivingAddress>),

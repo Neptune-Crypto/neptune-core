@@ -1176,7 +1176,7 @@ mod archival_state_tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;

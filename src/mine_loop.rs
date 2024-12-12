@@ -781,7 +781,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;

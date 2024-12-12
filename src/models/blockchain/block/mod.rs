@@ -1014,7 +1014,7 @@ mod block_tests {
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
-    use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;

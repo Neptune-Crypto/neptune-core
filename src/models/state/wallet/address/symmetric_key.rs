@@ -7,6 +7,7 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use serde::Deserialize;
@@ -23,7 +24,7 @@ use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
 /// represents a symmetric key decryption error
@@ -78,7 +79,7 @@ pub const SYMMETRIC_KEY_FLAG: BFieldElement = BFieldElement::new(SYMMETRIC_KEY_F
 ///
 /// The implementation can be easily changed later if needed as the type is
 /// opaque.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
 pub struct SymmetricKey {
     seed: Digest,
 }

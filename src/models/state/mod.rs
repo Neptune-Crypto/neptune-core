@@ -70,7 +70,7 @@ use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;

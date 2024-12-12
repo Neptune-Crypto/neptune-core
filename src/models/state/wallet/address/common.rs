@@ -10,7 +10,7 @@ use twenty_first::math::tip5::Digest;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
 /// returns human-readable-prefix for the given network
