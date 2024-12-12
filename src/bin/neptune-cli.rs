@@ -134,6 +134,9 @@ enum Command {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+    BlockDigestsByHeight {
+        height: u64,
+    },
     Confirmations,
     PeerInfo,
     AllPunishedPeers,
@@ -452,6 +455,10 @@ async fn main() -> Result<()> {
                 Some(block_info) => println!("{}", block_info),
                 None => println!("Not found"),
             }
+        }
+        Command::BlockDigestsByHeight { height } => {
+            let digests = client.block_digests_by_height(ctx, height.into()).await?;
+            println!("{}", digests.iter().join("\n"));
         }
         Command::Confirmations => {
             let val = client.confirmations(ctx).await?;
