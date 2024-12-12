@@ -12,6 +12,7 @@ use sysinfo::System;
 
 use super::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -112,6 +113,18 @@ pub struct Args {
     #[clap(long)]
     pub sleepy_guessing: bool,
 
+    /// Determines the fraction of the transaction fee consumed by this node as
+    /// a reward either for upgrading a `ProofCollection` to `SingleProof`, or
+    /// for merging two `SingleProof`s.
+    #[clap(long, default_value = "0.2", value_parser = fraction_validator)]
+    pub gobbling_fraction: f64,
+
+    /// Determines the minimum fee to take as a reward for upgrading foreign
+    /// transaction proofs. Foreign transactions where a fee below this
+    /// threshold cannot be collected by proof upgrading will not be upgraded.
+    #[clap(long, default_value = "0.01")]
+    pub min_gobbling_fee: NeptuneCoins,
+
     /// Prune the mempool when it exceeds this size in RAM.
     ///
     /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
@@ -208,6 +221,12 @@ pub struct Args {
     /// no limit is applied if unset.
     #[structopt(long, short, value_parser = clap::value_parser!(u8).range(10..32))]
     pub max_log2_padded_height_for_proofs: Option<u8>,
+
+    /// Sets the maximum number of proofs in a `ProofCollection` that can be
+    /// recursively combined into a `SingleProof` by this machine. I.e. how big
+    /// STARK proofs this machine can produce.
+    #[clap(long, default_value = "16")]
+    pub max_num_proofs: usize,
 }
 
 impl Default for Args {

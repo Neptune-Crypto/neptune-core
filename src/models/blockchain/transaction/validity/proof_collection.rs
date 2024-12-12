@@ -2,13 +2,12 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
-
-use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;
@@ -47,6 +46,16 @@ pub struct ProofCollection {
 }
 
 impl ProofCollection {
+    /// Get the total number of proofs in this collection
+    pub(crate) fn num_proofs(&self) -> usize {
+        1 + // removal_records_integrity
+        1 + // collect_lock_scripts
+        self.lock_scripts_halt.len() + // lock_scripts_halt
+        1 + // kernel_to_outputs
+        1 + // collect_type_scripts
+        self.type_scripts_halt.len() // type_scripts_halt
+    }
+
     fn extract_specific_witnesses(
         primitive_witness: &PrimitiveWitness,
     ) -> (

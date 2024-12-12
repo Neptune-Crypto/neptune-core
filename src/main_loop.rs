@@ -606,13 +606,13 @@ impl MainLoopHandler {
                         // Alternatively set the `max_number_of_blocks_before_syncing` value higher
                         // if this problem is encountered.
                         return Ok(());
-                    } else {
-                        info!(
-                            "Last block from peer is new canonical tip: {}; height: {}",
-                            last_block.hash(),
-                            last_block.header().height
-                        );
                     }
+
+                    info!(
+                        "Last block from peer is new canonical tip: {}; height: {}",
+                        last_block.hash(),
+                        last_block.header().height
+                    );
 
                     // Ask miner to stop work until state update is completed
                     self.main_to_miner_tx.send(MainToMiner::WaitForContinue);
@@ -1397,7 +1397,7 @@ impl MainLoopHandler {
                     self.handle_miner_task_message(main_message, &mut main_loop_state).await?
                 }
 
-                // Handle the completion of mempool tx-update jobs after new
+                // Handle the completion of mempool tx-update jobs after new block.
                 Some(ms_updated_transactions) = main_loop_state.update_mempool_receiver.recv() => {
                     self.handle_updated_mempool_txs(ms_updated_transactions).await;
                 }
@@ -1686,9 +1686,10 @@ mod test {
         use crate::models::proof_abstractions::timestamp::Timestamp;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 
-        async fn a_transaction(
+        async fn tx_no_outputs(
             global_state_lock: &GlobalStateLock,
             tx_proof_type: TxProvingCapability,
+            fee: NeptuneCoins,
         ) -> Transaction {
             let change_key = global_state_lock
                 .lock_guard()
@@ -1696,7 +1697,6 @@ mod test {
                 .wallet_state
                 .wallet_secret
                 .nth_generation_spending_key_for_tests(0);
-            let fee = NeptuneCoins::new(1);
             let in_seven_months = global_state_lock
                 .lock_guard()
                 .await
@@ -1724,7 +1724,7 @@ mod test {
 
         #[tokio::test]
         #[traced_test]
-        async fn upgrade_proof_collection_to_single_proof() {
+        async fn upgrade_proof_collection_to_single_proof_foreign_tx() {
             let test_setup = setup(0).await;
             let TestSetup {
                 peer_to_main_rx,
@@ -1758,9 +1758,11 @@ mod test {
                 "Scheduled task returns OK when run on empty mempool"
             );
 
-            let proof_collection_tx = a_transaction(
+            let fee = NeptuneCoins::new(1);
+            let proof_collection_tx = tx_no_outputs(
                 &main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
+                fee,
             )
             .await;
 

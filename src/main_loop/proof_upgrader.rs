@@ -1,6 +1,7 @@
 use std::time::SystemTime;
 
 use itertools::Itertools;
+use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -19,6 +20,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
@@ -48,6 +50,7 @@ pub enum UpgradeJob {
         kernel: TransactionKernel,
         proof: ProofCollection,
         mutator_set: MutatorSetAccumulator,
+        gobbling_fee: NeptuneCoins,
     },
     Merge {
         left_kernel: TransactionKernel,
@@ -56,6 +59,7 @@ pub enum UpgradeJob {
         single_proof_right: Proof,
         shuffle_seed: [u8; 32],
         mutator_set: MutatorSetAccumulator,
+        gobbling_fee: NeptuneCoins,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
 }
@@ -114,6 +118,28 @@ impl UpgradeJob {
         }
     }
 
+    /// Compute the ratio of gobbling fee to number of proofs.
+    ///
+    /// This number stands in for rate charged for upgrading proofs.
+    fn profitability(&self) -> NeptuneCoins {
+        match self {
+            UpgradeJob::ProofCollectionToSingleProof {
+                proof: collection,
+                gobbling_fee,
+                ..
+            } => {
+                let reciprocal = 1.0 / (collection.num_proofs() as f64);
+                gobbling_fee.lossy_f64_fraction_mul(reciprocal).unwrap()
+            }
+            UpgradeJob::Merge { gobbling_fee, .. } => {
+                let mut rate = *gobbling_fee;
+                rate.div_two();
+                rate
+            }
+            _ => NeptuneCoins::zero(),
+        }
+    }
+
     /// Return a list of the transaction IDs that will have their proofs
     /// upgraded with this decision.
     ///
@@ -121,20 +147,13 @@ impl UpgradeJob {
     /// of length one.
     pub(super) fn affected_txids(&self) -> Vec<TransactionKernelId> {
         match self {
-            UpgradeJob::ProofCollectionToSingleProof {
-                kernel,
-                proof: _,
-                mutator_set: _,
-            } => {
+            UpgradeJob::ProofCollectionToSingleProof { kernel, .. } => {
                 vec![kernel.txid()]
             }
             UpgradeJob::Merge {
                 left_kernel,
-                single_proof_left: _,
                 right_kernel,
-                single_proof_right: _,
-                shuffle_seed: _,
-                mutator_set: _,
+                ..
             } => vec![left_kernel.txid(), right_kernel.txid()],
             UpgradeJob::PrimitiveWitnessToProofCollection { primitive_witness } => {
                 vec![primitive_witness.kernel.txid()]
@@ -405,12 +424,29 @@ pub(super) fn get_upgrade_task_from_mempool(
 ) -> Option<(UpgradeJob, TransactionOrigin)> {
     // Do we have any `ProofCollection`s?
     let tip = global_state.chain.light_state();
+    let gobbling_fraction = global_state.gobbling_fraction();
+    let min_gobbling_fee = global_state.min_gobbling_fee();
+    let num_proofs_threshold = global_state.max_num_proofs();
 
-    if let Some((kernel, proof, tx_origin)) = global_state.mempool.most_dense_proof_collection() {
+    let proof_collection_job = if let Some((kernel, proof, tx_origin)) = global_state
+        .mempool
+        .most_dense_proof_collection(num_proofs_threshold)
+    {
+        let gobbling_fee = kernel
+            .fee
+            .lossy_f64_fraction_mul(gobbling_fraction)
+            .unwrap();
+        let gobbling_fee =
+            if gobbling_fee >= min_gobbling_fee && tx_origin == TransactionOrigin::Foreign {
+                gobbling_fee
+            } else {
+                NeptuneCoins::zero()
+            };
         let upgrade_decision = UpgradeJob::ProofCollectionToSingleProof {
             kernel: kernel.to_owned(),
             proof: proof.to_owned(),
             mutator_set: tip.mutator_set_accumulator_after().to_owned(),
+            gobbling_fee,
         };
 
         if upgrade_decision.mutator_set().hash() != kernel.mutator_set_hash {
@@ -418,15 +454,30 @@ pub(super) fn get_upgrade_task_from_mempool(
             return None;
         }
 
-        return Some((upgrade_decision, tx_origin));
+        Some((upgrade_decision, tx_origin))
+    } else {
+        None
+    };
+
+    if let Some((_, TransactionOrigin::Own)) = &proof_collection_job {
+        return proof_collection_job;
     }
 
     // Can we merge two single proofs?
-    if let Some((
+    let merge_job = if let Some((
         [(left_kernel, left_single_proof), (right_kernel, right_single_proof)],
         tx_origin,
     )) = global_state.mempool.most_dense_single_proof_pair()
     {
+        let gobbling_fee = left_kernel.fee + right_kernel.fee;
+        let gobbling_fee = gobbling_fee
+            .lossy_f64_fraction_mul(gobbling_fraction)
+            .unwrap();
+        let gobbling_fee = if gobbling_fee >= min_gobbling_fee {
+            gobbling_fee
+        } else {
+            NeptuneCoins::zero()
+        };
         let mut rng: StdRng = SeedableRng::from_seed(global_state.shuffle_seed());
         let upgrade_decision = UpgradeJob::Merge {
             left_kernel: left_kernel.to_owned(),
@@ -435,6 +486,7 @@ pub(super) fn get_upgrade_task_from_mempool(
             single_proof_right: right_single_proof.to_owned(),
             shuffle_seed: rng.gen(),
             mutator_set: tip.mutator_set_accumulator_after().to_owned(),
+            gobbling_fee,
         };
 
         if left_kernel.mutator_set_hash != right_kernel.mutator_set_hash
@@ -444,8 +496,17 @@ pub(super) fn get_upgrade_task_from_mempool(
             return None;
         }
 
-        return Some((upgrade_decision, tx_origin));
-    }
+        Some((upgrade_decision, tx_origin))
+    } else {
+        None
+    };
 
-    None
+    // pick the most profitable option
+    let mut jobs = [proof_collection_job, merge_job]
+        .into_iter()
+        .flatten()
+        .collect_vec();
+    jobs.sort_by_key(|(job, _)| job.profitability());
+
+    jobs.first().cloned()
 }

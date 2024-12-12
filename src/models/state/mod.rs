@@ -37,7 +37,6 @@ use tracing::info;
 use tracing::warn;
 use transaction_details::TransactionDetails;
 use twenty_first::math::digest::Digest;
-
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
@@ -1302,6 +1301,9 @@ impl GlobalState {
     /// The new block is assumed to be valid, also wrt. to proof-of-work.
     /// The new block will be set as the new tip, regardless of its
     /// cumulative proof-of-work number.
+    ///
+    /// Returns a list of update-jobs that should be
+    /// performed by this client.
     pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
         self.set_new_tip_internal(new_block, vec![]).await
     }
@@ -1309,6 +1311,9 @@ impl GlobalState {
     /// Update client's state with a new block that was mined locally. Block is
     /// assumed to be valid, also wrt. to PoW. The received block will be set as
     /// the new tip, regardless of its accumulated PoW.
+    ///
+    /// Returns a list of update-jobs that should be
+    /// performed by this client.
     pub async fn set_new_self_mined_tip(
         &mut self,
         new_block: Block,
@@ -1321,6 +1326,9 @@ impl GlobalState {
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW. or its
     /// validity.
+    ///
+    /// Returns a list of update-jobs that should be
+    /// performed by this client.
     async fn set_new_tip_internal(
         &mut self,
         new_block: Block,
@@ -1447,6 +1455,18 @@ impl GlobalState {
 
     pub(crate) fn proving_capability(&self) -> TxProvingCapability {
         self.cli().proving_capability()
+    }
+
+    pub(crate) fn min_gobbling_fee(&self) -> NeptuneCoins {
+        self.cli().min_gobbling_fee
+    }
+
+    pub(crate) fn gobbling_fraction(&self) -> f64 {
+        self.cli().gobbling_fraction
+    }
+
+    pub(crate) fn max_num_proofs(&self) -> usize {
+        self.cli().max_num_proofs
     }
 
     /// clears all Tx from mempool and notifies wallet of changes.

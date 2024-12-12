@@ -195,17 +195,20 @@ impl Mempool {
     /// fee-density if mempool contains any such transactions. Otherwise None.
     pub(crate) fn most_dense_proof_collection(
         &self,
+        num_proofs_threshold: usize,
     ) -> Option<(&TransactionKernel, &ProofCollection, TransactionOrigin)> {
         for (txid, _fee_density) in self.get_sorted_iter() {
             let candidate = self.tx_dictionary.get(&txid).unwrap();
             if let TransactionProof::ProofCollection(proof_collection) =
                 &candidate.transaction.proof
             {
-                return Some((
-                    &candidate.transaction.kernel,
-                    proof_collection,
-                    candidate.origin,
-                ));
+                if proof_collection.num_proofs() <= num_proofs_threshold {
+                    return Some((
+                        &candidate.transaction.kernel,
+                        proof_collection,
+                        candidate.origin,
+                    ));
+                }
             }
         }
 
@@ -956,14 +959,20 @@ mod tests {
 
         // No candidate when mempool is empty
         assert!(
-            mempool.most_dense_proof_collection().is_none(),
+            mempool
+                .most_dense_proof_collection(bob.cli.max_num_proofs)
+                .is_none(),
             "No proof collection when mempool is empty"
         );
 
         let tx_by_bob_txid = tx_by_bob.kernel.txid();
         mempool.insert(tx_by_bob, TransactionOrigin::Foreign);
         assert_eq!(
-            mempool.most_dense_proof_collection().unwrap().0.txid(),
+            mempool
+                .most_dense_proof_collection(bob.cli.max_num_proofs)
+                .unwrap()
+                .0
+                .txid(),
             tx_by_bob_txid
         );
     }
