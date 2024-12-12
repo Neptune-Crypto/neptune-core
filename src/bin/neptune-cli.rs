@@ -16,6 +16,7 @@ use clap::Parser;
 use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
+use itertools::Itertools;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
@@ -191,6 +192,9 @@ enum Command {
     BlockInfo {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
+    },
+    BlockDigestsByHeight {
+        height: u64,
     },
     Confirmations,
     PeerInfo,
@@ -473,6 +477,10 @@ async fn main() -> Result<()> {
                 Some(block_info) => println!("{}", block_info),
                 None => println!("Not found"),
             }
+        }
+        Command::BlockDigestsByHeight { height } => {
+            let digests = client.block_digests_by_height(ctx, height.into()).await?;
+            println!("{}", digests.iter().join("\n"));
         }
         Command::Confirmations => {
             let val = client.confirmations(ctx).await?;
