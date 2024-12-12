@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -15,7 +16,6 @@ use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tasm_lib::prelude::Digest;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;

@@ -7,7 +7,6 @@ use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::tip5::Digest;
 
-
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::PublicAnnouncement;

@@ -381,7 +381,7 @@ pub(crate) async fn make_coinbase_transaction(
         receiving_address.into(),
         owned,
     )
-    .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD + Timestamp::minutes(30));
+    .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
 
     let transaction_details = TransactionDetails::new_with_coinbase(
         vec![],

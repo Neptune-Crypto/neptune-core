@@ -1,10 +1,10 @@
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::prelude::Digest;
 
 use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;

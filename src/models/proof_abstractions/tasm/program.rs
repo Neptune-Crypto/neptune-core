@@ -3,10 +3,10 @@ use std::panic::RefUnwindSafe;
 
 use itertools::Itertools;
 use tasm_lib::library::Library;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::prelude::Digest;
 use tracing::debug;
 
 use super::environment;

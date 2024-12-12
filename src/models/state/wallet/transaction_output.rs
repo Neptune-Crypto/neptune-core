@@ -210,6 +210,33 @@ impl TxOutput {
         }
     }
 
+    /// Instantiate a [`TxOutput`] for native currency and use the given
+    /// [`UtxoNotificationMethod`].
+    ///
+    /// # Panics
+    ///
+    ///  - Panics if the given [`UtxoNoficiationMethod`] is `None`.
+    pub(crate) fn native_currency(
+        amount: NeptuneCoins,
+        sender_randomness: Digest,
+        notify_method: UtxoNotifyMethod,
+        owned: bool,
+    ) -> Self {
+        let receiving_address = match notify_method {
+            UtxoNotifyMethod::OnChain(receiving_address) => receiving_address,
+            UtxoNotifyMethod::OffChain(receiving_address) => receiving_address,
+            UtxoNotifyMethod::None => panic!("Cannot produce TxOutput without notification method"),
+        };
+        let utxo = Utxo::new_native_currency(receiving_address.lock_script(), amount);
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest: receiving_address.privacy_digest(),
+            notification_method: UtxoNotifyMethod::OffChain(receiving_address),
+            owned,
+        }
+    }
+
     pub(crate) fn is_offchain(&self) -> bool {
         matches!(self.notification_method, UtxoNotifyMethod::OffChain(_))
     }

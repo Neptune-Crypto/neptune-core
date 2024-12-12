@@ -80,7 +80,6 @@ mod tests {
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
 
-
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 

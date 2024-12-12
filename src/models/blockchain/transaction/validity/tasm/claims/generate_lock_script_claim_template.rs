@@ -76,6 +76,7 @@ mod test {
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::BasicSnippet;
+    use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::traits::function::Function;
@@ -84,7 +85,6 @@ mod test {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::twenty_first::bfe;
-    use tasm_lib::prelude::Digest;
 
     use super::GenerateLockScriptClaimTemplate;
     use crate::job_queue::triton_vm::TritonVmJobPriority;

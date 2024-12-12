@@ -14,6 +14,7 @@ use proptest_arbitrary_interop::arb;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
+use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -30,7 +31,9 @@ use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::PublicAnnouncement;
-use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
+use super::TransactionDetails;
+use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
+use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
@@ -41,6 +44,7 @@ use crate::models::blockchain::type_scripts::TypeScriptWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
@@ -166,6 +170,130 @@ impl Display for PrimitiveWitness {
 }
 
 impl PrimitiveWitness {
+    /// Generate a primitive witness for a transaction from various disparate witness data.
+    ///
+    /// # Panics
+    /// Panics if transaction validity cannot be satisfied.
+    fn generate_primitive_witness(
+        unlocked_utxos: Vec<UnlockedUtxo>,
+        output_utxos: Vec<Utxo>,
+        sender_randomnesses: Vec<Digest>,
+        receiver_digests: Vec<Digest>,
+        transaction_kernel: TransactionKernel,
+        mutator_set_accumulator: MutatorSetAccumulator,
+    ) -> PrimitiveWitness {
+        /// Generate a salt to use for [SaltedUtxos], deterministically.
+        fn generate_secure_pseudorandom_seed(
+            input_utxos: &Vec<Utxo>,
+            output_utxos: &Vec<Utxo>,
+            sender_randomnesses: &Vec<Digest>,
+        ) -> [u8; 32] {
+            let preimage = [
+                input_utxos.encode(),
+                output_utxos.encode(),
+                sender_randomnesses.encode(),
+            ]
+            .concat();
+            let seed = Tip5::hash_varlen(&preimage);
+            let seed: [u8; Digest::BYTES] = seed.into();
+
+            seed[0..32].try_into().unwrap()
+        }
+
+        let input_utxos = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.utxo.to_owned())
+            .collect_vec();
+        let salt_seed =
+            generate_secure_pseudorandom_seed(&input_utxos, &output_utxos, &sender_randomnesses);
+
+        let mut rng = StdRng::from_seed(salt_seed);
+        let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
+        let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
+
+        let type_script_hashes = input_utxos
+            .iter()
+            .chain(output_utxos.iter())
+            .flat_map(|utxo| utxo.coins().iter().map(|coin| coin.type_script_hash))
+            .unique()
+            .collect_vec();
+        let type_scripts_and_witnesses = type_script_hashes
+            .into_iter()
+            .map(|type_script_hash| {
+                match_type_script_and_generate_witness(
+                    type_script_hash,
+                    transaction_kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                )
+                .expect("type script hash should be known.")
+            })
+            .collect_vec();
+        let input_lock_scripts_and_witnesses = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.lock_script_and_witness())
+            .cloned()
+            .collect_vec();
+        let input_membership_proofs = unlocked_utxos
+            .iter()
+            .map(|unlocker| unlocker.mutator_set_mp().to_owned())
+            .collect_vec();
+
+        PrimitiveWitness {
+            input_utxos: salted_input_utxos,
+            lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
+            type_scripts_and_witnesses,
+            input_membership_proofs,
+            output_utxos: salted_output_utxos,
+            output_sender_randomnesses: sender_randomnesses.to_vec(),
+            output_receiver_digests: receiver_digests.to_vec(),
+            mutator_set_accumulator,
+            kernel: transaction_kernel,
+        }
+    }
+
+    /// Create a [`PrimitiveWitness`] from [`TransactionDetails`].
+    pub(crate) fn from_transaction_details(transaction_details: TransactionDetails) -> Self {
+        let TransactionDetails {
+            tx_inputs,
+            tx_outputs,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_accumulator,
+        } = transaction_details;
+
+        // complete transaction kernel
+        let removal_records = tx_inputs
+            .iter()
+            .map(|txi| txi.removal_record(&mutator_set_accumulator))
+            .collect_vec();
+        let kernel = TransactionKernelProxy {
+            inputs: removal_records,
+            outputs: tx_outputs.addition_records(),
+            public_announcements: tx_outputs.public_announcements(),
+            fee,
+            timestamp,
+            coinbase,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+        }
+        .into_kernel();
+
+        // populate witness
+        let output_utxos = tx_outputs.utxos();
+        let unlocked_utxos = tx_inputs;
+        let sender_randomnesses = tx_outputs.sender_randomnesses();
+        let receiver_digests = tx_outputs.receiver_digests();
+        Self::generate_primitive_witness(
+            unlocked_utxos,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+            kernel.clone(),
+            mutator_set_accumulator,
+        )
+    }
+
     pub fn transaction_inputs_from_address_seeds_and_amounts(
         address_seeds: &[Digest],
         input_amounts: &[NeptuneCoins],
@@ -546,7 +674,7 @@ impl PrimitiveWitness {
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
                         &output_address_seeds,
-                        maybe_coinbase.map(|_| timestamp + COINBASE_TIME_LOCK_PERIOD),
+                        maybe_coinbase.map(|_| timestamp + MINING_REWARD_TIME_LOCK_PERIOD),
                     );
                     Self::arbitrary_primitive_witness_with_timestamp_and(
                         &input_utxos,
@@ -949,7 +1077,7 @@ mod test {
                                         // Notice that we're in the general case timelocking more than we have to here.
                                         let max_timestamp = *timestamps.iter().max().unwrap();
                                         *utxo = utxo.clone().with_time_lock(
-                                            max_timestamp + COINBASE_TIME_LOCK_PERIOD,
+                                            max_timestamp + MINING_REWARD_TIME_LOCK_PERIOD,
                                         );
                                         timelocked_cb_acc = timelocked_cb_acc + amount;
                                     }
@@ -1284,7 +1412,7 @@ mod test {
                         mut timestamp,
                         extra_amount,
                     )| {
-                        while timestamp + COINBASE_TIME_LOCK_PERIOD < timestamp {
+                        while timestamp + MINING_REWARD_TIME_LOCK_PERIOD < timestamp {
                             timestamp = Timestamp::millis(timestamp.to_millis() >> 1);
                         }
 
@@ -1307,7 +1435,7 @@ mod test {
                                 LockScript::hash_lock(output_seeds[0]),
                                 timelocked_amount,
                             )
-                            .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
+                            .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
 
                             let mut liquid_amount =
                                 total_amount.checked_sub(&timelocked_amount).unwrap();
@@ -1335,7 +1463,7 @@ mod test {
                                 LockScript::hash_lock(output_seeds[0]),
                                 first_amount,
                             )
-                            .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
+                            .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
 
                             let second_amount = total_amount
                                 .checked_sub(&first_amount)

@@ -1,9 +1,14 @@
 use anyhow::bail;
 use anyhow::Result;
+use num_traits::CheckedSub;
 use num_traits::Zero;
+use tasm_lib::prelude::Digest;
 use tracing::error;
 
+use super::wallet::transaction_output::TxOutput;
+use super::wallet::transaction_output::UtxoNotifyMethod;
 use super::wallet::unlocked_utxo::UnlockedUtxo;
+use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -22,6 +27,49 @@ pub(crate) struct TransactionDetails {
 }
 
 impl TransactionDetails {
+    /// Create (`TransactionDetails` for) a new fee-gobbler transaction.
+    ///
+    /// The produced transaction has no inputs, sets a negative fee, and
+    /// distributes it over two UTXOs (one time-locked and one liquid
+    /// immediately) of which both are locked to the given lock script hash.
+    /// The produced transaction is supported by a [`PrimitiveWitness`], so
+    /// the caller still needs a follow-up proving operation.
+    pub(crate) fn fee_gobbler(
+        gobbled_fee: NeptuneCoins,
+        sender_randomness: Digest,
+        mutator_set_accumulator: MutatorSetAccumulator,
+        now: Timestamp,
+        notification_method: UtxoNotifyMethod,
+    ) -> Self {
+        let mut amount_liquid = gobbled_fee;
+        amount_liquid.div_two();
+        let amount_timelocked = gobbled_fee.checked_sub(&amount_liquid).unwrap();
+
+        let tx_outputs = vec![
+            TxOutput::native_currency(
+                amount_liquid,
+                sender_randomness,
+                notification_method.clone(),
+                true,
+            ),
+            TxOutput::native_currency(
+                amount_timelocked,
+                sender_randomness,
+                notification_method,
+                true,
+            )
+            .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
+        ];
+        TransactionDetails::new_without_coinbase(
+            vec![],
+            tx_outputs.into(),
+            -gobbled_fee,
+            now,
+            mutator_set_accumulator,
+        )
+        .expect("new_without_coinbase should succeed when total output amount is zero and no inputs are provided")
+    }
+
     /// Construct a [`TransactionDetails`] instance with coinbase from state
     /// information.
     ///

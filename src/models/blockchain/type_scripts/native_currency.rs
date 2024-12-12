@@ -24,7 +24,7 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
-use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
+use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -203,7 +203,7 @@ impl ConsensusProgram for NativeCurrency {
                 } else if coin_j.type_script_hash == Self::TIME_LOCK_HASH {
                     // decode state to get release date
                     let release_date = *Timestamp::decode(&coin_j.state).unwrap();
-                    if release_date >= timestamp + COINBASE_TIME_LOCK_PERIOD {
+                    if release_date >= timestamp + MINING_REWARD_TIME_LOCK_PERIOD {
                         time_locked = true;
                     }
                 }
@@ -485,7 +485,7 @@ impl ConsensusProgram for NativeCurrency {
             read_mem 1 pop 1
             // _ [txkmh] *ncw *coinbase *fee [txkmh] h i *timestamp timestamp
 
-            push {COINBASE_TIME_LOCK_PERIOD}
+            push {MINING_REWARD_TIME_LOCK_PERIOD}
             add
             // _ [txkmh] *ncw *coinbase *fee [txkmh] h i *timestamp coinbase_release_date
 

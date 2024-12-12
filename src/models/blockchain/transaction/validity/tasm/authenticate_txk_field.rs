@@ -77,6 +77,7 @@ mod tests {
     use strum::VariantArray;
     use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
     use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::prelude::Digest;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::test_helpers::test_assertion_failure;
     use tasm_lib::traits::read_only_algorithm::ReadOnlyAlgorithm;
@@ -85,7 +86,6 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::prelude::*;
-    use tasm_lib::prelude::Digest;
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;

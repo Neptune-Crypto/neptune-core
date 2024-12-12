@@ -6,10 +6,10 @@ use itertools::Itertools;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
-use tasm_lib::prelude::Digest;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;

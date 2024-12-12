@@ -10,8 +10,8 @@ use neptune_cash::database::storage::storage_vec::traits::StorageVecBase;
 use neptune_cash::database::NeptuneLevelDb;
 use neptune_cash::util_types::mutator_set::archival_mmr::ArchivalMmr;
 use rand::random;
-use tasm_lib::twenty_first::util_types::mmr::shared_advanced::num_leafs_to_num_nodes;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::num_leafs_to_num_nodes;
 
 fn main() {
     divan::main();

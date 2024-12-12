@@ -3,7 +3,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::tip5::Digest;
 
-
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::timestamp::Timestamp;

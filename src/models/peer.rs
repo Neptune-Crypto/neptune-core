@@ -13,7 +13,6 @@ use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 use twenty_first::math::digest::Digest;
 
-
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;

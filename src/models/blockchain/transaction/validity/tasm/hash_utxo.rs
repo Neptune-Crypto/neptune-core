@@ -13,7 +13,6 @@ use tasm_lib::traits::function::FunctionInitialState;
 use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
-
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
 use crate::models::blockchain::transaction::utxo::Utxo;

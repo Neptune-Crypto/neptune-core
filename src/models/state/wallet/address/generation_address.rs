@@ -28,7 +28,6 @@ use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
 
-
 use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;

@@ -13,9 +13,9 @@ use itertools::Itertools;
 use native_currency::NativeCurrency;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::prelude::Digest;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
