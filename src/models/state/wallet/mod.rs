@@ -32,7 +32,6 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
-
 use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
@@ -269,6 +268,14 @@ impl WalletSecret {
             ]
             .concat(),
         )
+    }
+
+    /// Return a seed used to randomize shuffling.
+    pub(crate) fn shuffle_seed(&self, block_height: BlockHeight) -> [u8; 32] {
+        let secure_seed_from_wallet = self.deterministic_derived_seed(block_height);
+        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
+
+        seed[0..32].try_into().unwrap()
     }
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness

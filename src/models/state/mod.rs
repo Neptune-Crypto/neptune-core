@@ -323,13 +323,9 @@ impl GlobalState {
     /// Return a seed used to randomize shuffling.
     pub(crate) fn shuffle_seed(&self) -> [u8; 32] {
         let next_block_height = self.chain.light_state().header().height.next();
-        let secure_seed_from_wallet = self
-            .wallet_state
+        self.wallet_state
             .wallet_secret
-            .deterministic_derived_seed(next_block_height);
-        let seed: [u8; Digest::BYTES] = secure_seed_from_wallet.into();
-
-        seed[0..32].try_into().unwrap()
+            .shuffle_seed(next_block_height)
     }
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {

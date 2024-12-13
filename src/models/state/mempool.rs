@@ -810,7 +810,6 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::main_loop::proof_upgrader::UpgradeJob;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -1056,7 +1055,7 @@ mod tests {
         ) -> Vec<MempoolEvent> {
             let mut updated_txs = vec![];
             for job in update_jobs {
-                let updated = UpgradeJob::UpdateMutatorSetData(job)
+                let updated = job
                     .upgrade(
                         &TritonVmJobQueue::dummy(),
                         TritonVmJobPriority::Highest.into(),

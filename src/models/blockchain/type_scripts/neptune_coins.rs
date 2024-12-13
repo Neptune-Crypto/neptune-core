@@ -277,6 +277,10 @@ impl NeptuneCoins {
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()
     }
+
+    pub(crate) fn is_positive(&self) -> bool {
+        self.0.is_positive()
+    }
 }
 
 impl GetSize for NeptuneCoins {

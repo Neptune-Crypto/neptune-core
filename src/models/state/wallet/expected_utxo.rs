@@ -86,4 +86,5 @@ pub enum UtxoNotifier {
     Cli,
     Myself,
     Premine,
+    FeeGobbler,
 }

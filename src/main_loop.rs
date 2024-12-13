@@ -432,8 +432,6 @@ impl MainLoopHandler {
         );
         let mut result = vec![];
         for job in update_jobs {
-            let job: UpgradeJob = job.into();
-
             // Jobs for updating txs in the mempool have highest priority since
             // they block the composer from continuing.
             // TODO: Handle errors better here.
