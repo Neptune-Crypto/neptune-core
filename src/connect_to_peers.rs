@@ -311,10 +311,10 @@ pub(crate) async fn call_peer(
     let state_clone = state.clone();
     let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
     let panic_result = std::panic::AssertUnwindSafe(async {
-        debug!("Attempting to initiate connection");
+        debug!("Attempting to initiate connection to {peer_address}");
         match tokio::net::TcpStream::connect(peer_address).await {
             Err(e) => {
-                warn!("Failed to establish connection: {}", e);
+                warn!("Failed to establish connection to {peer_address}: {}", e);
             }
             Ok(stream) => {
                 match call_peer_inner(
@@ -334,7 +334,7 @@ pub(crate) async fn call_peer(
             }
         };
 
-        info!("Connection closing");
+        info!("Connection to {peer_address} closing");
     })
     .catch_unwind()
     .await;
@@ -388,7 +388,7 @@ where
         Some(PeerMessage::Handshake(payload)) => {
             let (v, hsd) = *payload;
             if v != MAGIC_STRING_RESPONSE {
-                bail!("Didn't get expected magic value for handshake");
+                bail!("Didn't get expected magic value for handshake from {peer_address}");
             }
             if hsd.network != own_handshake.network {
                 bail!(
@@ -398,11 +398,11 @@ where
                     own_handshake.network,
                 );
             }
-            debug!("Got correct magic value response!");
+            debug!("Got correct magic value response from {peer_address}!");
             hsd
         }
         _ => {
-            bail!("Didn't get handshake response");
+            bail!("Didn't get handshake response from {peer_address}");
         }
     };
 
@@ -411,10 +411,15 @@ where
             info!("Outgoing connection accepted by {peer_address}");
         }
         Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
-            bail!("Outgoing connection attempt refused. Reason: {:?}", reason);
+            bail!(
+                "Outgoing connection attempt to {peer_address} refused. Reason: {:?}",
+                reason
+            );
         }
         _ => {
-            bail!("Got invalid connection status response on outgoing connection");
+            bail!(
+                "Got invalid connection status response from {peer_address} on outgoing connection"
+            );
         }
     }
 
@@ -430,11 +435,11 @@ where
     .await;
     if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
         warn!(
-            "Outgoing connection refused. Reason: {:?}\nNow hanging up.",
+            "Outgoing connection to {peer_address} refused. Reason: {:?}\nNow hanging up.",
             refused_reason
         );
         peer.send(PeerMessage::Bye).await?;
-        bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
+        bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
     }
 
     // By default, start by asking the peer for its peers. In an adversarial
