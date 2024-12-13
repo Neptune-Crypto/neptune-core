@@ -219,9 +219,14 @@ impl PeerLoopHandler {
             }
         );
         let now = self.now();
+        debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
-            if !new_block.has_proof_of_work(previous_block) {
+            let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block);
+            debug!("new block has proof of work? {new_block_has_proof_of_work}");
+            let new_block_is_valid = new_block.is_valid(previous_block, now);
+            debug!("new block is valid? {new_block_is_valid}");
+            if !new_block_has_proof_of_work {
                 warn!(
                     "Received invalid proof-of-work for block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
@@ -239,7 +244,7 @@ impl PeerLoopHandler {
                 .await?;
                 warn!("Failed to validate block due to insufficient PoW");
                 return Ok(None);
-            } else if !new_block.is_valid(previous_block, now) {
+            } else if !new_block_is_valid {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
@@ -263,12 +268,14 @@ impl PeerLoopHandler {
         }
 
         // evaluate the fork choice rule
-        if !self
+        debug!("Checking last block's canonicity ...");
+        let is_canonical = self
             .global_state_lock
             .lock_guard()
             .await
-            .incoming_block_is_more_canonical(received_blocks.last().unwrap())
-        {
+            .incoming_block_is_more_canonical(received_blocks.last().unwrap());
+        debug!("is canonical? {is_canonical}");
+        if !is_canonical {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
             canonical than current tip.",
