@@ -1,9 +1,7 @@
 use std::cmp;
-use std::collections::HashMap;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -1294,24 +1292,6 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Get longest lived connection from the peer map
-    #[allow(dead_code)]
-    fn get_longest_lived_peer(
-        peer_map: &mut HashMap<SocketAddr, PeerInfo>,
-    ) -> Option<&mut PeerInfo> {
-        let mut longest_lived_peer = None;
-        let mut longest_lived_duration = 0_u128;
-        for peer in peer_map.values_mut() {
-            let duration = peer.connection_established();
-            let nanos_duration = duration.duration_since(UNIX_EPOCH).unwrap().as_micros();
-            if nanos_duration > longest_lived_duration {
-                longest_lived_duration = nanos_duration;
-                longest_lived_peer = Some(peer);
-            }
-        }
-        longest_lived_peer
-    }
-
     /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
     /// or a message from main over the main-to-peer-tasks broadcast channel.
     async fn run<S>(
@@ -1453,9 +1433,16 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
+        if cli_args.bootstrap {
+            if global_state.net.peer_map.len() >= (cli_args.max_num_peers as usize) - 1 {
+                self.to_main_tx
+                    .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
+                    .await?;
+            }
+        } else if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
+        
 
         if global_state.net.peer_map.contains_key(&self.peer_address) {
             // This shouldn't be possible, unless the peer reports a different instance ID than
