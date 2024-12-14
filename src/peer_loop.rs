@@ -1,7 +1,9 @@
 use std::cmp;
+use std::collections::HashMap;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -1290,6 +1292,24 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
         }
+    }
+
+    /// Get longest lived connection from the peer map
+    #[allow(dead_code)]
+    fn get_longest_lived_peer(
+        peer_map: &mut HashMap<SocketAddr, PeerInfo>,
+    ) -> Option<&mut PeerInfo> {
+        let mut longest_lived_peer = None;
+        let mut longest_lived_duration = 0_u128;
+        for peer in peer_map.values_mut() {
+            let duration = peer.connection_established();
+            let nanos_duration = duration.duration_since(UNIX_EPOCH).unwrap().as_micros();
+            if nanos_duration > longest_lived_duration {
+                longest_lived_duration = nanos_duration;
+                longest_lived_peer = Some(peer);
+            }
+        }
+        longest_lived_peer
     }
 
     /// Loop for the peer tasks. Awaits either a message from the peer over TCP,
