@@ -1442,7 +1442,6 @@ impl PeerLoopHandler {
         } else if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
-        
 
         if global_state.net.peer_map.contains_key(&self.peer_address) {
             // This shouldn't be possible, unless the peer reports a different instance ID than
