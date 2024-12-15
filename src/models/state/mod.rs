@@ -2320,6 +2320,7 @@ mod global_state_tests {
             &premine_receiver,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2476,14 +2477,14 @@ mod global_state_tests {
         }
 
         assert_eq!(
-            3,
+            4,
             premine_receiver
                 .lock_guard_mut()
                 .await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .len().await, "Genesis receiver must have 3 monitored UTXOs after block 1: change from transaction, coinbase from block 1, and premine UTXO"
+                .len().await, "Premine receiver must have 4 monitored UTXOs after block 1: change from transaction, 2 coinbases from block 1, and premine UTXO"
         );
 
         assert_eq!(
@@ -2600,7 +2601,7 @@ mod global_state_tests {
 
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
-        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase
+        // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
         let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction(
             &premine_receiver
                 .global_state_lock
@@ -2612,6 +2613,7 @@ mod global_state_tests {
             &premine_receiver,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -2647,7 +2649,7 @@ mod global_state_tests {
         assert!(block_2.is_valid(&block_1, in_eight_months));
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
-        assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
+        assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
     }
 
     #[traced_test]
@@ -2667,10 +2669,15 @@ mod global_state_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
         let guesser_fraction = 0f64;
-        let (cb, _) =
-            make_coinbase_transaction(&genesis_block, &global_state_lock, guesser_fraction, now)
-                .await
-                .unwrap();
+        let (cb, _) = make_coinbase_transaction(
+            &genesis_block,
+            &global_state_lock,
+            guesser_fraction,
+            now,
+            TxProvingCapability::SingleProof,
+        )
+        .await
+        .unwrap();
         let block_1 = Block::compose(
             &genesis_block,
             cb,
@@ -2720,21 +2727,18 @@ mod global_state_tests {
                 global_state_lock,
                 guesser_fraction,
                 timestamp,
+                TxProvingCapability::PrimitiveWitness,
             )
             .await
             .unwrap();
 
-            Block::compose(
+            Block::block_template_invalid_proof(
                 &genesis_block,
                 cb,
                 timestamp,
                 Digest::default(),
                 None,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
             )
-            .await
-            .unwrap()
         }
 
         let network = Network::Main;

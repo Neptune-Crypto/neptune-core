@@ -716,6 +716,7 @@ impl TypeScriptWitness for TimeLockWitness {
     fn salted_output_utxos(&self) -> SaltedUtxos {
         SaltedUtxos::empty()
     }
+
     fn type_script_and_witness(&self) -> TypeScriptAndWitness {
         TypeScriptAndWitness::new_with_nondeterminism(TimeLock.program(), self.nondeterminism())
     }
@@ -823,6 +824,7 @@ impl Arbitrary for TimeLockWitness {
                         PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                             &output_amounts,
                             &output_address_seeds,
+                            None,
                         );
 
                     // generate primitive transaction witness and time lock witness from there
@@ -1000,6 +1002,7 @@ fn arbitrary_primitive_witness_with_timelocks(
                     PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
                         &output_address_seeds,
+                        None,
                     );
                 let mut counter = 0usize;
                 for utxo in input_utxos.iter_mut() {
@@ -1007,13 +1010,13 @@ fn arbitrary_primitive_witness_with_timelocks(
                     let time_lock = TimeLock::until(release_date);
                     let mut coins = utxo.coins().to_vec();
                     coins.push(time_lock);
-                    *utxo = (utxo.lock_script_hash(), coins).into();
+                    *utxo = Utxo::from((utxo.lock_script_hash(), coins));
                     counter += 1;
                 }
                 for utxo in output_utxos.iter_mut() {
                     let mut coins = utxo.coins().to_vec();
                     coins.push(TimeLock::until(release_dates[counter]));
-                    *utxo = (utxo.lock_script_hash(), coins).into();
+                    *utxo = Utxo::from((utxo.lock_script_hash(), coins));
                     counter += 1;
                 }
                 let release_dates = release_dates.clone();
@@ -1028,13 +1031,6 @@ fn arbitrary_primitive_witness_with_timelocks(
                 )
                 .prop_map(move |primitive_witness_template| {
                     let mut primitive_witness = primitive_witness_template.clone();
-                    let time_lock_witness = TimeLockWitness::from(primitive_witness.clone());
-                    primitive_witness.type_scripts_and_witnesses.push(
-                        TypeScriptAndWitness::new_with_nondeterminism(
-                            TimeLock.program(),
-                            time_lock_witness.nondeterminism(),
-                        ),
-                    );
                     let modified_kernel = TransactionKernelModifier::default()
                         .timestamp(now)
                         .modify(primitive_witness.kernel);

@@ -132,6 +132,12 @@ impl Utxo {
         Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }
 
+    pub(crate) fn has_native_currency(&self) -> bool {
+        self.coins
+            .iter()
+            .any(|coin| coin.type_script_hash == NativeCurrency.hash())
+    }
+
     /// Get the amount of Neptune coins that are encapsulated in this UTXO,
     /// regardless of which other coins are present. (Even if that makes the
     /// Neptune coins unspendable.)
@@ -207,6 +213,27 @@ impl Utxo {
             .filter_map(Coin::release_date)
             .any(|release_date| timestamp <= release_date)
     }
+
+    /// Adds a time-lock coin, if necessary.
+    ///
+    /// Does nothing if there is a time lock present already whose release date
+    /// is later than the argument.
+    pub(crate) fn with_time_lock(self, release_date: Timestamp) -> Self {
+        if self.release_date().is_some_and(|x| x >= release_date) {
+            self
+        } else {
+            let mut coins = self
+                .coins
+                .into_iter()
+                .filter(|c| c.type_script_hash != TimeLock.hash())
+                .collect_vec();
+            coins.push(TimeLock::until(release_date));
+            Self {
+                lock_script_hash: self.lock_script_hash,
+                coins,
+            }
+        }
+    }
 }
 
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
@@ -244,7 +271,7 @@ impl<'a> Arbitrary<'a> for Utxo {
     }
 }
 #[cfg(test)]
-mod utxo_tests {
+mod test {
     use proptest::prelude::*;
     use rand::thread_rng;
     use rand::Rng;

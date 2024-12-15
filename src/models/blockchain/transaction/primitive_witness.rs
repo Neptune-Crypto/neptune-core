@@ -30,8 +30,11 @@ use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::PublicAnnouncement;
+use crate::models::blockchain::block::COINBASE_TIME_LOCK_PERIOD;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::blockchain::type_scripts::TypeScriptWitness;
@@ -105,6 +108,16 @@ impl SaltedUtxos {
                 .try_into()
                 .unwrap(),
         }
+    }
+}
+
+impl IntoIterator for SaltedUtxos {
+    type Item = Utxo;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.utxos.into_iter()
     }
 }
 
@@ -221,21 +234,43 @@ impl PrimitiveWitness {
         }
     }
 
-    /// Generate valid output UTXOs from the amounts and seeds for the addresses
+    /// Generate valid output UTXOs from the amounts and seeds for the
+    /// addresses. If some release date is supplied, generate twice as many
+    /// UTXOs such that half the total amount is time-locked.
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
         address_seeds: &[Digest],
+        timelock_until: Option<Timestamp>,
     ) -> Vec<Utxo> {
         address_seeds
             .iter()
             .zip(output_amounts)
-            .map(|(seed, amount)| {
-                Utxo::new(
+            .flat_map(|(seed, amount)| {
+                let mut amount = *amount;
+                if timelock_until.is_some() {
+                    amount.div_two();
+                }
+                let liquid_utxo = Utxo::new(
                     generation_address::GenerationSpendingKey::derive_from_seed(*seed)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
-                )
+                );
+                let mut utxos = vec![liquid_utxo];
+                if let Some(release_date) = timelock_until {
+                    let timelocked_utxo = Utxo::new(
+                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                            .to_address()
+                            .lock_script(),
+                        [
+                            amount.to_native_coins(),
+                            vec![TimeLock::until(release_date)],
+                        ]
+                        .concat(),
+                    );
+                    utxos.push(timelocked_utxo);
+                }
+                utxos
             })
             .collect_vec()
     }
@@ -377,21 +412,33 @@ impl PrimitiveWitness {
 
         true
     }
-}
 
-impl Arbitrary for PrimitiveWitness {
-    type Parameters = (usize, usize, usize);
-    fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-        let (num_inputs, num_outputs, num_public_announcements) = parameters;
+    /// Strategy for generating a `PrimitiveWitness` with the given number of
+    /// inputs, outputs, and public announcements. If `num_inputs` is set to
+    /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
+    pub fn arbitrary_with_size_numbers(
+        num_inputs: Option<usize>,
+        num_outputs: usize,
+        num_public_announcements: usize,
+    ) -> BoxedStrategy<Self> {
+        // Primitive witnesses may not simultaneously have inputs and set a
+        // coinbase. In combination with a rule in `Block::is_valid` that
+        // requires that block transactions have at least one input, this
+        // limitation forces miners to pick up at least one transaction.
+        let (num_inputs, set_coinbase) = match num_inputs {
+            Some(number) => (number, false),
+            None => (0, true),
+        };
 
         // unwrap:
+        //  - total amount
         //  - lock script preimages (inputs)
         //  - amounts (inputs)
         //  - lock script preimages (outputs)
         //  - amounts (outputs)
         //  - public announcements
         //  - fee
-        //  - coinbase (option)
+        //  - timestamp
         (
             arb::<NeptuneCoins>(),
             vec(arb::<Digest>(), num_inputs),
@@ -400,59 +447,57 @@ impl Arbitrary for PrimitiveWitness {
             vec(arb::<u64>(), num_outputs),
             vec(arb::<PublicAnnouncement>(), num_public_announcements),
             arb::<u64>(),
-            arb::<Option<u64>>(),
+            arb::<Timestamp>(),
         )
             .prop_flat_map(
                 move |(
-                    total_amount,
+                    mut total_amount,
                     input_address_seeds,
                     input_dist,
                     output_address_seeds,
                     output_dist,
                     public_announcements,
                     fee_dist,
-                    maybe_coinbase_dist,
+                    timestamp,
                 )| {
-                    // Coinbase transactions may not take inputs. This is done
-                    // to force miners to pick up at least one transaction.
-                    let maybe_coinbase_dist = if num_inputs.is_zero() {
-                        maybe_coinbase_dist
-                    } else {
-                        None
-                    };
-                    // distribute total amount across inputs (+ coinbase)
-                    let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
-                    if let Some(d) = maybe_coinbase_dist {
-                        input_denominator += d as f64;
-                    }
-                    let input_weights = input_dist
-                        .into_iter()
-                        .map(|u| (u as f64) / input_denominator)
-                        .collect_vec();
-                    let mut input_amounts = input_weights
-                        .into_iter()
-                        .map(|w| total_amount.to_nau_f64() * w)
-                        .map(|f| NeptuneCoins::try_from(f).unwrap())
-                        .collect_vec();
-                    let maybe_coinbase = if maybe_coinbase_dist.is_some()
-                        || input_amounts.is_empty()
-                    {
-                        Some(
-                            total_amount
-                                .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
-                                .unwrap(),
-                        )
-                    } else {
-                        let sum_of_all_but_last = input_amounts
-                            .iter()
-                            .rev()
-                            .skip(1)
-                            .cloned()
-                            .sum::<NeptuneCoins>();
-                        *input_amounts.last_mut().unwrap() =
-                            total_amount.checked_sub(&sum_of_all_but_last).unwrap();
-                        None
-                    };
+                    let (maybe_coinbase, input_utxos, input_lock_scripts_and_witnesses) =
+                        if set_coinbase {
+                            (Some(total_amount), vec![], vec![])
+                        } else {
+                            // distribute total amount across inputs (+ coinbase)
+                            let input_denominator =
+                                input_dist.iter().map(|u| *u as f64).sum::<f64>();
+                            let input_weights = input_dist
+                                .into_iter()
+                                .map(|u| (u as f64) / input_denominator)
+                                .collect_vec();
+                            let mut input_amounts = input_weights
+                                .into_iter()
+                                .map(|w| total_amount.to_nau_f64() * w)
+                                .map(|f| NeptuneCoins::try_from(f).unwrap())
+                                .collect_vec();
+
+                            let sum_of_all_but_last = input_amounts
+                                .iter()
+                                .rev()
+                                .skip(1)
+                                .cloned()
+                                .sum::<NeptuneCoins>();
+                            if let Some(last_input) = input_amounts.last_mut() {
+                                *last_input =
+                                    total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                            } else {
+                                total_amount = NeptuneCoins::zero();
+                            }
+
+                            let (input_utxos, input_lock_scripts_and_witnesses) =
+                                Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    &input_address_seeds,
+                                    &input_amounts,
+                                );
+
+                            (None, input_utxos, input_lock_scripts_and_witnesses)
+                        };
 
                     // distribute total amount across outputs
                     let output_denominator =
@@ -468,39 +513,37 @@ impl Arbitrary for PrimitiveWitness {
                         .collect_vec();
                     let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
                     let fee = total_amount.checked_sub(&total_outputs).unwrap();
-
-                    let (input_utxos, input_lock_scripts_and_witnesses) =
-                        Self::transaction_inputs_from_address_seeds_and_amounts(
-                            &input_address_seeds,
-                            &input_amounts,
-                        );
-                    let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    let total_inputs = input_utxos
+                        .iter()
+                        .cloned()
+                        .map(|utxo| utxo.get_native_currency_amount())
+                        .sum::<NeptuneCoins>();
 
                     assert_eq!(
-                        total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
-                        total_outputs + fee
+                        maybe_coinbase.unwrap_or(total_inputs),
+                        total_outputs + fee,
+                        "total outputs: {total_outputs:?} fee: {fee:?}"
                     );
+
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
                         &output_address_seeds,
+                        maybe_coinbase.map(|_| timestamp + COINBASE_TIME_LOCK_PERIOD),
                     );
-                    Self::arbitrary_primitive_witness_with(
+                    Self::arbitrary_primitive_witness_with_timestamp_and(
                         &input_utxos,
                         &input_lock_scripts_and_witnesses,
                         &output_utxos,
                         &public_announcements,
                         fee,
                         maybe_coinbase,
+                        timestamp,
                     )
                 },
             )
             .boxed()
     }
 
-    type Strategy = BoxedStrategy<Self>;
-}
-
-impl PrimitiveWitness {
     pub fn arbitrary_primitive_witness_with(
         input_utxos: &[Utxo],
         input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
@@ -665,16 +708,31 @@ impl PrimitiveWitness {
 
         let num_inputs = input_utxos.len();
         let num_outputs = output_utxos.len();
-        let type_scripts_and_witnesses = if num_inputs + num_outputs > 0 {
-            let native_currency_type_script_witness = NativeCurrencyWitness {
-                salted_input_utxos: salted_input_utxos.clone(),
-                salted_output_utxos: salted_output_utxos.clone(),
-                kernel: kernel.clone(),
-            };
-            vec![native_currency_type_script_witness.type_script_and_witness()]
-        } else {
-            vec![]
-        };
+        let mut type_scripts_and_witnesses = vec![];
+        if num_inputs + num_outputs > 0 {
+            let all_utxos = salted_input_utxos
+                .utxos
+                .iter()
+                .chain(salted_output_utxos.utxos.iter());
+            if all_utxos.clone().any(|utxo| utxo.has_native_currency()) {
+                let native_currency_type_script_witness = NativeCurrencyWitness {
+                    salted_input_utxos: salted_input_utxos.clone(),
+                    salted_output_utxos: salted_output_utxos.clone(),
+                    kernel: kernel.clone(),
+                };
+                type_scripts_and_witnesses
+                    .push(native_currency_type_script_witness.type_script_and_witness());
+            }
+
+            if all_utxos.clone().any(|utxo| utxo.release_date().is_some()) {
+                let time_lock_witness = TimeLockWitness::new(
+                    kernel.clone(),
+                    salted_input_utxos.clone(),
+                    salted_output_utxos.clone(),
+                );
+                type_scripts_and_witnesses.push(time_lock_witness.type_script_and_witness());
+            }
+        }
 
         PrimitiveWitness {
             lock_scripts_and_witnesses: input_lock_scripts_and_witnesses.to_owned(),
@@ -695,6 +753,7 @@ mod test {
     use itertools::izip;
     use itertools::Itertools;
     use num_bigint::BigInt;
+    use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
@@ -764,6 +823,7 @@ mod test {
                 // assert that index lies in the range [0;N)
                 assert!(index < N);
             }
+
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -828,18 +888,20 @@ mod test {
                                 .collect_vec()
                         });
 
+                        let coinbase = |i: usize| {
+                            coinbase_and_index.and_then(|(coinbase, index)| {
+                                if index == i {
+                                    Some(coinbase)
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+
                         for i in 0..N {
-                            let maybe_coinbase =
-                                coinbase_and_index.and_then(|(coinbase, index)| {
-                                    if index == i {
-                                        Some(coinbase)
-                                    } else {
-                                        None
-                                    }
-                                });
                             Self::find_balanced_output_amounts_and_fee(
                                 input_amounts_per_tx[i],
-                                maybe_coinbase,
+                                coinbase(i),
                                 &mut output_utxo_amounts_per_tx[i],
                                 &mut fees[i],
                             );
@@ -848,10 +910,27 @@ mod test {
                         output_utxos
                             .iter_mut()
                             .zip(output_utxo_amounts_per_tx)
-                            .for_each(|(utxos, amounts)| {
-                                utxos.iter_mut().zip_eq(amounts).for_each(|(utxo, amount)| {
+                            .enumerate()
+                            .for_each(|(i, (utxos, amounts))| {
+                                // half_of_coinbase <= total_timelocked_output + half_of_fee =>
+                                // half_of_coinbase - half_of_fee <= total_timelocked_output
+                                let mut timelocked_cb_acc = NeptuneCoins::zero();
+                                let mut min_timelocked_cb = coinbase(i)
+                                    .unwrap_or(NeptuneCoins::zero())
+                                    .checked_sub(&fees[i])
+                                    .unwrap_or(NeptuneCoins::zero());
+                                min_timelocked_cb.div_two();
+                                for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
-                                })
+                                    if timelocked_cb_acc < min_timelocked_cb {
+                                        // Notice that we're in the general case timelocking more than we have to here.
+                                        let max_timestamp = *timestamps.iter().max().unwrap();
+                                        *utxo = utxo.clone().with_time_lock(
+                                            max_timestamp + COINBASE_TIME_LOCK_PERIOD,
+                                        );
+                                        timelocked_cb_acc = timelocked_cb_acc + amount;
+                                    }
+                                }
                             });
 
                         let utxos_and_lock_scripts_and_witnesses = input_amountss
@@ -914,9 +993,9 @@ mod test {
                                         output_utxos_,
                                     )| {
                                         let maybe_coinbase =
-                                            coinbase_and_index.and_then(|(coinbase, i)| {
+                                            coinbase_and_index.and_then(|(cb, i)| {
                                                 if index == i {
-                                                    Some(coinbase)
+                                                    Some(cb)
                                                 } else {
                                                     None
                                                 }
@@ -1127,7 +1206,7 @@ mod test {
         #[strategy(1usize..3)] _num_inputs: usize,
         #[strategy(1usize..3)] _num_outputs: usize,
         #[strategy(0usize..3)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements
         ))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
@@ -1188,9 +1267,9 @@ mod test {
 
     #[proptest(cases = 5)]
     fn total_amount_is_valid(
-        #[strategy(PrimitiveWitness::arbitrary_with((2,2,2)))] primitive_witness: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        primitive_witness: PrimitiveWitness,
     ) {
-        println!("generated primitive witness.");
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {
             amount
         } else {

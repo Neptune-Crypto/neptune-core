@@ -11,6 +11,7 @@ use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
 use tracing::debug;
 use tracing::info;
+use tracing::trace;
 
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
@@ -249,7 +250,7 @@ impl ProofCollection {
             Claim::about_program(&RemovalRecordsIntegrity.program())
                 .with_input(self.kernel_mast_hash.reversed().values())
                 .with_output(self.salted_inputs_hash.values().to_vec());
-        debug!(
+        trace!(
             "removal records integrity claim: {:?}",
             removal_records_integrity_claim
         );
@@ -277,6 +278,7 @@ impl ProofCollection {
                     .flat_map(|d| d.values())
                     .collect_vec(),
             );
+        trace!("collect_type_scripts_claim:\n{collect_type_scripts_claim:?}\n\n");
         let lock_script_claims = self
             .lock_script_hashes
             .iter()
@@ -437,7 +439,7 @@ pub mod test {
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
-        #[strategy(PrimitiveWitness::arbitrary_with((2, 2, 2)))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
