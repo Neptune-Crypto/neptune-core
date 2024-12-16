@@ -2419,7 +2419,7 @@ mod global_state_tests {
         .await
         .unwrap();
 
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2643,7 +2643,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        assert!(block_2.is_valid(&block_1, in_eight_months));
+        assert!(block_2.is_valid(&block_1, in_eight_months).await);
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -2690,7 +2690,8 @@ mod global_state_tests {
                 .await
                 .chain
                 .light_state()
-                .is_valid(&genesis_block, now),
+                .is_valid(&genesis_block, now)
+                .await,
             "light state tip must be a valid block"
         );
         assert!(
@@ -2701,7 +2702,8 @@ mod global_state_tests {
                 .archival_state()
                 .get_tip()
                 .await
-                .is_valid(&genesis_block, now),
+                .is_valid(&genesis_block, now)
+                .await,
             "archival state tip must be a valid block"
         );
     }
