@@ -53,6 +53,7 @@ const FEE_EXCEEDS_MAX: i128 = 1_000_038;
 const FEE_EXCEEDS_MIN: i128 = 1_000_039;
 const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_040;
 const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_041;
+const COINBASE_IS_SET_AND_FEE_IS_NEGATIVE: i128 = 1_000_042;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -139,6 +140,8 @@ impl ConsensusProgram for NativeCurrency {
             fee_leaf,
             kernel_tree_height,
         );
+
+        assert!(coinbase.is_none() || !fee.is_negative());
 
         let timestamp_leaf_index = TransactionKernelField::Timestamp as u32;
         let timestamp_leaf = Tip5::hash(&timestamp);
@@ -457,6 +460,39 @@ impl ConsensusProgram for NativeCurrency {
 
             call {merkle_verify}
             // _ [txkmh] *ncw *coinbase *fee
+
+
+            /* Verify that fee is non-negative when coinbase is set */
+            dup 1
+            read_mem 1 pop 1
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant
+
+            dup 1 addi {coin_size-1} read_mem {coin_size} pop 1
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant [fee]
+
+            push 127 call {i128_shr}
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant [fee >> 127]
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant signs signs signs signs
+
+            place 3 pop 3
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant signs
+
+            push 2 place 1 div_mod
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant quotient sign
+
+            place 1 pop 1
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant sign
+
+            add
+            // _ [txkmh] *ncw *coinbase *fee (coinbase_discriminant + sign)
+
+            push 2 eq
+            // _ [txkmh] *ncw *coinbase *fee (coinbase_discriminant && sign)
+
+            push 0 eq
+            // _ [txkmh] *ncw *coinbase *fee (!coinbase_discriminant || !sign)
+
+            assert error_id {COINBASE_IS_SET_AND_FEE_IS_NEGATIVE}
 
 
             /* Divine and authenticate timestamp */
@@ -1326,7 +1362,11 @@ pub mod test {
         NativeCurrency.test_assertion_failure(
             witness.standard_input(),
             witness.nondeterminism(),
-            &[NO_INFLATION_VIOLATION, COINBASE_TIMELOCK_INSUFFICIENT],
+            &[
+                NO_INFLATION_VIOLATION,
+                COINBASE_TIMELOCK_INSUFFICIENT,
+                COINBASE_IS_SET_AND_FEE_IS_NEGATIVE,
+            ],
         )?;
     }
 
@@ -1375,6 +1415,7 @@ pub mod test {
     #[proptest]
     fn transaction_with_timelocked_coinbase_is_valid(
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        #[filter(!#primitive_witness.kernel.fee.is_negative())]
         primitive_witness: PrimitiveWitness,
     ) {
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
@@ -1384,10 +1425,16 @@ pub mod test {
     #[test]
     fn transaction_with_timelocked_coinbase_is_valid_deterministic() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
+        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        while primitive_witness.kernel.fee.is_negative() {
+            primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        }
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         let mut fee = native_currency_witness.kernel.fee;
         fee.div_two();
