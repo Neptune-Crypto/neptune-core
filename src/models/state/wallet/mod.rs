@@ -1214,7 +1214,7 @@ mod wallet_tests {
         .await
         .unwrap();
         assert!(
-            block_3_b.is_valid(&block_2_b, in_seven_months),
+            block_3_b.is_valid(&block_2_b, in_seven_months).await,
             "Block must be valid after accumulating txs"
         );
         let expected_utxos_for_alice_cb = expected_composer_utxos
@@ -1411,7 +1411,7 @@ mod wallet_tests {
 
         // The entire block must be valid, i.e., have a valid block proof, and
         // be valid in other respects. We don't care about PoW, though.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
 
         // 4 outputs: 2 coinbases, 1 for recipient of tx, 1 for change.
         assert_eq!(4, block_1.body().transaction_kernel.outputs.len());

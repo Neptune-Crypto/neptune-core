@@ -846,7 +846,7 @@ pub(crate) async fn mine(
                     continue;
                 }
 
-                if !new_block_found.block.is_valid(&latest_block, Timestamp::now()) {
+                if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
                     // Block could be invalid if for instance the proof and proof-of-work
                     // took less time than the minimum block time.
                     error!("Found block with valid proof-of-work but block is invalid.");
@@ -1211,7 +1211,7 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
             assert!(
-                block_1_empty_mempool.is_valid(&genesis_block, now),
+                block_1_empty_mempool.is_valid(&genesis_block, now).await,
                 "Block template created by miner with empty mempool must be valid"
             );
 
@@ -1249,7 +1249,9 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
             assert!(
-                block_1_nonempty_mempool.is_valid(&genesis_block, now + Timestamp::seconds(2)),
+                block_1_nonempty_mempool
+                    .is_valid(&genesis_block, now + Timestamp::seconds(2))
+                    .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
 
@@ -1281,7 +1283,7 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
-        assert!(block_1.is_valid(&genesis_block, mocked_now));
+        assert!(block_1.is_valid(&genesis_block, mocked_now).await);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
@@ -1289,7 +1291,7 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now));
+        assert!(block_2.is_valid(&block_1, mocked_now).await);
     }
 
     /// This test mines a single block at height 1 on the main network

@@ -639,14 +639,15 @@ impl Block {
     /// Note that this function does **not** check that the block has enough
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
-    pub(crate) fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
+    pub(crate) async fn is_valid(&self, previous_block: &Block, now: Timestamp) -> bool {
         self.is_valid_internal(previous_block, now, None, None)
+            .await
     }
 
     /// Like `is_valid` but also allows specifying a custom
     /// `target_block_interval` and `minimum_block_time`. If `None` is passed,
     /// these variabes take the default values.
-    fn is_valid_internal(
+    async fn is_valid_internal(
         &self,
         previous_block: &Block,
         now: Timestamp,
@@ -778,7 +779,7 @@ impl Block {
             warn!("Can only verify block proofs, got {:?}", self.proof);
             return false;
         };
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof) {
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
             warn!("Block proof invalid.");
             return false;
         }
@@ -1157,7 +1158,7 @@ mod block_tests {
         let mut block1 = valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
         let timestamp = block1.kernel.header.timestamp;
-        assert!(block1.is_valid(&genesis_block, timestamp));
+        assert!(block1.is_valid(&genesis_block, timestamp).await);
 
         let mut mutated_leaf = genesis_block.body().block_mmr_accumulator.clone();
         let mp = mutated_leaf.append(genesis_block.hash());
@@ -1174,7 +1175,7 @@ mod block_tests {
 
         for bad_new_mmr in bad_new_mmrs {
             block1.kernel.body.block_mmr_accumulator = bad_new_mmr;
-            assert!(!block1.is_valid(&genesis_block, timestamp));
+            assert!(!block1.is_valid(&genesis_block, timestamp).await);
         }
     }
 
@@ -1276,24 +1277,24 @@ mod block_tests {
             // Set block timestamp 1 hour in the future.  (is valid)
             let future_time1 = now + Timestamp::hours(1);
             block1.kernel.header.timestamp = future_time1;
-            assert!(block1.is_valid(&genesis_block, now));
+            assert!(block1.is_valid(&genesis_block, now).await);
 
             now = block1.kernel.header.timestamp;
 
             // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
             let future_time2 = now + Timestamp::hours(2) - Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time2;
-            assert!(block1.is_valid(&genesis_block, now));
+            assert!(block1.is_valid(&genesis_block, now).await);
 
             // Set block timestamp 2 hours + 10 secs in the future. (not valid)
             let future_time3 = now + Timestamp::hours(2) + Timestamp::seconds(10);
             block1.kernel.header.timestamp = future_time3;
-            assert!(!block1.is_valid(&genesis_block, now));
+            assert!(!block1.is_valid(&genesis_block, now).await);
 
             // Set block timestamp 2 days in the future. (not valid)
             let future_time4 = now + Timestamp::seconds(86400 * 2);
             block1.kernel.header.timestamp = future_time4;
-            assert!(!block1.is_valid(&genesis_block, now));
+            assert!(!block1.is_valid(&genesis_block, now).await);
         }
     }
 

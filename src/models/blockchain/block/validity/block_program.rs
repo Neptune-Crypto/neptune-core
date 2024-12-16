@@ -21,6 +21,8 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::verifier::stark_verify::StarkVerify;
+use tokio::task;
+use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -49,9 +51,22 @@ impl BlockProgram {
             .with_output(appendix.claims_as_output())
     }
 
-    pub(crate) fn verify(block_body: &BlockBody, appendix: &BlockAppendix, proof: &Proof) -> bool {
+    pub(crate) async fn verify(
+        block_body: &BlockBody,
+        appendix: &BlockAppendix,
+        proof: &Proof,
+    ) -> bool {
         let claim = Self::claim(block_body, appendix);
-        triton_vm::verify(Stark::default(), &claim, proof)
+        let proof_clone = proof.clone();
+
+        debug!("** Calling triton_vm::verify to verify block proof ...");
+        let verdict =
+            task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof_clone))
+                .await
+                .expect("should be able to verify block proof in new tokio task");
+        debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
+
+        verdict
     }
 }
 
@@ -439,7 +454,9 @@ pub(crate) mod test {
             ))
             .unwrap();
 
-        assert!(current_block.is_valid(&predecessor, mock_now));
+        let current_block_is_valid =
+            rt.block_on(async { current_block.is_valid(&predecessor, mock_now).await });
+        assert!(current_block_is_valid);
 
         let mutator_set_update = current_block.mutator_set_update();
         let updated_tx = rt
@@ -468,6 +485,8 @@ pub(crate) mod test {
                 TritonVmProofJobOptions::default(),
             ))
             .unwrap();
-        assert!(!next_block.is_valid(&current_block, mock_later));
+        let next_block_is_valid =
+            rt.block_on(async { next_block.is_valid(&current_block, mock_later).await });
+        assert!(!next_block_is_valid);
     }
 }

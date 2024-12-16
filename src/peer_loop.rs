@@ -224,7 +224,7 @@ impl PeerLoopHandler {
         for new_block in received_blocks.iter() {
             let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
-            let new_block_is_valid = new_block.is_valid(previous_block, now);
+            let new_block_is_valid = new_block.is_valid(previous_block, now).await;
             debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
@@ -331,15 +331,14 @@ impl PeerLoopHandler {
         <S as TryStream>::Error: std::error::Error,
     {
         let parent_digest = received_block.kernel.header.prev_block_digest;
-        debug!("Fetching parent block");
-        let parent_block = self
-            .global_state_lock
-            .lock_guard()
-            .await
+        debug!("Try ensure path: fetching parent block");
+        let global_state = self.global_state_lock.lock_guard().await;
+        let parent_block = global_state
             .chain
             .archival_state()
             .get_block(parent_digest)
             .await?;
+        drop(global_state);
         debug!(
             "Completed parent block fetching from DB: {}",
             if parent_block.is_some() {
@@ -1162,7 +1161,7 @@ impl PeerLoopHandler {
                     .chain
                     .light_state()
                     .to_owned();
-                if !block.is_valid(&tip, self.now()) {
+                if !block.is_valid(&tip, self.now()).await {
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
 
@@ -1804,7 +1803,7 @@ mod peer_loop_tests {
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
         let block_1 = valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
-            block_1.is_valid(&genesis_block, now),
+            block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
         );
         alice.set_new_tip(block_1.clone()).await?;
