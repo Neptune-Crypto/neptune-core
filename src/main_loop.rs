@@ -1813,6 +1813,21 @@ mod test {
                 "Proof-upgrade task must finish successfully."
             );
 
+            // At this point there should be one transaction in the mempool,
+            // which is (if all is well) the merger of the ProofCollection
+            // transaction inserted above and one of the upgrader's fee
+            // gobblers. The point is that this transaction is a SingleProof
+            // transaction, so test that.
+
+            let (merged_txid, _) = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .mempool
+                .get_sorted_iter()
+                .last()
+                .expect("mempool should contain one item here");
+
             assert!(
                 matches!(
                     main_loop_handler
@@ -1820,7 +1835,7 @@ mod test {
                         .lock_guard()
                         .await
                         .mempool
-                        .get(proof_collection_tx.kernel.txid())
+                        .get(merged_txid)
                         .unwrap()
                         .proof,
                     TransactionProof::SingleProof(_)
@@ -1830,7 +1845,7 @@ mod test {
 
             match main_to_peer_rx.recv().await {
                 Ok(MainToPeerTask::TransactionNotification(tx_noti)) => {
-                    assert_eq!(proof_collection_tx.kernel.txid(), tx_noti.txid);
+                    assert_eq!(merged_txid, tx_noti.txid);
                     assert_eq!(TransactionProofQuality::SingleProof, tx_noti.proof_quality);
                 },
                 other => panic!("Must have sent transaction notification to peer loop after successful proof upgrade. Got:\n{other:?}"),
