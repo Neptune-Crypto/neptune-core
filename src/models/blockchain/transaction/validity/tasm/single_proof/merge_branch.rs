@@ -476,33 +476,32 @@ impl BasicSnippet for MergeBranch {
 
             /* 3. */
             dup 2 {&kernel_field_fee}
+            // _ *left_txk *right_txk *new_txk *left_fee *right_fee
+
             push {right_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee]
-
-            dup 3
-            dup 3
-            dup 3
-            dup 3
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] [right_fee]
-
-            {&push_max_amount}
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] [right_fee] [max_amount]
-
-            call {lt_u128}
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] (max_amount < right_fee)
-
-            push 0 eq
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] (max_amount >= right_fee)
-
-            assert error_id {Self::RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT}
-            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee]
+            //  _ *left_txk *right_txk *new_txk *left_fee *right_fee [right_txkmh]
 
             dup 5
             push {neptune_coins_size}
             call {authenticate_txk_fee_field}
             // _ *left_txk *right_txk *new_txk *left_fee *right_fee
+
+            dup 0 addi {neptune_coins_size-1}
+            read_mem {neptune_coins_size} pop 1
+            // _ *left_txk *right_txk *new_txk *left_fee *right_fee [right_fee]
+
+            {&push_max_amount}
+            // _ *left_txk *right_txk *new_txk *left_fee *right_fee [right_fee] [max_amount]
+
+            call {lt_u128}
+            // _ *left_txk *right_txk *new_txk *left_fee *right_fee (max_amount < right_fee)
+
+            push 0 eq
+            // _ *left_txk *right_txk *new_txk *left_fee *right_fee (max_amount >= right_fee)
+
+            assert error_id {Self::RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT}
 
             /* 4. */
             addi {neptune_coins_size -1}
