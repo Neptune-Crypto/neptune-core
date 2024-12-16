@@ -4,11 +4,11 @@ use std::cmp::max;
 
 use authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use itertools::Itertools;
+use num_traits::CheckedAdd;
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use strum::EnumCount;
-use tasm_lib::arithmetic::u128::safe_add::SafeAdd;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -92,6 +92,10 @@ impl MergeWitness {
         assert_eq!(
             left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
             "Attempted to merge transaction kernel with non-matching mutator set hashes"
+        );
+        assert!(
+            !right_kernel.fee.is_negative(),
+            "attempting to merge with RHS transaction whose fee is negative; negative fees only allowed on LHS"
         );
         let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
         let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
@@ -277,7 +281,12 @@ impl MergeWitness {
         // new fee is sum of operand fees
         let left_fee = mw.left_kernel.fee;
         let right_fee = mw.right_kernel.fee;
-        let new_fee = left_fee + right_fee;
+        assert!(!right_fee.is_negative());
+        let new_fee = if left_fee.is_negative() {
+            left_fee.checked_add_negative(&right_fee).unwrap()
+        } else {
+            left_fee.checked_add(&right_fee).unwrap()
+        };
 
         let assert_fee_integrity = |merkle_root, fee| {
             let leaf_index = TransactionKernelField::Fee as u32;
@@ -335,6 +344,11 @@ impl MergeWitness {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MergeBranch;
+
+impl MergeBranch {
+    const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_020;
+    const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_021;
+}
 
 impl BasicSnippet for MergeBranch {
     fn inputs(&self) -> Vec<(DataType, String)> {
@@ -426,15 +440,19 @@ impl BasicSnippet for MergeBranch {
 
         let neptune_coins_size = NeptuneCoins::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
-        let safe_add_u128 = library.import(Box::new(SafeAdd));
+        let overflowing_add_u128 = library.import(Box::new(
+            crate::tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
+        ));
         let compare_u128 = DataType::U128.compare();
+        let lt_u128 = library.import(Box::new(crate::tasm_lib::arithmetic::u128::lt::Lt));
+        let push_max_amount = NeptuneCoins::max().push_to_stack();
 
         let assert_new_fee_is_sum_of_left_and_right = triton_asm!(
             // _ *left_txk *right_txk *new_txk
 
             // 1. get left fee
             // 2. authenticate against left kernel mast hash
-            // 3. same right right
+            // 3. same right, but also check non-negativity
             // 4. add fees
             // 5. authenticate against new kernel mast hash
 
@@ -461,6 +479,26 @@ impl BasicSnippet for MergeBranch {
             push {right_txk_mast_hash_alloc.read_address()}
             read_mem {Digest::LEN}
             pop 1
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee]
+
+            dup 3
+            dup 3
+            dup 3
+            dup 3
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] [right_fee]
+
+            {&push_max_amount}
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] [right_fee] [max_amount]
+
+            call {lt_u128}
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] (max_amount < right_fee)
+
+            push 0 eq
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee] (max_amount >= right_fee)
+
+            assert error_id {Self::RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT}
+            //  _ *left_txk *right_txk *new_txk *left_fee [right_fee]
+
             dup 5
             push {neptune_coins_size}
             call {authenticate_txk_fee_field}
@@ -480,14 +518,28 @@ impl BasicSnippet for MergeBranch {
             pop 1
             // _ *left_txk *right_txk *new_txk [right_fee;4] [left_fee;4]
 
-            /*
-              The recursive verification and check for double spend suffice as
-              check for invalid u128s (with a word not being `u32`) and it
-              suffices as a check against the creation of invalid Neptune coin
-              amounts (exceeding the limit of total supply).
-            */
-            call {safe_add_u128}
+            call {overflowing_add_u128}
+            // _ *left_txk *right_txk *new_txk [calculated_new_fee;4] overflow
+
+            // The left fee can be negative, in which case there will be
+            // overflow when performing u128 addition.
+            pop 1
             // _ *left_txk *right_txk *new_txk [calculated_new_fee;4]
+
+            dup 3
+            dup 3
+            dup 3
+            dup 3
+            {&push_max_amount}
+            // _ *left_txk *right_txk *new_txk [calculated_new_fee;4] [new_fee] [max_amount]
+
+            call {lt_u128}
+            // _ *left_txk *right_txk *new_txk [calculated_new_fee;4] (max_amount < new_fee)
+
+            push 0 eq
+            // _ *left_txk *right_txk *new_txk [calculated_new_fee;4] (max_amount >= new_fee)
+
+            assert error_id {Self::NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT}
 
             /* 5. */
             dup {neptune_coins_size}

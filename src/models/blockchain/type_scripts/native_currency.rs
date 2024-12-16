@@ -354,16 +354,8 @@ impl ConsensusProgram for NativeCurrency {
             // _ coinbase_size
         );
 
-        let push_amount = |amount: NeptuneCoins| {
-            amount
-                .encode()
-                .into_iter()
-                .rev()
-                .map(|b| triton_instr!(push  b ))
-                .collect_vec()
-        };
-        let push_max_amount = push_amount(NeptuneCoins::max());
-        let push_min_amount = push_amount(NeptuneCoins::min());
+        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let push_min_amount = NeptuneCoins::min().push_to_stack();
 
         let digest_eq = DataType::Digest.compare();
 

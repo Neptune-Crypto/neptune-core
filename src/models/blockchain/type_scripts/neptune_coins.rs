@@ -5,6 +5,7 @@ use std::ops::Neg;
 use std::ops::Sub;
 use std::str::FromStr;
 
+use crate::models::blockchain::type_scripts::triton_instr;
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -23,6 +24,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
@@ -266,6 +268,15 @@ impl NeptuneCoins {
         } else {
             Some(Self(value))
         }
+    }
+
+    /// Generate tasm code for pushing this amount to the stack.
+    pub(crate) fn push_to_stack(&self) -> Vec<LabelledInstruction> {
+        self.encode()
+            .into_iter()
+            .rev()
+            .map(|b| triton_instr!(push b))
+            .collect()
     }
 }
 

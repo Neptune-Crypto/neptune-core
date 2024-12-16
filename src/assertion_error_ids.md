@@ -21,3 +21,4 @@ often.
 |    30..50 | [`NativeCurrency`](models/blockchain/type_scripts/native_currency.rs)                                                    |
 |   50..100 | [`SingleProof`](models/blockchain/transaction/validity/single_proof.rs)                                                  |
 |  100..120 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
+|  120..140 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
