@@ -1,6 +1,7 @@
 use std::ops::DerefMut;
 use std::path::PathBuf;
 
+use anyhow::bail;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
@@ -400,15 +401,24 @@ impl ArchivalState {
             .block_file_path(block_record.file_location.file_index);
 
         // Open file as read-only
-        let block_file: tokio::fs::File = tokio::fs::OpenOptions::new()
+        let block_file: tokio::fs::File = match tokio::fs::OpenOptions::new()
             .read(true)
-            .open(block_file_path)
+            .open(block_file_path.clone())
             .await
-            .unwrap();
+        {
+            Ok(file) => file,
+            Err(e) => {
+                bail!(
+                    "Could not open block file {}: {e}",
+                    block_file_path.as_path().to_string_lossy()
+                );
+            }
+        };
 
         // Read the file into memory, set the offset and length indicated in the block record
         // to avoid using more memory than needed
         // we use spawn_blocking to make the blocking mmap async-friendly.
+
         tokio::task::spawn_blocking(move || {
             let mmap = unsafe {
                 MmapOptions::new()
@@ -1895,7 +1905,7 @@ mod archival_state_tests {
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
-        assert!(block_1.is_valid(&genesis_block, in_seven_months));
+        assert!(block_1.is_valid(&genesis_block, in_seven_months).await);
 
         println!("Accumulated transaction into block_1.");
         println!(
@@ -2137,7 +2147,7 @@ mod archival_state_tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(block_2.is_valid(&block_1, in_seven_months));
+        assert!(block_2.is_valid(&block_1, in_seven_months).await);
 
         // Expect incoming UTXOs
         {
