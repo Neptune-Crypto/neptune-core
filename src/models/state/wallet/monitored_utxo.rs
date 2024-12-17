@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
-
 use twenty_first::math::tip5::Digest;
 
 use crate::models::blockchain::block::block_height::BlockHeight;

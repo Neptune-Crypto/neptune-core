@@ -12,11 +12,10 @@ use tasm_lib::hashing::eq_digest::EqDigest;
 use tasm_lib::library::Library;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
-
-use tasm_lib::prelude::Digest;
 use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::PublicInput;
 use twenty_first::math::bfield_codec::BFieldCodec;

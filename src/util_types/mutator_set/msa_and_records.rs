@@ -6,7 +6,6 @@ use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;

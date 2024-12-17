@@ -5,7 +5,6 @@ use std::ops::Neg;
 use std::ops::Sub;
 use std::str::FromStr;
 
-use crate::models::blockchain::type_scripts::triton_instr;
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
@@ -29,6 +28,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::native_currency::NativeCurrency;
 use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::type_scripts::triton_instr;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented

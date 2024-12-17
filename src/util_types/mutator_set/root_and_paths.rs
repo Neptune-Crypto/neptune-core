@@ -8,7 +8,6 @@ use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Just;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
-
 use tasm_lib::prelude::Digest;
 
 use crate::models::blockchain::shared::Hash;

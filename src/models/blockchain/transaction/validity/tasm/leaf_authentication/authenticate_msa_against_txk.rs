@@ -165,7 +165,6 @@ mod tests {
     use tasm_lib::traits::mem_preserver::MemPreserverInitialState;
     use tasm_lib::traits::mem_preserver::ShadowedMemPreserver;
     use tasm_lib::traits::rust_shadow::RustShadow;
-
     use twenty_first::prelude::MerkleTreeInclusionProof;
     use twenty_first::prelude::Mmr;
     use twenty_first::prelude::Sponge;

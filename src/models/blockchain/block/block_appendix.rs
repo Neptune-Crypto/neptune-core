@@ -5,7 +5,6 @@ use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::BFieldElement;
-
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::block_body::BlockBody;

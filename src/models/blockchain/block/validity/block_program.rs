@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
@@ -12,8 +13,6 @@ use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
-
-use tasm_lib::prelude::Digest;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::appendix_witness::AppendixWitness;

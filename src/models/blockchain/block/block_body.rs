@@ -7,7 +7,6 @@ use serde::Serialize;
 use strum::EnumCount;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-
 use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;

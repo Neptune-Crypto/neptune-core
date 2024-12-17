@@ -16,7 +16,6 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
-
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
