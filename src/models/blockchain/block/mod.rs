@@ -626,7 +626,7 @@ impl Block {
         //   c) Verify that the mutator set update induced by the block sends
         //      the old mutator set accumulator to the new one.
         //   d) transaction timestamp <= block timestamp
-        //   e) transaction coinbase <= miner reward
+        //   e) transaction coinbase <= miner reward, and not negative.
         //   f) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
@@ -811,7 +811,7 @@ impl Block {
         }
 
         // 2.e) Verify that the coinbase claimed by the transaction does not
-        //      exceed the block subsidy
+        //      exceed the block subsidy, or is negative.
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
@@ -820,6 +820,11 @@ impl Block {
                     "Coinbase exceeds block subsidy. coinbase: {coinbase}; \
                     block subsidy: {block_subsidy}."
                 );
+                return false;
+            }
+
+            if coinbase.is_negative() {
+                warn!("Coinbase may not be negative. Got coinbase: {coinbase}.");
                 return false;
             }
         }

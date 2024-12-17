@@ -438,8 +438,8 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *ncw
 
             {&field_fee}
-            // _ [txkmh] *ncw *coinbase *fee
             hint fee_ptr = stack[0]
+            // _ [txkmh] *ncw *coinbase *fee
 
             dup 7
             dup 7
