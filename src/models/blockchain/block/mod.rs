@@ -38,7 +38,6 @@ use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
-
 use validity::appendix_witness::AppendixWitness;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
@@ -383,6 +382,8 @@ impl Block {
         *self = block;
     }
 
+    /// The number of coins that can be printed into existence with the mining
+    /// a block with this height.
     pub fn block_subsidy(block_height: BlockHeight) -> NeptuneCoins {
         let mut reward: NeptuneCoins = NeptuneCoins::new(128);
         let generation = block_height.get_generation();
@@ -1188,16 +1189,20 @@ mod block_tests {
 
     #[test]
     fn test_premine_size() {
-        // 831600 = 42000000 * 0.0198
+        // 831488 = 42000000 * 0.019797333333333333
         // where 42000000 is the asymptotical limit of the token supply
-        // and 1.98% is the relative size of the premine
-        let premine_max_size = NeptuneCoins::new(831600);
+        // and 1.9797333...% is the relative size of the premine
+        let premine_max_size = NeptuneCoins::new(831488);
         let total_premine = Block::premine_distribution()
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NeptuneCoins>();
 
         assert!(total_premine <= premine_max_size);
+        assert!(
+            premine_max_size.to_nau_f64() / 42_000_000f64 < 0.0198f64,
+            "Premine must be less than or equal to promised"
+        )
     }
 
     mod block_is_valid {
