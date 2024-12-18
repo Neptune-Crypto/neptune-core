@@ -102,9 +102,10 @@ impl FromStr for BlockSelector {
 }
 
 impl BlockSelector {
-    /// returns Digest for this selector, if it exists. Returns the digest of
-    /// the block belonging to the canonical chain if multiple blocks with
-    /// same height is found.
+    /// returns canonical chain block Digest for this selector, if it exists.
+    ///
+    /// note: if multiple blocks with same height are found only the digest
+    /// of the block belonging to canonical chain is returned.
     pub async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
         match self {
             BlockSelector::Digest(d) => Some(*d),

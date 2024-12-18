@@ -821,13 +821,19 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
         let digest = block_selector.as_digest(&state).await?;
+        let tip_digest = state.chain.light_state().hash();
         let archival_state = state.chain.archival_state();
 
         let block = archival_state.get_block(digest).await.unwrap()?;
+        let is_canonical = archival_state
+            .block_belongs_to_canonical_chain(digest, tip_digest)
+            .await;
+
         Some(BlockInfo::from_block_and_digests(
             &block,
             archival_state.genesis_block().hash(),
-            state.chain.light_state().hash(),
+            tip_digest,
+            is_canonical,
         ))
     }
 
@@ -2117,12 +2123,22 @@ mod rpc_server_tests {
             global_state.chain.archival_state().genesis_block(),
             genesis_hash,
             tip_hash,
+            global_state
+                .chain
+                .archival_state()
+                .block_belongs_to_canonical_chain(genesis_hash, tip_hash)
+                .await,
         );
 
         let tip_block_info = BlockInfo::from_block_and_digests(
             global_state.chain.light_state(),
             genesis_hash,
             tip_hash,
+            global_state
+                .chain
+                .archival_state()
+                .block_belongs_to_canonical_chain(tip_hash, tip_hash)
+                .await,
         );
 
         // should find genesis block by Genesis selector

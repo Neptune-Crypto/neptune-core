@@ -28,6 +28,7 @@ pub struct BlockInfo {
     pub fee: NeptuneCoins,
     pub is_genesis: bool,
     pub is_tip: bool,
+    pub is_canonical: bool,
 }
 
 // note: this is used by neptune-cli block-info command.
@@ -48,7 +49,8 @@ impl std::fmt::Display for BlockInfo {
             + &format!("mining_reward: {}\n", self.mining_reward)
             + &format!("fee: {}\n", self.fee)
             + &format!("is_genesis: {}\n", self.is_genesis)
-            + &format!("is_tip: {}\n", self.is_tip);
+            + &format!("is_tip: {}\n", self.is_tip)
+            + &format!("is_canonical: {}\n", self.is_canonical);
 
         write!(f, "{}", buf)
     }
@@ -59,6 +61,7 @@ impl BlockInfo {
         block: &Block,
         genesis_digest: Digest,
         tip_digest: Digest,
+        is_canonical: bool,
     ) -> Self {
         let body = block.body();
         let header = block.header();
@@ -76,6 +79,7 @@ impl BlockInfo {
             mining_reward: crate::Block::block_subsidy(header.height),
             is_genesis: digest == genesis_digest,
             is_tip: digest == tip_digest,
+            is_canonical,
         }
     }
 }
