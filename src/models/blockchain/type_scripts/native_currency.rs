@@ -54,6 +54,7 @@ const FEE_EXCEEDS_MIN: i128 = 1_000_039;
 const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_040;
 const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_041;
 const COINBASE_IS_SET_AND_FEE_IS_NEGATIVE: i128 = 1_000_042;
+const INVALID_COIN_AMOUNT: i128 = 1_000_043;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -172,6 +173,9 @@ impl ConsensusProgram for NativeCurrency {
                     // decode state to get amount
                     let amount: NeptuneCoins =
                         *NeptuneCoins::decode(&utxo_i.coins()[j as usize].state).unwrap();
+
+                    // make sure amount is positive (or zero)
+                    assert!(!amount.is_negative());
 
                     // safely add to total
                     total_input = total_input.checked_add(&amount).unwrap();
@@ -999,17 +1003,36 @@ impl ConsensusProgram for NativeCurrency {
                     hint state_ptr = stack[0]
 
                     read_mem 1
-                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked state_size (*state+1)
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked state_size (*state-1)
 
                     addi {coin_size+1}
-                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked state_size *state[last]
                     hint state_last_ptr = stack[0]
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked state_size *state[last]
 
                     swap 1 push {coin_size} eq
                     assert error_id {BAD_STATE_SIZE_ERROR}
                     // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked *state[last]
 
                     read_mem {coin_size} pop 1
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount]
+
+                    /* assert 0 <= coin_amount <= max */
+                    dup 3
+                    dup 3
+                    dup 3
+                    dup 3
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount] [coin_amount]
+
+                    {&push_max_amount}
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount] [coin_amount] [max_amount]
+
+                    call {u128_lt}
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount] (max_amount < coin_amount)
+
+                    push 0 eq
+                    // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount] (max_amount >= coin_amount)
+
+                    assert error_id {INVALID_COIN_AMOUNT}
                     // _ *coins[j]_si [amount] [timelocked_amount] [utxo_amount] utxo_is_timelocked [coin_amount]
 
                     pick 8 pick 8 pick 8 pick 8
@@ -1372,7 +1395,7 @@ pub mod test {
     }
 
     #[tokio::test]
-    async fn tx_with_negative_fee_has_coinbase_deterministic() {
+    async fn tx_with_negative_fee_with_coinbase_deterministic() {
         let mut test_runner = TestRunner::deterministic();
         let mut primitive_witness = PrimitiveWitness::arbitrary_with_fee(-NeptuneCoins::new(1))
             .new_tree(&mut test_runner)
@@ -1645,9 +1668,13 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
+        // Why INVALID_COIN_AMOUNT and not FEE_EXCEEDS_MAX?
+        // It's because an invalid fee needs to come from invalid inputs; so
+        // the INVALID_COIN_AMOUNT assert is triggered when computing the sum
+        // of all inputs.
         assert_both_rust_and_tasm_fail(
             NativeCurrencyWitness::from(primitive_witness),
-            &[FEE_EXCEEDS_MAX],
+            &[INVALID_COIN_AMOUNT],
         );
     }
 
