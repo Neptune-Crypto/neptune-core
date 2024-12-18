@@ -489,7 +489,13 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant [fee >> 127]
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant signs signs signs signs
 
-            place 3 pop 3
+            /* Top bit of fee is 0 for positive fee, 1 for negative.
+               Shifting the fee right by 127 (sign-preserving shift) means
+               *all* bits are either 1 or 0. So all `signs` limbs are also the
+               same. So we only need to inspect one of them.
+            */
+
+            pop 3
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant signs
 
             push 2 place 1 div_mod
@@ -501,6 +507,9 @@ impl ConsensusProgram for NativeCurrency {
             add
             // _ [txkmh] *ncw *coinbase *fee (coinbase_discriminant + sign)
 
+            /* Possible values of top stack element: {0, 1, 2}.
+               Allowed: {0, 1} */
+
             push 2 eq
             // _ [txkmh] *ncw *coinbase *fee (coinbase_discriminant && sign)
 
@@ -508,6 +517,7 @@ impl ConsensusProgram for NativeCurrency {
             // _ [txkmh] *ncw *coinbase *fee (!coinbase_discriminant || !sign)
 
             assert error_id {COINBASE_IS_SET_AND_FEE_IS_NEGATIVE}
+            // _ [txkmh] *ncw *coinbase *fee
 
 
             /* Divine and authenticate timestamp */
