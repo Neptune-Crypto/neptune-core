@@ -7,6 +7,8 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
 pub(crate) struct CoinbaseAmount;
 
+const ILLEGAL_COINBASE_AMOUNT_ERROR: i128 = 1_000_200;
+
 impl BasicSnippet for CoinbaseAmount {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*coinbase".to_owned())]
@@ -20,13 +22,16 @@ impl BasicSnippet for CoinbaseAmount {
         "tasm_neptune_coinbase_amount".to_owned()
     }
 
-    fn code(&self, _library: &mut Library) -> Vec<LabelledInstruction> {
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let entrypoint = self.entrypoint();
 
         // `Coinbase` has type `Option<NeptuneCoin>` where the discriminant
         // from `Option` is one word, and `NeptuneCoin` is four words, as it is
         // represented by a u128.
         let size_minus_one = NeptuneCoins::static_length().unwrap();
+
+        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
 
         let has_coinbase_label = format!("{entrypoint}_has_coinbase");
         let has_coinbase = triton_asm!(
@@ -40,6 +45,19 @@ impl BasicSnippet for CoinbaseAmount {
 
                 read_mem {size_minus_one}
                 pop 1
+                // _ [coinbase_amount]
+
+                /* assert 0 <= coinbase < max_amount */
+                dup 3
+                dup 3
+                dup 3
+                dup 3
+                {&push_max_amount}
+                call {u128_lt}
+                push 0 eq
+                // _ [coinbase_amount] (coinbase_amount <= max)
+
+                assert error_id {ILLEGAL_COINBASE_AMOUNT_ERROR}
                 // _ [coinbase_amount]
 
                 push 0

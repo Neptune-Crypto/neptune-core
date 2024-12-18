@@ -130,6 +130,7 @@ impl ConsensusProgram for NativeCurrency {
             Some(coins) => coins,
             None => NeptuneCoins::new(0),
         };
+        assert!(!some_coinbase.is_negative());
 
         // authenticate fee against kernel mast hash
         let fee_leaf_index: u32 = 3;
