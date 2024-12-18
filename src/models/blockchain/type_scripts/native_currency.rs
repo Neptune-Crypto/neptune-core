@@ -55,6 +55,7 @@ const SUM_OF_OUTPUTS_EXCEEDS_MAX: i128 = 1_000_040;
 const SUM_OF_OUTPUTS_IS_NEGATIVE: i128 = 1_000_041;
 const COINBASE_IS_SET_AND_FEE_IS_NEGATIVE: i128 = 1_000_042;
 const INVALID_COIN_AMOUNT: i128 = 1_000_043;
+const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_044;
 
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
@@ -470,6 +471,15 @@ impl ConsensusProgram for NativeCurrency {
             /* Verify that fee is non-negative when coinbase is set */
             dup 1
             read_mem 1 pop 1
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant
+
+            dup 0 push 0 eq
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant (coinbase_discriminant == 0)
+
+            dup 1 push 1 eq
+            // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant (coinbase_discriminant == 0) (coinbase_discriminant == 1)
+
+            add assert error_id {INVALID_COINBASE_DISCRIMINANT}
             // _ [txkmh] *ncw *coinbase *fee coinbase_discriminant
 
             dup 1 addi {coin_size-1} read_mem {coin_size} pop 1
