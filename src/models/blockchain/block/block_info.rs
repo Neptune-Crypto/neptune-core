@@ -1,6 +1,7 @@
 //! BlockInfo is a concise summary of a block intended for human
 //! consumption/reporting in block explorers, cli, dashboard, etc.
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use twenty_first::math::digest::Digest;
@@ -29,6 +30,7 @@ pub struct BlockInfo {
     pub is_genesis: bool,
     pub is_tip: bool,
     pub is_canonical: bool,
+    pub sibling_blocks: Vec<Digest>, // blocks at same height
 }
 
 // note: this is used by neptune-cli block-info command.
@@ -50,17 +52,22 @@ impl std::fmt::Display for BlockInfo {
             + &format!("fee: {}\n", self.fee)
             + &format!("is_genesis: {}\n", self.is_genesis)
             + &format!("is_tip: {}\n", self.is_tip)
-            + &format!("is_canonical: {}\n", self.is_canonical);
+            + &format!("is_canonical: {}\n", self.is_canonical)
+            + &format!(
+                "sibling_blocks: {}\n",
+                self.sibling_blocks.iter().map(|d| d.to_hex()).join(",")
+            );
 
         write!(f, "{}", buf)
     }
 }
 
 impl BlockInfo {
-    pub fn from_block_and_digests(
+    pub fn new(
         block: &Block,
         genesis_digest: Digest,
         tip_digest: Digest,
+        sibling_blocks: Vec<Digest>, // other blocks at same height
         is_canonical: bool,
     ) -> Self {
         let body = block.body();
@@ -80,6 +87,7 @@ impl BlockInfo {
             is_genesis: digest == genesis_digest,
             is_tip: digest == tip_digest,
             is_canonical,
+            sibling_blocks,
         }
     }
 }

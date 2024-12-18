@@ -829,10 +829,19 @@ impl RPC for NeptuneRPCServer {
             .block_belongs_to_canonical_chain(digest, tip_digest)
             .await;
 
-        Some(BlockInfo::from_block_and_digests(
+        // sibling blocks are those at the same height, with different digest
+        let sibling_blocks = archival_state
+            .block_height_to_block_digests(block.header().height)
+            .await
+            .into_iter()
+            .filter(|d| *d != digest)
+            .collect();
+
+        Some(BlockInfo::new(
             &block,
             archival_state.genesis_block().hash(),
             tip_digest,
+            sibling_blocks,
             is_canonical,
         ))
     }
@@ -2119,10 +2128,11 @@ mod rpc_server_tests {
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
         let tip_hash = global_state.chain.light_state().hash();
 
-        let genesis_block_info = BlockInfo::from_block_and_digests(
+        let genesis_block_info = BlockInfo::new(
             global_state.chain.archival_state().genesis_block(),
             genesis_hash,
             tip_hash,
+            vec![],
             global_state
                 .chain
                 .archival_state()
@@ -2130,10 +2140,11 @@ mod rpc_server_tests {
                 .await,
         );
 
-        let tip_block_info = BlockInfo::from_block_and_digests(
+        let tip_block_info = BlockInfo::new(
             global_state.chain.light_state(),
             genesis_hash,
             tip_hash,
+            vec![],
             global_state
                 .chain
                 .archival_state()
