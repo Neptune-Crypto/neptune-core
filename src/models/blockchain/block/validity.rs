@@ -18,9 +18,9 @@ use super::Block;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
-pub mod appendix_witness;
 pub mod block_primitive_witness;
 pub mod block_program;
+pub mod block_proof_witness;
 pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;

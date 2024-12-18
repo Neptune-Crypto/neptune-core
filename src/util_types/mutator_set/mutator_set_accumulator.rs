@@ -7,6 +7,7 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
@@ -28,7 +29,9 @@ use super::shared::WINDOW_SIZE;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary, TasmObject,
+)]
 pub struct MutatorSetAccumulator {
     pub aocl: MmrAccumulator,
     pub swbf_inactive: MmrAccumulator,

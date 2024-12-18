@@ -38,9 +38,9 @@ use tracing::warn;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
-use validity::appendix_witness::AppendixWitness;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
+use validity::block_proof_witness::BlockProofWitness;
 
 use super::transaction::lock_script::LockScript;
 use super::transaction::transaction_kernel::TransactionKernelProxy;
@@ -237,14 +237,14 @@ impl Block {
         let header =
             primitive_witness.header(timestamp, nonce_preimage.hash(), target_block_interval);
         let (appendix, proof) = {
-            let appendix_witness =
-                AppendixWitness::produce(primitive_witness, triton_vm_job_queue).await?;
-            let appendix = appendix_witness.appendix();
+            let block_proof_witness =
+                BlockProofWitness::produce(primitive_witness, triton_vm_job_queue).await?;
+            let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
                 .prove(
                     claim,
-                    appendix_witness.nondeterminism(),
+                    block_proof_witness.nondeterminism(),
                     triton_vm_job_queue,
                     proof_job_options,
                 )
@@ -829,12 +829,11 @@ impl Block {
             }
         }
 
-        // This check *should* already follow from SingleProof.
-        // So we don't think this panic can ever be triggered.
-        assert!(
-            !self.kernel.body.transaction_kernel.fee.is_negative(),
-            "Tx fee cannot be negative"
-        );
+        let fee = self.kernel.body.transaction_kernel.fee;
+        if fee.is_negative() {
+            warn!("Fee may not be negative when transaction is included in block. Got fee: {fee}.");
+            return false;
+        }
 
         true
     }

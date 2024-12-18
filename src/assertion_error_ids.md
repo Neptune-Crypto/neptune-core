@@ -24,3 +24,4 @@ often.
 |  100..120 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
 |  120..140 | [`Update`](models/blockchain/transaction/validity/update.rs)                                                             |
 |  200..210 | [`CoinbaseAmount`](models/blockchain/transaction/validity/tasm/coinbase_amount.rs)                                       |
+|  210..250 | [`BlockProgram`](models/blockchain/block/validity/block_program.rs)                                                      |

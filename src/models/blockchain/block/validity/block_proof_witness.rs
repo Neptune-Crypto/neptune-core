@@ -4,8 +4,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -21,7 +21,9 @@ use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -32,16 +34,16 @@ use crate::models::proof_abstractions::SecretWitness;
 ///
 /// This is the witness for the [`BlockProgram`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
-pub(crate) struct AppendixWitness {
-    block_body_hash: Digest,
+pub(crate) struct BlockProofWitness {
+    pub(super) block_body: BlockBody,
     pub(crate) claims: Vec<Claim>,
     pub(crate) proofs: Vec<Proof>,
 }
 
-impl AppendixWitness {
-    fn new(block_body: &BlockBody) -> Self {
+impl BlockProofWitness {
+    fn new(block_body: BlockBody) -> Self {
         Self {
-            block_body_hash: block_body.mast_hash(),
+            block_body,
             claims: Vec::default(),
             proofs: Vec::default(),
         }
@@ -66,7 +68,7 @@ impl AppendixWitness {
     pub(crate) async fn produce(
         block_primitive_witness: BlockPrimitiveWitness,
         _triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> anyhow::Result<AppendixWitness> {
+    ) -> anyhow::Result<BlockProofWitness> {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel
@@ -84,7 +86,7 @@ impl AppendixWitness {
         };
 
         // Add more claim/proof pairs here, when softforking.
-        let ret = Self::new(block_primitive_witness.body()).with_claim(tx_claim, tx_proof);
+        let ret = Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
 
         assert_eq!(
             BlockAppendix::consensus_claims(block_primitive_witness.body()),
@@ -96,9 +98,9 @@ impl AppendixWitness {
     }
 }
 
-impl SecretWitness for AppendixWitness {
+impl SecretWitness for BlockProofWitness {
     fn standard_input(&self) -> PublicInput {
-        self.block_body_hash.reversed().values().into()
+        self.block_body.mast_hash().reversed().values().into()
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -110,16 +112,39 @@ impl SecretWitness for AppendixWitness {
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
+        // put witness into memory
         let mut nondeterminism = NonDeterminism::new([]);
         encode_to_memory(
             &mut nondeterminism.ram,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             self,
         );
+
+        // feed the txk mast hash via individual tokens
+        let txkmh = self.block_body.transaction_kernel.mast_hash();
+        nondeterminism
+            .individual_tokens
+            .extend_from_slice(&txkmh.reversed().values());
+
+        // add digests for Merkle authentication of tx fee
+        let fee_auth_path = self
+            .block_body
+            .transaction_kernel
+            .mast_path(TransactionKernelField::Fee);
+        let txk_auth_path = self.block_body.mast_path(BlockBodyField::TransactionKernel);
+        println!("fee_auth_path: {}", fee_auth_path.iter().join("\n"));
+        println!("txk_auth_path: {}", txk_auth_path.iter().join("\n"));
+        let pub_ann_digest = Tip5::hash(&self.block_body.transaction_kernel.public_announcements);
+        println!("pub_ann_digest: {pub_ann_digest}");
+        nondeterminism.digests.extend_from_slice(&fee_auth_path);
+        nondeterminism.digests.extend_from_slice(&txk_auth_path);
+
+        // modify nodeterminism in whichever way is necessary for verifying STARK proofs
         let stark_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
         for (claim, proof) in self.claims.iter().zip_eq(&self.proofs) {
             stark_snippet.update_nondeterminism(&mut nondeterminism, proof, claim);
         }
+
         nondeterminism
     }
 }

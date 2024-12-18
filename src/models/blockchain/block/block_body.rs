@@ -5,6 +5,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::prelude::MerkleTree;
@@ -60,7 +61,7 @@ impl HasDiscriminant for BlockBodyField {
 //
 // We likewise skip the field for `BFieldCodec`, and `GetSize` because there
 // exist no impls for `OnceLock<_>` so derive fails.
-#[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, BFieldCodec, GetSize, TasmObject)]
 pub struct BlockBody {
     /// Every block contains exactly one transaction, which represents the merger of all
     /// broadcasted transactions that the miner decided to confirm.
@@ -88,6 +89,7 @@ pub struct BlockBody {
     #[serde(skip)]
     #[bfield_codec(ignore)]
     #[get_size(ignore)]
+    #[tasm_object(ignore)]
     merkle_tree: OnceLock<MerkleTree>,
 }
 

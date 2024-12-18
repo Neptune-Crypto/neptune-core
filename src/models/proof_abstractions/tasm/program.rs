@@ -99,7 +99,7 @@ where
         let init_stack = vm_state.op_stack.clone();
         if let Err(err) = vm_state.run() {
             let err_str = format!("Triton VM failed.\nError: {err}\nVMState:\n{vm_state}");
-            debug!(err_str);
+            eprintln!("{err_str}");
             return Err(ConsensusError::TritonVMPanic(err_str, err));
         }
 

@@ -1,12 +1,15 @@
 use std::sync::OnceLock;
 
 use tasm_lib::field;
+use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
@@ -15,9 +18,13 @@ use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
-use super::appendix_witness::AppendixWitness;
+use super::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
@@ -25,11 +32,13 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 /// Verifies that all claims listed in the appendix are true.
 ///
-/// The witness for this program is [`AppendixWitness`].
+/// The witness for this program is [`BlockProofWitness`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BlockProgram;
 
 impl BlockProgram {
+    const ILLEGAL_FEE: i128 = 1_000_210;
+
     pub(crate) fn claim(block_body: &BlockBody, appendix: &BlockAppendix) -> Claim {
         Claim::new(Self.hash())
             .with_input(block_body.mast_hash().reversed().values().to_vec())
@@ -44,11 +53,35 @@ impl BlockProgram {
 
 impl ConsensusProgram for BlockProgram {
     fn source(&self) {
-        let _block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
+        let block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let block_witness: AppendixWitness = tasmlib::decode_from_memory(start_address);
+        let block_witness: BlockProofWitness = tasmlib::decode_from_memory(start_address);
         let claims: Vec<Claim> = block_witness.claims;
         let proofs: Vec<Proof> = block_witness.proofs;
+
+        let block_body = &block_witness.block_body;
+
+        let txk_mast_hash: Digest = tasmlib::tasmlib_io_read_secin___digest();
+
+        let fee = &block_body.transaction_kernel.fee;
+        let fee_hash = Tip5::hash(fee);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            txk_mast_hash,
+            TransactionKernelField::Fee as u32,
+            fee_hash,
+            TransactionKernel::MAST_HEIGHT as u32,
+        );
+
+        let txk_mast_hash_as_leaf = Tip5::hash(&txk_mast_hash);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            block_body_digest,
+            BlockBodyField::TransactionKernel as u32,
+            txk_mast_hash_as_leaf,
+            BlockBody::MAST_HEIGHT as u32,
+        );
+
+        assert!(!fee.is_negative());
+        assert!(*fee <= NeptuneCoins::max());
 
         let mut i = 0;
         while i < claims.len() {
@@ -66,8 +99,11 @@ impl ConsensusProgram for BlockProgram {
             Stark::default(),
         )));
 
-        let block_witness_field_claims = field!(AppendixWitness::claims);
-        let block_witness_field_proofs = field!(AppendixWitness::proofs);
+        let block_body_field = field!(BlockProofWitness::block_body);
+        let body_field_kernel = field!(BlockBody::transaction_kernel);
+        let kernel_field_fee = field!(TransactionKernel::fee);
+        let block_witness_field_claims = field!(BlockProofWitness::claims);
+        let block_witness_field_proofs = field!(BlockProofWitness::proofs);
 
         let hash_varlen = library.import(Box::new(HashVarlen));
         let print_claim_hash = triton_asm!(
@@ -124,6 +160,11 @@ impl ConsensusProgram for BlockProgram {
                 recurse
         };
 
+        let coin_size = NeptuneCoins::static_length().unwrap();
+        let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let code = triton_asm! {
             // _
 
@@ -134,6 +175,80 @@ impl ConsensusProgram for BlockProgram {
             hint block_witness_ptr = stack[0]
             // _ [bbd] *w
 
+            divine {Digest::LEN}
+            // _ [bbd] *w [txkmh]
+
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            push {TransactionKernel::MAST_HEIGHT}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height
+
+            push {TransactionKernelField::Fee as u32}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index
+
+            dup 12 {&block_body_field} {&body_field_kernel} {&kernel_field_fee}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+
+            dup 0 addi {coin_size - 1} read_mem {coin_size} pop 1
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
+
+            {&push_max_amount}
+            call {u128_lt}
+            push 0 eq
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
+
+            assert error_id {Self::ILLEGAL_FEE}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+
+            call {hash_fee} pop 1
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
+
+            call {merkle_verify}
+            // _ [bbd] *w [txkmh]
+
+            push 0 place 5
+            push 0 place 5
+            push 0 place 5
+            push 0 place 5
+            push 1 place 5
+
+            sponge_init
+            sponge_absorb
+            sponge_squeeze
+
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            // _ [bbd] *w [txkmh_hash]
+
+            dup 10
+            dup 10
+            dup 10
+            dup 10
+            dup 10
+            // _ [bbd] *w [txkmh_hash] [bbd]
+
+            push {BlockBody::MAST_HEIGHT}
+            push {BlockBodyField::TransactionKernel as u32}
+            // _ [bbd] *w [txkmh_hash] [bbd] block_body_mast_height txk_leaf_index
+
+            pick 11
+            pick 11
+            pick 11
+            pick 11
+            pick 11
+            // _ [bbd] *w [bbd] block_body_mast_height txk_leaf_index [txkmh_hash]
+
+            call {merkle_verify}
+            // _ [bbd] *w
+
+
+            /* verify appendix claims */
             dup 0 {&block_witness_field_claims}
             hint claims = stack[0]
             swap 1 {&block_witness_field_proofs}
@@ -208,27 +323,30 @@ pub(crate) mod test {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let _guard = rt.enter();
 
-        let appendix_witness = rt
-            .block_on(AppendixWitness::produce(
+        let block_proof_witness = rt
+            .block_on(BlockProofWitness::produce(
                 block_primitive_witness,
                 &TritonVmJobQueue::dummy(),
             ))
             .unwrap();
 
-        let block_program_nondeterminism = appendix_witness.nondeterminism();
+        let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
             .run_rust(
                 &block_body_mast_hash_as_input,
                 block_program_nondeterminism.clone(),
             )
             .unwrap();
-        let tasm_output = BlockProgram
+        let tasm_output = match BlockProgram
             .run_tasm(&block_body_mast_hash_as_input, block_program_nondeterminism)
-            .unwrap();
+        {
+            Ok(std_out) => std_out,
+            Err(err) => panic!("{err:?}"),
+        };
 
         assert_eq!(rust_output, tasm_output);
 
-        let expected_output = appendix_witness
+        let expected_output = block_proof_witness
             .claims()
             .iter()
             .flat_map(|appendix_claim| Tip5::hash(appendix_claim).values().to_vec())

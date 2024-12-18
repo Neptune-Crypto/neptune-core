@@ -30,7 +30,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 ///         |  | prove                                                                |
 ///         |  |  |                                                                   |-> Block
 ///         v  v  v                                                                   |
-/// AppendixWitness ---------------  produce  ----------------------> BlockProof ---}-|
+/// BlockProofWitness -------------  produce  ----------------------> BlockProof ---}-|
 ///                                                                               |   |
 ///                                                                   mining -----'   |
 ///                                                                      |            |
