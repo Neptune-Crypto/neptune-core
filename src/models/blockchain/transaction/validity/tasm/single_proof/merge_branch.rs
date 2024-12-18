@@ -346,8 +346,8 @@ impl MergeWitness {
 pub(crate) struct MergeBranch;
 
 impl MergeBranch {
-    const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_020;
-    const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_021;
+    const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_070;
+    const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_071;
 }
 
 impl BasicSnippet for MergeBranch {

@@ -85,7 +85,7 @@ impl TasmObject for NeptuneCoins {
 }
 
 impl NeptuneCoins {
-    pub(crate) const MAX_NAU: i128 = 42000000 * Self::conversion_factor();
+    pub(crate) const MAX_NAU: i128 = 42_000_000 * Self::conversion_factor();
 
     /// The maximum amount that is still valid.
     pub(crate) fn max() -> Self {
