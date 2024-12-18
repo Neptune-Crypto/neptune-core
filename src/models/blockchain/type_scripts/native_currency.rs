@@ -1414,13 +1414,34 @@ pub mod test {
         )?;
     }
 
-    #[tokio::test]
-    async fn tx_with_negative_fee_with_coinbase_deterministic() {
+    #[test]
+    fn tx_with_negative_fee_with_coinbase_deterministic() {
         let mut test_runner = TestRunner::deterministic();
         let mut primitive_witness = PrimitiveWitness::arbitrary_with_fee(-NeptuneCoins::new(1))
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
+        let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
+
+        let kernel_modifier =
+            TransactionKernelModifier::default().coinbase(Some(NeptuneCoins::new(1)));
+        primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
+        let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
+        NativeCurrency
+            .test_assertion_failure(
+                bad_native_currency_witness.standard_input(),
+                bad_native_currency_witness.nondeterminism(),
+                &[COINBASE_IS_SET_AND_FEE_IS_NEGATIVE],
+            )
+            .unwrap();
+    }
+
+    #[proptest]
+    fn tx_with_negative_fee_with_coinbase(
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(-NeptuneCoins::new(1)))]
+        mut primitive_witness: PrimitiveWitness,
+    ) {
         let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
         assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
 
