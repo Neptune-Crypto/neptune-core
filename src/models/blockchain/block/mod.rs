@@ -1196,6 +1196,7 @@ mod block_tests {
         // 831488 = 42000000 * 0.019797333333333333
         // where 42000000 is the asymptotical limit of the token supply
         // and 1.9797333...% is the relative size of the premine
+        let asymptotic_total_cap = NeptuneCoins::new(42_000_000);
         let premine_max_size = NeptuneCoins::new(831488);
         let total_premine = Block::premine_distribution()
             .iter()
@@ -1204,7 +1205,7 @@ mod block_tests {
 
         assert!(total_premine <= premine_max_size);
         assert!(
-            premine_max_size.to_nau_f64() / 42_000_000f64 < 0.0198f64,
+            premine_max_size.to_nau_f64() / asymptotic_total_cap.to_nau_f64() < 0.0198f64,
             "Premine must be less than or equal to promised"
         )
     }
