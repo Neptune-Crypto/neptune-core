@@ -979,7 +979,10 @@ impl MainLoopHandler {
             .get_candidate(&connected_peers, global_state.net.instance_id)
         {
             Some(candidate) => candidate,
-            None => return Ok(()),
+            None => {
+                debug!("Found no peer candidate to connect to. Not making new connection.");
+                return Ok(());
+            }
         };
 
         // 2)
