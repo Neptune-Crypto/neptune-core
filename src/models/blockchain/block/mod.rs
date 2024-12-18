@@ -399,6 +399,19 @@ impl Block {
         reward
     }
 
+    /// returns coinbase reward amount for this block.
+    ///
+    /// note that this amount may differ from self::block_subsidy(self.height)
+    /// because a miner can choose to accept less than the calculated reward amount.
+    pub fn coinbase_amount(&self) -> NeptuneCoins {
+        // A block must always have a Coinbase.
+        // we impl this method in part to cement that guarantee.
+        self.body()
+            .transaction_kernel
+            .coinbase
+            .unwrap_or_else(NeptuneCoins::zero)
+    }
+
     pub fn genesis_block(network: Network) -> Self {
         let premine_distribution = Self::premine_distribution();
         let total_premine_amount = premine_distribution

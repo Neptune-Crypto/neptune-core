@@ -25,7 +25,7 @@ pub struct BlockInfo {
     pub difficulty: Difficulty,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub mining_reward: NeptuneCoins,
+    pub coinbase_amount: NeptuneCoins,
     pub fee: NeptuneCoins,
     pub is_genesis: bool,
     pub is_tip: bool,
@@ -48,7 +48,7 @@ impl std::fmt::Display for BlockInfo {
             + &format!("difficulty: {}\n", self.difficulty)
             + &format!("num_inputs: {}\n", self.num_inputs)
             + &format!("num_outputs: {}\n", self.num_outputs)
-            + &format!("mining_reward: {}\n", self.mining_reward)
+            + &format!("coinbase_amount: {}\n", self.coinbase_amount)
             + &format!("fee: {}\n", self.fee)
             + &format!("is_genesis: {}\n", self.is_genesis)
             + &format!("is_tip: {}\n", self.is_tip)
@@ -83,11 +83,20 @@ impl BlockInfo {
             num_inputs: body.transaction_kernel.inputs.len(),
             num_outputs: body.transaction_kernel.outputs.len(),
             fee: body.transaction_kernel.fee,
-            mining_reward: crate::Block::block_subsidy(header.height),
+            coinbase_amount: block.coinbase_amount(),
             is_genesis: digest == genesis_digest,
             is_tip: digest == tip_digest,
             is_canonical,
             sibling_blocks,
         }
+    }
+
+    /// Returns expected (calculated) coinbase amount for this block's height.
+    ///
+    /// note that this calculated value may be more than the coinbase_amount
+    /// field because a miner may choose to reward themself less than the
+    /// calculated reward amount.
+    pub fn expected_coinbase_amount(&self) -> NeptuneCoins {
+        Block::block_subsidy(self.height)
     }
 }
