@@ -18,6 +18,7 @@ use super::removal_records_integrity::RemovalRecordsIntegrity;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
 use crate::models::blockchain::transaction::validity::collect_type_scripts::CollectTypeScripts;
@@ -43,6 +44,7 @@ pub struct ProofCollection {
     pub kernel_mast_hash: Digest,
     pub salted_inputs_hash: Digest,
     pub salted_outputs_hash: Digest,
+    pub merge_bit_mast_path: Vec<Digest>,
 }
 
 impl ProofCollection {
@@ -226,7 +228,10 @@ impl ProofCollection {
             .map(|tsaw| tsaw.program.hash())
             .collect_vec();
 
-        // assemble data into struct and return
+        let merge_bit_mast_path = primitive_witness
+            .kernel
+            .mast_path(TransactionKernelField::MergeBit);
+
         Ok(ProofCollection {
             removal_records_integrity,
             collect_lock_scripts,
@@ -239,6 +244,7 @@ impl ProofCollection {
             kernel_mast_hash: txk_mast_hash,
             salted_inputs_hash,
             salted_outputs_hash,
+            merge_bit_mast_path,
         })
     }
 

@@ -514,6 +514,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
             timestamp,
             coinbase: None,
             mutator_set_hash,
+            merge_bit: false,
         }
         .into_kernel(),
         proof: TransactionProof::invalid(),
@@ -560,6 +561,7 @@ pub fn make_mock_transaction_with_wallet(
         timestamp,
         coinbase: None,
         mutator_set_hash: random(),
+        merge_bit: false,
     }
     .into_kernel();
 
@@ -680,6 +682,7 @@ pub(crate) fn make_mock_block(
         timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_block.mutator_set_accumulator_after().hash(),
+        merge_bit: false,
     }
     .into_kernel();
     let tx = Transaction {
