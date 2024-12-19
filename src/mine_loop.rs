@@ -844,7 +844,7 @@ pub(crate) mod mine_loop_tests {
             )
         };
         let start_time = Timestamp::now();
-        let mut block = Block::block_template_invalid_proof(
+        let block = Block::block_template_invalid_proof(
             &previous_block,
             transaction,
             start_time,
@@ -855,24 +855,31 @@ pub(crate) mod mine_loop_tests {
 
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let num_iterations = 10000;
+        let num_iterations_launched = 10000;
         let tick = std::time::SystemTime::now();
-        for _ in 0..num_iterations {
-            guess_nonce_iteration(
-                &mut block,
-                &previous_block,
-                &worker_task_tx,
-                DifficultyInfo {
-                    target_block_interval,
-                    threshold,
-                },
-                sleepy_guessing,
-                &mut rng,
-            );
-        }
+        let num_iterations_run =
+            rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
+                .map_init(
+                    || (&previous_block, block.clone(), rand::thread_rng()),
+                    |(prev, bloc, prng), _| {
+                        guess_nonce_iteration(
+                            bloc,
+                            prev,
+                            &worker_task_tx,
+                            DifficultyInfo {
+                                target_block_interval,
+                                threshold,
+                            },
+                            sleepy_guessing,
+                            prng,
+                        );
+                    },
+                )
+                .count();
+
         let time_spent_mining = tick.elapsed().unwrap();
 
-        (num_iterations as f64) / (time_spent_mining.as_millis() as f64)
+        (num_iterations_run as f64) / (time_spent_mining.as_millis() as f64)
     }
 
     /// Estimate the time it takes to prepare a block so we can start guessing
