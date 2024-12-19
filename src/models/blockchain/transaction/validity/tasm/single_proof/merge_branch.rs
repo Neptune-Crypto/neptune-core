@@ -119,6 +119,7 @@ impl MergeWitness {
             coinbase: old_coinbase,
             timestamp: max(left_kernel.timestamp, right_kernel.timestamp),
             mutator_set_hash: left_kernel.mutator_set_hash,
+            merge_bit: true,
         }
         .into_kernel()
     }

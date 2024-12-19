@@ -483,6 +483,7 @@ mod tests {
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: Digest::default(),
+            merge_bit: false,
         }
         .into_kernel();
         let primitive_witness = PrimitiveWitness {

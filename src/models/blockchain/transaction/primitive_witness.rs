@@ -276,6 +276,7 @@ impl PrimitiveWitness {
             timestamp,
             coinbase,
             mutator_set_hash: mutator_set_accumulator.hash(),
+            merge_bit: false,
         }
         .into_kernel();
 
@@ -840,6 +841,7 @@ impl PrimitiveWitness {
             coinbase,
             timestamp,
             mutator_set_hash: mutator_set_accumulator.hash(),
+            merge_bit: false,
         }
         .into_kernel();
 
@@ -1325,6 +1327,7 @@ mod test {
                             coinbase,
                             timestamp,
                             mutator_set_hash: mutator_set_accumulator.hash(),
+                            merge_bit: false,
                         }
                         .into_kernel();
 

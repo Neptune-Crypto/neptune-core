@@ -319,6 +319,7 @@ mod tests {
             coinbase: cb,
             timestamp: Timestamp::now(),
             mutator_set_hash: Digest::default(),
+            merge_bit: false,
         }
         .into_kernel()
     }

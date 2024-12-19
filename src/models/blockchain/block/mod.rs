@@ -437,6 +437,7 @@ impl Block {
             public_announcements: vec![],
             coinbase: Some(total_premine_amount),
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
+            merge_bit: false,
         }
         .into_kernel();
 
