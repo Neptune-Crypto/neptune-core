@@ -3,13 +3,19 @@ use std::time::Duration;
 
 use anyhow::bail;
 use anyhow::Result;
+use block_header::BlockHeader;
 use block_header::MINIMUM_BLOCK_TIME;
+use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::twenty_first::prelude::CpuParallel;
+use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -22,6 +28,7 @@ use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -115,8 +122,20 @@ async fn guess_nonce(
     .unwrap()
 }
 
+/// Return MAST leafs from which the block hash is calculated. Returns those
+/// MAST leaves that can be precalculated prior to PoW-guessing.
+///
+/// Returns (block body MAST hash digest, appendix digest)
+fn precalculate_mast_leafs(block_template: &Block) -> (Digest, Digest) {
+    let block_body_mast_hash_digest =
+        Tip5::hash_varlen(&block_template.body().mast_hash().encode());
+    let appendix_digest = Tip5::hash_varlen(&block_template.appendix().encode());
+
+    (block_body_mast_hash_digest, appendix_digest)
+}
+
 fn guess_worker(
-    input_block: Block,
+    mut block: Block,
     previous_block: Block,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
@@ -126,12 +145,12 @@ fn guess_worker(
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block.header().difficulty;
     let threshold = prev_difficulty.target();
-    let input_block_height = input_block.kernel.header.height;
+    let input_block_height = block.kernel.header.height;
     info!(
         "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
-        input_block.body().transaction_kernel.outputs.len(),
+        block.body().transaction_kernel.outputs.len(),
         previous_block.header().difficulty,
-        input_block.header().height,
+        block.header().height,
         threshold
     );
 
@@ -140,13 +159,24 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
+    let previous_block_header = previous_block.header();
+    let block_header_template = block.header().to_owned();
+    let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
     let guess_result = rayon::iter::repeat(0)
         .map_init(
-            || (&previous_block, input_block.clone(), rand::thread_rng()), // get the thread-local RNG
-            |(prev, block, rng), _x| {
+            || {
+                (
+                    previous_block_header,
+                    block_header_template.clone(),
+                    rand::thread_rng(),
+                )
+            },
+            |(prev_header, block_header_templ, rng), _x| {
                 guess_nonce_iteration(
-                    block,
-                    prev,
+                    block_body_mast_hash_digest,
+                    appendix_digest,
+                    block_header_templ.to_owned(),
+                    prev_header,
                     &sender,
                     DifficultyInfo {
                         target_block_interval,
@@ -160,7 +190,7 @@ fn guess_worker(
         .find_any(|r| !r.block_not_found())
         .unwrap();
 
-    let (block, nonce_preimage) = match guess_result {
+    let (nonce_preimage, timestamp, difficulty) = match guess_result {
         GuessNonceResult::Cancelled => {
             info!(
                 "Abandoning mining of current block with height {}",
@@ -169,16 +199,19 @@ fn guess_worker(
             return;
         }
         GuessNonceResult::BlockFound {
-            block,
             nonce_preimage,
-        } => (block, nonce_preimage),
+            timestamp,
+            difficulty,
+        } => (nonce_preimage, timestamp, difficulty),
         _ => unreachable!(),
     };
 
-    let nonce = block.kernel.header.nonce;
+    let nonce = nonce_preimage.hash();
     info!("Found valid block with nonce: ({nonce}).");
 
-    let timestamp = block.kernel.header.timestamp;
+    block.set_header_nonce(nonce);
+    block.set_header_timestamp_and_difficulty(timestamp, difficulty);
+
     let timestamp_standard = timestamp.standard_format();
     let hash = block.hash();
     let hex = hash.to_hex();
@@ -206,7 +239,7 @@ Difficulty threshold: {threshold}
     );
 
     let new_block_found = NewBlockFound {
-        block,
+        block: Box::new(block),
         composer_utxos,
         guesser_fee_utxo_infos,
     };
@@ -225,7 +258,8 @@ enum GuessNonceResult {
     Cancelled,
     BlockFound {
         nonce_preimage: Digest,
-        block: Box<Block>,
+        timestamp: Timestamp,
+        difficulty: Difficulty,
     },
     BlockNotFound,
 }
@@ -242,8 +276,10 @@ impl GuessNonceResult {
 ///   cancelled is true if the task is terminated.
 #[inline]
 fn guess_nonce_iteration(
-    block: &mut Block,
-    previous_block: &Block,
+    block_body_mast_hash_digest: Digest,
+    appendix_digest: Digest,
+    mut block_header_template: BlockHeader,
+    previous_block_header: &BlockHeader,
     sender: &oneshot::Sender<NewBlockFound>,
     difficulty_info: DifficultyInfo,
     sleepy_guessing: bool,
@@ -252,7 +288,7 @@ fn guess_nonce_iteration(
     if sender.is_canceled() {
         info!(
             "Abandoning mining of current block with height {}",
-            block.kernel.header.height
+            block_header_template.height
         );
         return GuessNonceResult::Cancelled;
     }
@@ -260,7 +296,7 @@ fn guess_nonce_iteration(
     // Modify the nonce in the block header. In order to collect the guesser
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
     let nonce_preimage: Digest = rng.gen();
-    block.set_header_nonce(nonce_preimage.hash());
+    block_header_template.nonce = nonce_preimage.hash();
 
     // See issue #149 and test block_timestamp_represents_time_block_found()
     // this ensures header timestamp represents the moment block is found.
@@ -269,14 +305,22 @@ fn guess_nonce_iteration(
     let now = Timestamp::now();
     let new_difficulty = difficulty_control(
         now,
-        previous_block.header().timestamp,
-        previous_block.header().difficulty,
+        previous_block_header.timestamp,
+        previous_block_header.difficulty,
         difficulty_info.target_block_interval,
-        previous_block.header().height,
+        previous_block_header.height,
     );
-    block.set_header_timestamp_and_difficulty(now, new_difficulty);
+    block_header_template.timestamp = now;
+    block_header_template.difficulty = new_difficulty;
 
-    let success = block.hash() <= difficulty_info.threshold;
+    let digests = [
+        Tip5::hash_varlen(&block_header_template.mast_hash().encode()),
+        block_body_mast_hash_digest,
+        appendix_digest,
+        Digest::default(),
+    ];
+    let block_hash = CpuParallel::from_digests(&digests).unwrap().root();
+    let success = block_hash <= difficulty_info.threshold;
 
     if sleepy_guessing {
         std::thread::sleep(Duration::from_millis(100));
@@ -285,8 +329,9 @@ fn guess_nonce_iteration(
     match success {
         false => GuessNonceResult::BlockNotFound,
         true => GuessNonceResult::BlockFound {
-            block: Box::new(block.to_owned()),
             nonce_preimage,
+            timestamp: block_header_template.timestamp,
+            difficulty: block_header_template.difficulty,
         },
     }
 }
@@ -855,16 +900,27 @@ pub(crate) mod mine_loop_tests {
 
         let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let num_iterations_launched = 10000;
+        let num_iterations_launched = 100_000;
         let tick = std::time::SystemTime::now();
+        let previous_block_header = previous_block.header();
+        let block_header_template = block.header().to_owned();
+        let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(
-                    || (&previous_block, block.clone(), rand::thread_rng()),
-                    |(prev, bloc, prng), _| {
+                    || {
+                        (
+                            previous_block_header,
+                            block_header_template.clone(),
+                            rand::thread_rng(),
+                        )
+                    },
+                    |(prev_header, block_header_templ, prng), _| {
                         guess_nonce_iteration(
-                            bloc,
-                            prev,
+                            block_body_mast_hash_digest,
+                            appendix_digest,
+                            block_header_templ.to_owned(),
+                            prev_header,
                             &worker_task_tx,
                             DifficultyInfo {
                                 target_block_interval,
@@ -1459,7 +1515,7 @@ pub(crate) mod mine_loop_tests {
         let hash_rate_empty_tx = estimate_own_hash_rate(None, sleepy_guessing, 0).await;
         println!("hash_rate_empty_tx: {hash_rate_empty_tx}");
 
-        let hash_rate_big_tx = estimate_own_hash_rate(None, sleepy_guessing, 1000).await;
+        let hash_rate_big_tx = estimate_own_hash_rate(None, sleepy_guessing, 10000).await;
         println!("hash_rate_big_tx: {hash_rate_big_tx}");
 
         assert!(
