@@ -779,7 +779,7 @@ impl Arbitrary for TimeLockWitness {
             vec(arb::<Digest>(), num_outputs),
             vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
             vec(arb::<PublicAnnouncement>(), num_public_announcements),
-            arb::<Option<NeptuneCoins>>(),
+            NeptuneCoins::arbitrary_coinbase(),
             NeptuneCoins::arbitrary_non_negative(),
         )
             .prop_flat_map(

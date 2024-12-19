@@ -9,6 +9,8 @@ pub(crate) struct CoinbaseAmount;
 
 const ILLEGAL_COINBASE_AMOUNT_ERROR: i128 = 1_000_200;
 
+/// Map a pointer to a coinbase object to its amount (if some) or (if none)
+/// zero.
 impl BasicSnippet for CoinbaseAmount {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(DataType::VoidPointer, "*coinbase".to_owned())]
@@ -197,7 +199,10 @@ mod test {
             let new_seed: [u8; 32] = rng.gen();
 
             let mut u = Unstructured::new(&new_seed);
-            let coinbase: Option<NeptuneCoins> = u.arbitrary().unwrap();
+            let coinbase: Option<NeptuneCoins> = u
+                .arbitrary::<Option<NeptuneCoins>>()
+                .unwrap()
+                .map(|c| c.abs());
             let coinbase_ptr: BFieldElement = rng.gen();
 
             let mut memory = HashMap::default();

@@ -499,6 +499,8 @@ impl Display for NeptuneCoins {
 }
 
 impl<'a> Arbitrary<'a> for NeptuneCoins {
+    /// Generate an arbitrary amount of NeptuneCoins that is small in absolute
+    /// value but can be negative.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let nau: u128 = u.arbitrary()?;
         Ok(NeptuneCoins((nau as i128) >> 10))
@@ -509,6 +511,14 @@ impl NeptuneCoins {
     pub(crate) fn arbitrary_non_negative() -> BoxedStrategy<Self> {
         arb::<u128>()
             .prop_map(|uint| NeptuneCoins((uint >> 10) as i128))
+            .boxed()
+    }
+
+    /// Generate a strategy for an Option of NeptuneCoins, which if set will be
+    /// a small non-negative amount.
+    pub(crate) fn arbitrary_coinbase() -> BoxedStrategy<Option<Self>> {
+        arb::<Option<NeptuneCoins>>()
+            .prop_map(|coinbase| coinbase.map(|c| c.abs()))
             .boxed()
     }
 }
