@@ -80,6 +80,7 @@ impl ProofCollection {
             collect_type_scripts_witness,
         )
     }
+
     pub fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
         fn witness_halts_gracefully(
             program: impl ConsensusProgram,
@@ -454,7 +455,7 @@ pub mod test {
 
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false))]
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));

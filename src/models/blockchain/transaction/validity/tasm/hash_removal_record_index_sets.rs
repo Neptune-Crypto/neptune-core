@@ -166,6 +166,7 @@ mod tests {
                     Some(num_inputs),
                     num_outputs,
                     num_public_announcements,
+                    false,
                 )
                 .new_tree(&mut test_runner)
                 .unwrap()

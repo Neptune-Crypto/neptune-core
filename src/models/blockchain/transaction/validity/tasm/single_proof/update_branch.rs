@@ -801,6 +801,7 @@ pub(crate) mod test {
             Some(num_inputs),
             num_outputs,
             num_pub_announcements,
+            false,
         )
         .new_tree(&mut test_runner)
         .unwrap()

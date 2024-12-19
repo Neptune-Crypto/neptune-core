@@ -1272,7 +1272,7 @@ pub mod test {
         // Generate a tx with coinbase input, no outputs, fee-size is the same
         // as the coinbase, so tx is valid.
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 0)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 0, false)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1283,7 +1283,7 @@ pub mod test {
     #[test]
     fn native_currency_derived_witness_generates_accepting_tasm_program_unittest() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1296,7 +1296,7 @@ pub mod test {
         #[strategy(0usize..=3)] _num_inputs: usize,
         #[strategy(0usize..=3)] _num_outputs: usize,
         #[strategy(0usize..=1)] _num_public_announcements: usize,
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(#_num_inputs), #_num_outputs, #_num_public_announcements, false))]
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
@@ -1461,7 +1461,7 @@ pub mod test {
     #[tokio::test]
     async fn native_currency_failing_proof() {
         let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
@@ -1502,7 +1502,7 @@ pub mod test {
 
     #[proptest]
     fn transaction_with_timelocked_coinbase_is_valid(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2, false))]
         #[filter(!#primitive_witness.kernel.fee.is_negative())]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1513,12 +1513,13 @@ pub mod test {
     #[test]
     fn transaction_with_timelocked_coinbase_is_valid_deterministic() {
         let mut test_runner = TestRunner::deterministic();
-        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let mut primitive_witness =
+            PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2, false)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         while primitive_witness.kernel.fee.is_negative() {
-            primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2)
+            primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(None, 2, 2, false)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
@@ -1578,7 +1579,8 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
+            false
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]
@@ -1603,7 +1605,8 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
+            false
         ))]
         mut primitive_witness: PrimitiveWitness,
     ) {
@@ -1625,7 +1628,8 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
+            false
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]

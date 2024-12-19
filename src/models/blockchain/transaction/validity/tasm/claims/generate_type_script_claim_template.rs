@@ -157,10 +157,11 @@ mod test {
             _bench_case: Option<BenchmarkCase>,
         ) -> FunctionInitialState {
             let mut test_runner = TestRunner::deterministic();
-            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+            let primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
             let proof_collection = rt
