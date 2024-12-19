@@ -105,6 +105,91 @@ impl ConsensusProgram for BlockProgram {
         let block_witness_field_claims = field!(BlockProofWitness::claims);
         let block_witness_field_proofs = field!(BlockProofWitness::proofs);
 
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let coin_size = NeptuneCoins::static_length().unwrap();
+        let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
+        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let verify_fee_legality = triton_asm!(
+            // _ [bbd] *w [txkmh]
+
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            push {TransactionKernel::MAST_HEIGHT}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height
+
+            push {TransactionKernelField::Fee as u32}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index
+
+            dup 12 {&block_body_field} {&body_field_kernel} {&kernel_field_fee}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+
+            dup 0 addi {coin_size - 1} read_mem {coin_size} pop 1
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
+
+            {&push_max_amount}
+            call {u128_lt}
+            push 0 eq
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
+
+            assert error_id {Self::ILLEGAL_FEE}
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+
+            call {hash_fee} pop 1
+            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
+
+            call {merkle_verify}
+            // _ [bbd] *w [txkmh]
+
+            push 0
+            push 0
+            push 0
+            push 0
+            push 1
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            dup 9
+            // _ [bbd] *w [txkmh] 0 0 0 0 1 [txkmh]
+            // _ [bbd] *w [txkmh] [padded-txkmh] <-- rename
+
+            sponge_init
+            sponge_absorb
+            sponge_squeeze
+
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            pick 5 pop 1
+            // _ [bbd] *w [txkmh] [txkmh_hash]
+
+            dup 15
+            dup 15
+            dup 15
+            dup 15
+            dup 15
+            // _ [bbd] *w [txkmh] [txkmh_hash] [bbd]
+
+            push {BlockBody::MAST_HEIGHT}
+            push {BlockBodyField::TransactionKernel as u32}
+            // _ [bbd] *w [txkmh] [txkmh_hash] [bbd] block_body_mast_height txk_leaf_index
+
+            pick 11
+            pick 11
+            pick 11
+            pick 11
+            pick 11
+            // _ [bbd] *w [txkmh] [bbd] block_body_mast_height txk_leaf_index [txkmh_hash]
+
+            call {merkle_verify}
+            // _ [bbd] *w [txkmh]
+        );
+
         let hash_varlen = library.import(Box::new(HashVarlen));
         let print_claim_hash = triton_asm!(
             // _ *claim[i]_si
@@ -160,11 +245,6 @@ impl ConsensusProgram for BlockProgram {
                 recurse
         };
 
-        let coin_size = NeptuneCoins::static_length().unwrap();
-        let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
-        let merkle_verify = library.import(Box::new(MerkleVerify));
-        let push_max_amount = NeptuneCoins::max().push_to_stack();
-        let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let code = triton_asm! {
             // _
 
@@ -178,75 +258,11 @@ impl ConsensusProgram for BlockProgram {
             divine {Digest::LEN}
             // _ [bbd] *w [txkmh]
 
-            dup 4
-            dup 4
-            dup 4
-            dup 4
-            dup 4
-            push {TransactionKernel::MAST_HEIGHT}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height
-
-            push {TransactionKernelField::Fee as u32}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index
-
-            dup 12 {&block_body_field} {&body_field_kernel} {&kernel_field_fee}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
-
-            dup 0 addi {coin_size - 1} read_mem {coin_size} pop 1
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
-
-            {&push_max_amount}
-            call {u128_lt}
-            push 0 eq
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
-
-            assert error_id {Self::ILLEGAL_FEE}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
-
-            call {hash_fee} pop 1
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
-
-            call {merkle_verify}
+            {&verify_fee_legality}
             // _ [bbd] *w [txkmh]
 
-            push 0 place 5
-            push 0 place 5
-            push 0 place 5
-            push 0 place 5
-            push 1 place 5
-
-            sponge_init
-            sponge_absorb
-            sponge_squeeze
-
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
-            // _ [bbd] *w [txkmh_hash]
-
-            dup 10
-            dup 10
-            dup 10
-            dup 10
-            dup 10
-            // _ [bbd] *w [txkmh_hash] [bbd]
-
-            push {BlockBody::MAST_HEIGHT}
-            push {BlockBodyField::TransactionKernel as u32}
-            // _ [bbd] *w [txkmh_hash] [bbd] block_body_mast_height txk_leaf_index
-
-            pick 11
-            pick 11
-            pick 11
-            pick 11
-            pick 11
-            // _ [bbd] *w [bbd] block_body_mast_height txk_leaf_index [txkmh_hash]
-
-            call {merkle_verify}
+            pop {Digest::LEN}
             // _ [bbd] *w
-
 
             /* verify appendix claims */
             dup 0 {&block_witness_field_claims}
