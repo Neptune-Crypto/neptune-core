@@ -164,7 +164,7 @@ mod tests {
 
             let primitive_witness: PrimitiveWitness = {
                 let mut test_runner = TestRunner::new_with_rng(Default::default(), rng);
-                PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current()
@@ -184,7 +184,7 @@ mod tests {
         let inputs_ptr: BFieldElement = random();
         let primitive_witness: PrimitiveWitness = {
             let mut test_runner = TestRunner::deterministic();
-            PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
+            PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current()

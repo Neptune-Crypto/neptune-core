@@ -192,7 +192,7 @@ mod tests {
 
             let num_inputs = rng.gen_range(0usize..4);
             let primitive_witness =
-                PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2)
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 2, false)
                     .new_tree(&mut test_runner)
                     .unwrap()
                     .current();

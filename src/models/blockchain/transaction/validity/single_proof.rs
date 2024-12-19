@@ -794,16 +794,77 @@ mod test {
         }
     }
 
+    fn positive_prop(witness: SingleProofWitness) {
+        let claim = witness.claim();
+        let public_input = PublicInput::new(claim.input);
+        let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+        let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+    }
+
     mod proof_collection_tests {
+        use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+
         use super::*;
+
+        #[tokio::test]
+        async fn disallow_set_merge_bit() {
+            let mut test_runner = TestRunner::deterministic();
+            let good_primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(6), 6, 7, false)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+
+            let good_proof_collection = ProofCollection::produce(
+                &good_primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+
+            let good_witness = SingleProofWitness::from_collection(good_proof_collection);
+            positive_prop(good_witness);
+
+            // Setting the `merge_bit` must make program crash, as this bit may
+            // only be set to true through the execution of the merge branch.
+            let bad_primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(6), 6, 7, true)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+
+            let bad_proof_collection = ProofCollection::produce(
+                &bad_primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+
+            let bad_witness = SingleProofWitness::from_collection(bad_proof_collection);
+
+            // This witness fails with a Merkle auth path error since the never
+            // reads the actual bit but rather just verifies that it is set to
+            // false in this execution path.
+            SingleProof
+                .test_assertion_failure(
+                    bad_witness.standard_input(),
+                    bad_witness.nondeterminism(),
+                    &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+                )
+                .unwrap();
+        }
 
         #[tokio::test]
         async fn can_verify_via_valid_proof_collection() {
             let mut test_runner = TestRunner::deterministic();
-            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
-                .new_tree(&mut test_runner)
-                .unwrap()
-                .current();
+            let primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2, false)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
             let proof_collection = ProofCollection::produce(
@@ -815,28 +876,16 @@ mod test {
             .unwrap();
             assert!(proof_collection.verify(txk_mast_hash));
 
-            let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-            let txk_mast_hash_as_input_as_public_input =
-                PublicInput::new(txk_mast_hash.reversed().values().encode());
-
-            let nondeterminism = single_proof_witness.nondeterminism();
-
-            let rust_result = SingleProof
-                .run_rust(
-                    &txk_mast_hash_as_input_as_public_input,
-                    nondeterminism.clone(),
-                )
-                .expect("rust run should pass");
-
-            let tasm_result = SingleProof
-                .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
-                .expect("tasm run should pass");
-
-            assert_eq!(rust_result, tasm_result);
+            let witness = SingleProofWitness::from_collection(proof_collection);
+            let claim = witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
 
             // Verify equivalence of claim functions
             assert_eq!(
-                single_proof_witness.claim(),
+                witness.claim(),
                 SingleProof::claim(txk_mast_hash),
                 "Claim functions must agree"
             );
@@ -866,24 +915,12 @@ mod test {
             .unwrap();
             assert!(proof_collection.verify(txk_mast_hash));
 
-            let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-            let txk_mast_hash_as_input_as_public_input =
-                PublicInput::new(txk_mast_hash.reversed().values().encode());
-
-            let nondeterminism = single_proof_witness.nondeterminism();
-
-            let rust_result = SingleProof
-                .run_rust(
-                    &txk_mast_hash_as_input_as_public_input,
-                    nondeterminism.clone(),
-                )
-                .expect("rust run should pass");
-
-            let tasm_result = SingleProof
-                .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
-                .expect("tasm run should pass");
-
-            assert_eq!(rust_result, tasm_result);
+            let witness = SingleProofWitness::from_collection(proof_collection);
+            let claim = witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
         }
     }
 
