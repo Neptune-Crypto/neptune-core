@@ -2,6 +2,8 @@ use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::hashing::hash_from_stack::HashFromStack;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
 use tasm_lib::prelude::BasicSnippet;
@@ -34,10 +36,6 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_sin
 // Dictated by the witness type of SingleProof
 const UPDATE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
 
-pub(crate) const INPUT_SETS_NOT_EQUAL_ERROR: i128 = 1_000_100;
-pub(crate) const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
-pub(crate) const WITNESS_SIZE_CHANGED_ERROR: i128 = 1_000_102;
-
 #[derive(Debug, Clone, BFieldCodec, TasmObject)]
 pub struct UpdateWitness {
     pub(crate) old_kernel: TransactionKernel,
@@ -68,15 +66,20 @@ impl UpdateWitness {
         let msah_path = new_kernel.mast_path(TransactionKernelField::MutatorSetHash);
         assert!(
             MerkleTreeInclusionProof {
-                tree_height: TransactionKernelField::COUNT.next_power_of_two().ilog2() as usize,
+                tree_height: TransactionKernel::MAST_HEIGHT,
                 indexed_leafs: vec![(
                     TransactionKernelField::MutatorSetHash as usize,
-                    Hash::hash(&new_msa.hash())
+                    Tip5::hash(&new_msa.hash())
                 )],
                 authentication_structure: msah_path.clone(),
             }
             .verify(new_kernel.mast_hash()),
-            "path should be valid"
+            "mutator set hash mast path should be valid"
+        );
+
+        assert_eq!(
+            old_kernel.merge_bit, new_kernel.merge_bit,
+            "merge bit cannot be changed by update"
         );
 
         Self {
@@ -97,7 +100,7 @@ impl UpdateWitness {
         }
     }
 
-    pub fn populate_nd_digests(&self, nondeterminism: &mut NonDeterminism) {
+    pub fn populate_nd_streams(&self, nondeterminism: &mut NonDeterminism) {
         // update nondeterminism to account for verifying one STARK proof
         let claim = Claim::new(SingleProof.program().hash())
             .with_input(self.old_kernel_mast_hash.reversed().values().to_vec());
@@ -107,7 +110,6 @@ impl UpdateWitness {
             &claim,
         );
 
-        // set remaining digests
         nondeterminism.digests.extend(
             [
                 // mutator set hash
@@ -143,9 +145,16 @@ impl UpdateWitness {
                 // timestamp
                 self.old_kernel.mast_path(TransactionKernelField::Timestamp),
                 self.new_kernel.mast_path(TransactionKernelField::Timestamp),
+                // merge bit
+                self.old_kernel.mast_path(TransactionKernelField::MergeBit),
+                self.new_kernel.mast_path(TransactionKernelField::MergeBit),
             ]
             .concat(),
         );
+
+        nondeterminism
+            .individual_tokens
+            .extend_from_slice(&self.old_kernel.merge_bit.encode());
     }
 
     pub(crate) fn branch_source(
@@ -241,13 +250,13 @@ impl UpdateWitness {
             old_txk_digest,
             TransactionKernelField::Outputs as u32,
             outputs_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Outputs as u32,
             outputs_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
 
         // public announcements are identical
@@ -256,13 +265,13 @@ impl UpdateWitness {
             old_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             public_announcements_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::PublicAnnouncements as u32,
             public_announcements_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
 
         // fees are identical
@@ -271,13 +280,13 @@ impl UpdateWitness {
             old_txk_digest,
             TransactionKernelField::Fee as u32,
             fee_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Fee as u32,
             fee_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
 
         // coinbases are identical
@@ -286,13 +295,13 @@ impl UpdateWitness {
             old_txk_digest,
             TransactionKernelField::Coinbase as u32,
             coinbase_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Coinbase as u32,
             coinbase_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
 
         // timestamp increases or no change
@@ -304,20 +313,49 @@ impl UpdateWitness {
             old_txk_digest,
             TransactionKernelField::Timestamp as u32,
             old_timestamp_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         tasmlib::tasmlib_hashing_merkle_verify(
             new_txk_digest,
             TransactionKernelField::Timestamp as u32,
             new_timestamp_hash,
-            TransactionKernelField::COUNT.next_power_of_two().ilog2(),
+            TransactionKernel::MAST_HEIGHT as u32,
         );
         assert!(new_timestamp >= old_timestamp);
+
+        // merge bit unchanged
+        let merge_bit: BFieldElement = tasmlib::tasmlib_io_read_secin___bfe();
+
+        // May God have mercy upon my soul
+        assert!(merge_bit.value() == 0 || merge_bit.value() == 1);
+        let merge_bit: bool = merge_bit.value() != 0;
+
+        let merge_bit_leaf = Tip5::hash(&merge_bit);
+
+        tasmlib::tasmlib_hashing_merkle_verify(
+            old_txk_digest,
+            TransactionKernelField::MergeBit as u32,
+            merge_bit_leaf,
+            TransactionKernel::MAST_HEIGHT as u32,
+        );
+        tasmlib::tasmlib_hashing_merkle_verify(
+            new_txk_digest,
+            TransactionKernelField::MergeBit as u32,
+            merge_bit_leaf,
+            TransactionKernel::MAST_HEIGHT as u32,
+        );
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct UpdateBranch;
+
+impl UpdateBranch {
+    pub(crate) const INPUT_SETS_NOT_EQUAL_ERROR: i128 = 1_000_100;
+    pub(crate) const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
+    pub(crate) const WITNESS_SIZE_CHANGED_ERROR: i128 = 1_000_102;
+    pub(crate) const MERGE_BIT_NOT_BIT: i128 = 1_000_103;
+}
 
 impl BasicSnippet for UpdateBranch {
     fn inputs(&self) -> Vec<(DataType, String)> {
@@ -375,6 +413,10 @@ impl BasicSnippet for UpdateBranch {
 
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<UpdateWitness>::default()));
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let hash_bfe = library.import(Box::new(HashFromStack {
+            data_type: DataType::Bfe,
+        }));
 
         let mut authenticate_field_twice_with_no_change =
             |field_with_size_getter: &[LabelledInstruction], field: TransactionKernelField| {
@@ -429,6 +471,32 @@ impl BasicSnippet for UpdateBranch {
             field_with_size!(TransactionKernel::public_announcements);
         let fee_field_with_size = field_with_size!(TransactionKernel::fee);
         let coinbase_field_with_size = field_with_size!(TransactionKernel::coinbase);
+
+        let authenticate_merge_bit = triton_asm! {
+                // _ [txk_mh] merge_bit
+
+                push 1
+                dup 1
+                eq
+                push 0
+                dup 2
+                eq
+                add
+                assert error_id {Self::MERGE_BIT_NOT_BIT}
+
+                push {TransactionKernel::MAST_HEIGHT}
+
+                push {TransactionKernelField::MergeBit as u32}
+
+                pick 2
+                // _ [txk_mh] height index merge_bit
+
+                call {hash_bfe}
+                // _ [txk_mh] height index [merge_bit_digest]
+
+                call {merkle_verify}
+                // _
+        };
 
         let entrypoint = self.entrypoint();
         triton_asm! {
@@ -608,7 +676,7 @@ impl BasicSnippet for UpdateBranch {
                 call {multiset_eq_digests}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel set_equality(*new_inputs_digests, *old_inputs_digests)
 
-                assert error_id {INPUT_SETS_NOT_EQUAL_ERROR}
+                assert error_id {Self::INPUT_SETS_NOT_EQUAL_ERROR}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
                 /* Authenticate outputs and verify no-change */
@@ -674,8 +742,34 @@ impl BasicSnippet for UpdateBranch {
                 push 0 eq
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] (new_timestamp >= old_timestamp)
 
-                assert error_id {NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR}
+                assert error_id {Self::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash]
+
+
+                /* verify that merge bit has not changed */
+                divine 1
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] merge_bit
+
+                {&load_old_kernel_digest}
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] merge_bit [old_txk_mh]
+
+                dup 5
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] merge_bit [old_txk_mh] merge_bit
+
+                {&authenticate_merge_bit}
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] merge_bit
+
+                dup 5
+                dup 5
+                dup 5
+                dup 5
+                dup 5
+                pick 5
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] [new_txk_mhash] merge_bit
+
+                {&authenticate_merge_bit}
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash]
+
 
                 // _ disc *spw witness_size *update_witness [program_digest] [new_txk_mhash]
 
@@ -687,7 +781,7 @@ impl BasicSnippet for UpdateBranch {
                 // _ disc *spw [program_digest] [new_txk_mhash] witness_size witness_size_again
 
                 eq
-                assert error_id {WITNESS_SIZE_CHANGED_ERROR}
+                assert error_id {Self::WITNESS_SIZE_CHANGED_ERROR}
                 // _ disc *spw [program_digest] [new_txk_mhash]
 
                 pick 10
@@ -722,6 +816,8 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::TransactionKernelModifier;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
+
+    // The main tests are actually in [`../../single_proof.rs`].
 
     /// Return an update witness where the mutator set has had both elements
     /// added and removed.

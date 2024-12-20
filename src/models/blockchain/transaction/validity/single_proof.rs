@@ -214,7 +214,7 @@ impl SecretWitness for SingleProofWitness {
                 }
             }
             SingleProofWitness::Update(witness) => {
-                witness.populate_nd_digests(&mut nondeterminism);
+                witness.populate_nd_streams(&mut nondeterminism);
             }
             SingleProofWitness::Merger(witness_of_merge) => {
                 witness_of_merge.populate_nd_streams(&mut nondeterminism);
@@ -963,8 +963,6 @@ mod test {
         use twenty_first::prelude::Mmr;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR;
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::INPUT_SETS_NOT_EQUAL_ERROR;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
         use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
@@ -1030,7 +1028,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+                &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
             );
         }
 
@@ -1109,7 +1107,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
@@ -1131,7 +1129,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
@@ -1155,7 +1153,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
