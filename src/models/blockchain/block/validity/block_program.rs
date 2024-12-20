@@ -1,14 +1,18 @@
 use std::sync::OnceLock;
 
+use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::hash_from_stack::HashFromStack;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
+use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
@@ -62,7 +66,15 @@ impl ConsensusProgram for BlockProgram {
         let block_body = &block_witness.block_body;
 
         let txk_mast_hash: Digest = tasmlib::tasmlib_io_read_secin___digest();
+        let txk_mast_hash_as_leaf = Tip5::hash(&txk_mast_hash);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            block_body_digest,
+            BlockBodyField::TransactionKernel as u32,
+            txk_mast_hash_as_leaf,
+            BlockBody::MAST_HEIGHT as u32,
+        );
 
+        // Verify fee is legal
         let fee = &block_body.transaction_kernel.fee;
         let fee_hash = Tip5::hash(fee);
         tasmlib::tasmlib_hashing_merkle_verify(
@@ -72,16 +84,17 @@ impl ConsensusProgram for BlockProgram {
             TransactionKernel::MAST_HEIGHT as u32,
         );
 
-        let txk_mast_hash_as_leaf = Tip5::hash(&txk_mast_hash);
-        tasmlib::tasmlib_hashing_merkle_verify(
-            block_body_digest,
-            BlockBodyField::TransactionKernel as u32,
-            txk_mast_hash_as_leaf,
-            BlockBody::MAST_HEIGHT as u32,
-        );
-
         assert!(!fee.is_negative());
         assert!(*fee <= NeptuneCoins::max());
+
+        // Verify that merge bit is set
+        let merge_bit_hash = Tip5::hash(&1);
+        tasmlib::tasmlib_hashing_merkle_verify(
+            txk_mast_hash,
+            TransactionKernelField::MergeBit as u32,
+            merge_bit_hash,
+            TransactionKernel::MAST_HEIGHT as u32,
+        );
 
         let mut i = 0;
         while i < claims.len() {
@@ -110,8 +123,11 @@ impl ConsensusProgram for BlockProgram {
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
         let push_max_amount = NeptuneCoins::max().push_to_stack();
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let hash_from_stack_digest = library.import(Box::new(HashFromStack {
+            data_type: DataType::Digest,
+        }));
         let verify_fee_legality = triton_asm!(
-            // _ [bbd] *w [txkmh]
+            // _ *w [txkmh]
 
             dup 4
             dup 4
@@ -119,53 +135,69 @@ impl ConsensusProgram for BlockProgram {
             dup 4
             dup 4
             push {TransactionKernel::MAST_HEIGHT}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height
+            // _ *w [txkmh] [txkmh] txkm_height
 
             push {TransactionKernelField::Fee as u32}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index
 
             dup 12 {&block_body_field} {&body_field_kernel} {&kernel_field_fee}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
 
             dup 0 addi {coin_size - 1} read_mem {coin_size} pop 1
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee [fee]
 
             {&push_max_amount}
             call {u128_lt}
             push 0 eq
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee (max >= fee)
 
             assert error_id {Self::ILLEGAL_FEE}
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index *fee
 
             call {hash_fee} pop 1
-            // _ [bbd] *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
+            // _ *w [txkmh] [txkmh] txkm_height fee_leaf_index [fee_hash]
 
             call {merkle_verify}
+            // _ *w [txkmh]
+        );
+
+        let hash_of_one = Tip5::hash(&1);
+        let push_hash_of_one = hash_of_one
+            .values()
+            .into_iter()
+            .rev()
+            .map(|b| triton_instr!(push b))
+            .collect_vec();
+        let verify_set_merge_bit = triton_asm!(
+            // _ [txkmh]
+
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            push {TransactionKernel::MAST_HEIGHT}
+            // _ [txkmh] [txkmh] txkm_height
+
+            push {TransactionKernelField::MergeBit as u32}
+            // _ [txkmh] [txkmh] txkm_height leaf_index
+
+            {&push_hash_of_one}
+            // _ [txkmh] [txkmh] txkm_height fee_leaf_index [merge_bit_hash (true)]
+
+            call {merkle_verify}
+            // _ [txkmh]
+        );
+
+        let authenticate_txkmh = triton_asm!(
             // _ [bbd] *w [txkmh]
 
-            push 0
-            push 0
-            push 0
-            push 0
-            push 1
-            dup 9
-            dup 9
-            dup 9
-            dup 9
-            dup 9
-            // _ [bbd] *w [txkmh] 0 0 0 0 1 [txkmh]
-            // _ [bbd] *w [txkmh] [padded-txkmh] <-- rename
-
-            sponge_init
-            sponge_absorb
-            sponge_squeeze
-
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
-            pick 5 pop 1
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            dup 4
+            call {hash_from_stack_digest}
             // _ [bbd] *w [txkmh] [txkmh_hash]
 
             dup 15
@@ -258,7 +290,13 @@ impl ConsensusProgram for BlockProgram {
             divine {Digest::LEN}
             // _ [bbd] *w [txkmh]
 
+            {&authenticate_txkmh}
+            // _ [bbd] *w [txkmh]
+
             {&verify_fee_legality}
+            // _ [bbd] *w [txkmh]
+
+            {&verify_set_merge_bit}
             // _ [bbd] *w [txkmh]
 
             pop {Digest::LEN}
