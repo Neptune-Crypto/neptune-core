@@ -80,6 +80,7 @@ impl ProofCollection {
             collect_type_scripts_witness,
         )
     }
+
     pub fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
         fn witness_halts_gracefully(
             program: impl ConsensusProgram,

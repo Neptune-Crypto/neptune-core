@@ -563,10 +563,30 @@ impl PrimitiveWitness {
     /// Strategy for generating a `PrimitiveWitness` with the given number of
     /// inputs, outputs, and public announcements. If `num_inputs` is set to
     /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
+    ///
+    // Has to be public because it's used by a benchmark
     pub fn arbitrary_with_size_numbers(
         num_inputs: Option<usize>,
         num_outputs: usize,
         num_public_announcements: usize,
+    ) -> BoxedStrategy<Self> {
+        Self::arbitrary_with_size_numbers_and_merge_bit(
+            num_inputs,
+            num_outputs,
+            num_public_announcements,
+            false,
+        )
+    }
+
+    /// Strategy for generating a `PrimitiveWitness` with the given number of
+    /// inputs, outputs, public announcements, and specified merge bit.
+    ///
+    // Has to be public because it's used by a benchmark
+    pub fn arbitrary_with_size_numbers_and_merge_bit(
+        num_inputs: Option<usize>,
+        num_outputs: usize,
+        num_public_announcements: usize,
+        merge_bit: bool,
     ) -> BoxedStrategy<Self> {
         // Primitive witnesses may not simultaneously have inputs and set a
         // coinbase. In combination with a rule in `Block::is_valid` that
@@ -685,6 +705,7 @@ impl PrimitiveWitness {
                         fee,
                         maybe_coinbase,
                         timestamp,
+                        merge_bit,
                     )
                 },
             )
@@ -704,6 +725,7 @@ impl PrimitiveWitness {
         let output_utxos = output_utxos.to_vec();
         let public_announcements = public_announcements.to_vec();
 
+        let merge_bit = false;
         arb::<Timestamp>()
             .prop_flat_map(move |now| {
                 Self::arbitrary_primitive_witness_with_timestamp_and(
@@ -714,6 +736,7 @@ impl PrimitiveWitness {
                     fee,
                     coinbase,
                     now,
+                    merge_bit,
                 )
             })
             .boxed()
@@ -727,6 +750,7 @@ impl PrimitiveWitness {
         fee: NeptuneCoins,
         coinbase: Option<NeptuneCoins>,
         timestamp: Timestamp,
+        merge_bit: bool,
     ) -> BoxedStrategy<PrimitiveWitness> {
         let num_inputs = input_utxos.len();
         let num_outputs = output_utxos.len();
@@ -796,6 +820,7 @@ impl PrimitiveWitness {
                                 timestamp,
                                 inputs_salt,
                                 outputs_salt,
+                                merge_bit,
                             )
                         })
                         .boxed()
@@ -818,6 +843,7 @@ impl PrimitiveWitness {
         timestamp: Timestamp,
         inputs_salt: [BFieldElement; 3],
         outputs_salt: [BFieldElement; 3],
+        merge_bit: bool,
     ) -> Self {
         let mutator_set_accumulator = msa_and_records.mutator_set_accumulator;
         let input_membership_proofs = msa_and_records.membership_proofs;
@@ -841,7 +867,7 @@ impl PrimitiveWitness {
             coinbase,
             timestamp,
             mutator_set_hash: mutator_set_accumulator.hash(),
-            merge_bit: false,
+            merge_bit,
         }
         .into_kernel();
 
@@ -1153,6 +1179,8 @@ mod test {
                                                     None
                                                 }
                                             });
+
+                                        let merge_bit = false;
                                         Self::from_msa_and_records(
                                             msaar,
                                             input_utxos,
@@ -1166,6 +1194,7 @@ mod test {
                                             timestamp,
                                             inputs_salt,
                                             outputs_salt,
+                                            merge_bit,
                                         )
                                     },
                                 )
@@ -1481,6 +1510,7 @@ mod test {
                             vec![first_output, second_output]
                         };
 
+                        let merge_bit = false;
                         Self::arbitrary_primitive_witness_with_timestamp_and(
                             &input_utxos,
                             &input_lock_scripts_and_witnesses,
@@ -1489,6 +1519,7 @@ mod test {
                             fee,
                             None,
                             timestamp,
+                            merge_bit,
                         )
                     },
                 )

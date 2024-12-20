@@ -161,7 +161,8 @@ impl TransactionProof {
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
-                primitive_witness.validate().await
+                !primitive_witness.kernel.merge_bit
+                    && primitive_witness.validate().await
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
             TransactionProof::SingleProof(single_proof) => {
