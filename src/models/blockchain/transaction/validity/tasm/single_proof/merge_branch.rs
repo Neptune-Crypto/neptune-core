@@ -13,6 +13,7 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
 use tasm_lib::list::higher_order::inner_function::InnerFunction;
 use tasm_lib::list::higher_order::inner_function::RawCode;
@@ -177,6 +178,8 @@ impl MergeWitness {
                 .mast_path(TransactionKernelField::MutatorSetHash),
             self.new_kernel
                 .mast_path(TransactionKernelField::MutatorSetHash),
+            //
+            self.new_kernel.mast_path(TransactionKernelField::MergeBit),
         ]
         .concat();
         nondeterminism.digests.extend(digests);
@@ -340,6 +343,14 @@ impl MergeWitness {
         assert_mutator_set_hash_integrity(left_txk_digest);
         assert_mutator_set_hash_integrity(right_txk_digest);
         assert_mutator_set_hash_integrity(new_txk_digest);
+
+        // new merge bit is set
+        tasmlib::tasmlib_hashing_merkle_verify(
+            new_txk_digest,
+            TransactionKernelField::MergeBit as u32,
+            Tip5::hash(&1),
+            TransactionKernel::MAST_HEIGHT as u32,
+        );
     }
 }
 
@@ -741,6 +752,33 @@ impl BasicSnippet for MergeBranch {
             // _ *merge_witness *l_txk *r_txk *n_txk
         };
 
+        let hash_of_one = Tip5::hash(&1);
+        let push_hash_of_one = hash_of_one
+            .values()
+            .into_iter()
+            .rev()
+            .map(|b| triton_instr!(push b))
+            .collect_vec();
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let assert_new_merge_bit_set = triton_asm! {
+            // _
+
+            push {new_txk_mast_hash_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ [new_txkmh]
+
+            push {TransactionKernel::MAST_HEIGHT}
+
+            push {TransactionKernelField::MergeBit as u32}
+
+            {&push_hash_of_one}
+            // _ [new_txkmh] height index [hash_of_one]
+
+            call {merkle_verify}
+            // _
+        };
+
         let audit_witness =
             library.import(Box::new(VerifyNdSiIntegrity::<MergeWitness>::default()));
 
@@ -1000,6 +1038,9 @@ impl BasicSnippet for MergeBranch {
             // _ *merge_witness *l_txk *r_txk *n_txk
 
             {&assert_all_kernels_agree_on_mutator_set_hash}
+            // _ *merge_witness *l_txk *r_txk *n_txk
+
+            {&assert_new_merge_bit_set}
             // _ *merge_witness *l_txk *r_txk *n_txk
 
             pop 4
