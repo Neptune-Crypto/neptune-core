@@ -662,7 +662,7 @@ pub(crate) fn make_mock_block(
     let coinbase_amount = Block::block_subsidy(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
     let coinbase_sender_randomness: Digest = rng.gen();
-    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
+    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
     let coinbase_addition_record: AdditionRecord =
         commit(coinbase_digest, coinbase_sender_randomness, receiver_digest);

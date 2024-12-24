@@ -408,7 +408,7 @@ pub(crate) async fn make_coinbase_transaction(
         .await
         .wallet_state
         .wallet_secret
-        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest);
+        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
 
     let owned = true;
     let liquid_coinbase_output = TxOutput::offchain_native_currency(
@@ -470,13 +470,13 @@ pub(crate) async fn make_coinbase_transaction(
     let composer_utxo_not_timelocked = ExpectedUtxo::new(
         liquid_coinbase_output.utxo(),
         liquid_coinbase_output.sender_randomness(),
-        coinbase_recipient_spending_key.privacy_preimage,
+        coinbase_recipient_spending_key.privacy_preimage(),
         UtxoNotifier::OwnMinerComposeBlock,
     );
     let composer_utxo_timelocked = ExpectedUtxo::new(
         timelocked_coinbase_output.utxo(),
         timelocked_coinbase_output.sender_randomness(),
-        coinbase_recipient_spending_key.privacy_preimage,
+        coinbase_recipient_spending_key.privacy_preimage(),
         UtxoNotifier::OwnMinerComposeBlock,
     );
 

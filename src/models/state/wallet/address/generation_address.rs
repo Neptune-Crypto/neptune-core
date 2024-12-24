@@ -49,16 +49,16 @@ pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8
 // keep the serialized (including bech32m) representation small.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize)]
 pub struct GenerationSpendingKey {
-    pub seed: Digest,
+    seed: Digest,
 
     #[serde(skip)]
-    pub receiver_identifier: BFieldElement,
+    receiver_identifier: BFieldElement,
 
     #[serde(skip)]
-    pub decryption_key: lattice::kem::SecretKey,
+    decryption_key: lattice::kem::SecretKey,
 
     #[serde(skip)]
-    pub privacy_preimage: Digest,
+    privacy_preimage: Digest,
 
     #[serde(skip)]
     unlock_key: Digest,
@@ -77,11 +77,11 @@ impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenerationReceivingAddress {
-    pub receiver_identifier: BFieldElement,
-    pub encryption_key: lattice::kem::PublicKey,
+    receiver_identifier: BFieldElement,
+    encryption_key: lattice::kem::PublicKey,
 
-    pub privacy_digest: Digest,
-    pub spending_lock: Digest,
+    privacy_digest: Digest,
+    spending_lock: Digest,
 }
 
 impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
@@ -97,7 +97,7 @@ impl GenerationSpendingKey {
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = self.privacy_preimage.hash();
         GenerationReceivingAddress {
-            receiver_identifier: self.receiver_identifier,
+            receiver_identifier: self.receiver_identifier(),
             encryption_key: pk,
             privacy_digest,
             spending_lock: self.generate_spending_lock(),
@@ -172,6 +172,19 @@ impl GenerationSpendingKey {
 
     fn generate_spending_lock(&self) -> Digest {
         self.unlock_key.hash()
+    }
+
+    /// returns the privacy preimage.
+    ///
+    /// note: The hash of the preimage is available in the receiving address
+    /// as the privacy_digest
+    pub fn privacy_preimage(&self) -> Digest {
+        self.privacy_preimage
+    }
+
+    /// returns the receiver_identifier, a public fingerprint
+    pub fn receiver_identifier(&self) -> BFieldElement {
+        self.receiver_identifier
     }
 }
 
@@ -300,18 +313,13 @@ impl GenerationReceivingAddress {
         LockScript::hash_lock(self.spending_lock)
     }
 
-    /// returns the privacy digest
-    pub fn privacy_digest(&self) -> Digest {
-        self.privacy_digest
-    }
-
     pub(crate) fn generate_public_announcement(
         &self,
         utxo_notification_payload: &UtxoNotificationPayload,
     ) -> PublicAnnouncement {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
             flag: GENERATION_FLAG_U8.into(),
-            receiver_identifier: self.receiver_identifier,
+            receiver_identifier: self.receiver_identifier(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
 
@@ -325,10 +333,26 @@ impl GenerationReceivingAddress {
     ) -> String {
         let encrypted_utxo_notification = EncryptedUtxoNotification {
             flag: GENERATION_FLAG_U8.into(),
-            receiver_identifier: self.receiver_identifier,
+            receiver_identifier: self.receiver_identifier(),
             ciphertext: self.encrypt(utxo_notification_payload),
         };
 
         encrypted_utxo_notification.into_bech32m(network)
+    }
+
+    /// returns the receiver_identifier, a public fingerprint
+    pub fn receiver_identifier(&self) -> BFieldElement {
+        self.receiver_identifier
+    }
+
+    /// returns a privacy digest which corresponds to the.privacy_preimage(),
+    /// of the matching [GenerationSpendingKey]
+    pub fn privacy_digest(&self) -> Digest {
+        self.privacy_digest
+    }
+
+    /// returns the `spending_lock`
+    pub fn spending_lock(&self) -> Digest {
+        self.spending_lock
     }
 }

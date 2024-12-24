@@ -550,7 +550,7 @@ mod wallet_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -706,7 +706,7 @@ mod wallet_tests {
                 .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 ))
                 .await;
@@ -758,7 +758,7 @@ mod wallet_tests {
                     .add_expected_utxo(ExpectedUtxo::new(
                         cb_utxo_prime,
                         cb_output_randomness_prime,
-                        alice_spending_key.privacy_preimage,
+                        alice_spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     ))
                     .await;
@@ -931,7 +931,7 @@ mod wallet_tests {
 
         let bob_sender_randomness = bob.wallet_state.wallet_secret.generate_sender_randomness(
             genesis_block.kernel.header.height,
-            alice_address.privacy_digest,
+            alice_address.privacy_digest(),
         );
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(12),
@@ -1037,7 +1037,7 @@ mod wallet_tests {
             let expected_utxo = ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             );
             alice
@@ -1261,7 +1261,7 @@ mod wallet_tests {
                 ExpectedUtxo::new(
                     expected_utxo.utxo,
                     expected_utxo.sender_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )
             })
@@ -1276,7 +1276,7 @@ mod wallet_tests {
         let expected_utxo_for_alice = ExpectedUtxo::new(
             receiver_data_1_to_alice_new.utxo(),
             receiver_data_1_to_alice_new.sender_randomness(),
-            alice_spending_key.privacy_preimage,
+            alice_spending_key.privacy_preimage(),
             UtxoNotifier::Cli,
         );
         alice
@@ -1497,7 +1497,10 @@ mod wallet_tests {
             "_authority_wallet address: {}",
             address.to_bech32m(Network::Alpha).unwrap()
         );
-        println!("_authority_wallet spending_lock: {}", address.spending_lock);
+        println!(
+            "_authority_wallet spending_lock: {}",
+            address.spending_lock()
+        );
     }
 
     #[test]

@@ -1733,7 +1733,7 @@ mod global_state_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
-                own_key.privacy_preimage,
+                own_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -1899,7 +1899,7 @@ mod global_state_tests {
                 vec![ExpectedUtxo::new(
                     coinbase_utxo,
                     coinbase_output_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
             )
@@ -2033,7 +2033,7 @@ mod global_state_tests {
                     vec![ExpectedUtxo::new(
                         coinbase_utxo_1,
                         cb_utxo_output_randomness_1,
-                        alice_spending_key.privacy_preimage,
+                        alice_spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     )],
                 )
@@ -2353,7 +2353,7 @@ mod global_state_tests {
                         ExpectedUtxo::new(
                             expected_utxo.utxo,
                             expected_utxo.sender_randomness,
-                            genesis_spending_key.privacy_preimage,
+                            genesis_spending_key.privacy_preimage(),
                             UtxoNotifier::OwnMinerComposeBlock,
                         )
                     })
@@ -2792,7 +2792,7 @@ mod global_state_tests {
                     ExpectedUtxo::new(
                         cb_utxo,
                         cb_output_randomness,
-                        spending_key.privacy_preimage,
+                        spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     ),
                 )
@@ -2874,7 +2874,7 @@ mod global_state_tests {
                     ExpectedUtxo::new(
                         cb_utxo,
                         cb_output_randomness,
-                        spending_key.privacy_preimage,
+                        spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     ),
                 )
@@ -2982,7 +2982,7 @@ mod global_state_tests {
             let cb = ExpectedUtxo::new(
                 cb_utxo1,
                 cb_sender_randomness1,
-                spend_key.privacy_preimage,
+                spend_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             );
 

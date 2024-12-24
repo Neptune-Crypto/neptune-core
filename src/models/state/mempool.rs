@@ -1106,7 +1106,7 @@ mod tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;

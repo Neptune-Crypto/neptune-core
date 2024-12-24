@@ -2432,7 +2432,7 @@ mod rpc_server_tests {
                     let cb = ExpectedUtxo::new(
                         cb_utxo,
                         cb_sender_randomness,
-                        cb_key.privacy_preimage,
+                        cb_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     );
                     rpc_server
@@ -2564,7 +2564,7 @@ mod rpc_server_tests {
                 let cb = ExpectedUtxo::new(
                     cb_utxo,
                     cb_sender_randomness,
-                    bob_key.privacy_preimage,
+                    bob_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 );
                 bob_rpc_server

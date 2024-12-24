@@ -398,7 +398,7 @@ mod tests {
         let sender_randomness = state
             .wallet_state
             .wallet_secret
-            .generate_sender_randomness(block_height, address.privacy_digest);
+            .generate_sender_randomness(block_height, address.privacy_digest());
 
         for owned_utxo_notification_medium in [
             UtxoNotificationMedium::OffChain,
@@ -418,7 +418,7 @@ mod tests {
                 "Not owned UTXOs are, currently, always transmitted on-chain"
             );
             assert_eq!(tx_output.sender_randomness(), sender_randomness);
-            assert_eq!(tx_output.receiver_digest(), address.privacy_digest);
+            assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
             assert_eq!(tx_output.utxo(), utxo);
         }
     }
