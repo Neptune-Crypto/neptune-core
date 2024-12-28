@@ -583,6 +583,7 @@ pub(crate) async fn mine(
         global_state_lock.set_mining_status_to_inactive().await;
 
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
+        let is_connected = global_state_lock.lock(|s| !s.net.peer_map.is_empty()).await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
@@ -591,6 +592,7 @@ pub(crate) async fn mine(
             && maybe_proposal.is_some()
             && !is_syncing
             && !pause_mine
+            && is_connected
         {
             let composer_utxos = maybe_proposal.composer_utxos();
 
@@ -625,6 +627,7 @@ pub(crate) async fn mine(
             && guesser_task.is_none()
             && !is_syncing
             && !pause_mine
+            && is_connected
         {
             global_state_lock.set_mining_status_to_composing().await;
             let compose_task = compose_block(
