@@ -3,6 +3,7 @@
 use anyhow::bail;
 use anyhow::Result;
 use arbitrary::Arbitrary;
+use rayon::prelude::IntoParallelIterator;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -10,7 +11,9 @@ use tracing::warn;
 
 use super::common;
 use super::generation_address;
+use super::par_iter::SpendingKeyParallelIter;
 use super::symmetric_key;
+use super::SpendingKeyIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -29,7 +32,7 @@ use crate::BFieldElement;
 // actually stored in PublicAnnouncement.
 
 /// enumerates available cryptographic key implementations for sending and receiving funds.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, Serialize, Deserialize, PartialEq, Eq)]
 #[repr(u8)]
 pub enum KeyType {
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
@@ -363,6 +366,24 @@ impl std::hash::Hash for SpendingKey {
     }
 }
 
+impl IntoIterator for SpendingKey {
+    type Item = Self;
+    type IntoIter = SpendingKeyIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SpendingKeyIter::from(self)
+    }
+}
+
+impl IntoParallelIterator for SpendingKey {
+    type Iter = SpendingKeyParallelIter;
+    type Item = Self;
+
+    fn into_par_iter(self) -> Self::Iter {
+        SpendingKeyParallelIter::from(self.into_iter())
+    }
+}
+
 impl From<generation_address::GenerationSpendingKey> for SpendingKey {
     fn from(key: generation_address::GenerationSpendingKey) -> Self {
         Self::Generation(key)
@@ -376,6 +397,30 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
 }
 
 impl SpendingKey {
+    /// generates a new SpendingKey of requested `key_type` from `seed`
+    ///
+    /// perf:
+    ///   cheap for KeyType::Symmetric (only copies seed)
+    ///   not cheap for KeyType::Generation (performs several hash ops)
+    pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
+        match key_type {
+            KeyType::Generation => {
+                generation_address::GenerationSpendingKey::from_seed(seed).into()
+            }
+            KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
+        }
+    }
+
+    /// derives a child key from this key
+    ///
+    /// The first child is at index 0, and so on.
+    pub fn derive_child(&self, index: common::DerivationIndex) -> SpendingKey {
+        match self {
+            Self::Generation(k) => k.derive_child(index).into(),
+            Self::Symmetric(k) => k.derive_child(index).into(),
+        }
+    }
+
     /// returns the address that corresponds to this spending key.
     pub fn to_address(&self) -> ReceivingAddress {
         match self {
@@ -468,6 +513,20 @@ impl SpendingKey {
             })
     }
 
+    pub fn into_range_iter(
+        self,
+        range: impl std::ops::RangeBounds<common::DerivationIndex>,
+    ) -> SpendingKeyIter {
+        SpendingKeyIter::new_range(self, range)
+    }
+
+    pub fn into_par_range_iter(
+        self,
+        range: impl std::ops::RangeBounds<common::DerivationIndex>,
+    ) -> SpendingKeyParallelIter {
+        SpendingKeyParallelIter::from(SpendingKeyIter::new_range(self, range))
+    }
+
     /// converts a result into an Option and logs a warning on any error
     fn ok_warn<T>(&self, result: Result<T>) -> Option<T> {
         match result {
@@ -510,7 +569,7 @@ mod test {
     /// tests scanning for announced utxos with an asymmetric (generation) key
     #[proptest]
     fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(GenerationSpendingKey::derive_from_seed(seed).into())
+        worker::scan_for_announced_utxos(SpendingKey::from_seed(seed, KeyType::Generation))
     }
 
     /// tests encrypting and decrypting with a symmetric key
@@ -522,7 +581,7 @@ mod test {
     /// tests encrypting and decrypting with an asymmetric (generation) key
     #[proptest]
     fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::derive_from_seed(seed).into())
+        worker::test_encrypt_decrypt(GenerationSpendingKey::from_seed(seed).into())
     }
 
     /// tests keygen, sign, and verify with a symmetric key
@@ -538,8 +597,8 @@ mod test {
     #[proptest]
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
         worker::test_keypair_validity(
-            GenerationSpendingKey::derive_from_seed(seed).into(),
-            GenerationReceivingAddress::derive_from_seed(seed).into(),
+            SpendingKey::from_seed(seed, KeyType::Generation),
+            SpendingKey::from_seed(seed, KeyType::Generation).to_address(),
         );
     }
 
@@ -552,7 +611,7 @@ mod test {
     /// tests bech32m serialize, deserialize with an asymmetric (generation) key
     #[proptest]
     fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
+        worker::test_bech32m_conversion(GenerationReceivingAddress::from_seed(seed).into());
     }
 
     mod worker {
