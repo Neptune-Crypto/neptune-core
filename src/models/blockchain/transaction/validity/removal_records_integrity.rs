@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -38,8 +37,6 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -968,108 +965,117 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
     }
 }
 
-impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let num_inputs = u.int_in_range(1..=3usize)?;
-        let _num_outputs = u.int_in_range(1..=3usize)?;
-        let _num_public_announcements = u.int_in_range(0..=2usize)?;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod neptune_arbitrary {
+    use arbitrary::Arbitrary;
 
-        let input_utxos: Vec<Utxo> = (0..num_inputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let mut membership_proofs: Vec<MsMembershipProof> = (0..num_inputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let addition_records: Vec<AdditionRecord> = input_utxos
-            .iter()
-            .zip(membership_proofs.iter())
-            .map(|(utxo, msmp)| {
-                commit(
-                    Hash::hash(utxo),
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage.hash(),
-                )
+    use super::*;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+
+    impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let num_inputs = u.int_in_range(1..=3usize)?;
+            let _num_outputs = u.int_in_range(1..=3usize)?;
+            let _num_public_announcements = u.int_in_range(0..=2usize)?;
+
+            let input_utxos: Vec<Utxo> = (0..num_inputs)
+                .map(|_| u.arbitrary().unwrap())
+                .collect_vec();
+            let mut membership_proofs: Vec<MsMembershipProof> = (0..num_inputs)
+                .map(|_| u.arbitrary().unwrap())
+                .collect_vec();
+            let addition_records: Vec<AdditionRecord> = input_utxos
+                .iter()
+                .zip(membership_proofs.iter())
+                .map(|(utxo, msmp)| {
+                    commit(
+                        Hash::hash(utxo),
+                        msmp.sender_randomness,
+                        msmp.receiver_preimage.hash(),
+                    )
+                })
+                .collect_vec();
+            let canonical_commitments = addition_records
+                .iter()
+                .map(|ar| ar.canonical_commitment)
+                .collect_vec();
+            let (aocl, mmr_mps) =
+                Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments);
+            assert_eq!(num_inputs, mmr_mps.len());
+            assert_eq!(num_inputs, canonical_commitments.len());
+
+            for ((idx, mp), &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+                assert!(
+                    mp.verify(*idx, cc, &aocl.peaks(), aocl.num_leafs()),
+                    "Returned MPs must be valid for returned AOCL"
+                );
+            }
+
+            for (ms_mp, (_idx, mmr_mp)) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
+                ms_mp.auth_path_aocl = mmr_mp.clone();
+            }
+            let swbfi: MmrAccumulator = u.arbitrary()?;
+            let swbfa_hash: Digest = u.arbitrary()?;
+            let arb_kernel: TransactionKernel = u.arbitrary()?;
+
+            let new_inputs = input_utxos
+                .iter()
+                .zip(membership_proofs.iter())
+                .map(|(utxo, msmp)| {
+                    (
+                        Hash::hash(utxo),
+                        msmp.sender_randomness,
+                        msmp.receiver_preimage,
+                        msmp.aocl_leaf_index,
+                    )
+                })
+                .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
+                .map(|ais| RemovalRecord {
+                    absolute_indices: AbsoluteIndexSet::new(&ais),
+                    target_chunks: u.arbitrary().unwrap(),
+                })
+                .rev()
+                .collect_vec();
+
+            let kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(Hash::hash_pair(
+                    Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+                    Hash::hash_pair(swbfa_hash, Digest::default()),
+                ))
+                .inputs(new_inputs)
+                .modify(arb_kernel);
+
+            let salted_utxos = SaltedUtxos::new(input_utxos);
+
+            let aocl_auth_paths = membership_proofs
+                .iter()
+                .map(|x| x.auth_path_aocl.to_owned())
+                .collect();
+
+            let mast_root = kernel.mast_hash();
+            let mast_path_mutator_set = kernel.mast_path(TransactionKernelField::MutatorSetHash);
+            let mast_path_inputs = kernel.mast_path(TransactionKernelField::Inputs);
+            let mast_path_coinbase = kernel.mast_path(TransactionKernelField::Coinbase);
+            let TransactionKernelProxy {
+                coinbase, inputs, ..
+            } = kernel.into();
+
+            Ok(RemovalRecordsIntegrityWitness {
+                input_utxos: salted_utxos,
+                membership_proofs,
+                aocl_auth_paths,
+                coinbase,
+                aocl,
+                swbfi,
+                swbfa_hash,
+                mast_path_mutator_set,
+                mast_path_inputs,
+                mast_path_coinbase,
+                mast_root,
+                removal_records: inputs,
             })
-            .collect_vec();
-        let canonical_commitments = addition_records
-            .iter()
-            .map(|ar| ar.canonical_commitment)
-            .collect_vec();
-        let (aocl, mmr_mps) =
-            Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments);
-        assert_eq!(num_inputs, mmr_mps.len());
-        assert_eq!(num_inputs, canonical_commitments.len());
-
-        for ((idx, mp), &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
-            assert!(
-                mp.verify(*idx, cc, &aocl.peaks(), aocl.num_leafs()),
-                "Returned MPs must be valid for returned AOCL"
-            );
         }
-
-        for (ms_mp, (_idx, mmr_mp)) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
-            ms_mp.auth_path_aocl = mmr_mp.clone();
-        }
-        let swbfi: MmrAccumulator = u.arbitrary()?;
-        let swbfa_hash: Digest = u.arbitrary()?;
-        let arb_kernel: TransactionKernel = u.arbitrary()?;
-
-        let new_inputs = input_utxos
-            .iter()
-            .zip(membership_proofs.iter())
-            .map(|(utxo, msmp)| {
-                (
-                    Hash::hash(utxo),
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage,
-                    msmp.aocl_leaf_index,
-                )
-            })
-            .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
-            .map(|ais| RemovalRecord {
-                absolute_indices: AbsoluteIndexSet::new(&ais),
-                target_chunks: u.arbitrary().unwrap(),
-            })
-            .rev()
-            .collect_vec();
-
-        let kernel = TransactionKernelModifier::default()
-            .mutator_set_hash(Hash::hash_pair(
-                Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
-                Hash::hash_pair(swbfa_hash, Digest::default()),
-            ))
-            .inputs(new_inputs)
-            .modify(arb_kernel);
-
-        let salted_utxos = SaltedUtxos::new(input_utxos);
-
-        let aocl_auth_paths = membership_proofs
-            .iter()
-            .map(|x| x.auth_path_aocl.to_owned())
-            .collect();
-
-        let mast_root = kernel.mast_hash();
-        let mast_path_mutator_set = kernel.mast_path(TransactionKernelField::MutatorSetHash);
-        let mast_path_inputs = kernel.mast_path(TransactionKernelField::Inputs);
-        let mast_path_coinbase = kernel.mast_path(TransactionKernelField::Coinbase);
-        let TransactionKernelProxy {
-            coinbase, inputs, ..
-        } = kernel.into();
-
-        Ok(RemovalRecordsIntegrityWitness {
-            input_utxos: salted_utxos,
-            membership_proofs,
-            aocl_auth_paths,
-            coinbase,
-            aocl,
-            swbfi,
-            swbfa_hash,
-            mast_path_mutator_set,
-            mast_path_inputs,
-            mast_path_coinbase,
-            mast_root,
-            removal_records: inputs,
-        })
     }
 }
 
@@ -1085,6 +1091,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::models::blockchain::transaction::TransactionKernelModifier;
 
     fn prop_positive(
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
