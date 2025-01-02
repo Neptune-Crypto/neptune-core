@@ -426,7 +426,7 @@ mod wallet_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
@@ -1215,7 +1215,7 @@ mod wallet_tests {
             .unwrap();
 
         let guesser_fraction = 0f64;
-        let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction(
+        let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
             &alice
                 .global_state_lock
                 .lock_guard()
@@ -1396,7 +1396,7 @@ mod wallet_tests {
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
         let guesser_fraction = 0f64;
-        let (cbtx, _cb_expected) = make_coinbase_transaction(
+        let (cbtx, _cb_expected) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
                 .await

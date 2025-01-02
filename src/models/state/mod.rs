@@ -1507,7 +1507,7 @@ mod global_state_tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
@@ -2205,7 +2205,7 @@ mod global_state_tests {
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction(
+        let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction_from_state(
             &genesis_block,
             &premine_receiver,
             guesser_fraction,
@@ -2492,7 +2492,7 @@ mod global_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
-        let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction(
+        let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction_from_state(
             &premine_receiver
                 .global_state_lock
                 .lock_guard()
@@ -2559,7 +2559,7 @@ mod global_state_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
         let guesser_fraction = 0f64;
-        let (cb, _) = make_coinbase_transaction(
+        let (cb, _) = make_coinbase_transaction_from_state(
             &genesis_block,
             &global_state_lock,
             guesser_fraction,
@@ -2612,7 +2612,7 @@ mod global_state_tests {
         ) -> Block {
             let genesis_block = Block::genesis_block(global_state_lock.cli().network);
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
-            let (cb, _) = make_coinbase_transaction(
+            let (cb, _) = make_coinbase_transaction_from_state(
                 &genesis_block,
                 global_state_lock,
                 guesser_fraction,

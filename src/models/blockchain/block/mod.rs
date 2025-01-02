@@ -273,6 +273,10 @@ impl Block {
             ),
             "Transaction proof must be valid to generate a block"
         );
+        assert!(
+            transaction.kernel.merge_bit,
+            "Merge-bit must be set in transactions before they can be included in blocks."
+        );
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
@@ -1026,7 +1030,7 @@ mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -1237,7 +1241,7 @@ mod block_tests {
                 mock_genesis_global_state(network, 0, wallet, cli_args::Args::default()).await;
 
             let guesser_fraction = 0f64;
-            let (block_tx, _expected_utxo) = make_coinbase_transaction(
+            let (block_tx, _expected_utxo) = make_coinbase_transaction_from_state(
                 &genesis_block,
                 &genesis_state,
                 guesser_fraction,
