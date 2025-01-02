@@ -8,6 +8,8 @@ use block_header::MINIMUM_BLOCK_TIME;
 use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
+use num_traits::Zero;
+use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -24,12 +26,16 @@ use tracing::*;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::mine_loop::prover_job::ProverJobSettings;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -38,6 +44,7 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -510,9 +517,10 @@ pub(crate) async fn create_block_transaction(
     )
     .await?;
 
+    let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        predecessor_block.mutator_set_accumulator_after().hash()
+        predecessor_block_ms.hash()
     );
 
     let mut rng: StdRng =
@@ -522,7 +530,7 @@ pub(crate) async fn create_block_transaction(
     // TODO: Change this const to be defined through CLI arguments.
     const MAX_NUM_TXS_TO_MERGE: usize = 7;
     let only_merge_single_proofs = true;
-    let transactions_to_include = global_state_lock
+    let mut transactions_to_include = global_state_lock
         .lock_guard()
         .await
         .mempool
@@ -532,10 +540,39 @@ pub(crate) async fn create_block_transaction(
             only_merge_single_proofs,
         );
 
+    let vm_job_queue = global_state_lock.vm_job_queue();
+    let proof_job_options = TritonVmProofJobOptions {
+        job_priority: TritonVmJobPriority::High,
+        job_settings: ProverJobSettings {
+            max_log2_padded_height_for_proofs: global_state_lock
+                .cli()
+                .max_log2_padded_height_for_proofs,
+        },
+    };
+    if transactions_to_include.is_empty() {
+        // create the nop-gobbler and merge into the coinbase transaction to
+        // set the merge bit and allow the tx to be included in a block.
+        let nop_gobbler = TransactionDetails::fee_gobbler(
+            NeptuneCoins::zero(),
+            rng.gen(),
+            predecessor_block_ms,
+            timestamp,
+            UtxoNotifyMethod::None,
+        );
+        let nop_gobbler = PrimitiveWitness::from_transaction_details(nop_gobbler);
+        let nop_gobbler_proof =
+            SingleProof::produce(&nop_gobbler, vm_job_queue, proof_job_options).await?;
+        let nop_gobbler = Transaction {
+            kernel: nop_gobbler.kernel,
+            proof: TransactionProof::SingleProof(nop_gobbler_proof),
+        };
+
+        transactions_to_include = vec![nop_gobbler];
+    }
+
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
     let mut block_transaction = coinbase_transaction;
-    let vm_job_queue = global_state_lock.vm_job_queue();
     for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
         info!(
             "Merging transaction {} / {}",
@@ -547,11 +584,7 @@ pub(crate) async fn create_block_transaction(
             transaction_to_include,
             rng.gen(),
             vm_job_queue,
-            (
-                TritonVmJobPriority::High,
-                global_state_lock.cli().max_log2_padded_height_for_proofs,
-            )
-                .into(),
+            proof_job_options,
         )
         .await
         .expect("Must be able to merge transactions in mining context");
