@@ -19,6 +19,7 @@ use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
@@ -585,6 +586,10 @@ pub(crate) async fn mine(
 
         let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
         let is_connected = global_state_lock.lock(|s| !s.net.peer_map.is_empty()).await;
+        if !is_connected {
+            warn!("Not mining because client has no connections");
+            sleep(Duration::from_secs(2)).await;
+        }
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
