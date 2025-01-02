@@ -1146,15 +1146,9 @@ pub(crate) mod mine_loop_tests {
                 "Mempool must be empty at start of loop"
             );
             let (transaction_empty_mempool, _coinbase_utxo_info) = {
-                make_coinbase_transaction_from_state(
-                    &genesis_block,
-                    &alice,
-                    guesser_fee_fraction,
-                    now,
-                    TxProvingCapability::SingleProof,
-                )
-                .await
-                .unwrap()
+                create_block_transaction(&genesis_block, &alice, now, guesser_fee_fraction)
+                    .await
+                    .unwrap()
             };
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
