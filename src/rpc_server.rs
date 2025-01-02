@@ -2700,6 +2700,47 @@ mod rpc_server_tests {
     mod send_tests {
         use super::*;
 
+        #[traced_test]
+        #[tokio::test]
+        async fn send_to_many_n_outputs() {
+            let mut rng = StdRng::seed_from_u64(1815);
+            let network = Network::Main;
+            let rpc_server = test_rpc_server(
+                network,
+                WalletSecret::new_pseudorandom(rng.gen()),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
+            let ctx = context::current();
+            let timestamp = network.launch_date() + Timestamp::days(1);
+            let own_address = rpc_server
+                .clone()
+                .next_receiving_address(ctx, KeyType::Generation)
+                .await;
+            let elem = (own_address.clone(), NeptuneCoins::zero());
+            let outputs = std::iter::repeat(elem);
+            let fee = NeptuneCoins::zero();
+
+            for i in 0..5 {
+                let result = rpc_server
+                    .clone()
+                    .send_to_many_inner(
+                        ctx,
+                        outputs.clone().take(i).collect(),
+                        (
+                            UtxoNotificationMedium::OffChain,
+                            UtxoNotificationMedium::OffChain,
+                        ),
+                        fee,
+                        timestamp,
+                        TxProvingCapability::PrimitiveWitness,
+                    )
+                    .await;
+                assert!(result.is_ok());
+            }
+        }
+
         /// sends a tx with two outputs: one self, one external, for each key type.
         #[traced_test]
         #[tokio::test]
