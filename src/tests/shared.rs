@@ -50,7 +50,6 @@ use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::create_block_transaction_stateless;
-use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -86,7 +85,6 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -867,23 +865,16 @@ pub(crate) async fn valid_successor_for_tests(
 ///
 /// The block will be valid both in terms of PoW and block proof and will pass
 /// the Block::is_valid() function.
-pub(crate) async fn valid_block_for_tests(
-    state_lock: &GlobalStateLock,
-    timestamp: Timestamp,
-    seed: [u8; 32],
-    guesser_fraction: f64,
-) -> Block {
+pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u8; 32]) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    let (cb, _) = make_coinbase_transaction_from_state(
+    let block = valid_successor_for_tests(
         &current_tip,
-        state_lock,
-        guesser_fraction,
-        timestamp,
-        TxProvingCapability::SingleProof,
+        current_tip.header().timestamp + Timestamp::hours(1),
+        seed,
     )
-    .await
-    .unwrap();
-    valid_block_from_tx_for_tests(&current_tip, cb, seed).await
+    .await;
+
+    block
 }
 
 /// Create a deterministic sequence of valid blocks.
