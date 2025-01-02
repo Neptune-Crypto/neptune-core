@@ -120,42 +120,81 @@ impl TransactionOutput {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 enum Command {
     /// Dump shell completions.
     Completions,
 
     /******** READ STATE ********/
+    /// retrieve network that neptune-core is running on
     Network,
+
+    /// retrieve address for peers to contact this neptune-core node
     OwnListenAddressForPeers,
+
+    /// retrieve instance-id of this neptune-core node
     OwnInstanceId,
+
+    /// retrieve current block height
     BlockHeight,
+
+    /// retrieve information about a block
     BlockInfo {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+
+    /// retrieve block digests for a given block height
     BlockDigestsByHeight {
         height: u64,
     },
+
+    /// retrieve confirmations
     Confirmations,
+
+    /// retrieve info about peers
     PeerInfo,
+
+    /// retrieve list of punished peers
     AllPunishedPeers,
+
+    /// retrieve digest/hash of newest block
     TipDigest,
     LatestTipDigests {
         n: usize,
     },
+
+    /// retrieve digests of newest n blocks
     TipHeader,
+
+    /// retrieve block-header of any block
     Header {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+
+    /// retrieve confirmed balance
     SyncedBalance,
+
+    /// retrieve unconfirmed balance (includes unconfirmed transactions)
     SyncedBalanceUnconfirmed,
+
+    /// retrieve wallet status information
     WalletStatus,
+
+    /// retrieves number of utxos the wallet expects to receive.
     NumExpectedUtxos,
-    OwnReceivingAddress,
+
+    /// retrieve next unused receiving address
+    NextReceivingAddress,
+
+    /// list known coins
     ListCoins,
+
+    /// retrieve count of transactions in the mempool
     MempoolTxCount,
+
+    /// retrieve size of mempool in bytes (in RAM)
     MempoolSize,
 
     /******** BLOCKCHAIN STATISTICS ********/
@@ -196,11 +235,17 @@ enum Command {
     },
 
     /******** CHANGE STATE ********/
+    /// shutdown neptune-core
     Shutdown,
+
+    /// clear all peer standings
     ClearAllStandings,
+
+    /// clear standings for peer with a given IP
     ClearStandingByIp {
         ip: IpAddr,
     },
+
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
         #[clap(subcommand)]
@@ -210,9 +255,16 @@ enum Command {
         /// mined.
         max_search_depth: Option<u64>,
     },
+
+    /// send a payment to a single recipient
     Send {
+        /// recipient's address
         address: String,
+
+        /// amount to send
         amount: NeptuneCoins,
+
+        /// transaction fee
         fee: NeptuneCoins,
 
         /// local tag for identifying a receiver
@@ -220,36 +272,68 @@ enum Command {
         notify_self: UtxoNotificationMedium,
         notify_other: UtxoNotificationMedium,
     },
+
+    /// send a payment to one or more recipients
     SendToMany {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
         fee: NeptuneCoins,
     },
+
+    /// pause mining
     PauseMiner,
+
+    /// resume mining
     RestartMiner,
+
+    /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
-    /******** WALLET ********/
+    /******** WALLET -- offline actions ********/
+    /// generate a new wallet
     GenerateWallet {
-        #[clap(long, default_value_t=Network::default())]
+        #[clap(long, default_value_t)]
         network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
     },
+
+    /// displays path to wallet secrets file
     WhichWallet {
-        #[clap(long, default_value_t=Network::default())]
+        #[clap(long, default_value_t)]
         network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
     },
+
+    /// export mnemonic seed phrase
     ExportSeedPhrase {
-        #[clap(long, default_value_t=Network::default())]
+        #[clap(long, default_value_t)]
         network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
     },
+
+    /// import mnemonic seed phrase
     ImportSeedPhrase {
-        #[clap(long, default_value_t=Network::default())]
+        #[clap(long, default_value_t)]
         network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
     },
 }
 
-#[derive(Debug, Parser)]
+/// represents top-level cli args
+#[derive(Debug, Clone, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
     /// Sets the server address to connect to.
@@ -258,9 +342,6 @@ struct Config {
 
     #[clap(subcommand)]
     command: Command,
-
-    #[structopt(long, short, default_value = "alpha")]
-    pub network: Network,
 }
 
 #[tokio::main]
@@ -277,30 +358,25 @@ async fn main() -> Result<()> {
                 bail!("Unknown shell.  Shell completions not available.")
             }
         }
-        Command::WhichWallet { network } => {
-            // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+        Command::WhichWallet { network, data_dir } => {
+            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                println!("No wallet file found at {}.", wallet_file.display());
+                bail!("No wallet file found at {}.", wallet_file.display());
             } else {
                 println!("{}", wallet_file.display());
             }
             return Ok(());
         }
-        Command::GenerateWallet { network } => {
-            // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+        Command::GenerateWallet { network, data_dir } => {
+            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_dir = data_dir.wallet_directory_path();
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let (_, secret_file_paths) =
-                WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
+            let (_, secret_file_paths) = WalletSecret::read_from_file_or_create(&wallet_dir)?;
 
             println!(
                 "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
@@ -314,19 +390,16 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ImportSeedPhrase { network } => {
-            // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
-            let wallet_dir = data_dir.wallet_directory_path();
+        Command::ImportSeedPhrase { network, data_dir } => {
+            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists,
             if wallet_file.exists() {
-                println!(
+                bail!(
                     "Cannot import seed phrase; wallet file {} already exists. Move it to another location (or remove it) to import a seed phrase.",
                     wallet_file.display()
                 );
-                return Ok(());
             }
 
             // read seed phrase from user input
@@ -358,8 +431,7 @@ async fn main() -> Result<()> {
             }
             let wallet_secret = match WalletSecret::from_phrase(&phrase) {
                 Err(_) => {
-                    println!("Invalid seed phrase. Please try again.");
-                    return Ok(());
+                    bail!("Invalid seed phrase.");
                 }
                 Ok(ws) => ws,
             };
@@ -369,9 +441,7 @@ async fn main() -> Result<()> {
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
             match wallet_secret.save_to_disk(&wallet_file) {
                 Err(e) => {
-                    println!("Could not save imported wallet to disk.");
-                    println!("Error:");
-                    println!("{e}");
+                    bail!("Could not save imported wallet to disk. {e}");
                 }
                 Ok(_) => {
                     println!("Success.");
@@ -380,19 +450,17 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ExportSeedPhrase { network } => {
+        Command::ExportSeedPhrase { network, data_dir } => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
-            let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                println!(
-                    "Cannot export seed phrase because there is no wallet.dat file to export from."
+                bail!(
+                    concat!("Cannot export seed phrase because there is no wallet.dat file to export from.\n",
+                    "Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
-                println!("Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.");
-                return Ok(());
             }
             let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
                 Err(e) => {
@@ -530,11 +598,12 @@ async fn main() -> Result<()> {
             let num = client.num_expected_utxos(ctx).await?;
             println!("Found a total of {num} expected UTXOs in the database");
         }
-        Command::OwnReceivingAddress => {
+        Command::NextReceivingAddress => {
+            let network = client.network(ctx).await?;
             let rec_addr = client
                 .next_receiving_address(ctx, KeyType::Generation)
                 .await?;
-            println!("{}", rec_addr.to_display_bech32m(args.network).unwrap())
+            println!("{}", rec_addr.to_display_bech32m(network).unwrap())
         }
         Command::MempoolTxCount => {
             let count: usize = client.mempool_tx_count(ctx).await?;
@@ -725,8 +794,8 @@ async fn main() -> Result<()> {
             notify_other,
         } => {
             // Parse on client
-            let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
             let network = client.network(ctx).await?;
+            let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
             let root_dir = DataDirectory::get(None, network)?;
 
             let resp = client
@@ -757,9 +826,10 @@ async fn main() -> Result<()> {
             )?
         }
         Command::SendToMany { outputs, fee } => {
+            let network = client.network(ctx).await?;
             let parsed_outputs = outputs
                 .into_iter()
-                .map(|o| o.to_receiving_address_amount_tuple(args.network))
+                .map(|o| o.to_receiving_address_amount_tuple(network))
                 .collect::<Result<Vec<_>>>()?;
 
             let res = client
