@@ -208,7 +208,6 @@ where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
     info!("Established incoming TCP connection with {peer_address}");
-
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
     let mut peer: tokio_serde::Framed<
@@ -217,6 +216,19 @@ where
         PeerMessage,
         Bincode<PeerMessage, PeerMessage>,
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+
+    // Always disconnecting longest lived peer if node is running in bootstrap mode
+    if state.cli().bootstrap {
+        let global_state_lock_clone = state.clone();
+        let global_state = global_state_lock_clone.lock_guard().await;
+
+        if global_state.net.peer_map.len() < (state.cli().max_num_peers - 1) as usize {
+            peer_task_to_main_tx
+                .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
+                .await?;
+            info!("Bootsrap reached max peers, disconnecting longest lived peer");
+        }
+    }
 
     // Complete Neptune handshake
     let (peer_handshake_data, acceptance_code) = match peer.try_next().await? {
