@@ -273,6 +273,10 @@ impl Block {
             ),
             "Transaction proof must be valid to generate a block"
         );
+        assert!(
+            transaction.kernel.merge_bit,
+            "Merge-bit must be set in transactions before they can be included in blocks."
+        );
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
@@ -450,6 +454,7 @@ impl Block {
             public_announcements: vec![],
             coinbase: Some(total_premine_amount),
             mutator_set_hash: MutatorSetAccumulator::default().hash(),
+            merge_bit: false,
         }
         .into_kernel();
 
@@ -1025,7 +1030,6 @@ mod block_tests {
     use crate::config_models::network::Network;
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::NeptuneLevelDb;
-    use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -1221,9 +1225,11 @@ mod block_tests {
     }
 
     mod block_is_valid {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
         use super::*;
-        use crate::config_models::cli_args;
-        use crate::job_queue::triton_vm::TritonVmJobPriority;
+        use crate::tests::shared::valid_successor_for_tests;
 
         #[traced_test]
         #[tokio::test]
@@ -1231,31 +1237,9 @@ mod block_tests {
             let network = Network::Main;
             let genesis_block = Block::genesis_block(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
-            let wallet = WalletSecret::devnet_wallet();
-            let genesis_state =
-                mock_genesis_global_state(network, 0, wallet, cli_args::Args::default()).await;
+            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            let guesser_fraction = 0f64;
-            let (block_tx, _expected_utxo) = make_coinbase_transaction(
-                &genesis_block,
-                &genesis_state,
-                guesser_fraction,
-                now,
-                TxProvingCapability::SingleProof,
-            )
-            .await
-            .unwrap();
-            let mut block1 = Block::make_block_template_with_valid_proof(
-                &genesis_block,
-                block_tx,
-                now,
-                Digest::default(),
-                None,
-                &TritonVmJobQueue::dummy(),
-                TritonVmJobPriority::default().into(),
-            )
-            .await
-            .unwrap();
+            let mut block1 = valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
             // Set block timestamp 1 hour in the future.  (is valid)
             let future_time1 = now + Timestamp::hours(1);

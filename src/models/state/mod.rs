@@ -1507,10 +1507,11 @@ mod global_state_tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::valid_successor_for_tests;
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -2205,7 +2206,7 @@ mod global_state_tests {
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction(
+        let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction_from_state(
             &genesis_block,
             &premine_receiver,
             guesser_fraction,
@@ -2492,7 +2493,7 @@ mod global_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
-        let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction(
+        let (coinbase_transaction2, _expected_utxo) = make_coinbase_transaction_from_state(
             &premine_receiver
                 .global_state_lock
                 .lock_guard()
@@ -2558,29 +2559,9 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let guesser_fraction = 0f64;
-        let (cb, _) = make_coinbase_transaction(
-            &genesis_block,
-            &global_state_lock,
-            guesser_fraction,
-            now,
-            TxProvingCapability::SingleProof,
-        )
-        .await
-        .unwrap();
-        let block_1 = Block::compose(
-            &genesis_block,
-            cb,
-            now,
-            Digest::default(),
-            None,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
+        let block1 = valid_successor_for_tests(&genesis_block, now, Default::default()).await;
 
-        global_state_lock.set_new_tip(block_1).await.unwrap();
+        global_state_lock.set_new_tip(block1).await.unwrap();
 
         assert!(
             global_state_lock
@@ -2612,7 +2593,7 @@ mod global_state_tests {
         ) -> Block {
             let genesis_block = Block::genesis_block(global_state_lock.cli().network);
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
-            let (cb, _) = make_coinbase_transaction(
+            let (cb, _) = make_coinbase_transaction_from_state(
                 &genesis_block,
                 global_state_lock,
                 guesser_fraction,
@@ -3027,6 +3008,7 @@ mod global_state_tests {
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {
         use super::*;
+        use crate::mine_loop::create_block_transaction_stateless;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss
@@ -3162,6 +3144,8 @@ mod global_state_tests {
             };
 
             // in alice wallet: send pre-mined funds to bob
+            let coinbase_spending_key =
+                GenerationReceivingAddress::derive_from_seed(rng.gen()).into();
             let block_1 = {
                 let vm_job_queue = alice_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
@@ -3216,9 +3200,21 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
+                let (block_1_tx, _) = create_block_transaction_stateless(
+                    &genesis_block,
+                    coinbase_spending_key,
+                    rng.gen(),
+                    rng.gen(),
+                    seven_months_post_launch,
+                    0.5,
+                    &TritonVmJobQueue::dummy(),
+                    vec![alice_to_bob_tx],
+                )
+                .await
+                .unwrap();
                 let block_1 = Block::compose(
                     &genesis_block,
-                    alice_to_bob_tx,
+                    block_1_tx,
                     seven_months_post_launch,
                     Digest::default(),
                     None,

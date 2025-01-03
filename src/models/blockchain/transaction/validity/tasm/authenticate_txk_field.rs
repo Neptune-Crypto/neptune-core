@@ -108,6 +108,13 @@ mod tests {
             // for all transaction fields in reverse order, accumulate offset and record size
             let mut offset = 0;
 
+            if let Some(static_length) = bool::static_length() {
+                field_offsets_and_sizes.push((offset, static_length));
+                offset += static_length;
+            } else {
+                unreachable!("bool should have static length 1");
+            }
+
             // pub mutator_set_hash: Digest,
             if let Some(static_length) = Digest::static_length() {
                 field_offsets_and_sizes.push((offset, static_length));

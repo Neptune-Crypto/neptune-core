@@ -49,7 +49,7 @@ use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::mine_loop::make_coinbase_transaction;
+use crate::mine_loop::create_block_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -85,15 +85,12 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -514,6 +511,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
             timestamp,
             coinbase: None,
             mutator_set_hash,
+            merge_bit: false,
         }
         .into_kernel(),
         proof: TransactionProof::invalid(),
@@ -560,6 +558,7 @@ pub fn make_mock_transaction_with_wallet(
         timestamp,
         coinbase: None,
         mutator_set_hash: random(),
+        merge_bit: false,
     }
     .into_kernel();
 
@@ -680,6 +679,7 @@ pub(crate) fn make_mock_block(
         timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_block.mutator_set_accumulator_after().hash(),
+        merge_bit: false,
     }
     .into_kernel();
     let tx = Transaction {
@@ -844,47 +844,37 @@ pub(crate) async fn valid_successor_for_tests(
     timestamp: Timestamp,
     seed: [u8; 32],
 ) -> Block {
-    let tx_details = TransactionDetails::new_without_coinbase(
-        vec![],
-        TxOutputList::default(),
-        NeptuneCoins::zero(),
+    let mut rng = StdRng::from_seed(seed);
+    let (block_tx, _) = create_block_transaction_stateless(
+        predecessor,
+        GenerationReceivingAddress::derive_from_seed(rng.gen()).into(),
+        rng.gen(),
+        rng.gen(),
         timestamp,
-        predecessor.mutator_set_accumulator_after().clone(),
-    )
-    .unwrap();
-    let tx = GlobalState::create_raw_transaction(
-        tx_details,
-        TxProvingCapability::SingleProof,
+        0.5f64,
         &TritonVmJobQueue::dummy(),
-        TritonVmJobPriority::default().into(),
+        vec![],
     )
     .await
     .unwrap();
 
-    valid_block_from_tx_for_tests(predecessor, tx, seed).await
+    valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
 }
 
 /// Create a valid block with coinbase going to self. For testing purposes.
 ///
 /// The block will be valid both in terms of PoW and block proof and will pass
 /// the Block::is_valid() function.
-pub(crate) async fn valid_block_for_tests(
-    state_lock: &GlobalStateLock,
-    timestamp: Timestamp,
-    seed: [u8; 32],
-    guesser_fraction: f64,
-) -> Block {
+pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u8; 32]) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    let (cb, _) = make_coinbase_transaction(
+    let block = valid_successor_for_tests(
         &current_tip,
-        state_lock,
-        guesser_fraction,
-        timestamp,
-        TxProvingCapability::SingleProof,
+        current_tip.header().timestamp + Timestamp::hours(1),
+        seed,
     )
-    .await
-    .unwrap();
-    valid_block_from_tx_for_tests(&current_tip, cb, seed).await
+    .await;
+
+    block
 }
 
 /// Create a deterministic sequence of valid blocks.

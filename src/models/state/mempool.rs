@@ -810,7 +810,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -1202,7 +1202,7 @@ mod tests {
 
         // Create next block which includes Bob's, but not Alice's, transaction.
         let guesser_fraction = 0f64;
-        let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction(
+        let (coinbase_transaction, _expected_utxo) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
                 .await
@@ -1282,7 +1282,7 @@ mod tests {
 
         tx_by_alice_updated = mempool.get_transactions_for_block(usize::MAX, None, true)[0].clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
-        let (cbtx, _eutxo) = make_coinbase_transaction(
+        let (cbtx, _eutxo) = make_coinbase_transaction_from_state(
             &alice
                 .global_state_lock
                 .lock_guard()

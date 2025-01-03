@@ -8,6 +8,8 @@ use block_header::MINIMUM_BLOCK_TIME;
 use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
+use num_traits::Zero;
+use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -24,20 +26,27 @@ use tracing::*;
 use twenty_first::math::digest::Digest;
 
 use crate::job_queue::triton_vm::TritonVmJobPriority;
+use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
+use crate::models::state::wallet::transaction_output::TxOutputList;
+use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -338,35 +347,18 @@ fn guess_nonce_iteration(
     }
 }
 
-/// Produce a transaction that allocates the given fraction of the block
-/// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
-pub(crate) async fn make_coinbase_transaction(
+/// Make a coinbase transaction rewarding the composer identified by receiving
+/// address with the block subsidy minus the guesser fee. The rest, including
+/// transaction fees, goes to the guesser.
+pub(crate) async fn make_coinbase_transaction_stateless(
     latest_block: &Block,
-    global_state_lock: &GlobalStateLock,
+    receiving_address: ReceivingAddress,
+    sender_randomness: Digest,
     guesser_block_subsidy_fraction: f64,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
-) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-    // note: it is Ok to always use the same key here because:
-    //  1. if we find a block, the utxo will go to our wallet
-    //     and notification occurs offchain, so there is no privacy issue.
-    //  2. if we were to derive a new addr for each block then we would
-    //     have large gaps since an address only receives funds when
-    //     we actually win the mining lottery.
-    //  3. also this way we do not have to modify global/wallet state.
-
-    // It's important to use the input `latest_block` here instead of
-    // reading it from state, since that could, because of a race condition
-    // lead to an inconsistent witness higher up in the call graph. This is
-    // done to avoid holding a read-lock throughout this function.
-
-    let coinbase_recipient_spending_key = global_state_lock
-        .lock_guard()
-        .await
-        .wallet_state
-        .wallet_secret
-        .nth_generation_spending_key(0);
-    let receiving_address = coinbase_recipient_spending_key.to_address();
+    vm_job_queue: &JobQueue<TritonVmJobPriority>,
+) -> Result<(Transaction, TxOutputList)> {
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
@@ -383,9 +375,6 @@ pub(crate) async fn make_coinbase_transaction(
 
     info!("Setting guesser_fee to {guesser_fee}.");
 
-    // There is no reason to put coinbase UTXO notifications on chain, because:
-    // Both sender randomness and receiver preimage are derived
-    // deterministically from the wallet's seed.
     let Some(amount_to_composer) = coinbase_amount.checked_sub(&guesser_fee) else {
         bail!(
             "Guesser fee may not exceed coinbase amount. coinbase_amount: {}; guesser_fee: {}.",
@@ -405,18 +394,11 @@ pub(crate) async fn make_coinbase_transaction(
         .checked_sub(&liquid_composer_amount)
         .expect("Amount to composer must be larger than liquid amount to composer.");
 
-    let sender_randomness: Digest = global_state_lock
-        .lock_guard()
-        .await
-        .wallet_state
-        .wallet_secret
-        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
-
     let owned = true;
     let liquid_coinbase_output = TxOutput::offchain_native_currency(
         liquid_composer_amount,
         sender_randomness,
-        receiving_address.into(),
+        receiving_address.clone(),
         owned,
     );
 
@@ -425,18 +407,19 @@ pub(crate) async fn make_coinbase_transaction(
     let timelocked_coinbase_output = TxOutput::offchain_native_currency(
         timelocked_composer_amount,
         sender_randomness,
-        receiving_address.into(),
+        receiving_address,
         owned,
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
 
+    let composer_outputs: TxOutputList = vec![
+        liquid_coinbase_output.clone(),
+        timelocked_coinbase_output.clone(),
+    ]
+    .into();
     let transaction_details = TransactionDetails::new_with_coinbase(
         vec![],
-        vec![
-            liquid_coinbase_output.clone(),
-            timelocked_coinbase_output.clone(),
-        ]
-        .into(),
+        composer_outputs.clone(),
         coinbase_amount,
         guesser_fee,
         timestamp,
@@ -447,45 +430,95 @@ pub(crate) async fn make_coinbase_transaction(
  and tx must be balanced because the one output receives exactly the coinbase amount",
     );
 
-    // 2. Create the transaction
-    // The transaction is supported by a PrimitiveWitness. Upgrading this proof
-    // must be done by the caller.
-
-    // It's important to not hold any locks (not even read-locks) here. Since
-    // we, depending on the specified proof quality, might use *very* long time
-    // here. Read: minutes.
     info!("Start: generate single proof for coinbase transaction");
-    let vm_job_queue = global_state_lock.vm_job_queue();
     let transaction = GlobalState::create_raw_transaction(
         transaction_details,
         proving_power,
         vm_job_queue,
-        (
-            TritonVmJobPriority::High,
-            global_state_lock.cli().max_log2_padded_height_for_proofs,
-        )
-            .into(),
+        TritonVmProofJobOptions {
+            job_priority: TritonVmJobPriority::High,
+            job_settings: Default::default(),
+        },
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
 
-    let composer_utxo_not_timelocked = ExpectedUtxo::new(
-        liquid_coinbase_output.utxo(),
-        liquid_coinbase_output.sender_randomness(),
-        coinbase_recipient_spending_key.privacy_preimage(),
-        UtxoNotifier::OwnMinerComposeBlock,
-    );
-    let composer_utxo_timelocked = ExpectedUtxo::new(
-        timelocked_coinbase_output.utxo(),
-        timelocked_coinbase_output.sender_randomness(),
-        coinbase_recipient_spending_key.privacy_preimage(),
-        UtxoNotifier::OwnMinerComposeBlock,
-    );
+    Ok((transaction, composer_outputs))
+}
 
-    Ok((
-        transaction,
-        vec![composer_utxo_not_timelocked, composer_utxo_timelocked],
-    ))
+/// Create a transaction with a coinbase for the indicated address.
+///
+/// If no mempool transactions are included, a nop transaction will be merged in
+/// such that the resulting transaction is valid for block inclusion.
+pub(crate) async fn create_block_transaction_stateless(
+    predecessor_block: &Block,
+    receiving_address: ReceivingAddress,
+    sender_randomness_for_composer: Digest,
+    shuffle_seed: [u8; 32],
+    timestamp: Timestamp,
+    guesser_fee_fraction: f64,
+    vm_job_queue: &JobQueue<TritonVmJobPriority>,
+    mut selected_mempool_txs: Vec<Transaction>,
+) -> Result<(Transaction, TxOutputList)> {
+    // A coinbase transaction implies mining. So you *must*
+    // be able to create a SingleProof.
+    let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
+        predecessor_block,
+        receiving_address,
+        sender_randomness_for_composer,
+        guesser_fee_fraction,
+        timestamp,
+        TxProvingCapability::SingleProof,
+        vm_job_queue,
+    )
+    .await?;
+
+    let mut rng = StdRng::from_seed(shuffle_seed);
+
+    let mut block_transaction = coinbase_transaction;
+    if selected_mempool_txs.is_empty() {
+        // create the nop-gobbler and merge into the coinbase transaction to
+        // set the merge bit to allow the tx to be included in a block.
+        let nop_gobbler = TransactionDetails::fee_gobbler(
+            NeptuneCoins::zero(),
+            rng.gen(),
+            predecessor_block.mutator_set_accumulator_after(),
+            timestamp,
+            UtxoNotifyMethod::None,
+        );
+        let nop_gobbler = PrimitiveWitness::from_transaction_details(nop_gobbler);
+        let proof_job_options = TritonVmProofJobOptions {
+            job_priority: TritonVmJobPriority::High,
+            job_settings: Default::default(),
+        };
+        let nop_gobbler_proof =
+            SingleProof::produce(&nop_gobbler, vm_job_queue, proof_job_options).await?;
+        let nop_gobbler = Transaction {
+            kernel: nop_gobbler.kernel,
+            proof: TransactionProof::SingleProof(nop_gobbler_proof),
+        };
+
+        selected_mempool_txs = vec![nop_gobbler];
+    }
+
+    let num_merges = selected_mempool_txs.len();
+    for (i, tx_to_include) in selected_mempool_txs.into_iter().enumerate() {
+        info!("Merging transaction {} / {}", i + 1, num_merges);
+        block_transaction = Transaction::merge_with(
+            block_transaction,
+            tx_to_include,
+            rng.gen(),
+            vm_job_queue,
+            TritonVmProofJobOptions {
+                job_priority: TritonVmJobPriority::High,
+                job_settings: Default::default(),
+            },
+        )
+        .await
+        .expect("Must be able to merge transactions in mining context");
+    }
+
+    Ok((block_transaction, composer_txos))
 }
 
 /// Create the transaction that goes into the block template. The transaction is
@@ -499,20 +532,10 @@ pub(crate) async fn create_block_transaction(
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
-    // A coinbase transaction implies mining. So you *must*
-    // be able to create a SingleProof.
-    let (coinbase_transaction, composer_utxos) = make_coinbase_transaction(
-        predecessor_block,
-        global_state_lock,
-        guesser_fee_fraction,
-        timestamp,
-        TxProvingCapability::SingleProof,
-    )
-    .await?;
-
+    let predecessor_block_ms = predecessor_block.mutator_set_accumulator_after();
     debug!(
         "Creating block transaction with mutator set hash: {}",
-        predecessor_block.mutator_set_accumulator_after().hash()
+        predecessor_block_ms.hash()
     );
 
     let mut rng: StdRng =
@@ -522,7 +545,7 @@ pub(crate) async fn create_block_transaction(
     // TODO: Change this const to be defined through CLI arguments.
     const MAX_NUM_TXS_TO_MERGE: usize = 7;
     let only_merge_single_proofs = true;
-    let transactions_to_include = global_state_lock
+    let mempool_txs_to_mine = global_state_lock
         .lock_guard()
         .await
         .mempool
@@ -532,32 +555,47 @@ pub(crate) async fn create_block_transaction(
             only_merge_single_proofs,
         );
 
-    // Merge incoming transactions with the coinbase transaction
-    let num_transactions_to_include = transactions_to_include.len();
-    let mut block_transaction = coinbase_transaction;
-    let vm_job_queue = global_state_lock.vm_job_queue();
-    for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
-        info!(
-            "Merging transaction {} / {}",
-            i + 1,
-            num_transactions_to_include
-        );
-        block_transaction = Transaction::merge_with(
-            block_transaction,
-            transaction_to_include,
-            rng.gen(),
-            vm_job_queue,
-            (
-                TritonVmJobPriority::High,
-                global_state_lock.cli().max_log2_padded_height_for_proofs,
-            )
-                .into(),
-        )
+    let coinbase_recipient_spending_key = global_state_lock
+        .lock_guard()
         .await
-        .expect("Must be able to merge transactions in mining context");
-    }
+        .wallet_state
+        .wallet_secret
+        .nth_generation_spending_key(0);
+    let receiving_address = coinbase_recipient_spending_key.to_address();
+    let next_block_height: BlockHeight = predecessor_block.header().height.next();
+    let sender_randomness_for_composer = global_state_lock
+        .lock_guard()
+        .await
+        .wallet_state
+        .wallet_secret
+        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
+    let vm_job_queue = global_state_lock.vm_job_queue();
 
-    Ok((block_transaction, composer_utxos))
+    let (transaction, composer_txos) = create_block_transaction_stateless(
+        predecessor_block,
+        receiving_address.into(),
+        sender_randomness_for_composer,
+        rng.gen(),
+        timestamp,
+        guesser_fee_fraction,
+        vm_job_queue,
+        mempool_txs_to_mine,
+    )
+    .await?;
+
+    let own_expected_utxos = composer_txos
+        .iter()
+        .map(|txo| {
+            ExpectedUtxo::new(
+                txo.utxo(),
+                txo.sender_randomness(),
+                coinbase_recipient_spending_key.privacy_preimage(),
+                UtxoNotifier::OwnMinerComposeBlock,
+            )
+        })
+        .collect();
+
+    Ok((transaction, own_expected_utxos))
 }
 
 ///
@@ -847,6 +885,69 @@ pub(crate) mod mine_loop_tests {
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::WalletSecret;
 
+    /// Produce a transaction that allocates the given fraction of the block
+    /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
+    pub(crate) async fn make_coinbase_transaction_from_state(
+        latest_block: &Block,
+        global_state_lock: &GlobalStateLock,
+        guesser_block_subsidy_fraction: f64,
+        timestamp: Timestamp,
+        proving_power: TxProvingCapability,
+    ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
+        // note: it is Ok to always use the same key here because:
+        //  1. if we find a block, the utxo will go to our wallet
+        //     and notification occurs offchain, so there is no privacy issue.
+        //  2. if we were to derive a new addr for each block then we would
+        //     have large gaps since an address only receives funds when
+        //     we actually win the mining lottery.
+        //  3. also this way we do not have to modify global/wallet state.
+
+        // It's important to use the input `latest_block` here instead of
+        // reading it from state, since that could, because of a race condition
+        // lead to an inconsistent witness higher up in the call graph. This is
+        // done to avoid holding a read-lock throughout this function.
+
+        let coinbase_recipient_spending_key = global_state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let receiving_address = coinbase_recipient_spending_key.to_address();
+        let next_block_height: BlockHeight = latest_block.header().height.next();
+        let sender_randomness: Digest = global_state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
+        let vm_job_queue = global_state_lock.vm_job_queue();
+        let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
+            latest_block,
+            receiving_address.into(),
+            sender_randomness,
+            guesser_block_subsidy_fraction,
+            timestamp,
+            proving_power,
+            vm_job_queue,
+        )
+        .await?;
+
+        let own_expected_utxos = composer_outputs
+            .iter()
+            .map(|txo| {
+                ExpectedUtxo::new(
+                    txo.utxo(),
+                    txo.sender_randomness(),
+                    coinbase_recipient_spending_key.privacy_preimage(),
+                    UtxoNotifier::OwnMinerComposeBlock,
+                )
+            })
+            .collect();
+
+        Ok((transaction, own_expected_utxos))
+    }
+
     /// Similar to [mine_iteration] function but intended for tests.
     ///
     /// Does *not* update the timestamp of the block and therefore also does not
@@ -961,7 +1062,7 @@ pub(crate) mod mine_loop_tests {
         )
         .await;
         let tick = std::time::SystemTime::now();
-        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction(
+        let (transaction, _coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &genesis_block,
             &global_state_lock,
             0f64,
@@ -1045,15 +1146,9 @@ pub(crate) mod mine_loop_tests {
                 "Mempool must be empty at start of loop"
             );
             let (transaction_empty_mempool, _coinbase_utxo_info) = {
-                make_coinbase_transaction(
-                    &genesis_block,
-                    &alice,
-                    guesser_fee_fraction,
-                    now,
-                    TxProvingCapability::SingleProof,
-                )
-                .await
-                .unwrap()
+                create_block_transaction(&genesis_block, &alice, now, guesser_fee_fraction)
+                    .await
+                    .unwrap()
             };
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
@@ -1200,7 +1295,7 @@ pub(crate) mod mine_loop_tests {
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction(
+        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
             0f64,
@@ -1268,7 +1363,7 @@ pub(crate) mod mine_loop_tests {
         // pretend/simulate that it takes at least 10 seconds to mine the block.
         let ten_seconds_ago = now - Timestamp::seconds(10);
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction(
+        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &tip_block_orig,
             &global_state_lock,
             0f64,
@@ -1548,7 +1643,7 @@ pub(crate) mod mine_loop_tests {
         let genesis_block = Block::genesis_block(network);
         let launch_date = genesis_block.header().timestamp;
 
-        let (transaction, coinbase_utxo_info) = make_coinbase_transaction(
+        let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(
             &genesis_block,
             &global_state_lock,
             0f64,

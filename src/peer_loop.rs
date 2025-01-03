@@ -1799,8 +1799,7 @@ mod peer_loop_tests {
         let genesis_block: Block = Block::genesis_block(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 =
-            valid_block_for_tests(&alice, now, StdRng::seed_from_u64(5550001).gen(), 0.0).await;
+        let block_1 = valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now),
             "Block must be valid for this test to make sense"
@@ -2079,17 +2078,8 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state_lock
-            .lock_guard()
-            .await
-            .chain
-            .archival_state()
-            .get_tip()
-            .await;
 
-        let now = genesis_block.header().timestamp + Timestamp::hours(2);
-        let block_1 = valid_block_for_tests(&state_lock, now, rng.gen(), 0.0).await;
-
+        let block_1 = valid_block_for_tests(&state_lock, rng.gen()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
@@ -2901,13 +2891,9 @@ mod peer_loop_tests {
                 to_main_tx,
                 genesis_block,
             } = genesis_setup(Network::Main).await;
-            let now = genesis_block.header().timestamp + Timestamp::hours(1);
-            let guesser_fraction = 0.5;
             let block1 = valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                now,
                 StdRng::seed_from_u64(5550001).gen(),
-                guesser_fraction,
             )
             .await;
 
@@ -2944,15 +2930,11 @@ mod peer_loop_tests {
                 from_main_rx,
                 mut peer_state,
                 to_main_tx,
-                genesis_block,
+                ..
             } = genesis_setup(Network::Main).await;
-            let now = genesis_block.header().timestamp + Timestamp::hours(1);
-            let guesser_fraction = 0.5;
             let block1 = valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
-                now,
                 StdRng::seed_from_u64(5550001).gen(),
-                guesser_fraction,
             )
             .await;
 

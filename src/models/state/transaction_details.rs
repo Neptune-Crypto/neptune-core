@@ -41,49 +41,52 @@ impl TransactionDetails {
         now: Timestamp,
         notification_method: UtxoNotifyMethod,
     ) -> Self {
-        let mut amount_liquid = gobbled_fee;
-        amount_liquid.div_two();
-        let amount_timelocked = gobbled_fee.checked_sub(&amount_liquid).unwrap();
-
-        let (time_locked_txo, liquid_txo) = match notification_method {
-            UtxoNotifyMethod::OnChain(receiving_address) => (
-                TxOutput::onchain_native_currency(
-                    amount_timelocked,
-                    sender_randomness,
-                    receiving_address.clone(),
-                    true,
-                ),
-                TxOutput::onchain_native_currency(
-                    amount_liquid,
-                    sender_randomness,
-                    receiving_address,
-                    true,
-                )
-                .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
-            ),
-            UtxoNotifyMethod::OffChain(receiving_address) => (
-                TxOutput::offchain_native_currency(
-                    amount_timelocked,
-                    sender_randomness,
-                    receiving_address.clone(),
-                    true,
-                ),
-                TxOutput::offchain_native_currency(
-                    amount_liquid,
-                    sender_randomness,
-                    receiving_address,
-                    true,
-                )
-                .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
-            ),
-            UtxoNotifyMethod::None => {
-                panic!("Cannot produce fee gobbler transaction without UTXO notification")
+        let gobbling_utxos = if gobbled_fee.is_zero() {
+            vec![]
+        } else {
+            let mut amount_liquid = gobbled_fee;
+            amount_liquid.div_two();
+            let amount_timelocked = gobbled_fee.checked_sub(&amount_liquid).unwrap();
+            match notification_method {
+                UtxoNotifyMethod::OnChain(receiving_address) => vec![
+                    TxOutput::onchain_native_currency(
+                        amount_timelocked,
+                        sender_randomness,
+                        receiving_address.clone(),
+                        true,
+                    ),
+                    TxOutput::onchain_native_currency(
+                        amount_liquid,
+                        sender_randomness,
+                        receiving_address,
+                        true,
+                    )
+                    .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
+                ],
+                UtxoNotifyMethod::OffChain(receiving_address) => vec![
+                    TxOutput::offchain_native_currency(
+                        amount_timelocked,
+                        sender_randomness,
+                        receiving_address.clone(),
+                        true,
+                    ),
+                    TxOutput::offchain_native_currency(
+                        amount_liquid,
+                        sender_randomness,
+                        receiving_address,
+                        true,
+                    )
+                    .with_time_lock(now + MINING_REWARD_TIME_LOCK_PERIOD),
+                ],
+                UtxoNotifyMethod::None => {
+                    panic!("Cannot produce fee gobbler transaction without UTXO notification")
+                }
             }
         };
 
         TransactionDetails::new_without_coinbase(
             vec![],
-            vec![time_locked_txo, liquid_txo].into(),
+            gobbling_utxos.into(),
             -gobbled_fee,
             now,
             mutator_set_accumulator,

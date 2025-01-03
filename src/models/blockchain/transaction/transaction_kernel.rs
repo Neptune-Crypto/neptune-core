@@ -37,6 +37,9 @@ pub struct TransactionKernel {
     pub timestamp: Timestamp,
     pub mutator_set_hash: Digest,
 
+    /// Indicates whether the transaction is the result of some merger.
+    pub merge_bit: bool,
+
     // this is only here as a cache for MastHash
     // so that we lazily compute the input sequences at most once.
     #[serde(skip)]
@@ -79,6 +82,7 @@ pub enum TransactionKernelField {
     Coinbase,
     Timestamp,
     MutatorSetHash,
+    MergeBit,
 }
 
 impl HasDiscriminant for TransactionKernelField {
@@ -108,6 +112,8 @@ impl MastHash for TransactionKernel {
 
                 let mutator_set_hash_sequence = self.mutator_set_hash.encode();
 
+                let merge_bit_sequence = self.merge_bit.encode();
+
                 vec![
                     input_utxos_sequence,
                     output_utxos_sequence,
@@ -116,6 +122,7 @@ impl MastHash for TransactionKernel {
                     coinbase_sequence,
                     timestamp_sequence,
                     mutator_set_hash_sequence,
+                    merge_bit_sequence,
                 ]
             })
             .clone() // can we refactor to avoid this clone?
@@ -140,6 +147,7 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
         let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
         let timestamp: Timestamp = u.arbitrary()?;
         let mutator_set_hash: Digest = u.arbitrary()?;
+        let merge_bit: bool = u.arbitrary()?;
 
         let transaction_kernel = TransactionKernelProxy {
             inputs,
@@ -149,6 +157,7 @@ impl<'a> Arbitrary<'a> for TransactionKernel {
             coinbase,
             timestamp,
             mutator_set_hash,
+            merge_bit,
         }
         .into_kernel();
 
@@ -184,6 +193,9 @@ pub struct TransactionKernelProxy {
 
     /// mutator set hash *prior* to updating mutator set with this transaction.
     pub mutator_set_hash: Digest,
+
+    /// Indicates whether the transaction is the result of some merger.
+    pub merge_bit: bool,
 }
 
 impl From<TransactionKernel> for TransactionKernelProxy {
@@ -196,6 +208,7 @@ impl From<TransactionKernel> for TransactionKernelProxy {
             coinbase: k.coinbase,
             timestamp: k.timestamp,
             mutator_set_hash: k.mutator_set_hash,
+            merge_bit: k.merge_bit,
         }
     }
 }
@@ -210,6 +223,7 @@ impl TransactionKernelProxy {
             coinbase: self.coinbase,
             timestamp: self.timestamp,
             mutator_set_hash: self.mutator_set_hash,
+            merge_bit: self.merge_bit,
             mast_sequences: Default::default(),
         }
     }
@@ -231,6 +245,7 @@ pub struct TransactionKernelModifier {
     pub coinbase: Option<Option<NeptuneCoins>>,
     pub timestamp: Option<Timestamp>,
     pub mutator_set_hash: Option<Digest>,
+    pub merge_bit: Option<bool>,
 }
 
 impl TransactionKernelModifier {
@@ -269,6 +284,11 @@ impl TransactionKernelModifier {
         self.mutator_set_hash = Some(mutator_set_hash);
         self
     }
+    /// set merge-bit
+    pub fn merge_bit(mut self, merge_bit: bool) -> Self {
+        self.merge_bit = Some(merge_bit);
+        self
+    }
 
     /// perform move+modify operation.
     ///
@@ -286,6 +306,7 @@ impl TransactionKernelModifier {
             coinbase: self.coinbase.unwrap_or(k.coinbase),
             timestamp: self.timestamp.unwrap_or(k.timestamp),
             mutator_set_hash: self.mutator_set_hash.unwrap_or(k.mutator_set_hash),
+            merge_bit: self.merge_bit.unwrap_or(k.merge_bit),
 
             // we must not copy from original, as the modified
             // one must have a different sequence/hash.
@@ -342,6 +363,7 @@ pub mod transaction_kernel_tests {
         let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
         let timestamp: Timestamp = rng.gen();
         let mutator_set_hash: Digest = rng.gen();
+        let merge_bit: bool = rng.gen();
 
         TransactionKernelProxy {
             inputs,
@@ -351,6 +373,7 @@ pub mod transaction_kernel_tests {
             coinbase,
             timestamp,
             mutator_set_hash,
+            merge_bit,
         }
         .into_kernel()
     }
@@ -425,6 +448,7 @@ pub mod transaction_kernel_tests {
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: rng.gen::<Digest>(),
+            merge_bit: true,
         }
         .into_kernel();
         let encoded = kernel.encode();

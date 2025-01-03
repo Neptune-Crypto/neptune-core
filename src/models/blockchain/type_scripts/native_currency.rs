@@ -1578,7 +1578,7 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]
@@ -1603,7 +1603,7 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
     ) {
@@ -1625,7 +1625,7 @@ pub mod test {
         #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(
             None,
             #_num_outputs,
-            #_num_public_announcements
+            #_num_public_announcements,
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]

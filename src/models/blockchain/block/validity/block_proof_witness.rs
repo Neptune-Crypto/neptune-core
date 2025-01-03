@@ -5,7 +5,6 @@ use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -127,17 +126,22 @@ impl SecretWitness for BlockProofWitness {
             .extend_from_slice(&txkmh.reversed().values());
 
         // add digests for Merkle authentication of tx fee
+        let txk_auth_path = self.block_body.mast_path(BlockBodyField::TransactionKernel);
+        nondeterminism.digests.extend_from_slice(&txk_auth_path);
+
         let fee_auth_path = self
             .block_body
             .transaction_kernel
             .mast_path(TransactionKernelField::Fee);
-        let txk_auth_path = self.block_body.mast_path(BlockBodyField::TransactionKernel);
-        println!("fee_auth_path: {}", fee_auth_path.iter().join("\n"));
-        println!("txk_auth_path: {}", txk_auth_path.iter().join("\n"));
-        let pub_ann_digest = Tip5::hash(&self.block_body.transaction_kernel.public_announcements);
-        println!("pub_ann_digest: {pub_ann_digest}");
         nondeterminism.digests.extend_from_slice(&fee_auth_path);
-        nondeterminism.digests.extend_from_slice(&txk_auth_path);
+
+        let merge_bit_auth_path = self
+            .block_body
+            .transaction_kernel
+            .mast_path(TransactionKernelField::MergeBit);
+        nondeterminism
+            .digests
+            .extend_from_slice(&merge_bit_auth_path);
 
         // modify nodeterminism in whichever way is necessary for verifying STARK proofs
         let stark_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());

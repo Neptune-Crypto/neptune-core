@@ -1164,7 +1164,7 @@ mod archival_state_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::mine_loop::make_coinbase_transaction;
+    use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
@@ -1855,7 +1855,7 @@ mod archival_state_tests {
         println!("Generated transaction for Alice and Bob.");
 
         let guesser_fraction = 0f64;
-        let (cbtx, composer_expected_utxos) = make_coinbase_transaction(
+        let (cbtx, composer_expected_utxos) = make_coinbase_transaction_from_state(
             &premine_rec
                 .global_state_lock
                 .lock_guard()
@@ -2108,7 +2108,7 @@ mod archival_state_tests {
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to premine rec, 3 from Bob to premine rec, and 2 coinbases to premine rec
-        let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction(
+        let (cbtx2, expected_composer_utxos2) = make_coinbase_transaction_from_state(
             &premine_rec
                 .global_state_lock
                 .lock_guard()

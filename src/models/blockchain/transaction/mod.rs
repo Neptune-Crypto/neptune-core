@@ -161,7 +161,8 @@ impl TransactionProof {
     pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
-                primitive_witness.validate().await
+                !primitive_witness.kernel.merge_bit
+                    && primitive_witness.validate().await
                     && primitive_witness.kernel.mast_hash() == kernel_mast_hash
             }
             TransactionProof::SingleProof(single_proof) => {
@@ -282,14 +283,15 @@ impl Transaction {
     }
 
     /// Merge two transactions. Both input transactions must have a valid
-    /// Proof witness for this operation to work.
+    /// Proof witness for this operation to work. The `self` argument can be
+    /// a transaction with a negative fee.
     ///
     /// # Panics
     ///
     /// Panics if the two transactions cannot be merged, if e.g. the mutator
     /// set hashes are not the same, if both transactions have coinbase a
-    /// coinbase UTXO, or if either of the transactions are *not* a single
-    /// proof.
+    /// coinbase UTXO, if either of the transactions are *not* a single
+    /// proof, or if the RHS (`other`) has a negative fee.
     pub(crate) async fn merge_with(
         self,
         other: Transaction,
@@ -483,6 +485,7 @@ mod tests {
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: Digest::default(),
+            merge_bit: false,
         }
         .into_kernel();
         let primitive_witness = PrimitiveWitness {

@@ -1019,6 +1019,8 @@ fn arbitrary_primitive_witness_with_timelocks(
                     counter += 1;
                 }
                 let release_dates = release_dates.clone();
+
+                let merge_bit = false;
                 PrimitiveWitness::arbitrary_primitive_witness_with_timestamp_and(
                     &input_utxos,
                     &input_lock_scripts_and_witnesses,
@@ -1027,6 +1029,7 @@ fn arbitrary_primitive_witness_with_timelocks(
                     fee,
                     maybe_coinbase,
                     now,
+                    merge_bit,
                 )
                 .prop_map(move |primitive_witness_template| {
                     let mut primitive_witness = primitive_witness_template.clone();

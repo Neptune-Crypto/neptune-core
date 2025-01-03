@@ -14,6 +14,8 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;
 use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::UpdateBranch;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -153,6 +155,10 @@ impl SecretWitness for SingleProofWitness {
 
         match self {
             SingleProofWitness::Collection(proof_collection) => {
+                nondeterminism
+                    .digests
+                    .extend_from_slice(&proof_collection.merge_bit_mast_path);
+
                 // removal records integrity
                 let rri_claim = proof_collection.removal_records_integrity_claim();
                 let rri_proof = &proof_collection.removal_records_integrity;
@@ -208,7 +214,7 @@ impl SecretWitness for SingleProofWitness {
                 }
             }
             SingleProofWitness::Update(witness) => {
-                witness.populate_nd_digests(&mut nondeterminism);
+                witness.populate_nd_streams(&mut nondeterminism);
             }
             SingleProofWitness::Merger(witness_of_merge) => {
                 witness_of_merge.populate_nd_streams(&mut nondeterminism);
@@ -268,6 +274,14 @@ impl ConsensusProgram for SingleProof {
         match tasmlib::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS) {
             SingleProofWitness::Collection(pc) => {
                 assert_eq!(txk_digest, pc.kernel_mast_hash);
+
+                let claimed_merge_bit = false;
+                tasmlib::tasmlib_hashing_merkle_verify(
+                    txk_digest,
+                    TransactionKernelField::MergeBit as u32,
+                    Tip5::hash(&claimed_merge_bit),
+                    TransactionKernel::MAST_HEIGHT as u32,
+                );
 
                 let removal_records_integrity_claim: Claim = pc.removal_records_integrity_claim();
                 tasmlib::verify_stark(
@@ -350,6 +364,8 @@ impl ConsensusProgram for SingleProof {
             library.import(Box::new(VerifyNdSiIntegrity::<ProofCollection>::default()));
 
         let claim_field_with_size_output = triton_asm!(read_mem 1 addi 1 place 1 addi -1);
+        let merkle_verify =
+            library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
 
         let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop";
         let verify_scripts_loop_body = triton_asm! {
@@ -400,6 +416,47 @@ impl ConsensusProgram for SingleProof {
                 recurse
         };
 
+        let verify_merge_bit_false = triton_asm! {
+            // _ [txk_digest] garb garb
+
+                dup 6
+                dup 6
+                dup 6
+                dup 6
+                dup 6
+                // _ [txk_digest] garb garb [txk_digest]
+
+                push {TransactionKernel::MAST_HEIGHT as u32}
+                push {TransactionKernelField::MergeBit as u32}
+                // _ [txk_digest] garb garb [txk_digest] height index
+
+                push 0
+                push 0
+                push 0
+                push 0
+                push 0
+                push 0
+                push 0
+                push 0
+                push 1
+                push {false as u64}
+                // _ [txk_digest] garb garb [txk_digest] height index [padded-false-encoded]
+
+                sponge_init
+                sponge_absorb
+                sponge_squeeze
+
+                pick 5 pop 1
+                pick 5 pop 1
+                pick 5 pop 1
+                pick 5 pop 1
+                pick 5 pop 1
+                // _ [txk_digest] garb garb [txk_digest] height index [false-digest]
+
+                call {merkle_verify}
+                // _ [txk_digest] garb garb
+        };
+
         let proof_collection_case_label =
             "neptune_transaction_single_proof_case_collection".to_string();
         let proof_collection_case_body = triton_asm! {
@@ -409,6 +466,9 @@ impl ConsensusProgram for SingleProof {
                 hint discriminant = stack[0]
                 hint single_proof_witness = stack[1]
                 hint txk_digest = stack[2..7]
+                // _ [txk_digest] *single_proof_witness discriminant
+
+                {&verify_merge_bit_false}
                 // _ [txk_digest] *single_proof_witness discriminant
 
                 dup 1 addi 2
@@ -688,7 +748,6 @@ mod test {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
     use super::*;
@@ -734,93 +793,133 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn can_verify_via_valid_proof_collection() {
-        let mut test_runner = TestRunner::deterministic();
-        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let txk_mast_hash = primitive_witness.kernel.mast_hash();
-
-        let proof_collection = ProofCollection::produce(
-            &primitive_witness,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
-        assert!(proof_collection.verify(txk_mast_hash));
-
-        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-        let txk_mast_hash_as_input_as_public_input =
-            PublicInput::new(txk_mast_hash.reversed().values().encode());
-
-        let nondeterminism = single_proof_witness.nondeterminism();
-
-        let rust_result = SingleProof
-            .run_rust(
-                &txk_mast_hash_as_input_as_public_input,
-                nondeterminism.clone(),
-            )
-            .expect("rust run should pass");
-
-        let tasm_result = SingleProof
-            .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
-            .expect("tasm run should pass");
-
-        assert_eq!(rust_result, tasm_result);
-
-        // Verify equivalence of claim functions
-        assert_eq!(
-            single_proof_witness.claim(),
-            SingleProof::claim(txk_mast_hash),
-            "Claim functions must agree"
-        );
+    fn positive_prop(witness: SingleProofWitness) {
+        let claim = witness.claim();
+        let public_input = PublicInput::new(claim.input);
+        let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+        let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+        assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
-        let mut test_runner = TestRunner::deterministic();
-        let deterministic_now = arb::<Timestamp>()
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-        let primitive_witness =
-            arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now)
+    mod proof_collection_tests {
+        use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+
+        use super::*;
+
+        #[tokio::test]
+        async fn disallow_set_merge_bit_in_pc_path() {
+            let mut test_runner = TestRunner::deterministic();
+            let good_primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(Some(6), 6, 7, false)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+
+            let good_proof_collection = ProofCollection::produce(
+                &good_primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+
+            let good_witness = SingleProofWitness::from_collection(good_proof_collection);
+            positive_prop(good_witness);
+
+            // Setting the `merge_bit` must make program crash, as this bit may
+            // only be set to true through the execution of the merge branch.
+            let bad_primitive_witness =
+                PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(Some(6), 6, 7, true)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+
+            let bad_proof_collection = ProofCollection::produce(
+                &bad_primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+
+            let bad_witness = SingleProofWitness::from_collection(bad_proof_collection);
+
+            // This witness fails with a Merkle auth path error since the never
+            // reads the actual bit but rather just verifies that it is set to
+            // false in this execution path.
+            SingleProof
+                .test_assertion_failure(
+                    bad_witness.standard_input(),
+                    bad_witness.nondeterminism(),
+                    &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+                )
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn can_verify_via_valid_proof_collection() {
+            let mut test_runner = TestRunner::deterministic();
+            let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
-        let txk_mast_hash = primitive_witness.kernel.mast_hash();
+            let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-        let proof_collection = ProofCollection::produce(
-            &primitive_witness,
-            &TritonVmJobQueue::dummy(),
-            TritonVmJobPriority::default().into(),
-        )
-        .await
-        .unwrap();
-        assert!(proof_collection.verify(txk_mast_hash));
-
-        let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-        let txk_mast_hash_as_input_as_public_input =
-            PublicInput::new(txk_mast_hash.reversed().values().encode());
-
-        let nondeterminism = single_proof_witness.nondeterminism();
-
-        let rust_result = SingleProof
-            .run_rust(
-                &txk_mast_hash_as_input_as_public_input,
-                nondeterminism.clone(),
+            let proof_collection = ProofCollection::produce(
+                &primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
             )
-            .expect("rust run should pass");
+            .await
+            .unwrap();
+            assert!(proof_collection.verify(txk_mast_hash));
 
-        let tasm_result = SingleProof
-            .run_tasm(&txk_mast_hash_as_input_as_public_input, nondeterminism)
-            .expect("tasm run should pass");
+            let witness = SingleProofWitness::from_collection(proof_collection);
+            let claim = witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
 
-        assert_eq!(rust_result, tasm_result);
+            // Verify equivalence of claim functions
+            assert_eq!(
+                witness.claim(),
+                SingleProof::claim(txk_mast_hash),
+                "Claim functions must agree"
+            );
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
+            let mut test_runner = TestRunner::deterministic();
+            let deterministic_now = arb::<Timestamp>()
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+            let primitive_witness =
+                arbitrary_primitive_witness_with_expired_timelocks(2, 2, 2, deterministic_now)
+                    .new_tree(&mut test_runner)
+                    .unwrap()
+                    .current();
+            let txk_mast_hash = primitive_witness.kernel.mast_hash();
+
+            let proof_collection = ProofCollection::produce(
+                &primitive_witness,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default().into(),
+            )
+            .await
+            .unwrap();
+            assert!(proof_collection.verify(txk_mast_hash));
+
+            let witness = SingleProofWitness::from_collection(proof_collection);
+            let claim = witness.claim();
+            let public_input = PublicInput::new(claim.input);
+            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
+            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+        }
     }
 
     mod merge_tests {
@@ -864,8 +963,6 @@ mod test {
         use twenty_first::prelude::Mmr;
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR;
-        use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::INPUT_SETS_NOT_EQUAL_ERROR;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
         use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
@@ -931,7 +1028,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
+                &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
             );
         }
 
@@ -1010,7 +1107,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
@@ -1032,7 +1129,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
@@ -1056,7 +1153,7 @@ mod test {
                 SingleProof,
                 &input,
                 nondeterminism,
-                &[INPUT_SETS_NOT_EQUAL_ERROR],
+                &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
         }
 
