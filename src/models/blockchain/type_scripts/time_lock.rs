@@ -861,6 +861,9 @@ pub mod neptune_arbitrary {
     ///
     /// The UTXOs are timelocked with a release date set between `now` and six
     /// months from `now`.
+    ///
+    // Public bc used in benchmarks.
+    #[doc(hidden)]
     pub fn arbitrary_primitive_witness_with_active_timelocks(
         num_inputs: usize,
         num_outputs: usize,
@@ -888,6 +891,9 @@ pub mod neptune_arbitrary {
     ///
     /// The UTXOs are timelocked with a release date set between six months in the
     /// past relative to `now` and `now`.
+    ///
+    // Public bc used in benchmarks.
+    #[doc(hidden)]
     pub fn arbitrary_primitive_witness_with_expired_timelocks(
         num_inputs: usize,
         num_outputs: usize,

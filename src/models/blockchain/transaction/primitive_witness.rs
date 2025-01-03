@@ -557,7 +557,7 @@ pub mod neptune_arbitrary {
         /// Strategy for generating a `PrimitiveWitness` with the given number of
         /// inputs, outputs, and public announcements. If `num_inputs` is set to
         /// `None`, then the `PrimitiveWitness` is for a coinbase transaction.
-        pub fn arbitrary_with_size_numbers_and_merge_bit(
+        pub(crate) fn arbitrary_with_size_numbers_and_merge_bit(
             num_inputs: Option<usize>,
             num_outputs: usize,
             num_public_announcements: usize,
@@ -687,7 +687,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        pub fn arbitrary_primitive_witness_with(
+        pub(crate) fn arbitrary_primitive_witness_with(
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
@@ -717,7 +717,8 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        pub fn arbitrary_primitive_witness_with_timestamp_and(
+        #[allow(clippy::too_many_arguments)]
+        pub(crate) fn arbitrary_primitive_witness_with_timestamp_and(
             input_utxos: &[Utxo],
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
@@ -805,7 +806,7 @@ pub mod neptune_arbitrary {
                 .boxed()
         }
 
-        #[expect(clippy::too_many_arguments, reason = "under development")]
+        #[allow(clippy::too_many_arguments)]
         pub(crate) fn from_msa_and_records(
             msa_and_records: MsaAndRecords,
             input_utxos: Vec<Utxo>,
@@ -898,7 +899,7 @@ pub mod neptune_arbitrary {
         }
 
         // this is only used by arbitrary-impls
-        pub fn transaction_inputs_from_address_seeds_and_amounts(
+        pub(crate) fn transaction_inputs_from_address_seeds_and_amounts(
             address_seeds: &[Digest],
             input_amounts: &[NeptuneCoins],
         ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
