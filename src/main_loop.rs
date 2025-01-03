@@ -53,6 +53,7 @@ use crate::models::state::mempool::TransactionOrigin;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
+use crate::SUCCESS_EXIT_CODE;
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
@@ -480,7 +481,7 @@ impl MainLoopHandler {
         &mut self,
         msg: MinerToMain,
         main_loop_state: &mut MutableMainLoopState,
-    ) -> Result<()> {
+    ) -> Result<Option<i32>> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
                 log_slow_scope!(fn_name!() + "::MinerToMain::NewBlockFound");
@@ -496,7 +497,7 @@ impl MainLoopHandler {
                 if !global_state_mut.incoming_block_is_more_canonical(&new_block) {
                     warn!("Got new block from miner task that was not child of tip. Discarding.");
                     self.main_to_miner_tx.send(MainToMiner::Continue);
-                    return Ok(());
+                    return Ok(None);
                 } else {
                     info!(
                         "Block from miner is new canonical tip: {}",
@@ -547,7 +548,7 @@ impl MainLoopHandler {
                            with the guesser flag set and not the compose flag."
                     );
                     self.main_to_miner_tx.send(MainToMiner::Continue);
-                    return Ok(());
+                    return Ok(None);
                 }
 
                 self.main_to_peer_broadcast_tx
@@ -569,8 +570,12 @@ impl MainLoopHandler {
                 // received by main-loop.
                 self.main_to_miner_tx.send(MainToMiner::Continue);
             }
+            MinerToMain::Shutdown(exit_code) => {
+                return Ok(Some(exit_code));
+            }
         }
-        Ok(())
+
+        Ok(None)
     }
 
     /// Locking:
@@ -1245,7 +1250,7 @@ impl MainLoopHandler {
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
         task_handles: Vec<JoinHandle<()>>,
-    ) -> Result<()> {
+    ) -> Result<i32> {
         // Handle incoming connections, messages from peer tasks, and messages from the mining task
         let mut main_loop_state = MutableMainLoopState::new(task_handles);
 
@@ -1329,25 +1334,25 @@ impl MainLoopHandler {
                 })?;
         }
 
-        loop {
+        let exit_code: i32 = loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
-                    break;
+                    break SUCCESS_EXIT_CODE;
                 }
 
                 // Monitor for SIGTERM, SIGINT, and SIGQUIT.
                 Some(_) = rx_term.recv() => {
                     info!("Detected SIGTERM signal.");
-                    break;
+                    break SUCCESS_EXIT_CODE;
                 }
                 Some(_) = rx_int.recv() => {
                     info!("Detected SIGINT signal.");
-                    break;
+                    break SUCCESS_EXIT_CODE;
                 }
                 Some(_) = rx_quit.recv() => {
                     info!("Detected SIGQUIT signal.");
-                    break;
+                    break SUCCESS_EXIT_CODE;
                 }
 
                 // Handle incoming connections from peer
@@ -1395,7 +1400,12 @@ impl MainLoopHandler {
 
                 // Handle messages from miner task
                 Some(main_message) = miner_to_main_rx.recv() => {
-                    self.handle_miner_task_message(main_message, &mut main_loop_state).await?
+                    let exit_code = self.handle_miner_task_message(main_message, &mut main_loop_state).await?;
+
+                    if let Some(exit_code) = exit_code {
+                        break exit_code;
+                    }
+
                 }
 
                 // Handle the completion of mempool tx-update jobs after new block.
@@ -1407,7 +1417,7 @@ impl MainLoopHandler {
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
                     let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone()).await?;
                     if shutdown_after_execution {
-                        break
+                        break SUCCESS_EXIT_CODE
                     }
                 }
 
@@ -1485,11 +1495,12 @@ impl MainLoopHandler {
                 }
 
             }
-        }
+        };
 
         self.graceful_shutdown(main_loop_state.task_handles).await?;
         info!("Shutdown completed.");
-        Ok(())
+
+        Ok(exit_code)
     }
 
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down
