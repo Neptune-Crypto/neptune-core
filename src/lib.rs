@@ -77,6 +77,9 @@ use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
 
+pub const SUCCESS_EXIT_CODE: i32 = 0;
+pub const COMPOSITION_FAILED_EXIT_CODE: i32 = 159;
+
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
@@ -85,7 +88,7 @@ const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
+pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Starting client on {}.", cli_args.network);
 
     // Get data directory (wallet, block database), create one if none exists

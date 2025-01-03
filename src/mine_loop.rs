@@ -49,6 +49,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 async fn compose_block(
     latest_block: Block,
@@ -682,10 +683,16 @@ pub(crate) async fn mine(
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
                         pause_mine = true;
-                        tracing::warn!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
+                        tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
                     },
-                    // tbd: perhaps any composer error should pause mining rather than panic.
-                    _ => panic!("unexpected error while composing: {:?}", e),
+                    _ => {
+                        // Ensure graceful shutdown in case of error during
+                        // composition.
+                        tracing::error!("Composition failed:\n{e}\n. \
+                            Try adjusting the environment variables \
+                            \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
+                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                    }
                 }
             },
 

@@ -65,7 +65,11 @@ pub enum VmProcessError {
     //
     // *if* we could determine the process was externally killed then
     // it would be reasonable to retry the job.
-    #[error("proving process did not return any exit code")]
+    #[error(
+        "out-of-process triton-vm proving job terminated without exit code. \
+        Possibly killed by OS. You might not have enough RAM to construct this \
+        proof."
+    )]
     NoExitCode,
 }
 
