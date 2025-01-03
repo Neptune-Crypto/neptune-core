@@ -27,6 +27,18 @@ pub(crate) struct TransactionDetails {
 }
 
 impl TransactionDetails {
+    /// Create (`TransactionDetails` for) a nop-transaction, with no inputs and
+    /// no outputs. Can be used if a merge bit needs to be flipped.
+    pub(crate) fn nop(mutator_set_accumulator: MutatorSetAccumulator, now: Timestamp) -> Self {
+        Self::fee_gobbler(
+            NeptuneCoins::zero(),
+            Digest::default(),
+            mutator_set_accumulator,
+            now,
+            UtxoNotifyMethod::None,
+        )
+    }
+
     /// Create (`TransactionDetails` for) a new fee-gobbler transaction.
     ///
     /// The produced transaction has no inputs, sets a negative fee, and

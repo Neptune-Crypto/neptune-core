@@ -11,7 +11,6 @@ use composer_parameters::ComposerParameters;
 use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
-use num_traits::Zero;
 use primitive_witness::PrimitiveWitness;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -35,7 +34,6 @@ use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::*;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -44,12 +42,10 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
-use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
@@ -467,34 +463,27 @@ pub(crate) async fn create_block_transaction_stateless(
     )
     .await?;
 
-    let mut rng = StdRng::from_seed(shuffle_seed);
-
     let mut block_transaction = coinbase_transaction;
     if selected_mempool_txs.is_empty() {
-        // create the nop-gobbler and merge into the coinbase transaction to
-        // set the merge bit to allow the tx to be included in a block.
-        let nop_gobbler = TransactionDetails::fee_gobbler(
-            NeptuneCoins::zero(),
-            rng.gen(),
-            predecessor_block.mutator_set_accumulator_after(),
-            timestamp,
-            UtxoNotifyMethod::None,
-        );
-        let nop_gobbler = PrimitiveWitness::from_transaction_details(nop_gobbler);
+        // create the nop-tx and merge into the coinbase transaction to set the
+        // merge bit to allow the tx to be included in a block.
+        let nop =
+            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
+        let nop = PrimitiveWitness::from_transaction_details(nop);
         let proof_job_options = TritonVmProofJobOptions {
             job_priority: TritonVmJobPriority::High,
             job_settings: Default::default(),
         };
-        let nop_gobbler_proof =
-            SingleProof::produce(&nop_gobbler, vm_job_queue, proof_job_options).await?;
-        let nop_gobbler = Transaction {
-            kernel: nop_gobbler.kernel,
-            proof: TransactionProof::SingleProof(nop_gobbler_proof),
+        let nop_proof = SingleProof::produce(&nop, vm_job_queue, proof_job_options).await?;
+        let nop = Transaction {
+            kernel: nop.kernel,
+            proof: TransactionProof::SingleProof(nop_proof),
         };
 
-        selected_mempool_txs = vec![nop_gobbler];
+        selected_mempool_txs = vec![nop];
     }
 
+    let mut rng = StdRng::from_seed(shuffle_seed);
     let num_merges = selected_mempool_txs.len();
     for (i, tx_to_include) in selected_mempool_txs.into_iter().enumerate() {
         info!("Merging transaction {} / {}", i + 1, num_merges);
