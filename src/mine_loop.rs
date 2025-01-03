@@ -1,3 +1,5 @@
+pub(crate) mod composer_parameters;
+
 use std::cmp::max;
 use std::time::Duration;
 
@@ -5,6 +7,7 @@ use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
 use block_header::MINIMUM_BLOCK_TIME;
+use composer_parameters::ComposerParameters;
 use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
@@ -353,9 +356,7 @@ fn guess_nonce_iteration(
 /// transaction fees, goes to the guesser.
 pub(crate) async fn make_coinbase_transaction_stateless(
     latest_block: &Block,
-    receiving_address: ReceivingAddress,
-    sender_randomness: Digest,
-    guesser_block_subsidy_fraction: f64,
+    composer_parameters: ComposerParameters,
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
     vm_job_queue: &JobQueue<TritonVmJobPriority>,
@@ -363,13 +364,9 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
 
-    #[allow(clippy::manual_range_contains)]
-    if guesser_block_subsidy_fraction > 1.0 || guesser_block_subsidy_fraction < 0f64 {
-        bail!("Guesser fee fraction must be in [0, 1] interval. Got: {guesser_block_subsidy_fraction}");
-    }
-
     let coinbase_amount = Block::block_subsidy(next_block_height);
-    let Some(guesser_fee) = coinbase_amount.lossy_f64_fraction_mul(guesser_block_subsidy_fraction)
+    let Some(guesser_fee) =
+        coinbase_amount.lossy_f64_fraction_mul(composer_parameters.guesser_fee_fraction())
     else {
         bail!("Guesser fee times block subsidy must be valid amount");
     };
@@ -398,8 +395,8 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     let owned = true;
     let liquid_coinbase_output = TxOutput::offchain_native_currency(
         liquid_composer_amount,
-        sender_randomness,
-        receiving_address.clone(),
+        composer_parameters.sender_randomness(),
+        composer_parameters.reward_address(),
         owned,
     );
 
@@ -407,8 +404,8 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     // timestamp might be bumped by future merges.
     let timelocked_coinbase_output = TxOutput::offchain_native_currency(
         timelocked_composer_amount,
-        sender_randomness,
-        receiving_address,
+        composer_parameters.sender_randomness(),
+        composer_parameters.reward_address(),
         owned,
     )
     .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::minutes(30));
@@ -453,11 +450,9 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 /// such that the resulting transaction is valid for block inclusion.
 pub(crate) async fn create_block_transaction_stateless(
     predecessor_block: &Block,
-    receiving_address: ReceivingAddress,
-    sender_randomness_for_composer: Digest,
-    shuffle_seed: [u8; 32],
+    composer_parameters: ComposerParameters,
     timestamp: Timestamp,
-    guesser_fee_fraction: f64,
+    shuffle_seed: [u8; 32],
     vm_job_queue: &JobQueue<TritonVmJobPriority>,
     mut selected_mempool_txs: Vec<Transaction>,
 ) -> Result<(Transaction, TxOutputList)> {
@@ -465,9 +460,7 @@ pub(crate) async fn create_block_transaction_stateless(
     // be able to create a SingleProof.
     let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
         predecessor_block,
-        receiving_address,
-        sender_randomness_for_composer,
-        guesser_fee_fraction,
+        composer_parameters,
         timestamp,
         TxProvingCapability::SingleProof,
         vm_job_queue,
@@ -572,13 +565,16 @@ pub(crate) async fn create_block_transaction(
         .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
     let vm_job_queue = global_state_lock.vm_job_queue();
 
-    let (transaction, composer_txos) = create_block_transaction_stateless(
-        predecessor_block,
+    let composer_parameters = ComposerParameters::new(
         receiving_address.into(),
         sender_randomness_for_composer,
-        rng.gen(),
-        timestamp,
         guesser_fee_fraction,
+    );
+    let (transaction, composer_txos) = create_block_transaction_stateless(
+        predecessor_block,
+        composer_parameters,
+        timestamp,
+        rng.gen(),
         vm_job_queue,
         mempool_txs_to_mine,
     )
@@ -923,11 +919,15 @@ pub(crate) mod mine_loop_tests {
             .wallet_secret
             .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
         let vm_job_queue = global_state_lock.vm_job_queue();
-        let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
-            latest_block,
+
+        let composer_parameters = ComposerParameters::new(
             receiving_address.into(),
             sender_randomness,
             guesser_block_subsidy_fraction,
+        );
+        let (transaction, composer_outputs) = make_coinbase_transaction_stateless(
+            latest_block,
+            composer_parameters,
             timestamp,
             proving_power,
             vm_job_queue,

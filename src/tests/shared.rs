@@ -49,6 +49,7 @@ use crate::config_models::network::Network;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::create_block_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
@@ -845,13 +846,17 @@ pub(crate) async fn valid_successor_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let mut rng = StdRng::from_seed(seed);
-    let (block_tx, _) = create_block_transaction_stateless(
-        predecessor,
+
+    let composer_parameters = ComposerParameters::new(
         GenerationReceivingAddress::derive_from_seed(rng.gen()).into(),
         rng.gen(),
-        rng.gen(),
-        timestamp,
         0.5f64,
+    );
+    let (block_tx, _) = create_block_transaction_stateless(
+        predecessor,
+        composer_parameters,
+        timestamp,
+        rng.gen(),
         &TritonVmJobQueue::dummy(),
         vec![],
     )

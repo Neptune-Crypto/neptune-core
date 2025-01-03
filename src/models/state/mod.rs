@@ -3008,6 +3008,7 @@ mod global_state_tests {
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {
         use super::*;
+        use crate::mine_loop::composer_parameters::ComposerParameters;
         use crate::mine_loop::create_block_transaction_stateless;
 
         /// test scenario: onchain/symmetric.
@@ -3144,8 +3145,7 @@ mod global_state_tests {
             };
 
             // in alice wallet: send pre-mined funds to bob
-            let coinbase_spending_key =
-                GenerationReceivingAddress::derive_from_seed(rng.gen()).into();
+            let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
             let block_1 = {
                 let vm_job_queue = alice_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
@@ -3200,13 +3200,13 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
+                let composer_parameters =
+                    ComposerParameters::new(an_address.into(), rng.gen(), 0.5);
                 let (block_1_tx, _) = create_block_transaction_stateless(
                     &genesis_block,
-                    coinbase_spending_key,
-                    rng.gen(),
-                    rng.gen(),
+                    composer_parameters,
                     seven_months_post_launch,
-                    0.5,
+                    rng.gen(),
                     &TritonVmJobQueue::dummy(),
                     vec![alice_to_bob_tx],
                 )
