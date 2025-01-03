@@ -48,6 +48,9 @@ track-lock-location = []
 # not generally useful by itself.
 track-lock-time = []
 
+# implements arbitrary::Arbitrary for various types
+arbitrary-impls = []
+
 [dependencies]
 aead = { version = "0.5", features = ["std"] }
 aes-gcm = "0.10"
@@ -212,6 +215,7 @@ harness = false
 [[bench]]
 name = "consensus"
 harness = false
+required-features = ["arbitrary-impls"]
 
 [patch.crates-io]
 tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "821d7cac3633e51f224b5490a2c7215a9ea27709" }

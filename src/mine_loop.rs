@@ -284,6 +284,7 @@ impl GuessNonceResult {
 /// Returns (found: bool, cancelled: bool).
 ///   found is true if a valid block is found
 ///   cancelled is true if the task is terminated.
+#[allow(clippy::too_many_arguments)]
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn guess_nonce_iteration(

@@ -3,13 +3,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
-use num_traits::CheckedSub;
 use num_traits::Zero;
-use proptest::arbitrary::Arbitrary;
-use proptest::collection::vec;
-use proptest::strategy::BoxedStrategy;
-use proptest::strategy::Strategy;
-use proptest_arbitrary_interop::arb;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
@@ -22,16 +16,13 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
 
-use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
@@ -758,291 +749,309 @@ impl From<PrimitiveWitness> for TimeLockWitness {
     }
 }
 
-impl Arbitrary for TimeLockWitness {
-    /// Parameters are:
-    ///  - release_dates : `Vec<u64>` One release date per input UTXO. 0 if the time lock
-    ///    coin is absent.
-    ///  - num_outputs : usize Number of outputs.
-    ///  - num_public_announcements : usize Number of public announcements.
-    ///  - transaction_timestamp: Timestamp determining when the transaction takes place.
-    type Parameters = (Vec<Timestamp>, usize, usize, Timestamp);
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod neptune_arbitrary {
+    use num_traits::CheckedSub;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::collection::vec;
+    use proptest::strategy::BoxedStrategy;
+    use proptest::strategy::Strategy;
+    use proptest_arbitrary_interop::arb;
 
-    type Strategy = BoxedStrategy<Self>;
+    use super::super::neptune_coins::NeptuneCoins;
+    use super::*;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
 
-    fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-        let (release_dates, num_outputs, num_public_announcements, transaction_timestamp) =
-            parameters;
-        let num_inputs = release_dates.len();
+    impl Arbitrary for TimeLockWitness {
+        /// Parameters are:
+        ///  - release_dates : `Vec<u64>` One release date per input UTXO. 0 if the time lock
+        ///    coin is absent.
+        ///  - num_outputs : usize Number of outputs.
+        ///  - num_public_announcements : usize Number of public announcements.
+        ///  - transaction_timestamp: Timestamp determining when the transaction takes place.
+        type Parameters = (Vec<Timestamp>, usize, usize, Timestamp);
+
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
+            let (release_dates, num_outputs, num_public_announcements, transaction_timestamp) =
+                parameters;
+            let num_inputs = release_dates.len();
+            (
+                vec(arb::<Digest>(), num_inputs),
+                vec(NeptuneCoins::arbitrary_non_negative(), num_inputs),
+                vec(arb::<Digest>(), num_outputs),
+                vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
+                vec(arb::<PublicAnnouncement>(), num_public_announcements),
+                NeptuneCoins::arbitrary_coinbase(),
+                NeptuneCoins::arbitrary_non_negative(),
+            )
+                .prop_flat_map(
+                    move |(
+                        input_address_seeds,
+                        input_amounts,
+                        output_address_seeds,
+                        mut output_amounts,
+                        public_announcements,
+                        maybe_coinbase,
+                        mut fee,
+                    )| {
+                        // generate inputs
+                        let (mut input_utxos, input_lock_scripts_and_witnesses) =
+                            PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                                &input_address_seeds,
+                                &input_amounts,
+                            );
+                        let total_inputs = input_amounts.into_iter().sum::<NeptuneCoins>();
+
+                        // add time locks to input UTXOs (changes Utxo hash)
+                        for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter())
+                        {
+                            if !release_date.is_zero() {
+                                let time_lock_coin = TimeLock::until(*release_date);
+                                let mut coins = utxo.coins().to_vec();
+                                coins.push(time_lock_coin);
+                                *utxo = (utxo.lock_script_hash(), coins).into()
+                            }
+                        }
+
+                        // generate valid output amounts
+                        PrimitiveWitness::find_balanced_output_amounts_and_fee(
+                            total_inputs,
+                            maybe_coinbase,
+                            &mut output_amounts,
+                            &mut fee,
+                        );
+
+                        // generate output UTXOs
+                        let output_utxos =
+                            PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
+                                &output_amounts,
+                                &output_address_seeds,
+                                None,
+                            );
+
+                        // generate primitive transaction witness and time lock witness from there
+                        PrimitiveWitness::arbitrary_primitive_witness_with(
+                            &input_utxos,
+                            &input_lock_scripts_and_witnesses,
+                            &output_utxos,
+                            &public_announcements,
+                            NeptuneCoins::zero(),
+                            maybe_coinbase,
+                        )
+                        .prop_map(move |mut transaction_primitive_witness| {
+                            let modified_kernel = TransactionKernelModifier::default()
+                                .timestamp(transaction_timestamp)
+                                .modify(transaction_primitive_witness.kernel);
+
+                            transaction_primitive_witness.kernel = modified_kernel;
+                            TimeLockWitness::from(transaction_primitive_witness)
+                        })
+                        .boxed()
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
+    /// inputs, outputs, and public announcements, with active timelocks.
+    ///
+    /// The UTXOs are timelocked with a release date set between `now` and six
+    /// months from `now`.
+    pub fn arbitrary_primitive_witness_with_active_timelocks(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_announcements: usize,
+        now: Timestamp,
+    ) -> BoxedStrategy<PrimitiveWitness> {
+        vec(
+            Timestamp::arbitrary_between(now, now + Timestamp::months(6)),
+            num_inputs + num_outputs,
+        )
+        .prop_flat_map(move |release_dates| {
+            arbitrary_primitive_witness_with_timelocks(
+                num_inputs,
+                num_outputs,
+                num_announcements,
+                now,
+                release_dates,
+            )
+        })
+        .boxed()
+    }
+
+    /// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
+    /// inputs, outputs, and public announcements, with expired timelocks.
+    ///
+    /// The UTXOs are timelocked with a release date set between six months in the
+    /// past relative to `now` and `now`.
+    pub fn arbitrary_primitive_witness_with_expired_timelocks(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_announcements: usize,
+        now: Timestamp,
+    ) -> BoxedStrategy<PrimitiveWitness> {
+        vec(
+            Timestamp::arbitrary_between(now - Timestamp::months(6), now - Timestamp::millis(1)),
+            num_inputs + num_outputs,
+        )
+        .prop_flat_map(move |release_dates| {
+            arbitrary_primitive_witness_with_timelocks(
+                num_inputs,
+                num_outputs,
+                num_announcements,
+                now,
+                release_dates,
+            )
+        })
+        .boxed()
+    }
+
+    #[expect(unused_variables, reason = "under development")]
+    fn arbitrary_primitive_witness_with_timelocks(
+        num_inputs: usize,
+        num_outputs: usize,
+        num_announcements: usize,
+        now: Timestamp,
+        release_dates: Vec<Timestamp>,
+    ) -> BoxedStrategy<PrimitiveWitness> {
         (
-            vec(arb::<Digest>(), num_inputs),
-            vec(NeptuneCoins::arbitrary_non_negative(), num_inputs),
-            vec(arb::<Digest>(), num_outputs),
-            vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
-            vec(arb::<PublicAnnouncement>(), num_public_announcements),
-            NeptuneCoins::arbitrary_coinbase(),
             NeptuneCoins::arbitrary_non_negative(),
+            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<u64>(), num_inputs),
+            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<u64>(), num_outputs),
+            vec(arb::<PublicAnnouncement>(), num_announcements),
+            arb::<u64>(),
+            arb::<Option<u64>>(),
         )
             .prop_flat_map(
                 move |(
+                    total_amount,
                     input_address_seeds,
-                    input_amounts,
+                    input_dist,
                     output_address_seeds,
-                    mut output_amounts,
+                    output_dist,
                     public_announcements,
-                    maybe_coinbase,
-                    mut fee,
+                    fee_dist,
+                    maybe_coinbase_dist,
                 )| {
-                    // generate inputs
+                    let maybe_coinbase_dist = if num_inputs.is_zero() {
+                        maybe_coinbase_dist
+                    } else {
+                        None
+                    };
+
+                    // distribute total amount across inputs (+ coinbase)
+                    let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
+                    if let Some(d) = maybe_coinbase_dist {
+                        input_denominator += d as f64;
+                    }
+                    let input_weights = input_dist
+                        .into_iter()
+                        .map(|u| (u as f64) / input_denominator)
+                        .collect_vec();
+                    let mut input_amounts = input_weights
+                        .into_iter()
+                        .map(|w| total_amount.to_nau_f64() * w)
+                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .collect_vec();
+                    let maybe_coinbase = if maybe_coinbase_dist.is_some()
+                        || input_amounts.is_empty()
+                    {
+                        Some(
+                            total_amount
+                                .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
+                                .unwrap(),
+                        )
+                    } else {
+                        let sum_of_all_but_last = input_amounts
+                            .iter()
+                            .rev()
+                            .skip(1)
+                            .cloned()
+                            .sum::<NeptuneCoins>();
+                        *input_amounts.last_mut().unwrap() =
+                            total_amount.checked_sub(&sum_of_all_but_last).unwrap();
+                        None
+                    };
+
+                    // distribute total amount across outputs
+                    let output_denominator =
+                        output_dist.iter().map(|u| *u as f64).sum::<f64>() + (fee_dist as f64);
+                    let output_weights = output_dist
+                        .into_iter()
+                        .map(|u| (u as f64) / output_denominator)
+                        .collect_vec();
+                    let output_amounts = output_weights
+                        .into_iter()
+                        .map(|w| total_amount.to_nau_f64() * w)
+                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .collect_vec();
+                    let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+                    let fee = total_amount.checked_sub(&total_outputs).unwrap();
+
                     let (mut input_utxos, input_lock_scripts_and_witnesses) =
                         PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
                             &input_address_seeds,
                             &input_amounts,
                         );
-                    let total_inputs = input_amounts.into_iter().sum::<NeptuneCoins>();
+                    let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
 
-                    // add time locks to input UTXOs (changes Utxo hash)
-                    for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter()) {
-                        if !release_date.is_zero() {
-                            let time_lock_coin = TimeLock::until(*release_date);
-                            let mut coins = utxo.coins().to_vec();
-                            coins.push(time_lock_coin);
-                            *utxo = (utxo.lock_script_hash(), coins).into()
-                        }
-                    }
-
-                    // generate valid output amounts
-                    PrimitiveWitness::find_balanced_output_amounts_and_fee(
-                        total_inputs,
-                        maybe_coinbase,
-                        &mut output_amounts,
-                        &mut fee,
+                    assert_eq!(
+                        total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
+                        total_outputs + fee
                     );
-
-                    // generate output UTXOs
-                    let output_utxos =
+                    let mut output_utxos =
                         PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
                             &output_amounts,
                             &output_address_seeds,
                             None,
                         );
+                    let mut counter = 0usize;
+                    for utxo in input_utxos.iter_mut() {
+                        let release_date = release_dates[counter];
+                        let time_lock = TimeLock::until(release_date);
+                        let mut coins = utxo.coins().to_vec();
+                        coins.push(time_lock);
+                        *utxo = Utxo::from((utxo.lock_script_hash(), coins));
+                        counter += 1;
+                    }
+                    for utxo in output_utxos.iter_mut() {
+                        let mut coins = utxo.coins().to_vec();
+                        coins.push(TimeLock::until(release_dates[counter]));
+                        *utxo = Utxo::from((utxo.lock_script_hash(), coins));
+                        counter += 1;
+                    }
+                    let release_dates = release_dates.clone();
 
-                    // generate primitive transaction witness and time lock witness from there
-                    PrimitiveWitness::arbitrary_primitive_witness_with(
+                    let merge_bit = false;
+                    PrimitiveWitness::arbitrary_primitive_witness_with_timestamp_and(
                         &input_utxos,
                         &input_lock_scripts_and_witnesses,
                         &output_utxos,
                         &public_announcements,
-                        NeptuneCoins::zero(),
+                        fee,
                         maybe_coinbase,
+                        now,
+                        merge_bit,
                     )
-                    .prop_map(move |mut transaction_primitive_witness| {
+                    .prop_map(move |primitive_witness_template| {
+                        let mut primitive_witness = primitive_witness_template.clone();
                         let modified_kernel = TransactionKernelModifier::default()
-                            .timestamp(transaction_timestamp)
-                            .modify(transaction_primitive_witness.kernel);
+                            .timestamp(now)
+                            .modify(primitive_witness.kernel);
 
-                        transaction_primitive_witness.kernel = modified_kernel;
-                        TimeLockWitness::from(transaction_primitive_witness)
+                        primitive_witness.kernel = modified_kernel;
+                        primitive_witness
                     })
-                    .boxed()
                 },
             )
             .boxed()
     }
-}
-
-/// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-/// inputs, outputs, and public announcements, with active timelocks.
-///
-/// The UTXOs are timelocked with a release date set between `now` and six
-/// months from `now`.
-pub fn arbitrary_primitive_witness_with_active_timelocks(
-    num_inputs: usize,
-    num_outputs: usize,
-    num_announcements: usize,
-    now: Timestamp,
-) -> BoxedStrategy<PrimitiveWitness> {
-    vec(
-        Timestamp::arbitrary_between(now, now + Timestamp::months(6)),
-        num_inputs + num_outputs,
-    )
-    .prop_flat_map(move |release_dates| {
-        arbitrary_primitive_witness_with_timelocks(
-            num_inputs,
-            num_outputs,
-            num_announcements,
-            now,
-            release_dates,
-        )
-    })
-    .boxed()
-}
-
-/// Generate a `Strategy` for a [`PrimitiveWitness`] with the given numbers of
-/// inputs, outputs, and public announcements, with expired timelocks.
-///
-/// The UTXOs are timelocked with a release date set between six months in the
-/// past relative to `now` and `now`.
-pub fn arbitrary_primitive_witness_with_expired_timelocks(
-    num_inputs: usize,
-    num_outputs: usize,
-    num_announcements: usize,
-    now: Timestamp,
-) -> BoxedStrategy<PrimitiveWitness> {
-    vec(
-        Timestamp::arbitrary_between(now - Timestamp::months(6), now - Timestamp::millis(1)),
-        num_inputs + num_outputs,
-    )
-    .prop_flat_map(move |release_dates| {
-        arbitrary_primitive_witness_with_timelocks(
-            num_inputs,
-            num_outputs,
-            num_announcements,
-            now,
-            release_dates,
-        )
-    })
-    .boxed()
-}
-
-#[expect(unused_variables, reason = "under development")]
-fn arbitrary_primitive_witness_with_timelocks(
-    num_inputs: usize,
-    num_outputs: usize,
-    num_announcements: usize,
-    now: Timestamp,
-    release_dates: Vec<Timestamp>,
-) -> BoxedStrategy<PrimitiveWitness> {
-    (
-        NeptuneCoins::arbitrary_non_negative(),
-        vec(arb::<Digest>(), num_inputs),
-        vec(arb::<u64>(), num_inputs),
-        vec(arb::<Digest>(), num_outputs),
-        vec(arb::<u64>(), num_outputs),
-        vec(arb::<PublicAnnouncement>(), num_announcements),
-        arb::<u64>(),
-        arb::<Option<u64>>(),
-    )
-        .prop_flat_map(
-            move |(
-                total_amount,
-                input_address_seeds,
-                input_dist,
-                output_address_seeds,
-                output_dist,
-                public_announcements,
-                fee_dist,
-                maybe_coinbase_dist,
-            )| {
-                let maybe_coinbase_dist = if num_inputs.is_zero() {
-                    maybe_coinbase_dist
-                } else {
-                    None
-                };
-
-                // distribute total amount across inputs (+ coinbase)
-                let mut input_denominator = input_dist.iter().map(|u| *u as f64).sum::<f64>();
-                if let Some(d) = maybe_coinbase_dist {
-                    input_denominator += d as f64;
-                }
-                let input_weights = input_dist
-                    .into_iter()
-                    .map(|u| (u as f64) / input_denominator)
-                    .collect_vec();
-                let mut input_amounts = input_weights
-                    .into_iter()
-                    .map(|w| total_amount.to_nau_f64() * w)
-                    .map(|f| NeptuneCoins::try_from(f).unwrap())
-                    .collect_vec();
-                let maybe_coinbase = if maybe_coinbase_dist.is_some() || input_amounts.is_empty() {
-                    Some(
-                        total_amount
-                            .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
-                            .unwrap(),
-                    )
-                } else {
-                    let sum_of_all_but_last = input_amounts
-                        .iter()
-                        .rev()
-                        .skip(1)
-                        .cloned()
-                        .sum::<NeptuneCoins>();
-                    *input_amounts.last_mut().unwrap() =
-                        total_amount.checked_sub(&sum_of_all_but_last).unwrap();
-                    None
-                };
-
-                // distribute total amount across outputs
-                let output_denominator =
-                    output_dist.iter().map(|u| *u as f64).sum::<f64>() + (fee_dist as f64);
-                let output_weights = output_dist
-                    .into_iter()
-                    .map(|u| (u as f64) / output_denominator)
-                    .collect_vec();
-                let output_amounts = output_weights
-                    .into_iter()
-                    .map(|w| total_amount.to_nau_f64() * w)
-                    .map(|f| NeptuneCoins::try_from(f).unwrap())
-                    .collect_vec();
-                let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
-                let fee = total_amount.checked_sub(&total_outputs).unwrap();
-
-                let (mut input_utxos, input_lock_scripts_and_witnesses) =
-                    PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
-                        &input_address_seeds,
-                        &input_amounts,
-                    );
-                let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
-
-                assert_eq!(
-                    total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
-                    total_outputs + fee
-                );
-                let mut output_utxos =
-                    PrimitiveWitness::valid_tx_outputs_from_amounts_and_address_seeds(
-                        &output_amounts,
-                        &output_address_seeds,
-                        None,
-                    );
-                let mut counter = 0usize;
-                for utxo in input_utxos.iter_mut() {
-                    let release_date = release_dates[counter];
-                    let time_lock = TimeLock::until(release_date);
-                    let mut coins = utxo.coins().to_vec();
-                    coins.push(time_lock);
-                    *utxo = Utxo::from((utxo.lock_script_hash(), coins));
-                    counter += 1;
-                }
-                for utxo in output_utxos.iter_mut() {
-                    let mut coins = utxo.coins().to_vec();
-                    coins.push(TimeLock::until(release_dates[counter]));
-                    *utxo = Utxo::from((utxo.lock_script_hash(), coins));
-                    counter += 1;
-                }
-                let release_dates = release_dates.clone();
-
-                let merge_bit = false;
-                PrimitiveWitness::arbitrary_primitive_witness_with_timestamp_and(
-                    &input_utxos,
-                    &input_lock_scripts_and_witnesses,
-                    &output_utxos,
-                    &public_announcements,
-                    fee,
-                    maybe_coinbase,
-                    now,
-                    merge_bit,
-                )
-                .prop_map(move |primitive_witness_template| {
-                    let mut primitive_witness = primitive_witness_template.clone();
-                    let modified_kernel = TransactionKernelModifier::default()
-                        .timestamp(now)
-                        .modify(primitive_witness.kernel);
-
-                    primitive_witness.kernel = modified_kernel;
-                    primitive_witness
-                })
-            },
-        )
-        .boxed()
 }
 
 #[cfg(test)]
@@ -1061,8 +1070,8 @@ mod test {
 
     use super::TimeLockWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
+    use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;

@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -25,9 +26,8 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
-#[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary,
-)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
@@ -132,7 +132,7 @@ impl Utxo {
         Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }
 
-    pub(crate) fn has_native_currency(&self) -> bool {
+    pub fn has_native_currency(&self) -> bool {
         self.coins
             .iter()
             .any(|coin| coin.type_script_hash == NativeCurrency.hash())
@@ -255,21 +255,27 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     ))
 }
 
-impl<'a> Arbitrary<'a> for Utxo {
-    /// Produce a strategy for "arbitrary" UTXOs where "arbitrary" means:
-    ///  - lock script corresponding to an arbitrary generation address
-    ///  - one coin of type NativeCurrency and arbitrary, non-negative amount.
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let lock_script_hash: Digest = Digest::arbitrary(u)?;
-        let type_script_hash = NativeCurrency.hash();
-        let amount = NeptuneCoins::arbitrary(u)?.abs();
-        let coins = vec![Coin {
-            type_script_hash,
-            state: amount.encode(),
-        }];
-        Ok((lock_script_hash, coins).into())
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod neptune_arbitrary {
+    use super::*;
+
+    impl<'a> Arbitrary<'a> for Utxo {
+        /// Produce a strategy for "arbitrary" UTXOs where "arbitrary" means:
+        ///  - lock script corresponding to an arbitrary generation address
+        ///  - one coin of type NativeCurrency and arbitrary, non-negative amount.
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let lock_script_hash: Digest = Digest::arbitrary(u)?;
+            let type_script_hash = NativeCurrency.hash();
+            let amount = NeptuneCoins::arbitrary(u)?.abs();
+            let coins = vec![Coin {
+                type_script_hash,
+                state: amount.encode(),
+            }];
+            Ok((lock_script_hash, coins).into())
+        }
     }
 }
+
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;

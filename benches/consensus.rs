@@ -20,8 +20,8 @@ mod transaction {
     use neptune_cash::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
     use neptune_cash::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use neptune_cash::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
-    use neptune_cash::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-    use neptune_cash::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+    use neptune_cash::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
+    use neptune_cash::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
     use neptune_cash::models::blockchain::type_scripts::time_lock::TimeLock;
     use neptune_cash::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use neptune_cash::models::proof_abstractions::tasm::program::ConsensusProgram;

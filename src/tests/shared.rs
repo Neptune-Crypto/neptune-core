@@ -68,7 +68,7 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_expired_timelocks;
+use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::database::BlockIndexKey;
@@ -867,14 +867,12 @@ pub(crate) async fn valid_successor_for_tests(
 /// the Block::is_valid() function.
 pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u8; 32]) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    let block = valid_successor_for_tests(
+    valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
         seed,
     )
-    .await;
-
-    block
+    .await
 }
 
 /// Create a deterministic sequence of valid blocks.

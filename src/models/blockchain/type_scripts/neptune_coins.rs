@@ -6,7 +6,6 @@ use std::ops::Sub;
 use std::str::FromStr;
 
 use anyhow::bail;
-use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use num_bigint::BigInt;
 use num_bigint::ToBigInt;
@@ -16,9 +15,6 @@ use num_traits::CheckedSub;
 use num_traits::FromPrimitive;
 use num_traits::One;
 use num_traits::Zero;
-use proptest::prelude::BoxedStrategy;
-use proptest::prelude::Strategy;
-use proptest_arbitrary_interop::arb;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -281,10 +277,6 @@ impl NeptuneCoins {
 }
 
 impl NeptuneCoins {
-    pub(crate) fn abs(&self) -> Self {
-        Self(self.0.abs())
-    }
-
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()
     }
@@ -498,28 +490,42 @@ impl Display for NeptuneCoins {
     }
 }
 
-impl<'a> Arbitrary<'a> for NeptuneCoins {
-    /// Generate an arbitrary amount of NeptuneCoins that is small in absolute
-    /// value but can be negative.
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let nau: u128 = u.arbitrary()?;
-        Ok(NeptuneCoins((nau as i128) >> 10))
-    }
-}
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod neptune_arbitrary {
+    use ::arbitrary::Arbitrary;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
+    use proptest_arbitrary_interop::arb;
 
-impl NeptuneCoins {
-    pub(crate) fn arbitrary_non_negative() -> BoxedStrategy<Self> {
-        arb::<u128>()
-            .prop_map(|uint| NeptuneCoins((uint >> 10) as i128))
-            .boxed()
+    use super::*;
+
+    impl<'a> Arbitrary<'a> for NeptuneCoins {
+        /// Generate an arbitrary amount of NeptuneCoins that is small in absolute
+        /// value but can be negative.
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let nau: u128 = u.arbitrary()?;
+            Ok(NeptuneCoins((nau as i128) >> 10))
+        }
     }
 
-    /// Generate a strategy for an Option of NeptuneCoins, which if set will be
-    /// a small non-negative amount.
-    pub(crate) fn arbitrary_coinbase() -> BoxedStrategy<Option<Self>> {
-        arb::<Option<NeptuneCoins>>()
-            .prop_map(|coinbase| coinbase.map(|c| c.abs()))
-            .boxed()
+    impl NeptuneCoins {
+        pub(crate) fn abs(&self) -> Self {
+            Self(self.0.abs())
+        }
+
+        pub(crate) fn arbitrary_non_negative() -> BoxedStrategy<Self> {
+            arb::<u128>()
+                .prop_map(|uint| NeptuneCoins((uint >> 10) as i128))
+                .boxed()
+        }
+
+        /// Generate a strategy for an Option of NeptuneCoins, which if set will be
+        /// a small non-negative amount.
+        pub(crate) fn arbitrary_coinbase() -> BoxedStrategy<Option<Self>> {
+            arb::<Option<NeptuneCoins>>()
+                .prop_map(|coinbase| coinbase.map(|c| c.abs()))
+                .boxed()
+        }
     }
 }
 

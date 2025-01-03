@@ -1,8 +1,6 @@
 use std::sync::OnceLock;
 
-use arbitrary::Arbitrary;
 use get_size2::GetSize;
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
@@ -129,39 +127,47 @@ impl MastHash for TransactionKernel {
     }
 }
 
-impl<'a> Arbitrary<'a> for TransactionKernel {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let num_inputs = u.int_in_range(0..=4)?;
-        let num_outputs = u.int_in_range(0..=4)?;
-        let num_public_announcements = u.int_in_range(0..=2)?;
-        let inputs: Vec<RemovalRecord> = (0..num_inputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let outputs: Vec<AdditionRecord> = (0..num_outputs)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let fee: NeptuneCoins = u.arbitrary()?;
-        let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
-        let timestamp: Timestamp = u.arbitrary()?;
-        let mutator_set_hash: Digest = u.arbitrary()?;
-        let merge_bit: bool = u.arbitrary()?;
+#[cfg(any(test, feature = "arbitrary-impls"))]
+pub mod neptune_arbitrary {
+    use arbitrary::Arbitrary;
+    use itertools::Itertools;
 
-        let transaction_kernel = TransactionKernelProxy {
-            inputs,
-            outputs,
-            public_announcements,
-            fee,
-            coinbase,
-            timestamp,
-            mutator_set_hash,
-            merge_bit,
+    use super::*;
+
+    impl<'a> Arbitrary<'a> for TransactionKernel {
+        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+            let num_inputs = u.int_in_range(0..=4)?;
+            let num_outputs = u.int_in_range(0..=4)?;
+            let num_public_announcements = u.int_in_range(0..=2)?;
+            let inputs: Vec<RemovalRecord> = (0..num_inputs)
+                .map(|_| u.arbitrary().unwrap())
+                .collect_vec();
+            let outputs: Vec<AdditionRecord> = (0..num_outputs)
+                .map(|_| u.arbitrary().unwrap())
+                .collect_vec();
+            let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
+                .map(|_| u.arbitrary().unwrap())
+                .collect_vec();
+            let fee: NeptuneCoins = u.arbitrary()?;
+            let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
+            let timestamp: Timestamp = u.arbitrary()?;
+            let mutator_set_hash: Digest = u.arbitrary()?;
+            let merge_bit: bool = u.arbitrary()?;
+
+            let transaction_kernel = TransactionKernelProxy {
+                inputs,
+                outputs,
+                public_announcements,
+                fee,
+                coinbase,
+                timestamp,
+                mutator_set_hash,
+                merge_bit,
+            }
+            .into_kernel();
+
+            Ok(transaction_kernel)
         }
-        .into_kernel();
-
-        Ok(transaction_kernel)
     }
 }
 
@@ -325,6 +331,7 @@ impl TransactionKernelModifier {
 
 #[cfg(test)]
 pub mod transaction_kernel_tests {
+    use itertools::Itertools;
     use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
