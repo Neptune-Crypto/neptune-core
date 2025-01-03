@@ -1,3 +1,5 @@
+use std::process;
+
 use anyhow::Result;
 use clap::Parser;
 use neptune_cash::config_models::cli_args;
@@ -41,5 +43,9 @@ pub fn main() -> Result<()> {
 
     tokio_runtime.shutdown_timeout(tokio::time::Duration::from_secs(10));
 
-    res
+    if let Ok(exit_code) = res {
+        process::exit(exit_code)
+    } else {
+        res.map(|_| ())
+    }
 }

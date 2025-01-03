@@ -65,6 +65,10 @@ pub struct NewBlockFound {
 pub enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
+
+    /// Request main loop to shutdown entire application and return the
+    /// indicated exit code.
+    Shutdown(i32),
 }
 
 #[derive(Clone, Debug)]
