@@ -209,7 +209,7 @@ pub mod par_iter {
 
             let left = SpendingKeyIter::new_range(
                 range_iter.parent_key,
-                *range_iter.range.start()..=(mid - 1) as DerivationIndex,
+                *range_iter.range.start()..=mid as DerivationIndex,
             );
             let right =
                 SpendingKeyIter::new_range(range_iter.parent_key, mid..=*range_iter.range.end());
@@ -500,6 +500,10 @@ mod tests {
                 let set2: HashSet<SpendingKey> =
                     parent_key.into_par_range_iter(range.clone()).collect();
                 assert_eq!(set1, set2);
+
+                // test count() is correct
+                let count = parent_key.into_par_range_iter(range.clone()).count();
+                assert_eq!(set1.len(), count);
 
                 // test without collect(), by comparing len, and ensuring all elems are in the set.
                 let par_iter = parent_key.into_par_range_iter(range);
