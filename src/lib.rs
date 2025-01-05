@@ -28,6 +28,7 @@ pub mod tests;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU16;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -84,6 +85,8 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 10;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub static NUMBER_PEER_CONNECTIONS: AtomicU16 = AtomicU16::new(0);
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     info!("Starting client on {}.", cli_args.network);

@@ -45,6 +45,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalStateLock;
+use crate::NUMBER_PEER_CONNECTIONS;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -1432,9 +1433,10 @@ impl PeerLoopHandler {
         {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
-
-        if global_state.net.peer_map.len() >= cli_args.max_num_peers as usize {
-            bail!("Attempted to connect to more peers than allowed. Aborting connection.");
+        let number_peer_connections =
+            NUMBER_PEER_CONNECTIONS.load(std::sync::atomic::Ordering::SeqCst);
+        if number_peer_connections >= cli_args.max_num_peers {
+            bail!("Attempted to connect to more peers than allowed. Aborting connection. {number_peer_connections}");
         }
 
         if global_state.net.peer_map.contains_key(&self.peer_address) {
