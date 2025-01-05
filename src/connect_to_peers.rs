@@ -32,6 +32,7 @@ use crate::models::state::GlobalStateLock;
 use crate::peer_loop::PeerLoopHandler;
 use crate::MAGIC_STRING_REQUEST;
 use crate::MAGIC_STRING_RESPONSE;
+use crate::NUMBER_PEER_CONNECTIONS;
 
 // Max peer message size is 2000MB
 pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 2000 * 1024 * 1024;
@@ -99,9 +100,10 @@ async fn check_if_connection_is_allowed(
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
+    let number_peer_connection = NUMBER_PEER_CONNECTIONS.load(std::sync::atomic::Ordering::SeqCst);
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
-        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len() {
+        if cli_arguments.max_num_peers <= number_peer_connection {
             Some(InternalConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
@@ -137,8 +139,8 @@ async fn check_if_connection_is_allowed(
 
     // If this connection touches the maximum number of peer connections, say
     // so with special OK code.
-    if cli_arguments.max_num_peers as usize == global_state.net.peer_map.len() + 1 {
-        info!("ConnectionStatus::Accepted, but max # connections is now reached");
+    if cli_arguments.max_num_peers == number_peer_connection + 1 {
+        warn!("ConnectionStatus::Accepted, but max # connections is now reached");
         return InternalConnectionStatus::AcceptedMaxReached;
     }
 
@@ -217,19 +219,6 @@ where
         Bincode<PeerMessage, PeerMessage>,
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
-    // Always disconnecting longest lived peer if node is running in bootstrap mode
-    if state.cli().bootstrap {
-        let global_state_lock_clone = state.clone();
-        let global_state = global_state_lock_clone.lock_guard().await;
-
-        if global_state.net.peer_map.len() < (state.cli().max_num_peers - 1) as usize {
-            peer_task_to_main_tx
-                .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-                .await?;
-            info!("Bootsrap reached max peers, disconnecting longest lived peer");
-        }
-    }
-
     // Complete Neptune handshake
     let (peer_handshake_data, acceptance_code) = match peer.try_next().await? {
         Some(PeerMessage::Handshake(payload)) => {
@@ -285,6 +274,9 @@ where
 
     // If necessary, disconnect from another, existing peer.
     if acceptance_code == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
+        // Atomically decrementing since mpsc task might be long
+        NUMBER_PEER_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+
         info!("Maximum # peers reached, so disconnecting from an existing peer.");
         peer_task_to_main_tx
             .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
@@ -300,6 +292,8 @@ where
         true,
         peer_distance,
     );
+
+    NUMBER_PEER_CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_task_rx)
