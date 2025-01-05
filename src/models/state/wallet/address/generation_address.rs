@@ -30,7 +30,7 @@ use crate::util_types::mutator_set::mutator_set_trait::commit;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
