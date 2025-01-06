@@ -605,16 +605,19 @@ pub(crate) async fn mine(
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
     loop {
-        let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
-        let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
         global_state_lock.set_mining_status_to_inactive().await;
 
-        let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
         let is_connected = global_state_lock.lock(|s| !s.net.peer_map.is_empty()).await;
         if !is_connected {
             warn!("Not mining because client has no connections");
-            sleep(Duration::from_secs(2)).await;
+            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
+            sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
+            continue;
         }
+
+        let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
+        let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
+        let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
