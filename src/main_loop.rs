@@ -108,9 +108,16 @@ pub struct MainLoopHandler {
 
 /// The mutable part of the main loop function
 struct MutableMainLoopState {
+    /// Information used to batch-download blocks.
     sync_state: SyncState,
+
+    /// Information about potential peers for new connections.
     potential_peers: PotentialPeersState,
+
+    /// A list of joinhandles to spawned tasks.
     task_handles: Vec<JoinHandle<()>>,
+
+    /// A joinhandle to a task performing transaction-proof upgrades.
     proof_upgrader_task: Option<JoinHandle<()>>,
 
     /// A joinhandle to a task running the update of the mempool transactions.
@@ -417,7 +424,7 @@ impl MainLoopHandler {
         }
     }
 
-    /// Run a list of Triton VM prover jobs that updates the mutator set state
+    /// Run a list of Triton VM prover jobs that update the mutator set state
     /// for transactions.
     ///
     /// Sends the result back through the provided channel.
