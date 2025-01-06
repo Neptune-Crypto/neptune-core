@@ -310,7 +310,15 @@ impl UpgradeJob {
                     (upgraded_tx, expected_utxos)
                 }
                 Err(e) => {
-                    panic!("UpgradeProof job failed. error: {}", e);
+                    error!("UpgradeProof job failed. error: {e}");
+                    error!("upgrading of witness or proof in {tx_origin} transaction failed.");
+                    error!(
+                        "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
+                        capability is set to: {}.",
+                        TxProvingCapability::ProofCollection,
+                        global_state_lock.cli().proving_capability()
+                    );
+                    return;
                 }
             };
 

@@ -101,6 +101,17 @@ impl TransactionOrigin {
     }
 }
 
+impl std::fmt::Display for TransactionOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = match self {
+            TransactionOrigin::Foreign => "third-party",
+            TransactionOrigin::Own => "own",
+        };
+
+        write!(f, "{output}")
+    }
+}
+
 #[derive(Debug, GetSize, Clone, Serialize, Deserialize)]
 pub(crate) struct MempoolTransaction {
     pub(crate) transaction: Transaction,
