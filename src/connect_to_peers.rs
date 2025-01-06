@@ -100,8 +100,18 @@ async fn check_if_connection_is_allowed(
     }
 
     if let Some(status) = {
-        // Disallow connection if max number of &peers has been attained
-        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len() {
+        // Disallow connection if max number of peers has been reached or
+        // exceeded. There is another test in `answer_peer_inner` that precedes
+        // this one; however this test is still necessary to resolve potential
+        // race conditions.
+        // Note that if we are bootstrapping, then we *do* want to accept the
+        // connection and temporarily exceed the maximum. In this case a
+        // `DisconnectFromLongestLivedPeer` message should have been sent to
+        // the main loop already but that mesage need not have been processed by
+        // the time we get here.
+        if (cli_arguments.max_num_peers as usize) <= global_state.net.peer_map.len()
+            && !cli_arguments.bootstrap
+        {
             Some(InternalConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
