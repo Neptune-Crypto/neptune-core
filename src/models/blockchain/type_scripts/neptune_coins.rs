@@ -786,10 +786,63 @@ pub(crate) mod test {
     }
 
     #[proptest]
-    fn checked_add_proptest(lhs: i128, rhs: i128) {
-        let lhs = NeptuneCoins(lhs >> 1);
-        let rhs = NeptuneCoins(rhs >> 1);
-        prop_assert!(lhs.checked_add(&rhs).is_some());
+    fn checked_add_proptest_quarter_range(lhs: i128, rhs: i128) {
+        let lhs = lhs >> 2;
+        let rhs = rhs >> 2;
+        let expected = NeptuneCoins(lhs + rhs);
+        let lhs = NeptuneCoins(lhs);
+        let rhs = NeptuneCoins(rhs);
+
+        prop_assert_eq!(expected, lhs.checked_add(&rhs).unwrap());
+    }
+
+    #[proptest]
+    fn checked_add_proptest_full_range(
+        #[strategy(0..=NeptuneCoins::MAX_NAU >> 1)] lhs: i128,
+        #[strategy(0..=NeptuneCoins::MAX_NAU >> 1)] rhs: i128,
+    ) {
+        let expected = NeptuneCoins(lhs + rhs);
+        let lhs = NeptuneCoins(lhs);
+        let rhs = NeptuneCoins(rhs);
+        prop_assert_eq!(expected, lhs.checked_add(&rhs).unwrap());
+    }
+
+    #[proptest]
+    fn checked_add_proptest_limit(#[strategy(0..=NeptuneCoins::MAX_NAU)] lhs: i128) {
+        let rhs = NeptuneCoins(NeptuneCoins::MAX_NAU - lhs);
+        prop_assert!(!rhs.is_negative());
+
+        let lhs = NeptuneCoins(lhs);
+        let expected = NeptuneCoins::max();
+        prop_assert_eq!(expected, lhs.checked_add(&rhs).unwrap());
+    }
+
+    #[test]
+    fn checked_add_unittest_limit() {
+        let lhs = NeptuneCoins(NeptuneCoins::MAX_NAU >> 1);
+        let rhs = NeptuneCoins(NeptuneCoins::MAX_NAU >> 1);
+
+        let expected = NeptuneCoins::max();
+        assert_eq!(expected, lhs.checked_add(&rhs).unwrap());
+    }
+
+    #[proptest]
+    fn checked_add_with_self_matches_scalar_mul_two(
+        #[strategy(0..=NeptuneCoins::MAX_NAU >> 1)] lhs: i128,
+    ) {
+        let lhs = NeptuneCoins(lhs);
+        prop_assert_eq!(lhs.scalar_mul(2), lhs.checked_add(&lhs).unwrap());
+    }
+
+    #[proptest]
+    fn checked_add_with_self_and_self_matches_scalar_mul_three(
+        #[strategy(0..=NeptuneCoins::MAX_NAU >> 2)] lhs: i128,
+    ) {
+        let lhs = NeptuneCoins(lhs);
+        prop_assert_eq!(
+            lhs.scalar_mul(3),
+            lhs.checked_add(&lhs).unwrap().checked_add(&lhs).unwrap()
+        );
     }
 
     #[proptest]
