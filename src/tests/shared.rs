@@ -833,7 +833,7 @@ pub(crate) async fn valid_block_from_tx_for_tests(
 
     let threshold = predecessor.header().difficulty.target();
     let mut rng = StdRng::from_seed(seed);
-    while !block.has_proof_of_work(predecessor) {
+    while !block.has_proof_of_work(predecessor.header()) {
         mine_iteration_for_tests(&mut block, threshold, &mut rng);
     }
 

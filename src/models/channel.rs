@@ -16,7 +16,9 @@ use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToMiner {
-    NewBlock(Box<Block>),
+    /// Communicates that a new block is now considered canonical
+    NewBlock,
+
     Shutdown,
 
     /// Communicates to miner that it should work on a new block proposal
@@ -41,7 +43,7 @@ pub(crate) enum MainToMiner {
 impl MainToMiner {
     pub(crate) fn get_type(&self) -> &str {
         match self {
-            MainToMiner::NewBlock(_) => "new block",
+            MainToMiner::NewBlock => "new block",
             MainToMiner::Shutdown => "shutdown",
             MainToMiner::NewBlockProposal => "new block proposal",
             MainToMiner::WaitForContinue => "wait for continue",

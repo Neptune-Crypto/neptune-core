@@ -222,7 +222,7 @@ impl PeerLoopHandler {
         debug!("validating with respect to current timestamp {now}");
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
-            let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block);
+            let new_block_has_proof_of_work = new_block.has_proof_of_work(previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
             let new_block_is_valid = new_block.is_valid(previous_block, now);
             debug!("new block is valid? {new_block_is_valid}");

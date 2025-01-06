@@ -678,8 +678,7 @@ impl MainLoopHandler {
                     .await;
 
                 // Inform miner about new block.
-                self.main_to_miner_tx
-                    .send(MainToMiner::NewBlock(Box::new(last_block)));
+                self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
             PeerTaskToMain::AddPeerMaxBlockHeight((
                 socket_addr,

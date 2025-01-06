@@ -861,14 +861,14 @@ impl Block {
     /// `TARGET_BLOCK_INTERVAL` by a factor `ADVANCE_DIFFICULTY_CORRECTION_WAIT`
     /// then the effective difficulty is reduced by a factor
     /// `ADVANCE_DIFFICULTY_CORRECTION_FACTOR`.
-    pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
+    pub fn has_proof_of_work(&self, previous_block_header: &BlockHeader) -> bool {
         let hash = self.hash();
-        let threshold = previous_block.kernel.header.difficulty.target();
+        let threshold = previous_block_header.difficulty.target();
         if hash <= threshold {
             return true;
         }
 
-        let delta_t = self.header().timestamp - previous_block.header().timestamp;
+        let delta_t = self.header().timestamp - previous_block_header.timestamp;
         let excess_multiple = usize::try_from(
             delta_t.to_millis() / TARGET_BLOCK_INTERVAL.to_millis(),
         )
@@ -876,7 +876,7 @@ impl Block {
         let shift = usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()).unwrap()
             * (excess_multiple
                 >> usize::try_from(ADVANCE_DIFFICULTY_CORRECTION_WAIT.ilog2()).unwrap());
-        let effective_difficulty = previous_block.header().difficulty >> shift;
+        let effective_difficulty = previous_block_header.difficulty >> shift;
         if hash <= effective_difficulty.target() {
             return true;
         }

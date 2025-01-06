@@ -100,7 +100,7 @@ async fn compose_block(
 #[allow(clippy::too_many_arguments)]
 async fn guess_nonce(
     block: Block,
-    previous_block: Block,
+    previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
@@ -121,7 +121,7 @@ async fn guess_nonce(
     tokio::task::spawn_blocking(move || {
         guess_worker(
             block,
-            previous_block,
+            previous_block_header,
             sender,
             composer_utxos,
             sleepy_guessing,
@@ -146,20 +146,20 @@ fn precalculate_mast_leafs(block_template: &Block) -> (Digest, Digest) {
 
 fn guess_worker(
     mut block: Block,
-    previous_block: Block,
+    previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
     target_block_interval: Option<Timestamp>,
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
-    let prev_difficulty = previous_block.header().difficulty;
+    let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
     let input_block_height = block.kernel.header.height;
     info!(
         "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
         block.body().transaction_kernel.outputs.len(),
-        previous_block.header().difficulty,
+        previous_block_header.difficulty,
         block.header().height,
         threshold
     );
@@ -169,14 +169,13 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let previous_block_header = previous_block.header();
     let block_header_template = block.header().to_owned();
     let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
     let guess_result = rayon::iter::repeat(0)
         .map_init(
             || {
                 (
-                    previous_block_header,
+                    &previous_block_header,
                     block_header_template.clone(),
                     rand::thread_rng(),
                 )
@@ -592,7 +591,6 @@ pub(crate) async fn create_block_transaction(
 pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
-    mut latest_block: Block,
     mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     // Wait before starting mining task to ensure that peers have sent us information about
@@ -632,13 +630,17 @@ pub(crate) async fn mine(
 
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
+
             global_state_lock
                 .set_mining_status_to_guessing(proposal)
                 .await;
 
+            let latest_block_header = global_state_lock
+                .lock(|s| s.chain.light_state().header().to_owned())
+                .await;
             let guesser_task = guess_nonce(
                 proposal.to_owned(),
-                latest_block.clone(),
+                latest_block_header,
                 guesser_tx,
                 composer_utxos,
                 cli_args.sleepy_guessing,
@@ -664,8 +666,12 @@ pub(crate) async fn mine(
             && is_connected
         {
             global_state_lock.set_mining_status_to_composing().await;
+
+            let latest_block = global_state_lock
+                .lock(|s| s.chain.light_state().to_owned())
+                .await;
             let compose_task = compose_block(
-                latest_block.clone(),
+                latest_block,
                 global_state_lock.clone(),
                 composer_tx,
                 Timestamp::now(),
@@ -717,7 +723,7 @@ pub(crate) async fn mine(
 
                         break;
                     }
-                    MainToMiner::NewBlock(block) => {
+                    MainToMiner::NewBlock => {
                         if let Some(gt) = guesser_task {
                             gt.abort();
                             debug!("Abort-signal sent to guesser worker.");
@@ -727,8 +733,7 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to composer worker.");
                         }
 
-                        latest_block = *block;
-                        info!("Miner task received {} block height {}", cli_args.network, latest_block.kernel.header.height);
+                        info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
                         if let Some(gt) = guesser_task {
@@ -818,7 +823,10 @@ pub(crate) async fn mine(
                 // Sanity check, remove for more efficient mining.
                 // The below PoW check could fail due to race conditions. So we don't panic,
                 // we only ignore what the worker task sent us.
-                if !new_block_found.block.has_proof_of_work(&latest_block) {
+                let latest_block = global_state_lock
+                    .lock(|s| s.chain.light_state().to_owned())
+                    .await;
+                if !new_block_found.block.has_proof_of_work(latest_block.header()) {
                     error!("Own mined block did not have valid PoW Discarding.");
                     continue;
                 }
@@ -832,7 +840,6 @@ pub(crate) async fn mine(
 
                 info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
 
-                latest_block = *new_block_found.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
 
                 wait_for_confirmation = true;
@@ -1317,7 +1324,7 @@ pub(crate) mod mine_loop_tests {
 
         guess_worker(
             block,
-            tip_block_orig.clone(),
+            tip_block_orig.header().to_owned(),
             worker_task_tx,
             coinbase_utxo_info,
             sleepy_guessing,
@@ -1326,7 +1333,9 @@ pub(crate) mod mine_loop_tests {
 
         let mined_block_info = worker_task_rx.await.unwrap();
 
-        assert!(mined_block_info.block.has_proof_of_work(&tip_block_orig));
+        assert!(mined_block_info
+            .block
+            .has_proof_of_work(tip_block_orig.header()));
     }
 
     /// This test mines a single block at height 1 on the main network
@@ -1389,7 +1398,7 @@ pub(crate) mod mine_loop_tests {
 
         guess_worker(
             template,
-            tip_block_orig.clone(),
+            tip_block_orig.header().to_owned(),
             worker_task_tx,
             coinbase_utxo_info,
             sleepy_guessing,
@@ -1541,7 +1550,7 @@ pub(crate) mod mine_loop_tests {
 
             guess_worker(
                 block,
-                prev_block.clone(),
+                prev_block.header().clone(),
                 worker_task_tx,
                 composer_utxos,
                 sleepy_guessing,
@@ -1555,7 +1564,9 @@ pub(crate) mod mine_loop_tests {
             // which is the method we need here because it allows us to override
             // default values for the target block interval and the minimum
             // block interval.
-            assert!(mined_block_info.block.has_proof_of_work(&prev_block,));
+            assert!(mined_block_info
+                .block
+                .has_proof_of_work(prev_block.header()));
 
             prev_block = *mined_block_info.block;
 
@@ -1732,7 +1743,7 @@ pub(crate) mod mine_loop_tests {
         loop {
             successor_block.set_header_nonce(rng.gen());
 
-            if successor_block.has_proof_of_work(&predecessor_block) {
+            if successor_block.has_proof_of_work(predecessor_block.header()) {
                 break;
             }
 
