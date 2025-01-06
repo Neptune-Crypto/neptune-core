@@ -83,7 +83,7 @@ async fn check_if_connection_is_allowed(
     // Disallow connection if peer is banned via CLI arguments
     if cli_arguments.ban.contains(&peer_address.ip()) {
         warn!(
-            "Banned peer {} attempted to connect. Disallowing.",
+            "Peer {}, banned via CLI argument, attempted to connect. Disallowing.",
             peer_address.ip()
         );
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
@@ -95,7 +95,11 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some() && standing.unwrap().standing < -(cli_arguments.peer_tolerance as i32) {
+    if standing.is_some() && standing.unwrap().standing <= -(cli_arguments.peer_tolerance as i32) {
+        warn!(
+            "Peer {}, banned because of bad standing, attempted to connect. Disallowing.",
+            peer_address.ip()
+        );
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
