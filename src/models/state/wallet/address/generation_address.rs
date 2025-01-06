@@ -66,12 +66,65 @@ pub struct GenerationSpendingKey {
 
 // manually impl Deserialize so we can derive all other fields from the seed.
 impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
+    // todo: is there a more succinct way to impl this fn that works for
+    // both sequential and map visitor access patterns?
+    //
+    // for seq access (bincode, postcard) we can simply do:
+    //    let seed = Digest::deserialize(deserializer)?;
+    //    Ok(Self::derive_from_seed(seed))
+    //
+    // but that fails for crates like serde_json that use map access.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::de::Deserializer<'de>,
     {
-        let seed = Digest::deserialize(deserializer)?;
-        Ok(Self::derive_from_seed(seed))
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Seed,
+        }
+
+        struct FieldVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for FieldVisitor {
+            type Value = GenerationSpendingKey;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct GenerationSpendingKey")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+            where
+                V: serde::de::SeqAccess<'de>,
+            {
+                let seed = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                Ok(GenerationSpendingKey::derive_from_seed(seed))
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                let mut seed = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Seed => {
+                            if seed.is_some() {
+                                return Err(serde::de::Error::duplicate_field("seed"));
+                            }
+                            seed = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let seed_digest = seed.ok_or_else(|| serde::de::Error::missing_field("seed"))?;
+                Ok(GenerationSpendingKey::derive_from_seed(seed_digest))
+            }
+        }
+
+        const FIELDS: &[&str] = &["seed"];
+        deserializer.deserialize_struct("GenerationSpendingKey", FIELDS, FieldVisitor)
     }
 }
 
@@ -354,5 +407,45 @@ impl GenerationReceivingAddress {
     /// returns the `spending_lock`
     pub fn spending_lock(&self) -> Digest {
         self.spending_lock
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    mod generation_spending_key {
+        use super::*;
+
+        // we test serialization roundtrip because we skip fields when serializing and
+        // there is a custom impl Deserialization for GenerationSpendingKey
+        //
+        // serde crates can use either sequential or map visitor access pattern when deserializing
+        // so it is important to test both.
+        mod serialization {
+            use super::*;
+
+            // note: bincode uses sequential access pattern when deserializing.
+            #[test]
+            pub fn roundtrip_bincode() {
+                let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+
+                let s = bincode::serialize(&spending_key).unwrap();
+                let deserialized_key: GenerationSpendingKey = bincode::deserialize(&s).unwrap();
+
+                assert_eq!(spending_key, deserialized_key);
+            }
+
+            // note serde_json uses map access pattern when deserializing.
+            #[test]
+            pub fn roundtrip_json() {
+                let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+
+                let s = serde_json::to_string(&spending_key).unwrap();
+                let deserialized_key: GenerationSpendingKey = serde_json::from_str(&s).unwrap();
+
+                assert_eq!(spending_key, deserialized_key);
+            }
+        }
     }
 }
