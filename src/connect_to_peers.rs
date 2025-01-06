@@ -316,7 +316,7 @@ pub(crate) async fn call_peer(
     main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
     peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
     own_handshake_data: HandshakeData,
-    distance: u8,
+    peer_distance: u8,
 ) {
     let state_clone = state.clone();
     let peer_task_to_main_tx_clone = peer_task_to_main_tx.clone();
@@ -324,7 +324,15 @@ pub(crate) async fn call_peer(
         debug!("Attempting to initiate connection to {peer_address}");
         match tokio::net::TcpStream::connect(peer_address).await {
             Err(e) => {
-                warn!("Failed to establish connection to {peer_address}: {}", e);
+                let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
+                if peer_distance == 1 {
+                    // outgoing connection to peer of distance 1 means user has
+                    // requested a connection to this peer through CLI
+                    // arguments, and should be warned if this fails.
+                    warn!("{msg}");
+                } else {
+                    info!("{msg}");
+                }
             }
             Ok(stream) => {
                 match call_peer_inner(
@@ -334,12 +342,22 @@ pub(crate) async fn call_peer(
                     main_to_peer_task_rx,
                     peer_task_to_main_tx,
                     &own_handshake_data,
-                    distance,
+                    peer_distance,
                 )
                 .await
                 {
                     Ok(()) => (),
-                    Err(e) => error!("An error occurred: {}. Connection closing", e),
+                    Err(e) => {
+                        let msg = format!("{e}. Failed to establish connection.");
+                        // outgoing connection to peer of distance 1 means user has
+                        // requested a connection to this peer through CLI
+                        // arguments, and should be warned if this fails.
+                        if peer_distance == 1 {
+                            warn!("{msg}");
+                        } else {
+                            info!("{msg}");
+                        }
+                    }
                 }
             }
         };
