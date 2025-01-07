@@ -1,5 +1,6 @@
 pub(crate) mod composer_parameters;
 
+use std::cmp;
 use std::cmp::max;
 use std::time::Duration;
 
@@ -16,9 +17,9 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
+use rayon::ThreadPoolBuilder;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::twenty_first::prelude::CpuParallel;
 use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -49,6 +50,7 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::twenty_first::util_types::merkle_tree::CpuParallel;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 async fn compose_block(
@@ -171,33 +173,43 @@ fn guess_worker(
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     let block_header_template = block.header().to_owned();
     let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
-    let guess_result = rayon::iter::repeat(0)
-        .map_init(
-            || {
-                (
-                    &previous_block_header,
-                    block_header_template.clone(),
-                    rand::thread_rng(),
-                )
-            },
-            |(prev_header, block_header_templ, rng), _x| {
-                guess_nonce_iteration(
-                    block_body_mast_hash_digest,
-                    appendix_digest,
-                    block_header_templ.to_owned(),
-                    prev_header,
-                    &sender,
-                    DifficultyInfo {
-                        target_block_interval,
-                        threshold,
-                    },
-                    sleepy_guessing,
-                    rng,
-                )
-            },
-        )
-        .find_any(|r| !r.block_not_found())
+    let rayon_threads_available = rayon::current_num_threads();
+    let threads_to_use = cmp::max(1, rayon_threads_available.saturating_sub(2));
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(threads_to_use)
+        .build()
         .unwrap();
+    let guess_result = pool.install(|| {
+        rayon::iter::repeat(0)
+            .map_init(
+                || {
+                    (
+                        block_body_mast_hash_digest,
+                        appendix_digest,
+                        &block_header_template,
+                        rand::thread_rng(),
+                    )
+                },
+                |(block_body_mast_hash_digest_, appendix_digest_, block_header_template_, rng),
+                 _x| {
+                    guess_nonce_iteration(
+                        *block_body_mast_hash_digest_,
+                        *appendix_digest_,
+                        block_header_template_.clone(),
+                        &previous_block_header,
+                        &sender,
+                        DifficultyInfo {
+                            target_block_interval,
+                            threshold,
+                        },
+                        sleepy_guessing,
+                        rng,
+                    )
+                },
+            )
+            .find_any(|r| !r.block_not_found())
+            .unwrap()
+    });
 
     let (nonce_preimage, timestamp, difficulty) = match guess_result {
         GuessNonceResult::Cancelled => {
