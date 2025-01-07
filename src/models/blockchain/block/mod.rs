@@ -1037,7 +1037,6 @@ mod block_tests {
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
@@ -1136,7 +1135,7 @@ mod block_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block(&genesis_block, None, a_recipient_address, rng.gen());
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
         let timestamp = genesis_block.kernel.header.timestamp;
