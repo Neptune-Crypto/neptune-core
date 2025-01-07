@@ -1244,7 +1244,7 @@ mod block_tests {
         // and 1.9797333...% is the relative size of the premine
         let asymptotic_total_cap = NeptuneCoins::new(42_000_000);
         let premine_max_size = NeptuneCoins::new(831488);
-        let total_premine = Block::premine_distribution(Network::Alpha)
+        let total_premine = Block::premine_distribution(Network::Main)
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NeptuneCoins>();

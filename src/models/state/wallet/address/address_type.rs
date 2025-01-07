@@ -2,6 +2,7 @@
 
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use rayon::prelude::IntoParallelIterator;
 use serde::Deserialize;
@@ -22,6 +23,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
+use crate::models::state::XFieldElement;
 use crate::BFieldElement;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
@@ -96,12 +98,39 @@ impl KeyType {
     }
 }
 
+/// enumerates seed data for each KeyType.
+///
+/// used to instantiate a key with [SpendingKey::from_seed()]
+pub enum KeyTypeSeed {
+    Generation {
+        secret: XFieldElement,
+        index: common::DerivationIndex,
+    },
+
+    Symmetric(Digest),
+}
+
+impl KeyTypeSeed {
+    /// generates a random seed for a given [KeyType]
+    #[cfg(test)]
+    pub fn random(key_type: KeyType) -> Self {
+        match key_type {
+            KeyType::Generation => Self::Generation {
+                secret: rand::random(),
+                index: rand::random(),
+            },
+            KeyType::Symmetric => Self::Symmetric(rand::random()),
+        }
+    }
+}
+
 /// Represents any type of Neptune receiving Address.
 ///
 /// This enum provides an abstraction API for Address types, so that
 /// a method or struct may simply accept a `ReceivingAddress` and be
 /// forward-compatible with new types of Address as they are implemented.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub enum ReceivingAddress {
     /// a [generation_address]
     Generation(Box<generation_address::GenerationReceivingAddress>),
@@ -402,12 +431,13 @@ impl SpendingKey {
     /// perf:
     ///   cheap for KeyType::Symmetric (only copies seed)
     ///   not cheap for KeyType::Generation (performs several hash ops)
-    pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
-        match key_type {
-            KeyType::Generation => {
-                generation_address::GenerationSpendingKey::from_seed(seed).into()
+    pub fn from_seed(key_type_seed: KeyTypeSeed) -> Self {
+        match key_type_seed {
+            KeyTypeSeed::Generation { secret, index } => {
+                generation_address::GenerationSpendingKey::from_secret_and_index(secret, index)
+                    .into()
             }
-            KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
+            KeyTypeSeed::Symmetric(digest) => symmetric_key::SymmetricKey::from_seed(digest).into(),
         }
     }
 
@@ -546,72 +576,92 @@ impl SpendingKey {
 
 #[cfg(test)]
 mod test {
-    use generation_address::GenerationReceivingAddress;
-    use generation_address::GenerationSpendingKey;
     use itertools::Itertools;
     use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::thread_rng;
     use rand::Rng;
-    use symmetric_key::SymmetricKey;
     use test_strategy::proptest;
 
     use super::*;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::state::XFieldElement;
     use crate::tests::shared::make_mock_transaction;
 
     /// tests scanning for announced utxos with a symmetric key
     #[proptest]
     fn scan_for_announced_utxos_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(SymmetricKey::from_seed(seed).into())
+        worker::scan_for_announced_utxos(SpendingKey::from_seed(KeyTypeSeed::Symmetric(seed)))
     }
 
     /// tests scanning for announced utxos with an asymmetric (generation) key
     #[proptest]
-    fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(SpendingKey::from_seed(seed, KeyType::Generation))
+    fn scan_for_announced_utxos_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
+        worker::scan_for_announced_utxos(SpendingKey::from_seed(KeyTypeSeed::Generation {
+            secret,
+            index,
+        }))
     }
 
     /// tests encrypting and decrypting with a symmetric key
     #[proptest]
     fn test_encrypt_decrypt_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(SymmetricKey::from_seed(seed).into())
+        worker::test_encrypt_decrypt(SpendingKey::from_seed(KeyTypeSeed::Symmetric(seed)))
     }
 
     /// tests encrypting and decrypting with an asymmetric (generation) key
     #[proptest]
-    fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::from_seed(seed).into())
+    fn test_encrypt_decrypt_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
+        worker::test_encrypt_decrypt(SpendingKey::from_seed(KeyTypeSeed::Generation {
+            secret,
+            index,
+        }))
     }
 
     /// tests keygen, sign, and verify with a symmetric key
     #[proptest]
     fn test_keygen_sign_verify_symmetric(#[strategy(arb())] seed: Digest) {
         worker::test_keypair_validity(
-            SymmetricKey::from_seed(seed).into(),
-            SymmetricKey::from_seed(seed).into(),
+            SpendingKey::from_seed(KeyTypeSeed::Symmetric(seed)),
+            SpendingKey::from_seed(KeyTypeSeed::Symmetric(seed)).to_address(),
         );
     }
 
     /// tests keygen, sign, and verify with an asymmetric (generation) key
     #[proptest]
-    fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
+    fn test_keygen_sign_verify_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
         worker::test_keypair_validity(
-            SpendingKey::from_seed(seed, KeyType::Generation),
-            SpendingKey::from_seed(seed, KeyType::Generation).to_address(),
+            SpendingKey::from_seed(KeyTypeSeed::Generation { secret, index }),
+            SpendingKey::from_seed(KeyTypeSeed::Generation { secret, index }).to_address(),
         );
     }
 
     /// tests bech32m serialize, deserialize with a symmetric key
     #[proptest]
     fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());
+        worker::test_bech32m_conversion(
+            SpendingKey::from_seed(KeyTypeSeed::Symmetric(seed)).to_address(),
+        );
     }
 
     /// tests bech32m serialize, deserialize with an asymmetric (generation) key
     #[proptest]
-    fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::from_seed(seed).into());
+    fn test_bech32m_conversion_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
+        worker::test_bech32m_conversion(
+            SpendingKey::from_seed(KeyTypeSeed::Generation { secret, index }).to_address(),
+        );
     }
 
     mod worker {

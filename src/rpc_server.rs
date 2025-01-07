@@ -1618,6 +1618,7 @@ mod rpc_server_tests {
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
     use crate::models::state::wallet::address::KeyType;
+    use crate::models::state::wallet::address::KeyTypeSeed;
     use crate::models::state::wallet::address::SpendingKey;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
@@ -2310,7 +2311,7 @@ mod rpc_server_tests {
         let network = Network::Main;
         let ctx = context::current();
         let mut rng = thread_rng();
-        let address = SpendingKey::from_seed(rng.gen(), KeyType::Generation).to_address();
+        let address = SpendingKey::from_seed(KeyTypeSeed::random(KeyType::Generation)).to_address();
         let amount = NeptuneCoins::new(rng.gen_range(0..10));
 
         // set flag on, verify non-initiation
@@ -2833,7 +2834,7 @@ mod rpc_server_tests {
 
                 // --- Setup. generate an output that our wallet cannot claim. ---
                 let external_receiving_address =
-                    SpendingKey::from_seed(rng.gen(), recipient_key_type).to_address();
+                    SpendingKey::from_seed(KeyTypeSeed::random(recipient_key_type)).to_address();
                 let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
 
                 // --- Setup. generate an output that our wallet can claim. ---

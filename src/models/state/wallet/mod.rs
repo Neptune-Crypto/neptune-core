@@ -62,6 +62,13 @@ impl Zeroize for SecretKeyMaterial {
 
 /// Wallet contains the wallet-related data we want to store in a JSON file,
 /// and that is not updated during regular program execution.
+//
+// note: the master key is always the parent of the 0th key.
+//
+// In order to make Generation keys legacy-compatible they must include the
+// master secret and the index. With this construction there is no possible
+// parent of key 0, except DerivationIndex::MAX when DerivationIndex wraps
+// around.  This is gross, but it works.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, ZeroizeOnDrop)]
 pub struct WalletSecret {
     name: String,
@@ -69,7 +76,10 @@ pub struct WalletSecret {
     secret_seed: SecretKeyMaterial,
     version: u8,
 
+    // parent of 0th generation key
     master_generation_key: generation_address::GenerationSpendingKey,
+
+    // parent of 0th symmetric key
     master_symmetric_key: symmetric_key::SymmetricKey,
 }
 
@@ -209,19 +219,18 @@ impl WalletSecret {
         Ok((wallet, wallet_secret_file_locations))
     }
 
+    // generates 0th generation key.
     fn gen_master_generation_key(
         secret_seed: SecretKeyMaterial,
     ) -> generation_address::GenerationSpendingKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                secret_seed.0.encode(),
-                generation_address::GENERATION_FLAG.encode(),
-            ]
-            .concat(),
-        );
-        generation_address::GenerationSpendingKey::from_seed(key_seed)
+        // DerivationIndex::MAX + 1 --> 0.   So first derived child will be 0th key.
+        generation_address::GenerationSpendingKey::from_secret_and_index(
+            secret_seed.0,
+            DerivationIndex::MAX,
+        )
     }
 
+    // generates 0th symmetric key.
     fn gen_master_symmetric_key(secret_seed: SecretKeyMaterial) -> symmetric_key::SymmetricKey {
         let key_seed = Hash::hash_varlen(
             &[
@@ -233,9 +242,9 @@ impl WalletSecret {
         symmetric_key::SymmetricKey::from_seed(key_seed)
     }
 
-    /// get the master key of a given KeyType
+    /// get the master key of a given KeyType.
     ///
-    /// all keys are derived from the master key.
+    /// The master key is the parent of nth_spending_key(key_type, 0)
     pub fn master_key(&self, key_type: KeyType) -> SpendingKey {
         match key_type {
             KeyType::Generation => self.master_generation_key.into(),
@@ -244,11 +253,18 @@ impl WalletSecret {
     }
 
     /// Get the nth derived spending key of a given type.
+    ///
+    /// note: this is a read-only method and does not modify wallet state.  When
+    /// requesting a new key for purposes of a new wallet receiving address,
+    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    /// which takes &mut self.
     pub fn nth_spending_key(&mut self, key_type: KeyType, index: DerivationIndex) -> SpendingKey {
         self.master_key(key_type).derive_child(index)
     }
 
     /// derives a generation spending key at `index`
+    ///
+    /// deprecated: prefer nth_spending_key(KeyType::Generation, index) instead
     ///
     /// note: this is a read-only method and does not modify wallet state.  When
     /// requesting a new key for purposes of a new wallet receiving address,
@@ -262,6 +278,8 @@ impl WalletSecret {
     }
 
     /// derives a symmetric key at `index`
+    ///
+    /// deprecated: prefer nth_symmetric_key(KeyType::Generation, index) instead
     ///
     /// note: this is a read-only method and does not modify wallet state.  When
     /// requesting a new key for purposes of a new wallet receiving address,
@@ -282,7 +300,7 @@ impl WalletSecret {
         &self,
         counter: u64,
     ) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(counter.into())
+        self.nth_generation_spending_key(counter)
     }
 
     // note: legacy tests were written to call nth_symmetric_key()
@@ -293,7 +311,7 @@ impl WalletSecret {
     // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
     #[cfg(test)]
     pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(counter.into())
+        self.nth_symmetric_key(counter)
     }
 
     /// Return a deterministic seed that can be used to seed an RNG
@@ -1511,8 +1529,8 @@ mod wallet_tests {
         use super::*;
 
         // This test derives a set of generation keys and compares the derived
-        // set against a "known-good" hard-coded set that were generated from
-        // the alphanet branch.
+        // set against a "known-good" hard-coded set that were generated immediate
+        // after switching to self-derived keys. Jan 2025
         //
         // The test will fail if the key format or derivation method ever changes.
         #[test]
@@ -1667,10 +1685,11 @@ mod wallet_tests {
                 serde_json::from_str(json_serialized_known_keys()).unwrap()
             }
 
-            // returns a json-serialized string of generation spending keys generated from betanet tag.
+            // returns a json-serialized string of generation spending keys generated immediately
+            // after switch to self-derived keys.  Jan 2025
             pub fn json_serialized_known_keys() -> &'static str {
                 r#"
-[[0,{"seed":"085de9d8ff01b393be81f8f76cc6b153b7b0c20e1097909390e0877fb0d38fe1cb3518c189ecc220"}],[1,{"seed":"3b538bb459132b1f2526ad3172226080699560c05a762d89fd6d73336edb3fb5a0d5c9e36b092fa1"}],[2,{"seed":"287365585508989266466c47b04875fac951a93d6d794ba4de91cfa892db92a3e52bf8e91b85f30d"}],[3,{"seed":"47bdfbbe9803d28101356a9db943a1c5081e15cdea333a27c814c9fc62d274565f08fc1fb57bb2f4"}],[8,{"seed":"e7718293681c2a25f83ec4fcf2adc6c6df9cc67146abca5dfaa129e3c9af3d5d0ff0f7c55e3282b8"}],[16,{"seed":"cdf0082897ce71d4e20eef2f953dfa092cf0a3c015e79af51a262889849f44c23e6ed23fd41d95f9"}],[256,{"seed":"7deebf6aac8a267a50b2c09844f203f1a14117c929c41c4161af663281ea8e102eae65fa0aab9756"}],[512,{"seed":"0ed702bb8d3c3e4801088a6e47158f8fe747ddd0b5d197809b8fb1578e39127ed5a976e26bc4beeb"}],[1024,{"seed":"2eb0d1060c2485c9c8e560954889e8abc64ea3dafeaa2f0a997befda9d5ed932cf5224fad779bc8c"}],[2048,{"seed":"1199406fb70219a94dfccd3e08663d6d4b086034e9d4125760222c16b5ae9e7557e1bd2d22236fea"}],[4096,{"seed":"680a341df644f26ba0188f90f95333987b84dc988cce1dcb3db32a60453b98d3300476177e961646"}],[32767,{"seed":"2f5502fe93db525e75a35ca2315b6c253ea03d324d1dab4bacece8f0c518acfaee137c5b3699c682"}],[65535,{"seed":"12633efc8a1779f3a4da5980812b720dc77ac2dec93bd281589ca7f44bfa2d76c945af5226d0fbc3"}]]
+[[0,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":0}],[1,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":1}],[2,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":2}],[3,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":3}],[8,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":8}],[16,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":16}],[256,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":256}],[512,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":512}],[1024,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":1024}],[2048,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":2048}],[4096,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":4096}],[32767,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":32767}],[65535,{"secret":{"coefficients":[12063201067205522823,1529663126377206632,2090171368883726200]},"index":65535}]]
 "#
             }
         }

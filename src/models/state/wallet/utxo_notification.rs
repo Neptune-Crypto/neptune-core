@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,7 +22,8 @@ pub enum UtxoNotificationMedium {
 /// to encrypt this information.
 ///
 /// see also: [UtxoNotification]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) enum UtxoNotifyMethod {
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain(ReceivingAddress),

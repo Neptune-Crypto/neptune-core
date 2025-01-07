@@ -24,8 +24,8 @@ use super::SpendingKey;
 pub struct SpendingKeyIter {
     parent_key: SpendingKey,
     range: RangeInclusive<DerivationIndex>,
-    curr: Option<DerivationIndex>,
-    curr_back: Option<DerivationIndex>,
+    curr_fwd: Option<DerivationIndex>,
+    curr_rev: Option<DerivationIndex>,
 }
 
 impl From<SpendingKey> for SpendingKeyIter {
@@ -59,7 +59,7 @@ impl SpendingKeyIter {
         assert!(range.end() >= range.start());
         assert!(range.end() - range.start() <= usize::MAX as DerivationIndex);
 
-        let curr_back = if *range.end() == 0 {
+        let curr_rev = if *range.end() == 0 {
             0
         } else {
             *range.end() - 1
@@ -67,8 +67,8 @@ impl SpendingKeyIter {
 
         Self {
             parent_key,
-            curr: Some(*range.start()),
-            curr_back: Some(curr_back),
+            curr_fwd: Some(*range.start()),
+            curr_rev: Some(curr_rev),
             range,
         }
     }
@@ -103,10 +103,10 @@ impl Iterator for SpendingKeyIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match (self.curr, self.curr_back) {
+        match (self.curr_fwd, self.curr_rev) {
             (Some(c), Some(cb)) => {
                 let key = self.parent_key.derive_child(c);
-                self.curr = if c >= cb { None } else { Some(c + 1) };
+                self.curr_fwd = if c >= cb { None } else { Some(c + 1) };
                 Some(key)
             }
             _ => None,
@@ -128,10 +128,10 @@ impl Iterator for SpendingKeyIter {
 // see: https://github.com/rayon-rs/rayon/issues/1053
 impl DoubleEndedIterator for SpendingKeyIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match (self.curr, self.curr_back) {
+        match (self.curr_fwd, self.curr_rev) {
             (Some(c), Some(cb)) => {
                 let key = self.parent_key.derive_child(cb);
-                self.curr_back = if cb <= c { None } else { Some(cb - 1) };
+                self.curr_rev = if cb <= c { None } else { Some(cb - 1) };
                 Some(key)
             }
             _ => None,
@@ -530,7 +530,7 @@ mod tests {
             worker::validate_range_from(1..);
             worker::validate_range_from(0..);
             worker::validate_range_from(10..);
-            worker::validate_range_from(usize::MAX as DerivationIndex + 5..);
+            worker::validate_range_from(usize::MAX as DerivationIndex..);
         }
 
         #[test]
@@ -589,6 +589,7 @@ mod tests {
     mod helper {
         use super::*;
         use crate::models::state::wallet::address::KeyType;
+        use crate::models::state::wallet::address::KeyTypeSeed;
 
         // generates a random SpendingKey.
         //
@@ -596,7 +597,7 @@ mod tests {
         // less memory than GenerationSpendingKey.  For purposes of testing iterator
         // logic, the key-type does not matter.
         pub fn make_parent_key() -> SpendingKey {
-            SpendingKey::from_seed(rand::random(), KeyType::Symmetric)
+            SpendingKey::from_seed(KeyTypeSeed::random(KeyType::Symmetric))
         }
 
         // generates an iterator for a random SpendingKey::SymmetricKey

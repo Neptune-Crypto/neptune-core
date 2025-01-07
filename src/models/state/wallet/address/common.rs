@@ -13,7 +13,7 @@ use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
-pub type DerivationIndex = u128;
+pub type DerivationIndex = u64;
 
 /// returns human-readable-prefix for the given network
 pub(crate) fn network_hrp_char(network: Network) -> char {

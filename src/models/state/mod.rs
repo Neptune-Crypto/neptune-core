@@ -1498,7 +1498,6 @@ mod global_state_tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
     use wallet::WalletSecret;
@@ -2942,6 +2941,7 @@ mod global_state_tests {
         use super::*;
         use crate::mine_loop::composer_parameters::ComposerParameters;
         use crate::mine_loop::create_block_transaction_stateless;
+        use crate::models::state::wallet::address::KeyTypeSeed;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss
@@ -3077,7 +3077,11 @@ mod global_state_tests {
             };
 
             // in alice wallet: send pre-mined funds to bob
-            let an_address = GenerationReceivingAddress::from_seed(rng.gen());
+            let an_address = SpendingKey::from_seed(KeyTypeSeed::Generation {
+                secret: rng.gen(),
+                index: rng.gen(),
+            })
+            .to_address();
             let block_1 = {
                 let vm_job_queue = alice_state_lock.vm_job_queue().clone();
                 let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
@@ -3132,8 +3136,7 @@ mod global_state_tests {
                     .await;
 
                 // the block gets mined.
-                let composer_parameters =
-                    ComposerParameters::new(an_address.into(), rng.gen(), 0.5);
+                let composer_parameters = ComposerParameters::new(an_address, rng.gen(), 0.5);
                 let (block_1_tx, _) = create_block_transaction_stateless(
                     &genesis_block,
                     composer_parameters,

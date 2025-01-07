@@ -767,6 +767,7 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::state::wallet::address::DerivationIndex;
 
     impl Arbitrary for TimeLockWitness {
         /// Parameters are:
@@ -784,9 +785,9 @@ pub mod neptune_arbitrary {
                 parameters;
             let num_inputs = release_dates.len();
             (
-                vec(arb::<Digest>(), num_inputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_inputs),
                 vec(NeptuneCoins::arbitrary_non_negative(), num_inputs),
-                vec(arb::<Digest>(), num_outputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_outputs),
                 vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
                 vec(arb::<PublicAnnouncement>(), num_public_announcements),
                 NeptuneCoins::arbitrary_coinbase(),
@@ -931,9 +932,9 @@ pub mod neptune_arbitrary {
     ) -> BoxedStrategy<PrimitiveWitness> {
         (
             NeptuneCoins::arbitrary_non_negative(),
-            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<(XFieldElement, DerivationIndex)>(), num_inputs),
             vec(arb::<u64>(), num_inputs),
-            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<(XFieldElement, DerivationIndex)>(), num_outputs),
             vec(arb::<u64>(), num_outputs),
             vec(arb::<PublicAnnouncement>(), num_announcements),
             arb::<u64>(),

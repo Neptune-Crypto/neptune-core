@@ -92,7 +92,8 @@ use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
-use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+use crate::models::state::wallet::address::KeyTypeSeed;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::wallet_state::WalletState;
@@ -861,7 +862,11 @@ pub(crate) async fn valid_successor_for_tests(
     let mut rng = StdRng::from_seed(seed);
 
     let composer_parameters = ComposerParameters::new(
-        GenerationReceivingAddress::from_seed(rng.gen()).into(),
+        SpendingKey::from_seed(KeyTypeSeed::Generation {
+            secret: rng.gen(),
+            index: rng.gen(),
+        })
+        .to_address(),
         rng.gen(),
         0.5f64,
     );

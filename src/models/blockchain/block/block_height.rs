@@ -160,7 +160,7 @@ mod test {
 
     #[test]
     fn asymptotic_limit_is_42_million() {
-        let network = Network::Alpha;
+        let network = Network::Main;
         let generation_0_subsidy = Block::block_subsidy(BlockHeight::genesis().next());
 
         // Genesis block does not contain block subsidy so it must be subtracted

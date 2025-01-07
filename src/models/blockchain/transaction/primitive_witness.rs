@@ -430,11 +430,11 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::generation_address;
+    use crate::models::state::wallet::address::DerivationIndex;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
@@ -484,9 +484,9 @@ pub mod neptune_arbitrary {
             //  - timestamp
             (
                 NeptuneCoins::arbitrary_non_negative(),
-                vec(arb::<Digest>(), num_inputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_inputs),
                 vec(arb::<u64>(), num_inputs),
-                vec(arb::<Digest>(), num_outputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_outputs),
                 vec(arb::<u64>(), num_outputs),
                 vec(arb::<PublicAnnouncement>(), num_public_announcements),
                 arb::<u64>(),
@@ -801,13 +801,15 @@ pub mod neptune_arbitrary {
 
         // this is only used by arbitrary-impls
         pub(crate) fn transaction_inputs_from_address_seeds_and_amounts(
-            address_seeds: &[Digest],
+            address_seeds: &[(XFieldElement, DerivationIndex)],
             input_amounts: &[NeptuneCoins],
         ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
             let input_spending_keys = address_seeds
                 .iter()
-                .map(|address_seed| {
-                    generation_address::GenerationSpendingKey::from_seed(*address_seed)
+                .map(|(secret, index)| {
+                    generation_address::GenerationSpendingKey::from_secret_and_index(
+                        *secret, *index,
+                    )
                 })
                 .collect_vec();
 
@@ -834,7 +836,7 @@ pub mod neptune_arbitrary {
         /// amounts and fee and mutates these values until they satisfy the no-inflation
         /// requirement. This method assumes that the total input amount and coinbase (if
         /// set) can be safely added.
-        pub(crate) fn find_balanced_output_amounts_and_fee(
+        pub fn find_balanced_output_amounts_and_fee(
             total_input_amount: NeptuneCoins,
             coinbase: Option<NeptuneCoins>,
             output_amounts_suggestion: &mut [NeptuneCoins],
@@ -849,15 +851,15 @@ pub mod neptune_arbitrary {
                 "Amount balancer only accepts non-negative fee suggestions. Got:\n{fee_suggestion}"
             );
             assert!(
-            !total_input_amount.is_negative(),
-            "Amount balancer only accepts non-negative total input amount. Got:\n{total_input_amount}"
-        );
+                !total_input_amount.is_negative(),
+                "Amount balancer only accepts non-negative total input amount. Got:\n{total_input_amount}"
+            );
             assert!(
-            output_amounts_suggestion
-                .iter()
-                .all(|input_amount_sugg| !input_amount_sugg.is_negative()),
-            "Amount balancer only accepts non-negative output amount suggestsions. Got:\n\n{output_amounts_suggestion:?}"
-        );
+                output_amounts_suggestion
+                    .iter()
+                    .all(|input_amount_sugg| !input_amount_sugg.is_negative()),
+                "Amount balancer only accepts non-negative output amount suggestsions. Got:\n\n{output_amounts_suggestion:?}"
+            );
             let mut total_output_amount = output_amounts_suggestion
                 .iter()
                 .cloned()
@@ -889,31 +891,38 @@ pub mod neptune_arbitrary {
         /// Generate valid output UTXOs from the amounts and seeds for the
         /// addresses. If some release date is supplied, generate twice as many
         /// UTXOs such that half the total amount is time-locked.
-        pub(crate) fn valid_tx_outputs_from_amounts_and_address_seeds(
+        pub fn valid_tx_outputs_from_amounts_and_address_seeds(
             output_amounts: &[NeptuneCoins],
-            address_seeds: &[Digest],
+            address_seeds: &[(XFieldElement, DerivationIndex)],
             timelock_until: Option<Timestamp>,
         ) -> Vec<Utxo> {
+            use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+            use crate::models::state::wallet::address::generation_address;
+
             address_seeds
                 .iter()
                 .zip(output_amounts)
-                .flat_map(|(seed, amount)| {
+                .flat_map(|((secret, index), amount)| {
                     let mut amount = *amount;
                     if timelock_until.is_some() {
                         amount.div_two();
                     }
                     let liquid_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::from_seed(*seed)
-                            .to_address()
-                            .lock_script(),
+                        generation_address::GenerationSpendingKey::from_secret_and_index(
+                            *secret, *index,
+                        )
+                        .to_address()
+                        .lock_script(),
                         amount.to_native_coins(),
                     );
                     let mut utxos = vec![liquid_utxo];
                     if let Some(release_date) = timelock_until {
                         let timelocked_utxo = Utxo::new(
-                            generation_address::GenerationSpendingKey::from_seed(*seed)
-                                .to_address()
-                                .lock_script(),
+                            generation_address::GenerationSpendingKey::from_secret_and_index(
+                                *secret, *index,
+                            )
+                            .to_address()
+                            .lock_script(),
                             [
                                 amount.to_native_coins(),
                                 vec![TimeLock::until(release_date)],
@@ -957,6 +966,7 @@ mod test {
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::wallet::address::DerivationIndex;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -1021,6 +1031,9 @@ mod test {
                 assert!(index < N);
             }
 
+            let nested_vec_strategy_seeds = |counts: [usize; N]| {
+                counts.map(|count| vec(arb::<(XFieldElement, DerivationIndex)>(), count))
+            };
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -1038,7 +1051,7 @@ mod test {
             (
                 (
                     nested_vec_strategy_amounts(input_counts),
-                    nested_vec_strategy_digests(input_counts),
+                    nested_vec_strategy_seeds(input_counts),
                     nested_vec_strategy_utxos(output_counts),
                     nested_vec_strategy_pubann(announcement_counts),
                     vec(NeptuneCoins::arbitrary_non_negative(), N),
@@ -1450,7 +1463,7 @@ mod test {
 
             (
                 total_amount_strategy,
-                arb::<Digest>(),
+                arb::<(XFieldElement, DerivationIndex)>(),
                 vec(arb::<Digest>(), num_outputs),
                 arb::<Timestamp>(),
                 NeptuneCoins::arbitrary_non_negative(),

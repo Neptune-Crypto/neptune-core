@@ -9,6 +9,8 @@ pub mod symmetric_key;
 
 /// KeyType simply enumerates the known key types.
 pub use address_type::KeyType;
+/// Enumerates seed data for each key type.
+pub use address_type::KeyTypeSeed;
 /// ReceivingAddress abstracts over any address type and should be used
 /// wherever possible.
 pub use address_type::ReceivingAddress;
