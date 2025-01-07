@@ -203,17 +203,6 @@ impl WalletSecret {
         &self,
         index: u64,
     ) -> generation_address::GenerationSpendingKey {
-        assert!(
-            index.is_zero(),
-            "For now we only support one generation address per wallet"
-        );
-        self.nth_generation_spending_key_worker(index)
-    }
-
-    fn nth_generation_spending_key_worker(
-        &self,
-        index: u64,
-    ) -> generation_address::GenerationSpendingKey {
         // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
         // in case you don't know with what counter you made the address
         let key_seed = Hash::hash_varlen(
@@ -1559,7 +1548,7 @@ mod wallet_tests {
             );
 
             for (index, key) in known_keys {
-                assert_eq!(devnet_wallet.nth_generation_spending_key_worker(index), key);
+                assert_eq!(devnet_wallet.nth_generation_spending_key(index), key);
             }
         }
 
@@ -1586,7 +1575,7 @@ mod wallet_tests {
             for (index, known_addr) in known_addrs {
                 println!("index: {}", index);
                 let derived_addr = devnet_wallet
-                    .nth_generation_spending_key_worker(index)
+                    .nth_generation_spending_key(index)
                     .to_address()
                     .to_bech32m(network)
                     .unwrap();
@@ -1613,7 +1602,7 @@ mod wallet_tests {
 
             let addrs = indexes
                 .into_iter()
-                .map(|i| (i, devnet_wallet.nth_generation_spending_key_worker(i)))
+                .map(|i| (i, devnet_wallet.nth_generation_spending_key(i)))
                 .collect_vec();
 
             println!("{}", serde_json::to_string(&addrs).unwrap());
@@ -1645,7 +1634,7 @@ mod wallet_tests {
                     (
                         i,
                         devnet_wallet
-                            .nth_generation_spending_key_worker(i)
+                            .nth_generation_spending_key(i)
                             .to_address()
                             .to_bech32m(network)
                             .unwrap(),
