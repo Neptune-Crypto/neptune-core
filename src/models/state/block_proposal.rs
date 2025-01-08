@@ -112,8 +112,11 @@ impl fmt::Display for BlockProposalRejectError {
             ),
             BlockProposalRejectError::InsufficientFee { current, received } => write!(
                 f,
-                "Insufficient fee. Proposal was {};\ncurrent fee is: {:?}",
-                received, current
+                "Insufficient fee. Proposal was {};\ncurrent fee is: {}",
+                received,
+                current
+                    .map(|c| format!("{}", c))
+                    .unwrap_or("None".to_string())
             ),
         }
     }
