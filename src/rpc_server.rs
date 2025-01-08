@@ -76,6 +76,7 @@ pub struct DashBoardOverviewDataFromClient {
 
     // `None` symbolizes failure in getting peer count
     pub peer_count: Option<usize>,
+    pub max_num_peers: usize,
 
     // `None` symbolizes failure to get mining status
     pub mining_status: Option<MiningStatus>,
@@ -1174,6 +1175,7 @@ impl RPC for NeptuneRPCServer {
         info!("proving capability: {proving_capability}");
 
         let peer_count = Some(state.net.peer_map.len());
+        let max_num_peers = self.state.cli().max_num_peers as usize;
 
         let mining_status = Some(state.mining_status.clone());
 
@@ -1202,6 +1204,7 @@ impl RPC for NeptuneRPCServer {
             mempool_total_tx_count,
             mempool_own_tx_count,
             peer_count,
+            max_num_peers,
             mining_status,
             proving_capability,
             confirmations,

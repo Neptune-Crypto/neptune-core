@@ -57,7 +57,7 @@ pub struct OverviewData {
 
     listen_address: Option<SocketAddr>,
     peer_count: Option<usize>,
-    max_peer_count: Option<usize>,
+    max_num_peers: Option<usize>,
     authenticated_peer_count: Option<usize>,
 
     up_since: Option<u64>,
@@ -150,6 +150,7 @@ impl OverviewScreen {
                                 own_overview_data.mempool_total_tx_count = Some(resp.mempool_total_tx_count.try_into().unwrap());
                                 own_overview_data.mempool_own_tx_count = Some(resp.mempool_own_tx_count.try_into().unwrap());
                                 own_overview_data.peer_count=resp.peer_count;
+                                own_overview_data.max_num_peers = Some(resp.max_num_peers);
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.available_balance = Some(resp.available_balance);
@@ -419,7 +420,7 @@ impl Widget for OverviewScreen {
         lines.push(format!(
             "number: {} / {}",
             dashifnotset!(data.peer_count),
-            dashifnotset!(data.max_peer_count)
+            dashifnotset!(data.max_num_peers)
         ));
         lines.push(format!(
             "↪ authenticated: {}",
