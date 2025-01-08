@@ -1510,30 +1510,7 @@ mod global_state_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::valid_successor_for_tests;
-
-    async fn wallet_state_has_all_valid_mps_for(
-        wallet_state: &WalletState,
-        tip_block: &Block,
-    ) -> bool {
-        let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-        for monitored_utxo in monitored_utxos.get_all().await.iter() {
-            let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
-
-            match current_mp {
-                Some(mp) => {
-                    if !tip_block
-                        .mutator_set_accumulator_after()
-                        .verify(Hash::hash(&monitored_utxo.utxo), &mp)
-                    {
-                        return false;
-                    }
-                }
-                None => return false,
-            }
-        }
-
-        true
-    }
+    use crate::tests::shared::wallet_state_has_all_valid_mps;
 
     #[traced_test]
     #[tokio::test]
@@ -1860,7 +1837,7 @@ mod global_state_tests {
         assert!(alice.wallet_state.is_synced_to(mock_block_1a.hash()).await);
 
         // Verify that MPs are valid
-        assert!(wallet_state_has_all_valid_mps_for(&alice.wallet_state, &mock_block_1a).await);
+        assert!(wallet_state_has_all_valid_mps(&alice.wallet_state, &mock_block_1a).await);
 
         Ok(())
     }

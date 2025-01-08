@@ -81,6 +81,15 @@ impl MonitoredUtxo {
         block_digest: Digest,
         updated_membership_proof: MsMembershipProof,
     ) {
+        // Don't add MSMP for this block if it's already there.
+        if self
+            .blockhash_to_membership_proof
+            .iter()
+            .any(|(block_hash, _)| *block_hash == block_digest)
+        {
+            return;
+        }
+
         while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo {
             self.blockhash_to_membership_proof.pop_back();
         }

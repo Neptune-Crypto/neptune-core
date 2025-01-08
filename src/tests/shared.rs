@@ -31,6 +31,7 @@ use rand::thread_rng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::broadcast;
@@ -46,6 +47,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
+use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -914,4 +916,30 @@ pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
         predecessor = blocks.last().unwrap();
     }
     blocks.try_into().unwrap()
+}
+
+pub(crate) async fn wallet_state_has_all_valid_mps(
+    wallet_state: &WalletState,
+    tip_block: &Block,
+) -> bool {
+    let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
+    for (i, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
+        let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
+
+        match current_mp {
+            Some(mp) => {
+                if !tip_block
+                    .mutator_set_accumulator_after()
+                    .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
+                {
+                    println!("mutxo {i} has invalid msmp");
+                    return false;
+                }
+                println!("mutxo {i} has valid msmp");
+            }
+            None => return false,
+        }
+    }
+
+    true
 }
