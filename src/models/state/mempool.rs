@@ -829,7 +829,6 @@ mod tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
-    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -1098,28 +1097,23 @@ mod tests {
         let bob_address = bob_spending_key.to_address();
 
         let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
-        let alice_spending_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let alice_address = alice_spending_key.to_address();
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let alice_address = alice_key.to_address();
         let mut alice =
             mock_genesis_global_state(network, 2, alice_wallet, cli_args::Args::default()).await;
 
         // Ensure that both wallets have a non-zero balance by letting Alice
         // mine a block.
         let genesis_block = Block::genesis_block(network);
-        let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+        let (block_1, expected_1) =
+            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
 
         // Update both states with block 1
         alice
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(ExpectedUtxo::new(
-                coinbase_utxo_1,
-                cb_sender_randomness_1,
-                alice_spending_key.privacy_preimage(),
-                UtxoNotifier::OwnMinerComposeBlock,
-            ))
+            .add_expected_utxos(expected_1)
             .await;
         alice.set_new_tip(block_1.clone()).await.unwrap();
         bob.set_new_tip(block_1.clone()).await.unwrap();
@@ -1175,7 +1169,7 @@ mod tests {
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
         let utxos_from_alice = vec![TxOutput::onchain_native_currency(
-            NeptuneCoins::new(68),
+            NeptuneCoins::new(62),
             rng.gen(),
             alice_address.into(),
             true,
@@ -1185,7 +1179,7 @@ mod tests {
             .await
             .create_transaction_with_prover_capability(
                 utxos_from_alice.into(),
-                alice_spending_key.into(),
+                alice_key.into(),
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(1),
                 in_seven_months,
@@ -1275,8 +1269,8 @@ mod tests {
         // valid.
         let mut previous_block = block_2;
         for _ in 0..2 {
-            let (next_block, _, _) =
-                make_mock_block(&previous_block, None, alice_address, rng.gen());
+            let (next_block, _) =
+                make_mock_block(&previous_block, None, alice_key, rng.gen()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
             let (_, joinhandles1) = mempool
@@ -1463,9 +1457,8 @@ mod tests {
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let bob_address = bob_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
+        let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let bob_address = bob_key.to_address();
 
         let tx_receiver_data = TxOutput::onchain_native_currency(
             NeptuneCoins::new(1),
@@ -1514,8 +1507,8 @@ mod tests {
                 "The inserted tx must be in the mempool"
             );
 
-            let (next_block, _, _) =
-                make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
+            let (next_block, _) =
+                make_mock_block(&current_block, Some(in_seven_years), bob_key, rng.gen()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
             let mempool_txs =
@@ -1545,8 +1538,8 @@ mod tests {
         }
 
         // Now make a deep reorganization and verify that nothing crashes
-        let (block_1b, _, _) =
-            make_mock_block(&genesis_block, Some(in_seven_years), bob_address, rng.gen());
+        let (block_1b, _) =
+            make_mock_block(&genesis_block, Some(in_seven_years), bob_key, rng.gen()).await;
         assert!(
             block_1b.header().height.previous().is_genesis(),
             "Sanity check that new tip has height 1"

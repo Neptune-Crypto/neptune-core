@@ -964,9 +964,15 @@ pub(crate) mod mine_loop_tests {
         block: &mut Block,
         threshold: Digest,
         rng: &mut StdRng,
-    ) -> bool {
-        block.set_header_nonce(rng.gen());
-        block.hash() <= threshold
+    ) -> Option<Digest> {
+        let nonce_preimage: Digest = rng.gen();
+        let nonce = nonce_preimage.hash();
+        block.set_header_nonce(nonce);
+        if block.hash() <= threshold {
+            Some(nonce_preimage)
+        } else {
+            None
+        }
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds

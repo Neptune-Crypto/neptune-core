@@ -1497,11 +1497,9 @@ mod global_state_tests {
     use rand::thread_rng;
     use rand::Rng;
     use rand::SeedableRng;
-    use rayon::iter::IndexedParallelIterator;
-    use rayon::iter::IntoParallelIterator;
-    use rayon::iter::ParallelIterator;
     use tracing_test::traced_test;
     use wallet::address::generation_address::GenerationReceivingAddress;
+    use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
     use wallet::WalletSecret;
 
@@ -1721,34 +1719,30 @@ mod global_state_tests {
         let mut rng = thread_rng();
         let wallet = WalletSecret::devnet_wallet();
         let own_key = wallet.nth_generation_spending_key_for_tests(0);
-        let own_address = own_key.to_address();
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis_block(network);
-        let (block1, cb_utxo, cb_sender_randomness) =
-            make_mock_block(&genesis_block, None, own_address, rng.gen());
+        let (block1, expected_utxos_block1) =
+            make_mock_block(&genesis_block, None, own_key, rng.gen()).await;
         global_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .add_expected_utxo(ExpectedUtxo::new(
-                cb_utxo,
-                cb_sender_randomness,
-                own_key.privacy_preimage(),
-                UtxoNotifier::OwnMinerComposeBlock,
-            ))
+            .add_expected_utxos(expected_utxos_block1)
             .await;
         global_state_lock.set_new_tip(block1.clone()).await.unwrap();
 
-        // Delete everything from monitored UTXO (premined UTXO and block-1 coinbase)
+        // Delete everything from monitored UTXO (premined UTXO and block-1
+        // composer coinbases).
         let mut global_state = global_state_lock.lock_guard_mut().await;
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
             assert_eq!(
-                2,
+                3,
                 monitored_utxos.len().await,
-                "MUTXO must have genesis element and premine prior to clearing"
+                "MUTXO must have genesis element and composer rewards"
             );
+            monitored_utxos.pop().await;
             monitored_utxos.pop().await;
             monitored_utxos.pop().await;
 
@@ -1767,7 +1761,7 @@ mod global_state_tests {
                 .unwrap();
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert_eq!(
-                2,
+                3,
                 monitored_utxos.len().await,
                 "MUTXO must have genesis element and premine after recovery"
             );
@@ -1782,15 +1776,18 @@ mod global_state_tests {
                 mutxos[0].confirmed_in_block,
                 "Historical information must be restored for premine TX"
             );
-            assert_eq!(
-                Some((
-                    block1.hash(),
-                    block1.header().timestamp,
-                    block1.header().height
-                )),
-                mutxos[1].confirmed_in_block,
-                "Historical information must be restored for coinbase TX"
-            );
+
+            for i in 1..=2 {
+                assert_eq!(
+                    Some((
+                        block1.hash(),
+                        block1.header().timestamp,
+                        block1.header().height
+                    )),
+                    mutxos[i].confirmed_in_block,
+                    "Historical information must be restored for composer TX, i={i}"
+                );
+            }
 
             // Verify that the restored MUTXOs have MSMPs
             for mutxo in mutxos {
@@ -1827,15 +1824,13 @@ mod global_state_tests {
         let mut alice = alice_state_lock.lock_guard_mut().await;
 
         let bob_wallet_secret = WalletSecret::new_random();
-        let bob_address = bob_wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address();
+        let bob_key = bob_wallet_secret.nth_generation_spending_key(0);
 
         // 1. Create new block 1 and store it
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, bob_address, rng.gen());
+        let (mock_block_1a, _) = make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
         {
             alice
                 .chain
@@ -1884,32 +1879,24 @@ mod global_state_tests {
         )
         .await;
         let mut alice = alice.lock_guard_mut().await;
-        let alice_spending_key = alice
+        let alice_key = alice
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let alice_address = alice_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = alice.chain.archival_state().get_tip().await;
-        let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
-            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+        let (mock_block_1a, expected_utxos_1a) =
+            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
         alice
-            .set_new_self_mined_tip(
-                mock_block_1a.clone(),
-                vec![ExpectedUtxo::new(
-                    coinbase_utxo,
-                    coinbase_output_randomness,
-                    alice_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMinerComposeBlock,
-                )],
-            )
+            .set_new_self_mined_tip(mock_block_1a.clone(), expected_utxos_1a)
             .await
             .unwrap();
 
-        // Verify that wallet has monitored UTXOs, from genesis and from block_1a
+        // Verify that wallet has monitored UTXOs, 1 from genesis, 2 from
+        // block 1a.
         assert_eq!(
-            2,
+            3,
             alice
                 .wallet_state
                 .get_wallet_status_from_lock(mock_block_1a.hash())
@@ -1918,14 +1905,13 @@ mod global_state_tests {
                 .len()
         );
 
-        // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
+        // Make a new fork from genesis that makes us lose the composer UTXOs
+        // of block 1a.
         let bob_wallet_secret = WalletSecret::new_random();
-        let bob_address = bob_wallet_secret
-            .nth_generation_spending_key(0)
-            .to_address();
+        let bob_key = bob_wallet_secret.nth_generation_spending_key(0);
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _, _) = make_mock_block(&parent_block, None, bob_address, rng.gen());
+            let (next_block, _) = make_mock_block(&parent_block, None, bob_key, rng.gen()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
@@ -1936,13 +1922,13 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
+        // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
         let alice_wallet_status_after_reorg = alice
             .wallet_state
             .get_wallet_status_from_lock(parent_block.hash())
             .await;
         assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
-        assert_eq!(1, alice_wallet_status_after_reorg.unsynced_unspent.len());
+        assert_eq!(2, alice_wallet_status_after_reorg.unsynced_unspent.len());
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
@@ -1973,34 +1959,31 @@ mod global_state_tests {
         /// branch starts from `first_for_2`. All branches have the same length.
         ///
         /// Factored out to parallel function to make this test run faster.
-        fn make_3_branches(
+        async fn make_3_branches(
             first_for_0_1: &Block,
             first_for_2: &Block,
             num_blocks_per_branch: usize,
-            cb_recipient: &GenerationReceivingAddress,
+            cb_recipient: &GenerationSpendingKey,
         ) -> [Vec<Block>; 3] {
             let mut final_ret = Vec::with_capacity(3);
-            (0..3)
-                .into_par_iter()
-                .map(|i| {
-                    let mut rng = thread_rng();
-                    let mut ret = Vec::with_capacity(num_blocks_per_branch);
+            for i in 0..3 {
+                let mut rng = thread_rng();
+                let mut ret = Vec::with_capacity(num_blocks_per_branch);
 
-                    let mut block = if i < 2 {
-                        first_for_0_1.to_owned()
-                    } else {
-                        first_for_2.to_owned()
-                    };
-                    for _ in 0..num_blocks_per_branch {
-                        let (next_block, _, _) =
-                            make_mock_block(&block, None, cb_recipient.to_owned(), rng.gen());
-                        ret.push(next_block.clone());
-                        block = next_block;
-                    }
+                let mut block = if i < 2 {
+                    first_for_0_1.to_owned()
+                } else {
+                    first_for_2.to_owned()
+                };
+                for _ in 0..num_blocks_per_branch {
+                    let (next_block, _) =
+                        make_mock_block(&block, None, cb_recipient.to_owned(), rng.gen()).await;
+                    ret.push(next_block.clone());
+                    block = next_block;
+                }
 
-                    ret
-                })
-                .collect_into_vec(&mut final_ret);
+                final_ret.push(ret);
+            }
 
             final_ret.try_into().unwrap()
         }
@@ -2015,35 +1998,26 @@ mod global_state_tests {
         )
         .await;
         let mut alice = alice.lock_guard_mut().await;
-        let alice_spending_key = alice
+        let alice_key = alice
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let alice_address = alice_spending_key.to_address();
         let bob_secret = WalletSecret::new_random();
-        let bob_address = bob_secret.nth_generation_spending_key(0).to_address();
+        let bob_key = bob_secret.nth_generation_spending_key(0);
 
-        // 1. Create new block 1 where Alice receives a coinbase UTXO, store it
+        // 1. Create new block 1 where Alice receives two composer UTXOs, store it.
         let genesis_block = alice.chain.archival_state().get_tip().await;
-        let (block_1, coinbase_utxo_1, cb_utxo_output_randomness_1) =
-            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+        let (block_1, alice_composer_expected_1) =
+            make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
         {
             alice
-                .set_new_self_mined_tip(
-                    block_1.clone(),
-                    vec![ExpectedUtxo::new(
-                        coinbase_utxo_1,
-                        cb_utxo_output_randomness_1,
-                        alice_spending_key.privacy_preimage(),
-                        UtxoNotifier::OwnMinerComposeBlock,
-                    )],
-                )
+                .set_new_self_mined_tip(block_1.clone(), alice_composer_expected_1)
                 .await
                 .unwrap();
 
-            // Verify that UTXO was recorded
+            // Verify that composer UTXOs were recorded
             assert_eq!(
-                2,
+                3,
                 alice
                     .wallet_state
                     .get_wallet_status_from_lock(block_1.hash())
@@ -2054,7 +2028,7 @@ mod global_state_tests {
         }
 
         let [a_blocks, b_blocks, c_blocks] =
-            make_3_branches(&block_1, &genesis_block, 60, &bob_address);
+            make_3_branches(&block_1, &genesis_block, 60, &bob_key).await;
 
         // Add 60 blocks on top of 1, *not* mined by Alice
         let fork_a_block = a_blocks.last().unwrap().to_owned();
@@ -2068,7 +2042,7 @@ mod global_state_tests {
             .get_wallet_status_from_lock(fork_a_block.hash())
             .await;
 
-        assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
+        assert_eq!(3, wallet_status_on_a_fork.synced_unspent.len());
 
         // Fork away from the "a" chain to the "b" chain, with block 1 as LUCA
         let fork_b_block = b_blocks.last().unwrap().to_owned();
@@ -2088,7 +2062,7 @@ mod global_state_tests {
                 .len()
         );
         assert_eq!(
-            2,
+            3,
             alice_wallet_status_on_b_fork_before_resync
                 .unsynced_unspent
                 .len()
@@ -2103,7 +2077,7 @@ mod global_state_tests {
             .wallet_state
             .get_wallet_status_from_lock(fork_b_block.hash())
             .await;
-        assert_eq!(2, wallet_status_on_b_fork_after_resync.synced_unspent.len());
+        assert_eq!(3, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
             0,
             wallet_status_on_b_fork_after_resync.unsynced_unspent.len()
@@ -2128,7 +2102,7 @@ mod global_state_tests {
                 .len()
         );
         assert_eq!(
-            2,
+            3,
             alice_wallet_status_on_c_fork_before_resync
                 .unsynced_unspent
                 .len()
@@ -2145,7 +2119,7 @@ mod global_state_tests {
             .get_wallet_status_from_lock(fork_c_block.hash())
             .await;
         assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
-        assert_eq!(1, alice_ws_c_after_resync.unsynced_unspent.len());
+        assert_eq!(2, alice_ws_c_after_resync.unsynced_unspent.len());
 
         // Also check that UTXO from 1a is considered abandoned
         let alice_mutxos = alice.wallet_state.wallet_db.monitored_utxos();
@@ -2156,13 +2130,15 @@ mod global_state_tests {
                 .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
                 .await
         );
-        assert!(
-            alice_mutxos
-                .get(1)
-                .await
-                .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
-                .await
-        );
+        for i in 1..=2 {
+            assert!(
+                alice_mutxos
+                    .get(i)
+                    .await
+                    .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
+                    .await
+            );
+        }
     }
 
     #[traced_test]
@@ -2687,6 +2663,7 @@ mod global_state_tests {
                     .await,
                 "Archival state must have expected sync-label"
             );
+
             assert_eq!(
                 expected_tip_digest,
                 global_state
@@ -2699,12 +2676,14 @@ mod global_state_tests {
                     .hash(),
                 "Expected block must be returned"
             );
+
+            let tip_height = expected_tip.header().height;
             assert_eq!(
                 expected_num_blocks_at_tip_height,
                 global_state
                     .chain
                     .archival_state()
-                    .block_height_to_block_digests(expected_tip.header().height)
+                    .block_height_to_block_digests(tip_height)
                     .await
                     .len(),
                 "Exactly {expected_num_blocks_at_tip_height} blocks at height must be known"
@@ -2742,7 +2721,11 @@ mod global_state_tests {
                 }
             }
 
-            assert_eq!(expected_num_spendable_utxos, mutxos_on_tip.len(), "Number of monitored UTXOS must match expected value of {expected_num_spendable_utxos}");
+            assert_eq!(
+                expected_num_spendable_utxos,
+                mutxos_on_tip.len(),
+                "Number of monitored UTXOS at height {tip_height} must match expected value of {expected_num_spendable_utxos}"
+            );
             assert!(
                 mutxos_on_tip.iter().all(|mutxo| tip_msa.verify(
                     Tip5::hash(&mutxo.utxo),
@@ -2765,18 +2748,8 @@ mod global_state_tests {
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
-            let mut block_with_cb = move |previous_block: &Block| {
-                let (new_block, cb_utxo, cb_output_randomness) =
-                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
-                (
-                    new_block,
-                    ExpectedUtxo::new(
-                        cb_utxo,
-                        cb_output_randomness,
-                        spending_key.privacy_preimage(),
-                        UtxoNotifier::OwnMinerComposeBlock,
-                    ),
-                )
+            let mut block_with_expected_utxos = async move |previous_block: &Block| {
+                make_mock_block(previous_block, None, spending_key, rng.gen()).await
             };
 
             let mut global_state_lock = mock_genesis_global_state(
@@ -2790,9 +2763,9 @@ mod global_state_tests {
             // Branch A
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
-                let (next_block, next_cb) = block_with_cb(&previous_block);
+                let (next_block, expected) = block_with_expected_utxos(&previous_block).await;
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
+                    .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
                     .unwrap();
                 let global_state = global_state_lock.lock_guard().await;
@@ -2801,7 +2774,7 @@ mod global_state_tests {
                     next_block.clone(),
                     previous_block.clone(),
                     1,
-                    block_height + 1,
+                    2 * block_height + 1,
                 )
                 .await;
                 previous_block = next_block;
@@ -2810,9 +2783,9 @@ mod global_state_tests {
             // Branch B
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
-                let (next_block, next_cb) = block_with_cb(&previous_block);
+                let (next_block, expected) = block_with_expected_utxos(&previous_block).await;
                 global_state_lock
-                    .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
+                    .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
                     .unwrap();
 
@@ -2829,7 +2802,7 @@ mod global_state_tests {
                     next_block.clone(),
                     previous_block.clone(),
                     2,
-                    block_height + 1,
+                    2 * block_height + 1,
                 )
                 .await;
                 previous_block = next_block;
@@ -2847,25 +2820,15 @@ mod global_state_tests {
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
-            let mut block_with_cb = move |previous_block: &Block| {
-                let (new_block, cb_utxo, cb_output_randomness) =
-                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
-                (
-                    new_block,
-                    ExpectedUtxo::new(
-                        cb_utxo,
-                        cb_output_randomness,
-                        spending_key.privacy_preimage(),
-                        UtxoNotifier::OwnMinerComposeBlock,
-                    ),
-                )
+            let mut block_with_expected = async move |previous_block: &Block| {
+                make_mock_block(previous_block, None, spending_key, rng.gen()).await
             };
 
-            let (block_1a, cb_1a) = block_with_cb(&genesis_block);
-            let (block_2a, cb_2a) = block_with_cb(&block_1a);
-            let (block_3a, cb_3a) = block_with_cb(&block_2a);
+            let (block_1a, expected_1a) = block_with_expected(&genesis_block).await;
+            let (block_2a, expected_2a) = block_with_expected(&block_1a).await;
+            let (block_3a, expected_3a) = block_with_expected(&block_2a).await;
 
-            for claim_coinbase in [false, true] {
+            for claim_composer_fees in [false, true] {
                 let mut global_state_lock = mock_genesis_global_state(
                     network,
                     2,
@@ -2875,21 +2838,21 @@ mod global_state_tests {
                 .await;
                 let mut global_state = global_state_lock.lock_guard_mut().await;
 
-                if claim_coinbase {
+                if claim_composer_fees {
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), vec![cb_1a.clone()])
+                        .set_new_self_mined_tip(block_1a.clone(), expected_1a.clone())
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_2a.clone(), vec![cb_2a.clone()])
+                        .set_new_self_mined_tip(block_2a.clone(), expected_2a.clone())
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_3a.clone(), vec![cb_3a.clone()])
+                        .set_new_self_mined_tip(block_3a.clone(), expected_3a.clone())
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1a.clone(), vec![cb_1a.clone()])
+                        .set_new_self_mined_tip(block_1a.clone(), expected_1a.clone())
                         .await
                         .unwrap();
                 } else {
@@ -2899,7 +2862,7 @@ mod global_state_tests {
                     global_state.set_new_tip(block_1a.clone()).await.unwrap();
                 }
 
-                let expected_number_of_mutxos = if claim_coinbase { 2 } else { 1 };
+                let expected_number_of_mutxos = if claim_composer_fees { 3 } else { 1 };
 
                 assert_correct_global_state(
                     &global_state,
@@ -2912,8 +2875,8 @@ mod global_state_tests {
 
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
-                let (block_1b, _, _) =
-                    make_mock_block(&genesis_block, None, spending_key.to_address(), random());
+                let (block_1b, _) =
+                    make_mock_block(&genesis_block, None, spending_key, random()).await;
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -2927,13 +2890,13 @@ mod global_state_tests {
                 // Add many blocks, verify state-validity after each.
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
-                    let (next_block, next_cb) = block_with_cb(&previous_block);
+                    let (next_block, expected) = block_with_expected(&previous_block).await;
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
+                        .set_new_self_mined_tip(next_block.clone(), expected.clone())
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(next_block.clone(), vec![next_cb.clone()])
+                        .set_new_self_mined_tip(next_block.clone(), expected)
                         .await
                         .unwrap();
                     assert_correct_global_state(
@@ -2941,7 +2904,7 @@ mod global_state_tests {
                         next_block.clone(),
                         previous_block.clone(),
                         if block_height <= 3 { 2 } else { 1 },
-                        block_height,
+                        2 * (block_height - 1) + 1,
                     )
                     .await;
                     previous_block = next_block;
@@ -2958,17 +2921,11 @@ mod global_state_tests {
             let genesis_block = Block::genesis_block(network);
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
-            let (block_1, cb_utxo1, cb_sender_randomness1) =
-                make_mock_block(&genesis_block, None, spend_key.to_address(), rng.gen());
-            let cb = ExpectedUtxo::new(
-                cb_utxo1,
-                cb_sender_randomness1,
-                spend_key.privacy_preimage(),
-                UtxoNotifier::OwnMinerComposeBlock,
-            );
+            let (block_1, expected1) =
+                make_mock_block(&genesis_block, None, spend_key, rng.gen()).await;
 
             for claim_cb in [false, true] {
-                let expected_num_mutxos = if claim_cb { 2 } else { 1 };
+                let expected_num_mutxos = if claim_cb { 3 } else { 1 };
                 let mut global_state_lock = mock_genesis_global_state(
                     network,
                     2,
@@ -2980,11 +2937,11 @@ mod global_state_tests {
 
                 if claim_cb {
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()])
+                        .set_new_self_mined_tip(block_1.clone(), expected1.clone())
                         .await
                         .unwrap();
                     global_state
-                        .set_new_self_mined_tip(block_1.clone(), vec![cb.clone()])
+                        .set_new_self_mined_tip(block_1.clone(), expected1.clone())
                         .await
                         .unwrap();
                 } else {
