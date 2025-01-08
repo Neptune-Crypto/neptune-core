@@ -1399,6 +1399,7 @@ mod tests {
     use crate::config_models::network::Network;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
 
@@ -1537,6 +1538,92 @@ mod tests {
                 .iter()
                 .all(|unlocker| unlocker.utxo.can_spend_at(block_1_timestamp)),
             "All allocated UTXOs must be spendable now"
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn never_store_same_utxo_twice_different_blocks() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut bob_global_lock =
+            mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
+                .await;
+
+        let genesis_block = Block::genesis_block(network);
+        let nonce_preimage_1a: Digest = rng.gen();
+        let mock_block_seed = rng.gen();
+        let guesser_fraction = 0.5f64;
+
+        // `bob` both composes and guesses the PoW solution of this block.
+        let (block_1a, expected_utxos_block_1a) =
+            make_mock_block_with_nonce_preimage_and_guesser_fraction(
+                &genesis_block,
+                None,
+                bob_key,
+                mock_block_seed,
+                guesser_fraction,
+                nonce_preimage_1a,
+            )
+            .await;
+        let guesser_fee_utxo_infos0 = block_1a.guesser_fee_expected_utxos(nonce_preimage_1a);
+
+        let mut bob = bob_global_lock.lock_guard_mut().await;
+        bob.wallet_state
+            .add_expected_utxos(expected_utxos_block_1a.clone())
+            .await;
+        bob.set_new_self_mined_tip(block_1a, guesser_fee_utxo_infos0)
+            .await
+            .unwrap();
+        assert_eq!(4, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(
+            4,
+            bob.wallet_state
+                .read_utxo_ms_recovery_data()
+                .await
+                .unwrap()
+                .len(),
+        );
+
+        // Add a new block to state as tip, which *only* differs in its PoW
+        // solution. `bob` did *not* find the PoW-solution for this block.
+        let nonce_preimage_1b: Digest = rng.gen();
+        let (block_1b, expected_utxos_block_1b) =
+            make_mock_block_with_nonce_preimage_and_guesser_fraction(
+                &genesis_block,
+                None,
+                bob_key,
+                mock_block_seed,
+                guesser_fraction,
+                nonce_preimage_1b,
+            )
+            .await;
+
+        // Composer UTXOs must agree
+        for (expu_1a, expu_1b) in expected_utxos_block_1a
+            .iter()
+            .zip_eq(expected_utxos_block_1b.iter())
+        {
+            assert_eq!(expu_1a.addition_record, expu_1b.addition_record);
+            assert_eq!(expu_1a.utxo, expu_1b.utxo);
+            assert_eq!(expu_1a.sender_randomness, expu_1b.sender_randomness);
+            assert_eq!(expu_1a.receiver_preimage, expu_1b.receiver_preimage);
+        }
+
+        bob.wallet_state
+            .add_expected_utxos(expected_utxos_block_1a.clone())
+            .await;
+        bob.set_new_tip(block_1b).await.unwrap();
+        assert_eq!(4, bob.wallet_state.wallet_db.monitored_utxos().len().await,);
+        assert_eq!(
+            4,
+            bob.wallet_state
+                .read_utxo_ms_recovery_data()
+                .await
+                .unwrap()
+                .len(),
         );
     }
 
