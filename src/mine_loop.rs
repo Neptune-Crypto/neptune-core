@@ -98,13 +98,13 @@ async fn compose_block(
 }
 
 /// Attempt to mine a valid block for the network
-#[allow(clippy::too_many_arguments)]
 async fn guess_nonce(
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
+    num_guesser_threads: Option<usize>,
     target_block_interval: Option<Timestamp>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
@@ -126,6 +126,7 @@ async fn guess_nonce(
             sender,
             composer_utxos,
             sleepy_guessing,
+            num_guesser_threads,
             target_block_interval,
         )
     })
@@ -151,18 +152,21 @@ fn guess_worker(
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     sleepy_guessing: bool,
+    num_guesser_threads: Option<usize>,
     target_block_interval: Option<Timestamp>,
 ) {
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
     let input_block_height = block.kernel.header.height;
+    let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
-        "Mining on block with {} outputs and difficulty {}. Attempting to find block with height {} with digest less than target: {}",
+        "Guessing with {} threads on block {} with {} outputs and difficulty {}. Target: {}",
+        threads_to_use,
+        block.header().height,
         block.body().transaction_kernel.outputs.len(),
         previous_block_header.difficulty,
-        block.header().height,
-        threshold
+        threshold.to_hex()
     );
 
     // note: this article discusses rayon strategies for mining.
@@ -172,9 +176,7 @@ fn guess_worker(
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     let block_header_template = block.header().to_owned();
     let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
-    let rayon_threads_available = rayon::current_num_threads();
 
-    let threads_to_use = rayon_threads_available;
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads_to_use)
         .build()
@@ -656,6 +658,7 @@ pub(crate) async fn mine(
                 guesser_tx,
                 composer_utxos,
                 cli_args.sleepy_guessing,
+                cli_args.guesser_threads,
                 None, // using default TARGET_BLOCK_INTERVAL
             );
 
@@ -1333,6 +1336,7 @@ pub(crate) mod mine_loop_tests {
         );
 
         let sleepy_guessing = false;
+        let num_guesser_threads = None;
 
         guess_worker(
             block,
@@ -1340,6 +1344,7 @@ pub(crate) mod mine_loop_tests {
             worker_task_tx,
             coinbase_utxo_info,
             sleepy_guessing,
+            num_guesser_threads,
             None,
         );
 
@@ -1407,6 +1412,7 @@ pub(crate) mod mine_loop_tests {
         assert_eq!(ten_seconds_ago, initial_header_timestamp);
 
         let sleepy_guessing = false;
+        let num_guesser_threads = None;
 
         guess_worker(
             template,
@@ -1414,6 +1420,7 @@ pub(crate) mod mine_loop_tests {
             worker_task_tx,
             coinbase_utxo_info,
             sleepy_guessing,
+            num_guesser_threads,
             None,
         );
 
@@ -1492,6 +1499,7 @@ pub(crate) mod mine_loop_tests {
 
         // set initial difficulty in accordance with own hash rate
         let sleepy_guessing = false;
+        let num_guesser_threads = None;
         let num_outputs = 0;
         let hash_rate =
             estimate_own_hash_rate(Some(target_block_interval), sleepy_guessing, num_outputs).await;
@@ -1566,6 +1574,7 @@ pub(crate) mod mine_loop_tests {
                 worker_task_tx,
                 composer_utxos,
                 sleepy_guessing,
+                num_guesser_threads,
                 Some(target_block_interval),
             );
 
