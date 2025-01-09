@@ -1963,7 +1963,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_liquid_amount(in_seven_months)
         );
         assert_eq!(
             NeptuneCoins::new(5),
@@ -1971,7 +1971,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_liquid_amount(in_seven_months)
         );
 
         let block_subsidy = Block::block_subsidy(block_1.header().height);
@@ -1988,7 +1988,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_liquid_amount(in_seven_months)
         );
 
         let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
@@ -1999,7 +1999,7 @@ mod archival_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(after_cb_timelock_expiration)
+                .synced_unspent_liquid_amount(after_cb_timelock_expiration)
         );
 
         println!("Transactions were received in good order.");
@@ -2177,14 +2177,14 @@ mod archival_state_tests {
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months)
+            .synced_unspent_liquid_amount(in_seven_months)
             .is_zero());
         assert!(bob
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months)
+            .synced_unspent_liquid_amount(in_seven_months)
             .is_zero());
 
         // Verify that all ingoing UTXOs are recorded in wallet of receiver of genesis UTXO

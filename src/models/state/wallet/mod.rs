@@ -900,7 +900,7 @@ mod wallet_tests {
         let bobs_original_balance = bob
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(in_seven_months);
+            .synced_unspent_liquid_amount(in_seven_months);
         assert!(
             !bobs_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -958,7 +958,7 @@ mod wallet_tests {
                 .unwrap(),
             bob.get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months),
+                .synced_unspent_liquid_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 

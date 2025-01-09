@@ -40,7 +40,7 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
-    pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+    pub fn synced_unspent_liquid_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
@@ -56,18 +56,24 @@ impl WalletStatus {
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
+
+    /// Sum of value of monitored unsynced, unspent UTXOs. Does not check for
+    /// spendability, as that can only be determined once the monitored UTXO
+    /// is synced.
     pub fn unsynced_unspent_amount(&self) -> NeptuneCoins {
         self.unsynced_unspent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
+
     pub fn synced_spent_amount(&self) -> NeptuneCoins {
         self.synced_spent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
+
     pub fn unsynced_spent_amount(&self) -> NeptuneCoins {
         self.unsynced_spent
             .iter()
@@ -87,7 +93,7 @@ impl Display for WalletStatus {
         let synced_unspent_available: String = format!(
             "synced, unspent available UTXOS: count: {}, amount: {:?}\n[{}]",
             synced_unspent_available_count,
-            self.synced_unspent_available_amount(now),
+            self.synced_unspent_liquid_amount(now),
             self.synced_unspent
                 .iter()
                 .filter(|(wse, _mnmp)| wse.utxo.can_spend_at(now))

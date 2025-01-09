@@ -368,11 +368,24 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::mock_genesis_global_state;
+
+    impl TxOutput {
+        pub(crate) fn with_coin(self, coin: Coin) -> Self {
+            Self {
+                utxo: self.utxo.with_coin(coin),
+                sender_randomness: self.sender_randomness,
+                receiver_digest: self.receiver_digest,
+                notification_method: self.notification_method,
+                owned: self.owned,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_utxoreceiver_auto_not_owned_output() {

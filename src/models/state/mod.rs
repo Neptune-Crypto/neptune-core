@@ -1820,7 +1820,7 @@ mod global_state_tests {
         assert!(!alice
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months)
+            .synced_unspent_liquid_amount(launch + seven_months)
             .is_zero());
 
         // Verify that this is unsynced with mock_block_1a
@@ -2338,7 +2338,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_liquid_amount(in_seven_months)
         );
         assert_eq!(
             NeptuneCoins::new(7),
@@ -2346,7 +2346,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(in_seven_months)
+                .synced_unspent_liquid_amount(in_seven_months)
         );
         // TODO: No idea why this isn't working.
         // {
@@ -3088,7 +3088,7 @@ mod global_state_tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_available_amount(seven_months_post_launch);
+                    .synced_unspent_liquid_amount(seven_months_post_launch);
                 assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
 
                 // create change key for alice. change_key_type is a test param.
@@ -3185,7 +3185,7 @@ mod global_state_tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .synced_unspent_liquid_amount(seven_months_post_launch)
                 );
 
                 block_1
@@ -3204,7 +3204,7 @@ mod global_state_tests {
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .synced_unspent_liquid_amount(seven_months_post_launch)
                 );
             }
 
@@ -3241,7 +3241,7 @@ mod global_state_tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_available_amount(seven_months_post_launch);
+                    .synced_unspent_liquid_amount(seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
                 assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
@@ -3272,7 +3272,7 @@ mod global_state_tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_available_amount(seven_months_post_launch)
+                        .synced_unspent_liquid_amount(seven_months_post_launch)
                 );
             }
         }

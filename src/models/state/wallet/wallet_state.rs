@@ -439,7 +439,7 @@ impl WalletState {
     ) -> NeptuneCoins {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
-        wallet_status.synced_unspent_available_amount(timestamp)
+        wallet_status.synced_unspent_liquid_amount(timestamp)
     }
 
     pub async fn unconfirmed_balance(
@@ -472,6 +472,10 @@ impl WalletState {
 
     // note: does not verify we do not have any dups.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
+        if !expected_utxo.utxo.all_type_scripts_are_known() {
+            warn!("adding expected UTXO with *unknown type script* to expected UTXOs database");
+        }
+
         self.wallet_db
             .expected_utxos_mut()
             .push(expected_utxo)
@@ -831,8 +835,6 @@ impl WalletState {
     ///
     /// Assume the given block is valid and that the wallet state is not synced
     /// with the new block yet but is synced with the previous block (if any).
-    /// The previous block necessary (if it exists) to supply the
-    /// mutator set accumulator and guesser fee.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
@@ -928,11 +930,12 @@ impl WalletState {
             .await
             .collect_vec();
 
-        let all_received_outputs =
-            onchain_received_outputs.chain(offchain_received_outputs.iter().cloned());
+        let all_spendable_received_outputs = onchain_received_outputs
+            .chain(offchain_received_outputs.iter().cloned())
+            .filter(|announced_utxo| announced_utxo.utxo.all_type_scripts_are_known());
 
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
-            all_received_outputs
+            all_spendable_received_outputs
                 .map(|au| {
                     (
                         au.addition_record(),
@@ -940,13 +943,6 @@ impl WalletState {
                     )
                 })
                 .collect();
-
-        debug!(
-            "announced outputs received: onchain: {}, offchain: {}, total: {}",
-            addition_record_to_utxo_info.len() - offchain_received_outputs.len(),
-            offchain_received_outputs.len(),
-            addition_record_to_utxo_info.len()
-        );
 
         // Derive the membership proofs for received UTXOs, and in
         // the process update existing membership proofs with
@@ -1278,7 +1274,7 @@ impl WalletState {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
-        let available = wallet_status.synced_unspent_available_amount(timestamp);
+        let available = wallet_status.synced_unspent_liquid_amount(timestamp);
         if available < total_spend {
             bail!(
                 "Insufficient funds. Requested: {}, Available: {}",
@@ -1361,10 +1357,13 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
@@ -1453,10 +1452,10 @@ mod tests {
         // there, as it is timelocked.
         let one_coin = NeptuneCoins::new(1);
         assert!(alice_ws_genesis
-            .synced_unspent_available_amount(launch_timestamp)
+            .synced_unspent_liquid_amount(launch_timestamp)
             .is_zero());
         assert!(!alice_ws_genesis
-            .synced_unspent_available_amount(released_timestamp)
+            .synced_unspent_liquid_amount(released_timestamp)
             .is_zero());
         assert!(
             alice
@@ -1510,22 +1509,22 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[traced_test]
-    async fn test_update_wallet_state_repeated_addition_records() {
+    /// Test-setup.
+    ///
+    /// Generate a new wallet and state for Bob, who proceeds to mine one block.
+    /// Bob updates his wallet state with this block and as a result has a
+    /// nonzero balance.
+    ///
+    /// Note that this function is probabilistic. Block is invalid, both wrt.
+    /// PoW and proof.
+    async fn bob_mines_one_block(network: Network) -> (Block, GlobalStateLock) {
         let mut rng = thread_rng();
-        let network = Network::Main;
         let cli = cli_args::Args::default();
 
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob_global_lock =
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli.clone()).await;
-
-        let alice_wallet_secret = WalletSecret::new_random();
-        let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut alice_global_lock =
-            mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block1, composer_fee_eutxos) =
@@ -1537,7 +1536,29 @@ mod tests {
             .set_new_self_mined_tip(block1.clone(), composer_fee_eutxos)
             .await
             .unwrap();
-        alice_global_lock
+
+        (block1, bob_global_lock)
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_update_wallet_state_repeated_addition_records() {
+        let network = Network::Main;
+        let cli = cli_args::Args::default();
+
+        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
+
+        let (block1, mut bob) = bob_mines_one_block(network).await;
+        let bob_key = bob
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
+
+        alice
             .lock_guard_mut()
             .await
             .set_new_tip(block1.clone())
@@ -1548,12 +1569,12 @@ mod tests {
         let fee = NeptuneCoins::new(1);
         let txoutput = TxOutput::onchain_native_currency(
             NeptuneCoins::new(7),
-            rng.gen(),
+            random(),
             alice_key.to_address().into(),
             false,
         );
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
-        let (tx_block2, _) = bob_global_lock
+        let (tx_block2, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -1570,13 +1591,12 @@ mod tests {
 
         // Make block 2, verify that Alice registers correct balance.
         let block2 = invalid_block_with_transaction(&block1, tx_block2.clone());
-        bob_global_lock
-            .lock_guard_mut()
+        bob.lock_guard_mut()
             .await
             .set_new_tip(block2.clone())
             .await
             .unwrap();
-        alice_global_lock
+        alice
             .lock_guard_mut()
             .await
             .set_new_tip(block2.clone())
@@ -1584,7 +1604,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             NeptuneCoins::new(14),
-            alice_global_lock
+            alice
                 .lock_guard()
                 .await
                 .wallet_state
@@ -1595,7 +1615,7 @@ mod tests {
 
         // Repeat the outputs to Alice in block 3 and verify correct new
         // balance.
-        let (tx_block3, _) = bob_global_lock
+        let (tx_block3, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -1610,7 +1630,7 @@ mod tests {
             .await
             .unwrap();
         let block3 = invalid_block_with_transaction(&block2, tx_block3.clone());
-        alice_global_lock
+        alice
             .lock_guard_mut()
             .await
             .set_new_tip(block3.clone())
@@ -1618,13 +1638,115 @@ mod tests {
             .unwrap();
         assert_eq!(
             NeptuneCoins::new(28),
-            alice_global_lock
+            alice
                 .lock_guard()
                 .await
                 .wallet_state
                 .confirmed_balance(block3.hash(), tx_block2.kernel.timestamp)
                 .await,
             "All four UTXOs must be registered by wallet and contribute to balance"
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_unrecognized_type_script() {
+        let network = Network::Main;
+        let cli = cli_args::Args::default();
+
+        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
+
+        let (block1, mut bob) = bob_mines_one_block(network).await;
+        let bob_key = bob
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key_for_tests(0);
+
+        alice
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block1.clone())
+            .await
+            .unwrap();
+
+        let unrecognized_typescript = Coin {
+            type_script_hash: random(),
+            state: vec![random(), random()],
+        };
+        let txo = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(3),
+            random(),
+            alice_key.to_address().into(),
+            false,
+        );
+        let fee = NeptuneCoins::new(10);
+        let (mut tx_block2, _) = bob
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![txo.clone()].into(),
+                bob_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                network.launch_date() + Timestamp::minutes(11),
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+        let bad_txo = txo.clone().with_coin(unrecognized_typescript);
+        let expected_bad_utxos = alice
+            .lock_guard()
+            .await
+            .wallet_state
+            .extract_expected_utxos(vec![bad_txo.clone()].into(), UtxoNotifier::Cli);
+        alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .add_expected_utxos(expected_bad_utxos)
+            .await;
+        let bad_addition_record = commit(
+            Tip5::hash(&bad_txo.utxo()),
+            txo.sender_randomness(),
+            txo.receiver_digest(),
+        );
+        let bad_kernel = TransactionKernelModifier::default()
+            .outputs(vec![bad_addition_record])
+            .modify(tx_block2.kernel.clone());
+        tx_block2.kernel = bad_kernel;
+        let block2 = invalid_block_with_transaction(&block1, tx_block2.clone());
+        alice
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block2.clone())
+            .await
+            .unwrap();
+        assert!(
+            alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block2.hash(), tx_block2.kernel.timestamp)
+                .await
+                .is_zero(),
+            "UTXO with unknown typescript may not count towards balance"
+        );
+        assert!(
+            alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .len()
+                .await
+                .is_zero(),
+            "UTXO with unknown typescript may not added to MUTXO list"
         );
     }
 

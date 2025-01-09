@@ -161,7 +161,7 @@ impl Utxo {
     /// Determine whether the UTXO has coins that contain only known type
     /// scripts. If other type scripts are included, then we cannot spend
     /// this UTXO.
-    pub fn has_known_type_scripts(&self) -> bool {
+    pub fn all_type_scripts_are_known(&self) -> bool {
         let known_type_script_hashes = [NativeCurrency.hash(), TimeLock.hash()];
         self.coins
             .iter()
@@ -175,7 +175,7 @@ impl Utxo {
     pub fn can_spend_at(&self, timestamp: Timestamp) -> bool {
         crate::macros::log_slow_scope!();
         // unknown type script
-        if !self.has_known_type_scripts() {
+        if !self.all_type_scripts_are_known() {
             return false;
         }
 
@@ -204,7 +204,7 @@ impl Utxo {
     /// Determine whether the only thing preventing the UTXO from being spendable
     /// is the timelock whose according release date is in the future.
     pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: Timestamp) -> bool {
-        if !self.has_known_type_scripts() {
+        if !self.all_type_scripts_are_known() {
             return false;
         }
 
@@ -305,6 +305,13 @@ mod test {
         }
 
         (lock_script_hash, coins).into()
+    }
+
+    impl Utxo {
+        pub(crate) fn with_coin(mut self, coin: Coin) -> Self {
+            self.coins.push(coin);
+            self
+        }
     }
 
     #[test]
