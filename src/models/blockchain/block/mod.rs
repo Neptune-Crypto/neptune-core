@@ -202,6 +202,26 @@ impl Block {
         }
     }
 
+    /// Create a block template with an invalid block proof, from a block
+    /// primitive witness.
+    #[cfg(test)]
+    pub(crate) fn block_template_invalid_proof_from_witness(
+        primitive_witness: BlockPrimitiveWitness,
+        block_timestamp: Timestamp,
+        nonce_preimage: Digest,
+        target_block_interval: Option<Timestamp>,
+    ) -> Block {
+        let body = primitive_witness.body().to_owned();
+        let header = primitive_witness.header(
+            block_timestamp,
+            nonce_preimage.hash(),
+            target_block_interval,
+        );
+        let proof = BlockProof::Invalid;
+        let appendix = BlockAppendix::default();
+        Block::new(header, body, appendix, proof)
+    }
+
     /// Create a block template with an invalid block proof.
     ///
     /// To be used in tests where you don't care about block validity.
@@ -214,15 +234,12 @@ impl Block {
         target_block_interval: Option<Timestamp>,
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
-        let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(
+        Self::block_template_invalid_proof_from_witness(
+            primitive_witness,
             block_timestamp,
-            nonce_preimage.hash(),
+            nonce_preimage,
             target_block_interval,
-        );
-        let proof = BlockProof::Invalid;
-        let appendix = BlockAppendix::default();
-        Block::new(header, body, appendix, proof)
+        )
     }
 
     pub(crate) async fn block_template_from_block_primitive_witness(
