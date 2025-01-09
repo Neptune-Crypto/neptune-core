@@ -216,6 +216,20 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         MmrMembershipProof::new(authentication_path)
     }
 
+    /// Returns the right-most leaf of the MMR, the leaf that was added the
+    /// latest.
+    pub(crate) async fn get_latest_leaf(&self) -> Option<Digest> {
+        if self.is_empty().await {
+            return None;
+        }
+
+        let node_index = self.digests.len().await - 1;
+        let (_, height) = shared_advanced::right_lineage_length_and_own_height(node_index);
+        let node_index = node_index - height as u64;
+
+        Some(self.digests.get(node_index).await)
+    }
+
     /// Remove the last leaf from the archival MMR
     pub async fn remove_last_leaf_async(&mut self) -> Option<Digest> {
         if self.is_empty().await {
@@ -931,8 +945,10 @@ pub(crate) mod mmr_test {
         let mut mmr: ArchivalMmr<Storage> =
             mock::get_ammr_from_digests(input_digests.clone()).await;
         assert_eq!(22, mmr.count_nodes().await);
+        assert_eq!(Some(input_digests[11]), mmr.get_latest_leaf().await);
         assert_eq!(Some(input_digests[11]), mmr.remove_last_leaf_async().await);
         assert_eq!(19, mmr.count_nodes().await);
+        assert_eq!(Some(input_digests[10]), mmr.get_latest_leaf().await);
         assert_eq!(Some(input_digests[10]), mmr.remove_last_leaf_async().await);
         assert_eq!(18, mmr.count_nodes().await);
         assert_eq!(Some(input_digests[9]), mmr.remove_last_leaf_async().await);
@@ -953,10 +969,12 @@ pub(crate) mod mmr_test {
         assert_eq!(3, mmr.count_nodes().await);
         assert_eq!(Some(input_digests[1]), mmr.remove_last_leaf_async().await);
         assert_eq!(1, mmr.count_nodes().await);
+        assert_eq!(Some(input_digests[0]), mmr.get_latest_leaf().await);
         assert_eq!(Some(input_digests[0]), mmr.remove_last_leaf_async().await);
         assert_eq!(0, mmr.count_nodes().await);
         assert!(mmr.is_empty().await);
         assert!(mmr.remove_last_leaf_async().await.is_none());
+        assert!(mmr.get_latest_leaf().await.is_none());
     }
 
     #[tokio::test]
