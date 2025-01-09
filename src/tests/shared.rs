@@ -923,7 +923,7 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
     tip_block: &Block,
 ) -> bool {
     let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-    for (i, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
+    for monitored_utxo in monitored_utxos.get_all().await.iter() {
         let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
         match current_mp {
@@ -932,10 +932,8 @@ pub(crate) async fn wallet_state_has_all_valid_mps(
                     .mutator_set_accumulator_after()
                     .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
                 {
-                    println!("mutxo {i} has invalid msmp");
                     return false;
                 }
-                println!("mutxo {i} has valid msmp");
             }
             None => return false,
         }

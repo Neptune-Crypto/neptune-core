@@ -41,7 +41,6 @@ use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -51,10 +50,8 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
-use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::ClaimUtxoData;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
@@ -1024,16 +1021,13 @@ impl WalletState {
                     "Received UTXO in block {}, height {}: value = {}",
                     new_block.hash(),
                     new_block.kernel.header.height,
-                    utxo.coins()
-                        .iter()
-                        .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
-                        .map(|coin| *NeptuneCoins::decode(&coin.state)
-                            .expect("Failed to decode coin state as amount"))
-                        .sum::<NeptuneCoins>(),
+                    utxo.get_native_currency_amount(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
                     msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
+                let aocl_index = new_own_membership_proof.aocl_leaf_index;
+                let strong_key = StrongUtxoKey::new(*addition_record, aocl_index);
 
                 // Add the new UTXO to the list of monitored UTXOs
                 let mut mutxo = MonitoredUtxo::new(utxo.clone(), self.number_of_mps_per_utxo);
@@ -1043,10 +1037,6 @@ impl WalletState {
                     new_block.kernel.header.height,
                 ));
 
-                let aocl_index = new_own_membership_proof.aocl_leaf_index;
-                let addition_record =
-                    commit(utxo_digest, sender_randomness, receiver_preimage.hash());
-                let strong_key = StrongUtxoKey::new(addition_record, aocl_index);
                 if let Some(mutxo_index) = all_existing_mutxos.get(&strong_key) {
                     debug!("Repeated monitored UTXO. Not adding new entry to monitored UTXOs");
                     valid_membership_proofs_and_own_utxo_count.insert(
@@ -1143,18 +1133,6 @@ impl WalletState {
         changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
-        let num_unspent_utxos = {
-            let stream = monitored_utxos.stream_values().await;
-            pin_mut!(stream); // needed for iteration
-
-            stream
-                .filter(|m| futures::future::ready(m.spent_in_block.is_none()))
-                .count()
-                .await
-        };
-
-        debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
-
         for (updated_ms_mp, own_utxo_index, utxo_digest) in
             valid_membership_proofs_and_own_utxo_count.values()
         {
@@ -1200,7 +1178,6 @@ impl WalletState {
         self.wallet_db.expected_utxos_mut().set_many(updates).await;
 
         self.wallet_db.set_sync_label(new_block.hash()).await;
-        self.wallet_db.persist().await;
 
         Ok(())
     }
@@ -1383,7 +1360,12 @@ mod tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
@@ -1530,6 +1512,124 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
+    async fn test_update_wallet_state_repeated_addition_records() {
+        let mut rng = thread_rng();
+        let network = Network::Main;
+        let cli = cli_args::Args::default();
+
+        let bob_wallet_secret = WalletSecret::new_random();
+        let bob_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut bob_global_lock =
+            mock_genesis_global_state(network, 0, bob_wallet_secret, cli.clone()).await;
+
+        let alice_wallet_secret = WalletSecret::new_random();
+        let alice_key = alice_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let mut alice_global_lock =
+            mock_genesis_global_state(network, 0, alice_wallet_secret, cli).await;
+
+        // `bob` both composes and guesses the PoW solution of this block.
+        let (block1, composer_fee_eutxos) =
+            make_mock_block(&Block::genesis_block(network), None, bob_key, rng.gen()).await;
+
+        bob_global_lock
+            .lock_guard_mut()
+            .await
+            .set_new_self_mined_tip(block1.clone(), composer_fee_eutxos)
+            .await
+            .unwrap();
+        alice_global_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block1.clone())
+            .await
+            .unwrap();
+
+        // Bob sends two identical coins (=identical addition records) to Alice.
+        let fee = NeptuneCoins::new(1);
+        let txoutput = TxOutput::onchain_native_currency(
+            NeptuneCoins::new(7),
+            rng.gen(),
+            alice_key.to_address().into(),
+            false,
+        );
+        let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
+        let (tx_block2, _) = bob_global_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                tx_outputs.clone().into(),
+                bob_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                network.launch_date() + Timestamp::minutes(11),
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+
+        // Make block 2, verify that Alice registers correct balance.
+        let block2 = invalid_block_with_transaction(&block1, tx_block2.clone());
+        bob_global_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block2.clone())
+            .await
+            .unwrap();
+        alice_global_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block2.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            NeptuneCoins::new(14),
+            alice_global_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block2.hash(), tx_block2.kernel.timestamp)
+                .await,
+            "Both UTXOs must be registered by wallet and contribute to balance"
+        );
+
+        // Repeat the outputs to Alice in block 3 and verify correct new
+        // balance.
+        let (tx_block3, _) = bob_global_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction_with_prover_capability(
+                tx_outputs.into(),
+                bob_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                network.launch_date() + Timestamp::minutes(22),
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
+            .unwrap();
+        let block3 = invalid_block_with_transaction(&block2, tx_block3.clone());
+        alice_global_lock
+            .lock_guard_mut()
+            .await
+            .set_new_tip(block3.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            NeptuneCoins::new(28),
+            alice_global_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block3.hash(), tx_block2.kernel.timestamp)
+                .await,
+            "All four UTXOs must be registered by wallet and contribute to balance"
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
     async fn never_store_same_utxo_twice_different_blocks() {
         let mut rng = thread_rng();
         let network = Network::Main;
@@ -1647,9 +1747,10 @@ mod tests {
         let mut bob = bob_global_lock.lock_guard_mut().await;
 
         let genesis_block = Block::genesis_block(network);
-        let (block1, expected1) = make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
+        let (block1, composer_utxos) =
+            make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
 
-        bob.wallet_state.add_expected_utxos(expected1).await;
+        bob.wallet_state.add_expected_utxos(composer_utxos).await;
         assert!(
             bob.wallet_state
                 .wallet_db
@@ -2107,6 +2208,7 @@ mod tests {
 
         mod worker {
             use super::*;
+            use crate::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
             use crate::tests::shared::unit_test_data_directory;
 
@@ -2351,6 +2453,7 @@ mod tests {
 
         mod worker {
             use super::*;
+            use crate::database::storage::storage_schema::traits::StorageWriter;
             use crate::tests::shared::mock_genesis_wallet_state_with_data_dir;
             use crate::tests::shared::unit_test_data_directory;
 
