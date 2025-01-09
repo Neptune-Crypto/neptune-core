@@ -3,8 +3,6 @@ use std::fmt::Display;
 
 use get_size2::GetSize;
 use itertools::Itertools;
-use num_traits::CheckedAdd;
-use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
@@ -25,13 +23,8 @@ use super::transaction_kernel::TransactionKernelProxy;
 use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::time_lock::TimeLock;
-use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -281,104 +274,6 @@ impl PrimitiveWitness {
         )
     }
 
-    /// Obtain a *balanced* set of outputs (and fee) given a fixed total input amount
-    /// and (optional) coinbase. This function takes a suggestion for the output
-    /// amounts and fee and mutates these values until they satisfy the no-inflation
-    /// requirement. This method assumes that the total input amount and coinbase (if
-    /// set) can be safely added.
-    pub fn find_balanced_output_amounts_and_fee(
-        total_input_amount: NeptuneCoins,
-        coinbase: Option<NeptuneCoins>,
-        output_amounts_suggestion: &mut [NeptuneCoins],
-        fee_suggestion: &mut NeptuneCoins,
-    ) {
-        assert!(
-            coinbase.is_none_or(|x| !x.is_negative()),
-            "If coinbase is set, it must be non-negative. Got:\n{coinbase:?}"
-        );
-        assert!(
-            !fee_suggestion.is_negative(),
-            "Amount balancer only accepts non-negative fee suggestions. Got:\n{fee_suggestion}"
-        );
-        assert!(
-            !total_input_amount.is_negative(),
-            "Amount balancer only accepts non-negative total input amount. Got:\n{total_input_amount}"
-        );
-        assert!(
-            output_amounts_suggestion
-                .iter()
-                .all(|input_amount_sugg| !input_amount_sugg.is_negative()),
-            "Amount balancer only accepts non-negative output amount suggestsions. Got:\n\n{output_amounts_suggestion:?}"
-        );
-        let mut total_output_amount = output_amounts_suggestion
-            .iter()
-            .cloned()
-            .sum::<NeptuneCoins>();
-        let total_input_plus_coinbase =
-            total_input_amount + coinbase.unwrap_or_else(|| NeptuneCoins::new(0));
-        let mut inflationary = total_output_amount.checked_add(fee_suggestion).is_none()
-            || (total_output_amount + *fee_suggestion != total_input_plus_coinbase);
-        while inflationary {
-            for amount in output_amounts_suggestion.iter_mut() {
-                amount.div_two();
-            }
-            total_output_amount = output_amounts_suggestion
-                .iter()
-                .cloned()
-                .sum::<NeptuneCoins>();
-            match total_input_plus_coinbase.checked_sub(&total_output_amount) {
-                Some(number) => {
-                    *fee_suggestion = number;
-                    inflationary = false;
-                }
-                None => {
-                    inflationary = true;
-                }
-            }
-        }
-    }
-
-    /// Generate valid output UTXOs from the amounts and seeds for the
-    /// addresses. If some release date is supplied, generate twice as many
-    /// UTXOs such that half the total amount is time-locked.
-    pub fn valid_tx_outputs_from_amounts_and_address_seeds(
-        output_amounts: &[NeptuneCoins],
-        address_seeds: &[Digest],
-        timelock_until: Option<Timestamp>,
-    ) -> Vec<Utxo> {
-        address_seeds
-            .iter()
-            .zip(output_amounts)
-            .flat_map(|(seed, amount)| {
-                let mut amount = *amount;
-                if timelock_until.is_some() {
-                    amount.div_two();
-                }
-                let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::derive_from_seed(*seed)
-                        .to_address()
-                        .lock_script(),
-                    amount.to_native_coins(),
-                );
-                let mut utxos = vec![liquid_utxo];
-                if let Some(release_date) = timelock_until {
-                    let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
-                            .to_address()
-                            .lock_script(),
-                        [
-                            amount.to_native_coins(),
-                            vec![TimeLock::until(release_date)],
-                        ]
-                        .concat(),
-                    );
-                    utxos.push(timelocked_utxo);
-                }
-                utxos
-            })
-            .collect_vec()
-    }
-
     /// Verify the transaction directly from the primitive witness, without proofs or
     /// decomposing into subclaims.
     #[must_use]
@@ -438,7 +333,7 @@ impl PrimitiveWitness {
         let type_script_dictionary = self
             .type_scripts_and_witnesses
             .iter()
-            .map(|tsaw| (tsaw.program.hash(), TypeScript::from(tsaw)))
+            .map(|tsaw| (tsaw.program.hash(), tsaw.program.to_owned()))
             .collect::<HashMap<_, _>>();
 
         if !type_script_hashes
@@ -451,7 +346,7 @@ impl PrimitiveWitness {
 
         // verify type scripts
         for type_script_hash in type_script_hashes {
-            let type_script = type_script_dictionary[&type_script_hash].program().clone();
+            let type_script = type_script_dictionary[&type_script_hash].clone();
             let public_input = self.kernel.mast_hash().encode().into();
             let secret_input = self
                 .kernel
@@ -520,6 +415,8 @@ impl PrimitiveWitness {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
+    use num_traits::CheckedAdd;
+    use num_traits::CheckedSub;
     use num_traits::Zero;
     use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
@@ -532,8 +429,12 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::wallet::address::generation_address;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
@@ -927,6 +828,104 @@ pub mod neptune_arbitrary {
                 .collect_vec();
             (input_utxos, input_lock_scripts_and_witnesses)
         }
+
+        /// Obtain a *balanced* set of outputs (and fee) given a fixed total input amount
+        /// and (optional) coinbase. This function takes a suggestion for the output
+        /// amounts and fee and mutates these values until they satisfy the no-inflation
+        /// requirement. This method assumes that the total input amount and coinbase (if
+        /// set) can be safely added.
+        pub(crate) fn find_balanced_output_amounts_and_fee(
+            total_input_amount: NeptuneCoins,
+            coinbase: Option<NeptuneCoins>,
+            output_amounts_suggestion: &mut [NeptuneCoins],
+            fee_suggestion: &mut NeptuneCoins,
+        ) {
+            assert!(
+                coinbase.is_none_or(|x| !x.is_negative()),
+                "If coinbase is set, it must be non-negative. Got:\n{coinbase:?}"
+            );
+            assert!(
+                !fee_suggestion.is_negative(),
+                "Amount balancer only accepts non-negative fee suggestions. Got:\n{fee_suggestion}"
+            );
+            assert!(
+            !total_input_amount.is_negative(),
+            "Amount balancer only accepts non-negative total input amount. Got:\n{total_input_amount}"
+        );
+            assert!(
+            output_amounts_suggestion
+                .iter()
+                .all(|input_amount_sugg| !input_amount_sugg.is_negative()),
+            "Amount balancer only accepts non-negative output amount suggestsions. Got:\n\n{output_amounts_suggestion:?}"
+        );
+            let mut total_output_amount = output_amounts_suggestion
+                .iter()
+                .cloned()
+                .sum::<NeptuneCoins>();
+            let total_input_plus_coinbase =
+                total_input_amount + coinbase.unwrap_or_else(|| NeptuneCoins::new(0));
+            let mut inflationary = total_output_amount.checked_add(fee_suggestion).is_none()
+                || (total_output_amount + *fee_suggestion != total_input_plus_coinbase);
+            while inflationary {
+                for amount in output_amounts_suggestion.iter_mut() {
+                    amount.div_two();
+                }
+                total_output_amount = output_amounts_suggestion
+                    .iter()
+                    .cloned()
+                    .sum::<NeptuneCoins>();
+                match total_input_plus_coinbase.checked_sub(&total_output_amount) {
+                    Some(number) => {
+                        *fee_suggestion = number;
+                        inflationary = false;
+                    }
+                    None => {
+                        inflationary = true;
+                    }
+                }
+            }
+        }
+
+        /// Generate valid output UTXOs from the amounts and seeds for the
+        /// addresses. If some release date is supplied, generate twice as many
+        /// UTXOs such that half the total amount is time-locked.
+        pub(crate) fn valid_tx_outputs_from_amounts_and_address_seeds(
+            output_amounts: &[NeptuneCoins],
+            address_seeds: &[Digest],
+            timelock_until: Option<Timestamp>,
+        ) -> Vec<Utxo> {
+            address_seeds
+                .iter()
+                .zip(output_amounts)
+                .flat_map(|(seed, amount)| {
+                    let mut amount = *amount;
+                    if timelock_until.is_some() {
+                        amount.div_two();
+                    }
+                    let liquid_utxo = Utxo::new(
+                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                            .to_address()
+                            .lock_script(),
+                        amount.to_native_coins(),
+                    );
+                    let mut utxos = vec![liquid_utxo];
+                    if let Some(release_date) = timelock_until {
+                        let timelocked_utxo = Utxo::new(
+                            generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                                .to_address()
+                                .lock_script(),
+                            [
+                                amount.to_native_coins(),
+                                vec![TimeLock::until(release_date)],
+                            ]
+                            .concat(),
+                        );
+                        utxos.push(timelocked_utxo);
+                    }
+                    utxos
+                })
+                .collect_vec()
+        }
     }
 }
 
@@ -936,6 +935,7 @@ mod test {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_traits::CheckedAdd;
+    use num_traits::CheckedSub;
     use num_traits::Zero;
     use proptest::arbitrary::Arbitrary;
     use proptest::collection::vec;
@@ -956,6 +956,7 @@ mod test {
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;

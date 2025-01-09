@@ -23,6 +23,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use super::neptune_coins::NeptuneCoins;
+use super::TypeScript;
 use super::TypeScriptWitness;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use crate::models::blockchain::shared::Hash;
@@ -1083,6 +1084,10 @@ impl ConsensusProgram for NativeCurrency {
 
         *HASH.get_or_init(|| self.program().hash())
     }
+}
+
+impl TypeScript for NativeCurrency {
+    type State = NeptuneCoins;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq, TasmObject)]

@@ -55,3 +55,39 @@ impl MastHash for BlockKernel {
         sequences
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::prelude::Tip5;
+    use tasm_lib::twenty_first::prelude::CpuParallel;
+    use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
+
+    use super::*;
+    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
+    use crate::models::blockchain::block::Block;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
+
+    #[test]
+    fn kernel_hash_calculation() {
+        // How do I create an arbitrary new block? Preferably without proof.
+        let block_primitive_witness = deterministic_block_primitive_witness();
+        let invalid_block = Block::block_template_invalid_proof_from_witness(
+            block_primitive_witness,
+            Timestamp::now(),
+            Digest::default(),
+            None,
+        );
+        let calculated = invalid_block.hash();
+        let merkle_tree_leafs = [
+            Tip5::hash_varlen(&invalid_block.header().mast_hash().encode()),
+            Tip5::hash_varlen(&invalid_block.body().mast_hash().encode()),
+            Tip5::hash_varlen(&invalid_block.appendix().encode()),
+            Digest::default(),
+        ];
+
+        let mt = CpuParallel::from_digests(&merkle_tree_leafs).unwrap();
+        let expected_root = mt.root();
+        assert_eq!(expected_root, calculated);
+    }
+}

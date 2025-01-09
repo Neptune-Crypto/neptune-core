@@ -58,8 +58,9 @@ async fn check_if_connection_is_allowed(
     let cli_arguments = global_state_lock.cli();
     let global_state = global_state_lock.lock_guard().await;
     fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
-        let own_version = semver::Version::parse(own_version)
-            .expect("Must be able to parse own version string. Got: {own_version}");
+        let own_version = semver::Version::parse(own_version).unwrap_or_else(|_| {
+            panic!("Must be able to parse own version string. Got: {own_version}")
+        });
         let other_version = match semver::Version::parse(other_version) {
             Ok(version) => version,
             Err(err) => {

@@ -4,10 +4,12 @@ use super::native_currency::NativeCurrency;
 use super::native_currency::NativeCurrencyWitness;
 use super::time_lock::TimeLock;
 use super::time_lock::TimeLockWitness;
+use super::TypeScript;
 use super::TypeScriptAndWitness;
 use super::TypeScriptWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 
 pub(crate) fn match_type_script_and_generate_witness(
@@ -26,4 +28,8 @@ pub(crate) fn match_type_script_and_generate_witness(
         return None;
     };
     Some(type_script_and_witness)
+}
+
+pub(crate) fn is_known_type_script_with_valid_state(coin: &Coin) -> bool {
+    NativeCurrency.matches_coin(coin) || TimeLock.matches_coin(coin)
 }

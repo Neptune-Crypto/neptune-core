@@ -202,6 +202,26 @@ impl Block {
         }
     }
 
+    /// Create a block template with an invalid block proof, from a block
+    /// primitive witness.
+    #[cfg(test)]
+    pub(crate) fn block_template_invalid_proof_from_witness(
+        primitive_witness: BlockPrimitiveWitness,
+        block_timestamp: Timestamp,
+        nonce_preimage: Digest,
+        target_block_interval: Option<Timestamp>,
+    ) -> Block {
+        let body = primitive_witness.body().to_owned();
+        let header = primitive_witness.header(
+            block_timestamp,
+            nonce_preimage.hash(),
+            target_block_interval,
+        );
+        let proof = BlockProof::Invalid;
+        let appendix = BlockAppendix::default();
+        Block::new(header, body, appendix, proof)
+    }
+
     /// Create a block template with an invalid block proof.
     ///
     /// To be used in tests where you don't care about block validity.
@@ -214,15 +234,12 @@ impl Block {
         target_block_interval: Option<Timestamp>,
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
-        let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(
+        Self::block_template_invalid_proof_from_witness(
+            primitive_witness,
             block_timestamp,
-            nonce_preimage.hash(),
+            nonce_preimage,
             target_block_interval,
-        );
-        let proof = BlockProof::Invalid;
-        let appendix = BlockAppendix::default();
-        Block::new(header, body, appendix, proof)
+        )
     }
 
     pub(crate) async fn block_template_from_block_primitive_witness(
@@ -1019,8 +1036,6 @@ impl Block {
 mod block_tests {
     use rand::thread_rng;
     use rand::Rng;
-    use rayon::iter::IntoParallelRefIterator;
-    use rayon::iter::ParallelIterator;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
@@ -1037,7 +1052,6 @@ mod block_tests {
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
@@ -1057,42 +1071,37 @@ mod block_tests {
         );
     }
 
-    #[test]
-    fn test_difficulty_control_matches() {
+    #[tokio::test]
+    async fn test_difficulty_control_matches() {
         let network = Network::Main;
 
         let a_wallet_secret = WalletSecret::new_random();
-        let a_recipient_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
+        let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
 
-        // parallelized since this is a slow test.
-        [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000]
-            .par_iter()
-            .for_each(|multiplier| {
-                let mut block_prev = Block::genesis_block(network);
-                let mut now = block_prev.kernel.header.timestamp;
-                let mut rng = thread_rng();
+        // TODO: Can this outer-loop be parallelized?
+        for multiplier in [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000] {
+            let mut block_prev = Block::genesis_block(network);
+            let mut now = block_prev.kernel.header.timestamp;
+            let mut rng = thread_rng();
 
-                for i in (0..30).step_by(1) {
-                    let duration = i as u64 * multiplier;
-                    now += Timestamp::millis(duration);
+            for i in (0..30).step_by(1) {
+                let duration = i as u64 * multiplier;
+                now += Timestamp::millis(duration);
 
-                    let (block, _, _) =
-                        make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
+                let (block, _) = make_mock_block(&block_prev, Some(now), a_key, rng.gen()).await;
 
-                    let control = difficulty_control(
-                        block.kernel.header.timestamp,
-                        block_prev.header().timestamp,
-                        block_prev.header().difficulty,
-                        None,
-                        block_prev.header().height,
-                    );
-                    assert_eq!(block.kernel.header.difficulty, control);
+                let control = difficulty_control(
+                    block.kernel.header.timestamp,
+                    block_prev.header().timestamp,
+                    block_prev.header().difficulty,
+                    None,
+                    block_prev.header().height,
+                );
+                assert_eq!(block.kernel.header.difficulty, control);
 
-                    block_prev = block;
-                }
-            });
+                block_prev = block;
+            }
+        }
     }
 
     #[test]
@@ -1125,18 +1134,15 @@ mod block_tests {
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
     }
 
-    #[test]
-    fn block_with_wrong_mmra_is_invalid() {
+    #[tokio::test]
+    async fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
         let network = Network::RegTest;
         let genesis_block = Block::genesis_block(network);
 
         let a_wallet_secret = WalletSecret::new_random();
-        let a_recipient_address = a_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
-            .to_address();
-        let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
+        let (mut block_1, _) = make_mock_block(&genesis_block, None, a_key, rng.gen()).await;
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
         let timestamp = genesis_block.kernel.header.timestamp;
@@ -1162,11 +1168,9 @@ mod block_tests {
 
         for i in 0..55 {
             let wallet_secret = WalletSecret::new_random();
-            let recipient_address = wallet_secret
-                .nth_generation_spending_key_for_tests(0)
-                .to_address();
-            let (new_block, _, _) =
-                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
+            let key = wallet_secret.nth_generation_spending_key_for_tests(0);
+            let (new_block, _) =
+                make_mock_block(blocks.last().unwrap(), None, key, rng.gen()).await;
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());

@@ -16,6 +16,7 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::math::tip5::Tip5;
 
+use super::TypeScript;
 use super::TypeScriptWitness;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
@@ -649,6 +650,10 @@ impl ConsensusProgram for TimeLock {
 
         *HASH.get_or_init(|| self.program().hash())
     }
+}
+
+impl TypeScript for TimeLock {
+    type State = Timestamp;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]

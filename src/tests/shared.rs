@@ -31,6 +31,7 @@ use rand::thread_rng;
 use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::broadcast;
@@ -46,11 +47,14 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
+use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::job_queue::JobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::create_block_transaction_stateless;
+use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -86,6 +90,7 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -95,10 +100,8 @@ use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
@@ -644,79 +647,89 @@ pub(crate) fn invalid_block_with_transaction(
     Block::new(block_header, body, appendix, BlockProof::Invalid)
 }
 
-/// Build a fake block with a random hash, containing *one* output UTXO in the form
-/// of a coinbase output.
+/// Build a fake and invalid block where the caller can specify the
+/// nonce-preimage and guesser fraction.
 ///
-/// Returns (block, coinbase UTXO, Coinbase output randomness)
-pub(crate) fn make_mock_block(
+/// Returns (block, composer's expected UTXOs).
+pub(crate) async fn make_mock_block_with_nonce_preimage_and_guesser_fraction(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
+    composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
+    guesser_fraction: f64,
+    nonce_preimage: Digest,
+) -> (Block, Vec<ExpectedUtxo>) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
 
     // Build coinbase UTXO and associated data
-    let lock_script = coinbase_beneficiary.lock_script();
-    let coinbase_amount = Block::block_subsidy(new_block_height);
-    let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
-    let coinbase_sender_randomness: Digest = rng.gen();
-    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest();
-    let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
-    let coinbase_addition_record: AdditionRecord =
-        commit(coinbase_digest, coinbase_sender_randomness, receiver_digest);
-
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
         None => previous_block.kernel.header.timestamp + TARGET_BLOCK_INTERVAL,
     };
 
-    let tx_kernel = TransactionKernelProxy {
-        inputs: vec![],
-        outputs: vec![coinbase_addition_record],
-        public_announcements: vec![],
-        fee: NeptuneCoins::zero(),
-        timestamp: block_timestamp,
-        coinbase: Some(coinbase_amount),
-        mutator_set_hash: previous_block.mutator_set_accumulator_after().hash(),
-        merge_bit: false,
-    }
-    .into_kernel();
-    let tx = Transaction {
-        kernel: tx_kernel,
-        proof: TransactionProof::invalid(),
-    };
+    let coinbase_sender_randomness: Digest = rng.gen();
+    let composer_parameters = ComposerParameters::new(
+        composer_key.to_address().into(),
+        coinbase_sender_randomness,
+        guesser_fraction,
+    );
+
+    let (tx, composer_txos) = make_coinbase_transaction_stateless(
+        previous_block,
+        composer_parameters,
+        block_timestamp,
+        TxProvingCapability::PrimitiveWitness,
+        &JobQueue::dummy(),
+    )
+    .await
+    .unwrap();
 
     let block = Block::block_template_invalid_proof(
         previous_block,
         tx,
         block_timestamp,
-        Digest::default(),
+        nonce_preimage,
         None,
     );
 
-    (block, coinbase_utxo, coinbase_sender_randomness)
+    let composer_expected_utxos = composer_txos
+        .iter()
+        .map(|txo| {
+            ExpectedUtxo::new(
+                txo.utxo(),
+                txo.sender_randomness(),
+                composer_key.privacy_preimage(),
+                UtxoNotifier::OwnMinerComposeBlock,
+            )
+        })
+        .collect();
+
+    (block, composer_expected_utxos)
 }
 
-/// Like [make_mock_block] but returns a block with a valid PoW.
-pub(crate) fn make_mock_block_with_valid_pow(
+/// Build a fake block with a random hash, containing *two* outputs for the
+/// composer.
+///
+/// Returns (block, composer-utxos).
+pub(crate) async fn make_mock_block(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
+    composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
-) -> (Block, Utxo, Digest) {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let (mut block, cb_utxo, cb_sender_randomness) = make_mock_block(
-        previous_block,
-        block_timestamp,
-        coinbase_beneficiary,
-        rng.gen(),
-    );
-    let threshold = previous_block.header().difficulty.target();
-    while !mine_iteration_for_tests(&mut block, threshold, &mut rng) {}
+) -> (Block, Vec<ExpectedUtxo>) {
+    let nonce_preimage = Digest::default();
+    let (block, composer_expected_utxos) =
+        make_mock_block_with_nonce_preimage_and_guesser_fraction(
+            previous_block,
+            block_timestamp,
+            composer_key,
+            seed,
+            0f64,
+            nonce_preimage,
+        )
+        .await;
 
-    (block, cb_utxo, cb_sender_randomness)
+    (block, composer_expected_utxos)
 }
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
@@ -903,4 +916,28 @@ pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
         predecessor = blocks.last().unwrap();
     }
     blocks.try_into().unwrap()
+}
+
+pub(crate) async fn wallet_state_has_all_valid_mps(
+    wallet_state: &WalletState,
+    tip_block: &Block,
+) -> bool {
+    let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
+    for monitored_utxo in monitored_utxos.get_all().await.iter() {
+        let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
+
+        match current_mp {
+            Some(mp) => {
+                if !tip_block
+                    .mutator_set_accumulator_after()
+                    .verify(Tip5::hash(&monitored_utxo.utxo), &mp)
+                {
+                    return false;
+                }
+            }
+            None => return false,
+        }
+    }
+
+    true
 }

@@ -427,7 +427,10 @@ pub mod test {
         };
         file_as_string
             .lines()
-            .map(|s| Url::parse(s).expect("Must be able to parse string '{s}' as URL"))
+            .map(|s| {
+                Url::parse(s)
+                    .unwrap_or_else(|_| panic!("Must be able to parse string '{s}' as URL"))
+            })
             .collect()
     }
 
