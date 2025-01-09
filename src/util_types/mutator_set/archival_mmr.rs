@@ -2,6 +2,7 @@ use itertools::Itertools;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_authentication_path_node_indices;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
+use tasm_lib::twenty_first::util_types::mmr::shared_advanced::leaf_index_to_node_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::node_index_to_leaf_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::right_lineage_length_from_leaf_index;
@@ -246,6 +247,18 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 
         Some(ret)
     }
+
+    /// Remove the last leafs of the MMR such that only the specified number
+    /// of leafs remain. If initial number of leafs is less than requested,
+    /// this MMR is not mutated.
+    pub(crate) async fn prune_to_num_leafs(&mut self, num_leafs: u64) {
+        let index_of_last_removal = leaf_index_to_node_index(num_leafs);
+
+        while self.digests.len().await > index_of_last_removal {
+            // TODO: It would be faster to be able to prune here,
+            self.digests.pop().await.unwrap();
+        }
+    }
 }
 
 impl ArchivalMmr<DbtVec<Digest>> {
@@ -260,7 +273,12 @@ impl ArchivalMmr<DbtVec<Digest>> {
 #[cfg(test)]
 pub(crate) mod mmr_test {
 
+    use std::cmp;
+
     use itertools::*;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest_arbitrary_interop::arb;
     use rand::random;
     use rand::thread_rng;
     use test_strategy::proptest;
@@ -349,6 +367,41 @@ pub(crate) mod mmr_test {
     ) {
         let root = root_from_arbitrary_number_of_digests(test_tree.tree.leafs());
         assert_eq!(test_tree.tree.root(), root);
+    }
+
+    #[tokio::test]
+    async fn prune_to_num_leafs_unit_test() {
+        let mut archival_mmr: ArchivalMmr<Storage> =
+            mock::get_ammr_from_digests(vec![Digest::default(); 7]).await;
+        assert_eq!(7, archival_mmr.num_leafs().await as usize);
+        archival_mmr.prune_to_num_leafs(2).await;
+        assert_eq!(2, archival_mmr.num_leafs().await as u64);
+    }
+
+    #[tokio::test]
+    async fn prune_to_num_leafs_empty() {
+        for init_size in 0..3 {
+            let mut archival_mmr: ArchivalMmr<Storage> =
+                mock::get_ammr_from_digests(vec![Digest::default(); init_size]).await;
+            assert_eq!(init_size, archival_mmr.num_leafs().await as usize);
+            archival_mmr.prune_to_num_leafs(2).await;
+            assert_eq!(
+                cmp::min(2, init_size as u64),
+                archival_mmr.num_leafs().await
+            );
+        }
+    }
+
+    #[proptest(cases = 8, async = "tokio")]
+    async fn prune_to_num_leafs_pbt(
+        #[strategy(1u64..200)] init_num_leafs: u64,
+        #[strategy(vec(arb(), #init_num_leafs as usize))] digests: Vec<Digest>,
+        #[strategy(0u64..#init_num_leafs)] final_num_leafs: u64,
+    ) {
+        let mut archival_mmr: ArchivalMmr<Storage> = mock::get_ammr_from_digests(digests).await;
+        prop_assert_eq!(init_num_leafs, archival_mmr.num_leafs().await as u64);
+        archival_mmr.prune_to_num_leafs(final_num_leafs).await;
+        prop_assert_eq!(final_num_leafs, archival_mmr.num_leafs().await as u64);
     }
 
     #[tokio::test]
