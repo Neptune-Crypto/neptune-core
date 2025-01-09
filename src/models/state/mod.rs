@@ -2725,10 +2725,6 @@ mod global_state_tests {
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
-            let mut block_with_expected_utxos = async move |previous_block: &Block| {
-                make_mock_block(previous_block, None, spending_key, rng.gen()).await
-            };
-
             let mut global_state_lock = mock_genesis_global_state(
                 network,
                 2,
@@ -2740,7 +2736,8 @@ mod global_state_tests {
             // Branch A
             let mut previous_block = genesis_block.clone();
             for block_height in 1..60 {
-                let (next_block, expected) = block_with_expected_utxos(&previous_block).await;
+                let (next_block, expected) =
+                    make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
                 global_state_lock
                     .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
@@ -2760,7 +2757,8 @@ mod global_state_tests {
             // Branch B
             previous_block = genesis_block.clone();
             for block_height in 1..60 {
-                let (next_block, expected) = block_with_expected_utxos(&previous_block).await;
+                let (next_block, expected) =
+                    make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
                 global_state_lock
                     .set_new_self_mined_tip(next_block.clone(), expected)
                     .await
@@ -2797,13 +2795,12 @@ mod global_state_tests {
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
-            let mut block_with_expected = async move |previous_block: &Block| {
-                make_mock_block(previous_block, None, spending_key, rng.gen()).await
-            };
-
-            let (block_1a, expected_1a) = block_with_expected(&genesis_block).await;
-            let (block_2a, expected_2a) = block_with_expected(&block_1a).await;
-            let (block_3a, expected_3a) = block_with_expected(&block_2a).await;
+            let (block_1a, expected_1a) =
+                make_mock_block(&genesis_block, None, spending_key, rng.gen()).await;
+            let (block_2a, expected_2a) =
+                make_mock_block(&block_1a, None, spending_key, rng.gen()).await;
+            let (block_3a, expected_3a) =
+                make_mock_block(&block_2a, None, spending_key, rng.gen()).await;
 
             for claim_composer_fees in [false, true] {
                 let mut global_state_lock = mock_genesis_global_state(
@@ -2867,7 +2864,8 @@ mod global_state_tests {
                 // Add many blocks, verify state-validity after each.
                 let mut previous_block = block_1b;
                 for block_height in 2..60 {
-                    let (next_block, expected) = block_with_expected(&previous_block).await;
+                    let (next_block, expected) =
+                        make_mock_block(&previous_block, None, spending_key, rng.gen()).await;
                     global_state
                         .set_new_self_mined_tip(next_block.clone(), expected.clone())
                         .await
