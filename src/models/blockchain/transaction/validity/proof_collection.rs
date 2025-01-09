@@ -81,46 +81,6 @@ impl ProofCollection {
         )
     }
 
-    pub fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
-        fn witness_halts_gracefully(
-            program: impl ConsensusProgram,
-            witness: impl SecretWitness,
-        ) -> bool {
-            program
-                .run_rust(&witness.standard_input(), witness.nondeterminism())
-                .map(|output| output == witness.output())
-                .unwrap_or(false)
-        }
-
-        let txk_mast_hash = primitive_witness.kernel.mast_hash();
-        let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
-        let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
-        let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
-
-        let all_lock_scripts_halt = primitive_witness
-            .lock_scripts_and_witnesses
-            .iter()
-            .all(|lsaw| lsaw.halts_gracefully(txk_mast_hash_as_input.clone()));
-        let all_type_scripts_halt = primitive_witness
-            .type_scripts_and_witnesses
-            .iter()
-            .all(|ts| ts.halts_gracefully(txk_mast_hash, salted_inputs_hash, salted_outputs_hash));
-
-        let (
-            removal_records_integrity_witness,
-            collect_lock_scripts_witness,
-            kernel_to_outputs_witness,
-            collect_type_scripts_witness,
-        ) = Self::extract_specific_witnesses(primitive_witness);
-
-        witness_halts_gracefully(RemovalRecordsIntegrity, removal_records_integrity_witness)
-            || witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
-            || witness_halts_gracefully(KernelToOutputs, kernel_to_outputs_witness)
-            || witness_halts_gracefully(CollectTypeScripts, collect_type_scripts_witness)
-            || all_lock_scripts_halt
-            || all_type_scripts_halt
-    }
-
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: &TritonVmJobQueue,
@@ -459,5 +419,51 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
+    }
+
+    impl ProofCollection {
+        pub(crate) fn can_produce(primitive_witness: &PrimitiveWitness) -> bool {
+            fn witness_halts_gracefully(
+                program: impl ConsensusProgram,
+                witness: impl SecretWitness,
+            ) -> bool {
+                program
+                    .run_rust(&witness.standard_input(), witness.nondeterminism())
+                    .map(|output| output == witness.output())
+                    .unwrap_or(false)
+            }
+
+            let txk_mast_hash = primitive_witness.kernel.mast_hash();
+            let txk_mast_hash_as_input =
+                PublicInput::new(txk_mast_hash.reversed().values().to_vec());
+            let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
+            let salted_outputs_hash = Hash::hash(&primitive_witness.output_utxos);
+
+            let all_lock_scripts_halt = primitive_witness
+                .lock_scripts_and_witnesses
+                .iter()
+                .all(|lsaw| lsaw.halts_gracefully(txk_mast_hash_as_input.clone()));
+            let all_type_scripts_halt =
+                primitive_witness
+                    .type_scripts_and_witnesses
+                    .iter()
+                    .all(|ts| {
+                        ts.halts_gracefully(txk_mast_hash, salted_inputs_hash, salted_outputs_hash)
+                    });
+
+            let (
+                removal_records_integrity_witness,
+                collect_lock_scripts_witness,
+                kernel_to_outputs_witness,
+                collect_type_scripts_witness,
+            ) = Self::extract_specific_witnesses(primitive_witness);
+
+            witness_halts_gracefully(RemovalRecordsIntegrity, removal_records_integrity_witness)
+                && witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
+                && witness_halts_gracefully(KernelToOutputs, kernel_to_outputs_witness)
+                && witness_halts_gracefully(CollectTypeScripts, collect_type_scripts_witness)
+                && all_lock_scripts_halt
+                && all_type_scripts_halt
+        }
     }
 }

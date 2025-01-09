@@ -4,13 +4,11 @@ pub mod neptune_coins;
 pub mod time_lock;
 
 use std::collections::HashMap;
-use std::hash::Hash as StdHash;
 use std::hash::Hasher as StdHasher;
 
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
-use native_currency::NativeCurrency;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -19,6 +17,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
+use super::transaction::utxo::Coin;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
@@ -26,50 +25,22 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TypeScript {
-    program: Program,
-}
+pub(crate) trait TypeScript: ConsensusProgram {
+    type State: BFieldCodec;
 
-// Standard hash needed for filtering out duplicates.
-impl StdHash for TypeScript {
-    fn hash<H: StdHasher>(&self, state: &mut H) {
-        StdHash::hash(&self.encode(), state);
+    fn try_decode_state(
+        &self,
+        state: &[BFieldElement],
+    ) -> Result<Box<Self::State>, <Self::State as BFieldCodec>::Error> {
+        Self::State::decode(state)
+    }
+
+    fn matches_coin(&self, coin: &Coin) -> bool {
+        self.try_decode_state(&coin.state).is_ok() && coin.type_script_hash == self.hash()
     }
 }
 
-impl From<Vec<LabelledInstruction>> for TypeScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self::new(Program::new(&instrs))
-    }
-}
-
-impl From<&[LabelledInstruction]> for TypeScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self::new(Program::new(instrs))
-    }
-}
-
-impl TypeScript {
-    pub fn new(program: Program) -> Self {
-        Self { program }
-    }
-
-    #[cfg(test)]
-    pub fn hash(&self) -> Digest {
-        self.program.hash()
-    }
-
-    pub fn program(&self) -> &Program {
-        &self.program
-    }
-
-    pub fn native_currency() -> Self {
-        Self::new(NativeCurrency.program())
-    }
-}
-
-pub trait TypeScriptWitness {
+pub(crate) trait TypeScriptWitness {
     fn new(
         transaction_kernel: TransactionKernel,
         salted_input_utxos: SaltedUtxos,
@@ -100,20 +71,8 @@ pub struct TypeScriptAndWitness {
     nd_digests: Vec<Digest>,
 }
 
-impl From<TypeScriptAndWitness> for TypeScript {
-    fn from(type_script_and_witness: TypeScriptAndWitness) -> Self {
-        Self::new(type_script_and_witness.program)
-    }
-}
-
-impl From<&TypeScriptAndWitness> for TypeScript {
-    fn from(type_script_and_witness: &TypeScriptAndWitness) -> Self {
-        Self::new(type_script_and_witness.program.clone())
-    }
-}
-
 impl TypeScriptAndWitness {
-    pub fn new_with_nondeterminism(program: Program, witness: NonDeterminism) -> Self {
+    pub(crate) fn new_with_nondeterminism(program: Program, witness: NonDeterminism) -> Self {
         Self {
             program,
             nd_memory: witness.ram.into_iter().collect(),
@@ -122,16 +81,7 @@ impl TypeScriptAndWitness {
         }
     }
 
-    pub fn new(program: Program) -> Self {
-        Self {
-            program,
-            nd_memory: vec![],
-            nd_tokens: vec![],
-            nd_digests: vec![],
-        }
-    }
-
-    pub fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
+    pub(crate) fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,
             nd_memory: vec![],
@@ -140,25 +90,10 @@ impl TypeScriptAndWitness {
         }
     }
 
-    pub fn nondeterminism(&self) -> NonDeterminism {
+    pub(crate) fn nondeterminism(&self) -> NonDeterminism {
         NonDeterminism::new(self.nd_tokens.clone())
             .with_digests(self.nd_digests.clone())
             .with_ram(self.nd_memory.iter().cloned().collect::<HashMap<_, _>>())
-    }
-
-    pub fn halts_gracefully(
-        &self,
-        txk_mast_hash: Digest,
-        salted_inputs_hash: Digest,
-        salted_outputs_hash: Digest,
-    ) -> bool {
-        let standard_input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
-            .into_iter()
-            .flat_map(|d| d.reversed().values().to_vec())
-            .collect_vec();
-        let public_input = PublicInput::new(standard_input);
-
-        VM::run(self.program.clone(), public_input, self.nondeterminism()).is_ok()
     }
 
     /// Assuming the type script halts gracefully, prove it.
@@ -200,5 +135,27 @@ impl std::hash::Hash for TypeScriptAndWitness {
         self.nd_tokens.hash(state);
         self.nd_memory.hash(state);
         self.nd_digests.hash(state);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    impl TypeScriptAndWitness {
+        pub(crate) fn halts_gracefully(
+            &self,
+            txk_mast_hash: Digest,
+            salted_inputs_hash: Digest,
+            salted_outputs_hash: Digest,
+        ) -> bool {
+            let standard_input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
+                .into_iter()
+                .flat_map(|d| d.reversed().values().to_vec())
+                .collect_vec();
+            let public_input = PublicInput::new(standard_input);
+
+            VM::run(self.program.clone(), public_input, self.nondeterminism()).is_ok()
+        }
     }
 }

@@ -385,6 +385,16 @@ mod tests {
                 owned: self.owned,
             }
         }
+
+        pub(crate) fn replace_utxo(self, utxo: Utxo) -> Self {
+            Self {
+                utxo,
+                sender_randomness: self.sender_randomness,
+                receiver_digest: self.receiver_digest,
+                notification_method: self.notification_method,
+                owned: self.owned,
+            }
+        }
     }
 
     #[tokio::test]

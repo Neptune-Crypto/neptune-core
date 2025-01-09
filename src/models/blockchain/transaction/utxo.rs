@@ -19,6 +19,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
 
 use super::lock_script::LockScript;
+use crate::models::blockchain::type_scripts::known_type_scripts::is_known_type_script_with_valid_state;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
@@ -158,14 +159,9 @@ impl Utxo {
         self.coins.iter().filter_map(Coin::release_date).next()
     }
 
-    /// Determine whether the UTXO has coins that contain only known type
-    /// scripts. If other type scripts are included, then we cannot spend
-    /// this UTXO.
-    pub fn all_type_scripts_are_known(&self) -> bool {
-        let known_type_script_hashes = [NativeCurrency.hash(), TimeLock.hash()];
-        self.coins
-            .iter()
-            .all(|c| known_type_script_hashes.contains(&c.type_script_hash))
+    /// Test the coins for state validity, relative to known type scripts.
+    pub fn all_type_script_states_are_valid(&self) -> bool {
+        self.coins.iter().all(is_known_type_script_with_valid_state)
     }
 
     /// Determine if the UTXO can be spent at a given date in the future,
@@ -175,7 +171,7 @@ impl Utxo {
     pub fn can_spend_at(&self, timestamp: Timestamp) -> bool {
         crate::macros::log_slow_scope!();
         // unknown type script
-        if !self.all_type_scripts_are_known() {
+        if !self.all_type_script_states_are_valid() {
             return false;
         }
 
@@ -204,7 +200,7 @@ impl Utxo {
     /// Determine whether the only thing preventing the UTXO from being spendable
     /// is the timelock whose according release date is in the future.
     pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: Timestamp) -> bool {
-        if !self.all_type_scripts_are_known() {
+        if !self.all_type_script_states_are_valid() {
             return false;
         }
 
@@ -283,10 +279,8 @@ mod test {
     use rand::Rng;
     use test_strategy::proptest;
     use tracing_test::traced_test;
-    use twenty_first::math::other::random_elements;
 
     use super::*;
-    use crate::models::blockchain::type_scripts::TypeScript;
     use crate::triton_vm::prelude::*;
 
     fn make_random_utxo() -> Utxo {
@@ -296,12 +290,8 @@ mod test {
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
-            let type_script = TypeScript::native_currency();
-            let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
-            coins.push(Coin {
-                type_script_hash: type_script.hash(),
-                state,
-            });
+            let amount = NeptuneCoins::from_raw_i128(rng.gen_range(0i128..=NeptuneCoins::MAX_NAU));
+            coins.push(Coin::new_native_currency(amount));
         }
 
         (lock_script_hash, coins).into()
@@ -310,6 +300,15 @@ mod test {
     impl Utxo {
         pub(crate) fn with_coin(mut self, coin: Coin) -> Self {
             self.coins.push(coin);
+            self
+        }
+
+        pub(crate) fn append_to_coin_state(
+            mut self,
+            coin_index: usize,
+            new_element: BFieldElement,
+        ) -> Self {
+            self.coins[coin_index].state.push(new_element);
             self
         }
     }

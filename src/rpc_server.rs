@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -641,6 +642,13 @@ impl NeptuneRPCServer {
             sender_randomness: utxo_notification.sender_randomness,
             receiver_preimage: spending_key.privacy_preimage(),
         };
+
+        // Check if we can satisfy typescripts
+        if !announced_utxo.utxo.all_type_script_states_are_valid() {
+            let msg = "Attempting to claim UTXO with malformed type script.";
+            warn!(msg);
+            bail!(msg);
+        }
 
         // check if wallet is already expecting this utxo.
         let addition_record = announced_utxo.addition_record();
