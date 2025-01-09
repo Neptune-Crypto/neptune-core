@@ -1754,14 +1754,14 @@ mod global_state_tests {
                 "Historical information must be restored for premine TX"
             );
 
-            for i in 1..=2 {
+            for (i, mutxo) in mutxos.iter().enumerate().skip(1).take((1..=2).count()) {
                 assert_eq!(
                     Some((
                         block1.hash(),
                         block1.header().timestamp,
                         block1.header().height
                     )),
-                    mutxos[i].confirmed_in_block,
+                    mutxo.confirmed_in_block,
                     "Historical information must be restored for composer TX, i={i}"
                 );
             }

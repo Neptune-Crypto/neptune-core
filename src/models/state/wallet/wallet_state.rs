@@ -1723,8 +1723,7 @@ mod tests {
         // guesser-fee UTXOs will not be valid, so we cannot require that all
         // four MUTXOs have valid MSMPs, since the two guesser-UTXOs were
         // orphaned with block 1b.
-        for i in 0..=1 {
-            let mutxo = &final_mutxos[i];
+        for mutxo in final_mutxos.iter().take((0..=1).count()) {
             let item = Tip5::hash(&mutxo.utxo);
             let (mutxo_sync_block_digest, msmp) =
                 mutxo.get_latest_membership_proof_entry().unwrap();

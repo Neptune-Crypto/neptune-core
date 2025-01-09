@@ -154,14 +154,26 @@ impl WalletSecret {
         let outgoing_randomness_file: PathBuf =
             Self::wallet_outgoing_secrets_path(wallet_directory_path);
         if !outgoing_randomness_file.exists() {
-            Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).expect(
-                "Create file for outgoing randomness must succeed. Attempted to create file: {outgoing_randomness_file}",
+            Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).unwrap_or_else(
+                |_| {
+                    panic!(
+                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
+                outgoing_randomness_file.to_string_lossy()
+            )
+                },
             );
         }
 
         let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
         if !incoming_randomness_file.exists() {
-            Self::create_empty_wallet_randomness_file(&incoming_randomness_file).expect("Create file for outgoing randomness must succeed. Attempted to create file: {incoming_randomness_file}");
+            Self::create_empty_wallet_randomness_file(&incoming_randomness_file).unwrap_or_else(
+                |_| {
+                    panic!(
+                "Create file for outgoing randomness must succeed. Attempted to create file: {}",
+                incoming_randomness_file.to_string_lossy()
+            )
+                },
+            );
         }
 
         // Sanity checks that files were actually created
