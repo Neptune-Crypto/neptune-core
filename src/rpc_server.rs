@@ -834,7 +834,7 @@ impl RPC for NeptuneRPCServer {
 
         let block = archival_state.get_block(digest).await.unwrap()?;
         let is_canonical = archival_state
-            .block_belongs_to_canonical_chain(digest, tip_digest)
+            .block_belongs_to_canonical_chain(digest)
             .await;
 
         // sibling blocks are those at the same height, with different digest
@@ -2144,7 +2144,7 @@ mod rpc_server_tests {
             global_state
                 .chain
                 .archival_state()
-                .block_belongs_to_canonical_chain(genesis_hash, tip_hash)
+                .block_belongs_to_canonical_chain(genesis_hash)
                 .await,
         );
 
@@ -2156,7 +2156,7 @@ mod rpc_server_tests {
             global_state
                 .chain
                 .archival_state()
-                .block_belongs_to_canonical_chain(tip_hash, tip_hash)
+                .block_belongs_to_canonical_chain(tip_hash)
                 .await,
         );
 

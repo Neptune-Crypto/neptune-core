@@ -598,14 +598,12 @@ impl ArchivalState {
 
         let mut min_block_height = BlockHeight::genesis().next();
         let mut max_block_height = record.block_header.height;
-        let mut earliest_known_canonical = block_hash;
 
         // Do binary search to find block
         loop {
             if aocl_leaf_index < record.min_aocl_index {
                 // Look below current height
                 max_block_height = record.block_header.height.previous();
-                earliest_known_canonical = block_hash;
             } else if aocl_leaf_index > record.max_aocl_index() {
                 // Look above current height
                 min_block_height = record.block_header.height.next();
@@ -615,7 +613,7 @@ impl ArchivalState {
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
             block_hash = self
-                .block_height_to_canonical_block_digest(new_guess_height, earliest_known_canonical)
+                .block_height_to_canonical_block_digest(new_guess_height)
                 .await
                 .unwrap_or_else(|| {
                     panic!("Block record for height {new_guess_height} must exist.")
@@ -780,19 +778,6 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
-    /// Return the number of blocks with the given height
-    async fn block_height_to_block_count(&self, height: BlockHeight) -> usize {
-        match self
-            .block_index_db
-            .get(BlockIndexKey::Height(height))
-            .await
-            .map(|x| x.as_height_record())
-        {
-            Some(rec) => rec.len(),
-            None => 0,
-        }
-    }
-
     /// Return the headers of the known blocks at a specific height
     pub async fn block_height_to_block_headers(
         &self,
@@ -830,7 +815,6 @@ impl ArchivalState {
     pub async fn block_height_to_canonical_block_digest(
         &self,
         block_height: BlockHeight,
-        tip_digest: Digest,
     ) -> Option<Digest> {
         let digests = self.block_height_to_block_digests(block_height).await;
 
@@ -841,10 +825,7 @@ impl ArchivalState {
         //       Iterator::find() but the for loop is easier to understand.
         //       see: https://stackoverflow.com/questions/74901029/rust-async-find-use-await-within-predicate
         for digest in digests.into_iter() {
-            if self
-                .block_belongs_to_canonical_chain(digest, tip_digest)
-                .await
-            {
+            if self.block_belongs_to_canonical_chain(digest).await {
                 return Some(digest);
             }
         }
@@ -913,50 +894,20 @@ impl ArchivalState {
     }
 
     /// Return a boolean indicating if block belongs to most canonical chain
-    pub async fn block_belongs_to_canonical_chain(
-        &self,
-        block_digest: Digest,
-        tip_digest: Digest,
-    ) -> bool {
+    pub async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
         let block_header = self
             .get_block_header(block_digest)
             .await
             .unwrap_or_else(|| panic!("Could not get block header by digest: {}", block_digest));
-        let tip_header = self
-            .get_block_header(tip_digest)
+
+        let block_height: u64 = block_header.height.into();
+
+        self.archival_block_mmr
+            .try_get_leaf(block_height)
             .await
-            .unwrap_or_else(|| panic!("Could not get block header by digest: {}", tip_digest));
-
-        // If block is tip or parent to tip, then block belongs to canonical chain
-        if tip_digest == block_digest || tip_header.prev_block_digest == block_digest {
-            return true;
-        }
-
-        // If block is genesis block, it belongs to the canonical chain
-        if block_digest == self.genesis_block.hash() {
-            return true;
-        }
-
-        // If tip header height is less than this block, or the same but with a different hash,
-        // then it cannot belong to the canonical chain. Note that we already checked if digest
-        // was that of tip, so it's sufficient to check if tip height is less than or equal to
-        // block height.
-        if tip_header.height <= block_header.height {
-            return false;
-        }
-
-        // If only one block at this height is known and block height is less than or equal
-        // to that of the tip, then this block must belong to the canonical chain
-        if self.block_height_to_block_count(block_header.height).await == 1
-            && tip_header.height >= block_header.height
-        {
-            return true;
-        }
-
-        // Find the path from block to tip and check if this involves stepping back
-        let (backwards, _, _) = self.find_path(block_digest, tip_digest).await;
-
-        backwards.is_empty()
+            .is_some_and(|canonical_digest_at_this_height| {
+                canonical_digest_at_this_height == block_digest
+            })
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input
@@ -2993,7 +2944,7 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(genesis.hash(), genesis.hash())
+                .block_belongs_to_canonical_chain(genesis.hash())
                 .await,
             "Genesis block is always part of the canonical chain, tip"
         );
@@ -3005,13 +2956,13 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(genesis.hash(), block1.hash())
+                .block_belongs_to_canonical_chain(genesis.hash())
                 .await,
             "Genesis block is always part of the canonical chain, tip parent"
         );
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(block1.hash(), block1.hash())
+                .block_belongs_to_canonical_chain(block1.hash())
                 .await,
             "Tip block is always part of the canonical chain"
         );
@@ -3037,7 +2988,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "block {} does not belong to canonical chain",
                 i
@@ -3048,7 +2999,7 @@ mod archival_state_tests {
 
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(genesis.hash(), mock_block_4_a.hash())
+                .block_belongs_to_canonical_chain(genesis.hash())
                 .await,
             "Genesis block is always part of the canonical chain, block height is four"
         );
@@ -3069,27 +3020,6 @@ mod archival_state_tests {
         for (i, block) in [
             genesis.clone(),
             block1.clone(),
-            mock_block_2_a.clone(),
-            mock_block_3_a.clone(),
-            mock_block_4_a.clone(),
-        ]
-        .iter()
-        .enumerate()
-        {
-            assert!(
-                archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
-                    .await,
-                "canonical chain {} is canonical",
-                i
-            );
-            dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
-            dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
-        }
-
-        // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
-        // value
-        for (i, block) in [
             mock_block_2_b.clone(),
             mock_block_3_b.clone(),
             mock_block_4_b.clone(),
@@ -3099,14 +3029,31 @@ mod archival_state_tests {
         .enumerate()
         {
             assert!(
+                archival_state
+                    .block_belongs_to_canonical_chain(block.hash())
+                    .await,
+                "canonical chain {} is canonical",
+                i
+            );
+            dag_walker_leash_prop(block.hash(), mock_block_5_b.hash(), &archival_state).await;
+            dag_walker_leash_prop(mock_block_5_b.hash(), block.hash(), &archival_state).await;
+        }
+
+        for (i, block) in [
+            mock_block_2_a.clone(),
+            mock_block_3_a.clone(),
+            mock_block_4_a.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_4_a.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
-            dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
         }
 
         // Make a complicated tree and verify that the function identifies the correct blocks as part
@@ -3149,6 +3096,14 @@ mod archival_state_tests {
         let (mock_block_3_d, _) =
             make_mock_block(&mock_block_2_a.clone(), None, key, rng.gen()).await;
         add_block_to_archival_state(&mut archival_state, mock_block_3_d.clone()).await?;
+
+        let (mock_block_4_e, _) =
+            make_mock_block(&mock_block_3_d.clone(), None, key, rng.gen()).await;
+        add_block_to_archival_state(&mut archival_state, mock_block_4_e.clone()).await?;
+        let (mock_block_5_e, _) =
+            make_mock_block(&mock_block_4_e.clone(), None, key, rng.gen()).await;
+        add_block_to_archival_state(&mut archival_state, mock_block_5_e.clone()).await?;
+
         let (mock_block_4_d, _) =
             make_mock_block(&mock_block_3_d.clone(), None, key, rng.gen()).await;
         add_block_to_archival_state(&mut archival_state, mock_block_4_d.clone()).await?;
@@ -3160,13 +3115,6 @@ mod archival_state_tests {
         let (mock_block_6_d, _) =
             make_mock_block(&mock_block_5_d.clone(), None, key, rng.gen()).await;
         add_block_to_archival_state(&mut archival_state, mock_block_6_d.clone()).await?;
-
-        let (mock_block_4_e, _) =
-            make_mock_block(&mock_block_3_d.clone(), None, key, rng.gen()).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_4_e.clone()).await?;
-        let (mock_block_5_e, _) =
-            make_mock_block(&mock_block_4_e.clone(), None, key, rng.gen()).await;
-        add_block_to_archival_state(&mut archival_state, mock_block_5_e.clone()).await?;
 
         for (i, block) in [
             genesis.clone(),
@@ -3182,7 +3130,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_d.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
@@ -3213,7 +3161,7 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_d.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
@@ -3249,13 +3197,13 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_b.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(mock_block_6_b.hash(), block.hash(), &archival_state).await;
-            dag_walker_leash_prop(block.hash(), mock_block_6_b.hash(), &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
         }
 
         for (i, block) in [
@@ -3272,7 +3220,7 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(block.hash(), mock_block_6_b.hash())
+                    .block_belongs_to_canonical_chain(block.hash())
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
@@ -3292,8 +3240,6 @@ mod archival_state_tests {
         //              \
         //               \
         //                \2b<---3b<----4b<----5b<---6b
-        //
-        // Note that in the later test, 6b becomes the tip.
         let (backwards, luca, forwards) = archival_state
             .find_path(mock_block_5_e.hash(), mock_block_6_b.hash())
             .await;

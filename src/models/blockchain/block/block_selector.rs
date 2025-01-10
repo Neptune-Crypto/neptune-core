@@ -113,7 +113,7 @@ impl BlockSelector {
                 state
                     .chain
                     .archival_state()
-                    .block_height_to_canonical_block_digest(*h, state.chain.light_state().hash())
+                    .block_height_to_canonical_block_digest(*h)
                     .await
             }
             BlockSelector::Tip => Some(state.chain.light_state().hash()),

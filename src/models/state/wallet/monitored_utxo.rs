@@ -123,11 +123,11 @@ impl MonitoredUtxo {
     }
 
     /// Returns true if the MUTXO was abandoned
-    pub async fn was_abandoned(&self, tip_digest: Digest, archival_state: &ArchivalState) -> bool {
+    pub async fn was_abandoned(&self, archival_state: &ArchivalState) -> bool {
         match self.confirmed_in_block {
             Some((confirm_block_digest, _, _)) => {
                 !archival_state
-                    .block_belongs_to_canonical_chain(confirm_block_digest, tip_digest)
+                    .block_belongs_to_canonical_chain(confirm_block_digest)
                     .await
             }
             None => false,

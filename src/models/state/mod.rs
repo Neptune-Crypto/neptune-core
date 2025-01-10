@@ -1208,19 +1208,16 @@ impl GlobalState {
             )
         }
 
+        // Find monitored_utxo for updating
         let current_tip_header = self.chain.light_state().header();
         let current_tip_digest = self.chain.light_state().hash();
-
         let current_tip_info: (Digest, Timestamp, BlockHeight) = (
             current_tip_digest,
             current_tip_header.timestamp,
             current_tip_header.height,
         );
-
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
         let mut removed_count = 0;
-
-        // Find monitored_utxo for updating
         for i in 0..monitored_utxos.len().await {
             let mut mutxo = monitored_utxos.get(i).await;
 
@@ -1242,9 +1239,7 @@ impl GlobalState {
                 let depth = current_tip_header.height - block_height_confirmed + 1;
 
                 let abandoned = depth >= block_depth_threshhold as i128
-                    && mutxo
-                        .was_abandoned(current_tip_digest, self.chain.archival_state())
-                        .await;
+                    && mutxo.was_abandoned(self.chain.archival_state()).await;
 
                 if abandoned {
                     mutxo.abandoned_at = Some(current_tip_info);
@@ -1919,14 +1914,14 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .await
-                .was_abandoned(parent_block.hash(), alice.chain.archival_state())
+                .was_abandoned(alice.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
                 .await
-                .was_abandoned(parent_block.hash(), alice.chain.archival_state())
+                .was_abandoned(alice.chain.archival_state())
                 .await
         );
 
@@ -2109,7 +2104,7 @@ mod global_state_tests {
             !alice_mutxos
                 .get(0)
                 .await
-                .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
+                .was_abandoned(alice.chain.archival_state())
                 .await
         );
         for i in 1..=2 {
@@ -2117,7 +2112,7 @@ mod global_state_tests {
                 alice_mutxos
                     .get(i)
                     .await
-                    .was_abandoned(fork_c_block.hash(), alice.chain.archival_state())
+                    .was_abandoned(alice.chain.archival_state())
                     .await
             );
         }
@@ -2727,7 +2722,7 @@ mod global_state_tests {
             );
             for mutxo in mutxos {
                 if !mutxo
-                    .was_abandoned(expected_tip_digest, global_state.chain.archival_state())
+                    .was_abandoned(global_state.chain.archival_state())
                     .await
                 {
                     mutxos_on_tip.push(mutxo);

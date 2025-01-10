@@ -569,13 +569,6 @@ impl PeerLoopHandler {
                 // Find the block that the peer is requesting to start from
                 let mut peers_preferred_canonical_block: Option<Block> = None;
 
-                let tip_digest = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .hash();
                 {
                     let global_state = self.global_state_lock.lock_guard().await;
                     // Find the 1st match (known and canonical block) of the
@@ -589,16 +582,10 @@ impl PeerLoopHandler {
                             .await
                             .expect("Lookup must work");
                         if let Some(block_candidate) = block_candidate {
-                            // Verify that this block is not only known but also belongs to the canonical
-                            // chain. Also check if it's the genesis block.
-
                             if global_state
                                 .chain
                                 .archival_state()
-                                .block_belongs_to_canonical_chain(
-                                    block_candidate.hash(),
-                                    tip_digest,
-                                )
+                                .block_belongs_to_canonical_chain(block_candidate.hash())
                                 .await
                             {
                                 peers_preferred_canonical_block = Some(block_candidate);
@@ -654,7 +641,7 @@ impl PeerLoopHandler {
                             if global_state
                                 .chain
                                 .archival_state()
-                                .block_belongs_to_canonical_chain(child, tip_digest)
+                                .block_belongs_to_canonical_chain(child)
                                 .await
                             {
                                 canonical = child;
@@ -877,18 +864,16 @@ impl PeerLoopHandler {
 
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_digest = block_digests[0];
-                if block_digests.len() > 1 {
-                    let global_state = self.global_state_lock.lock_guard().await;
-                    let tip_digest = global_state.chain.light_state().hash();
-                    for block_digest in block_digests {
-                        if global_state
-                            .chain
-                            .archival_state()
-                            .block_belongs_to_canonical_chain(block_digest, tip_digest)
-                            .await
-                        {
-                            canonical_chain_block_digest = block_digest;
-                        }
+                let global_state = self.global_state_lock.lock_guard().await;
+                for block_digest in block_digests.into_iter().skip(1) {
+                    if global_state
+                        .chain
+                        .archival_state()
+                        .block_belongs_to_canonical_chain(block_digest)
+                        .await
+                    {
+                        canonical_chain_block_digest = block_digest;
+                        break;
                     }
                 }
 
