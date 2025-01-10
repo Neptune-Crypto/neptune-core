@@ -140,6 +140,7 @@ pub enum NegativePeerSanction {
     ReceivedBatchBlocksOutsideOfSync,
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
+    BatchBlocksRequestEmpty,
     InvalidTransaction,
     UnconfirmableTransaction,
 
@@ -194,6 +195,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::InvalidBlockProposal => "Invalid block proposal",
             NegativePeerSanction::UnwantedMessage => "unwanted message",
             NegativePeerSanction::NonFavorableBlockProposal => "non-favorable block proposal",
+            NegativePeerSanction::BatchBlocksRequestEmpty => "batch block request empty",
         };
         write!(f, "{string}")
     }
@@ -255,6 +257,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidBlockProposal => -10,
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
+            NegativePeerSanction::BatchBlocksRequestEmpty => -10,
         }
     }
 }
@@ -511,9 +514,9 @@ pub(crate) enum PeerMessage {
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
 
-    /// A list of block digests containing the
     BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+    UnableToSatisfyBatchRequest,
 
     BlockProposalNotification(BlockProposalNotification),
 
@@ -559,6 +562,7 @@ impl PeerMessage {
             PeerMessage::BlockProposalNotification(_) => "block proposal notification",
             PeerMessage::BlockProposalRequest(_) => "block proposal request",
             PeerMessage::BlockProposal(_) => "block proposal",
+            PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
         }
         .to_string()
     }
@@ -583,6 +587,7 @@ impl PeerMessage {
             PeerMessage::BlockProposalNotification(_) => false,
             PeerMessage::BlockProposalRequest(_) => false,
             PeerMessage::BlockProposal(_) => false,
+            PeerMessage::UnableToSatisfyBatchRequest => true,
         }
     }
 
@@ -607,6 +612,7 @@ impl PeerMessage {
             PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
             PeerMessage::BlockProposal(_) => true,
+            PeerMessage::UnableToSatisfyBatchRequest => false,
         }
     }
 }

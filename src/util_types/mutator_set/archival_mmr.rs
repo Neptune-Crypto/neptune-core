@@ -185,6 +185,10 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
     }
 
     /// Get a leaf from the MMR, will panic if index is out of range.
+    ///
+    /// # Panics
+    ///
+    /// panics if the leaf-index is out-of-bounds.
     pub async fn get_leaf_async(&self, leaf_index: u64) -> Digest {
         // Use debug-assert here to limit this lookup to *one* db-lookup in
         // production. Otherwise, it would be two lookups.
