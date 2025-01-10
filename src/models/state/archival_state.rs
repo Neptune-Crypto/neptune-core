@@ -893,12 +893,15 @@ impl ArchivalState {
         downstream_children
     }
 
-    /// Return a boolean indicating if block belongs to most canonical chain
-    pub async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
-        let block_header = self
-            .get_block_header(block_digest)
-            .await
-            .unwrap_or_else(|| panic!("Could not get block header by digest: {}", block_digest));
+    /// Return a boolean indicating if block belongs to most canonical chain.
+    ///
+    /// Returns false if either the block is not known, or if it's known but
+    /// has been orphaned.
+    pub(crate) async fn block_belongs_to_canonical_chain(&self, block_digest: Digest) -> bool {
+        let block_header = match self.get_block_header(block_digest).await {
+            Some(bh) => bh,
+            None => return false,
+        };
 
         let block_height: u64 = block_header.height.into();
 
@@ -1196,6 +1199,7 @@ impl ArchivalState {
 mod archival_state_tests {
 
     use itertools::Itertools;
+    use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
@@ -3267,6 +3271,16 @@ mod archival_state_tests {
         assert_eq!(block1.hash(), luca, "Luca must be block 1");
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn block_belongs_to_canonical_chain_doesnt_crash_on_unknown_block() {
+        let archival_state = make_test_archival_state(Network::Main).await;
+        assert!(
+            !archival_state
+                .block_belongs_to_canonical_chain(random())
+                .await
+        );
     }
 
     #[should_panic]
