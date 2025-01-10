@@ -18,6 +18,8 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_schema::DbtVec;
+use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -33,13 +35,17 @@ use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
+type ArchivalBlockMmr = ArchivalMmr<DbtVec<Digest>>;
+
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
+pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -70,6 +76,9 @@ pub struct ArchivalState {
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
     pub archival_mutator_set: RustyArchivalMutatorSet,
+
+    /// Archival-MMR of the block digests belonging to the canonical chain.
+    pub(crate) archival_block_mmr: ArchivalBlockMmr,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -102,7 +111,7 @@ impl ArchivalState {
     }
 
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
-    pub async fn initialize_mutator_set(
+    pub(crate) async fn initialize_mutator_set(
         data_dir: &DataDirectory,
     ) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
@@ -131,6 +140,46 @@ impl ArchivalState {
         archival_set.restore_or_new().await;
 
         Ok(archival_set)
+    }
+
+    pub(crate) async fn initialize_archival_block_mmr(
+        data_dir: &DataDirectory,
+    ) -> Result<ArchivalBlockMmr> {
+        let abmmr_dir_path = data_dir.archival_block_mmr_dir_path();
+        DataDirectory::create_dir_if_not_exists(&abmmr_dir_path).await?;
+
+        let path = abmmr_dir_path.clone();
+        let result = NeptuneLevelDb::new(&path, &create_db_if_missing()).await;
+
+        let db = match result {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::error!(
+                    "Could not open archival MMR database at {}: {e}",
+                    abmmr_dir_path.display()
+                );
+                panic!(
+                    "Could not open database; do not know how to proceed. Panicking.\n\
+                    If you suspect the database may be corrupted, consider renaming the directory {}\
+                     or removing it altogether. Or perhaps a node is already running?",
+                     abmmr_dir_path.display()
+                );
+            }
+        };
+
+        let mut storage = SimpleRustyStorage::new_with_callback(
+            db,
+            "archival-block-mmr-Schema",
+            crate::LOG_TOKIO_LOCK_EVENT_CB,
+        );
+
+        // We do not need a sync-label since the last leaf of the MMR will
+        // be the sync-label, i.e., the block digest of the latest block added.
+        let abmmr = storage.schema.new_vec::<Digest>("archival_block_mmr").await;
+
+        let archival_bmmr = ArchivalBlockMmr::new(abmmr).await;
+
+        Ok(archival_bmmr)
     }
 
     /// Find the path connecting two blocks. Every path involves
@@ -196,10 +245,11 @@ impl ArchivalState {
         (leaving, luca, arriving)
     }
 
-    pub async fn new(
+    pub(crate) async fn new(
         data_dir: DataDirectory,
         block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
         mut archival_mutator_set: RustyArchivalMutatorSet,
+        mut archival_block_mmr: ArchivalBlockMmr,
         network: Network,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block(network));
@@ -218,11 +268,17 @@ impl ArchivalState {
             archival_mutator_set.persist().await;
         }
 
+        // Add genesis block digest to archival MMR, if empty.
+        if archival_block_mmr.is_empty().await {
+            archival_block_mmr.append(genesis_block.hash()).await;
+        }
+
         Self {
             data_dir,
             block_index_db,
             genesis_block,
             archival_mutator_set,
+            archival_block_mmr,
         }
     }
 
@@ -391,6 +447,46 @@ impl ArchivalState {
         self.block_index_db.batch_write(batch).await;
 
         Ok(())
+    }
+
+    /// Add a new block as tip for the archival block MMR.
+    ///
+    /// All predecessors of this block must be known and stored in the block
+    /// index database for this update to work.
+    pub(crate) async fn add_to_archival_block_mmr(&mut self, new_block: &Block) {
+        // Roll back to length of parent (accounting for genesis block),
+        // then add new digest.
+        let num_leafs_prior_to_this_block = new_block.header().height.into();
+        self.archival_block_mmr
+            .prune_to_num_leafs(num_leafs_prior_to_this_block)
+            .await;
+
+        let latest_leaf = self
+            .archival_block_mmr
+            .get_latest_leaf()
+            .await
+            .expect("block MMR must always have at least one leaf");
+        if new_block.header().prev_block_digest != latest_leaf {
+            let (backwards, _, forwards) = self
+                .find_path(latest_leaf, new_block.header().prev_block_digest)
+                .await;
+            for _ in backwards {
+                self.archival_block_mmr.remove_last_leaf_async().await;
+            }
+            for digest in forwards {
+                self.archival_block_mmr.append(digest).await;
+            }
+        }
+
+        assert_eq!(
+            new_block.header().prev_block_digest,
+            self.archival_block_mmr
+                .get_latest_leaf()
+                .await
+                .expect("block MMR must always have at least one leaf"),
+            "Archival block-MMR must be in a consistent state. Try deleting this database to have it rebuilt."
+        );
+        self.archival_block_mmr.append(new_block.hash()).await;
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
@@ -1197,7 +1293,11 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        ArchivalState::new(data_dir, block_index_db, ams, network).await
+        let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
+            .await
+            .unwrap();
+
+        ArchivalState::new(data_dir, block_index_db, ams, archival_block_mmr, network).await
     }
 
     #[traced_test]

@@ -116,10 +116,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir).await?;
     info!("Got archival mutator set");
 
+    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir).await?;
+    info!("Got archival block MMR");
+
     let archival_state = ArchivalState::new(
         data_dir,
         block_index_db,
         archival_mutator_set,
+        archival_block_mmr,
         cli_args.network,
     )
     .await;

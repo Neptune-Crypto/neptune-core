@@ -1338,6 +1338,11 @@ impl GlobalState {
             .write_block_as_tip(&new_block)
             .await?;
 
+        self.chain
+            .archival_state_mut()
+            .add_to_archival_block_mmr(&new_block)
+            .await;
+
         // update the mutator set with the UTXOs from this block
         self.chain
             .archival_state_mut()
@@ -2615,6 +2620,8 @@ mod global_state_tests {
     }
 
     mod state_update_on_reorganizations {
+        use twenty_first::prelude::Mmr;
+
         use super::*;
 
         async fn assert_correct_global_state(
@@ -2653,6 +2660,35 @@ mod global_state_tests {
                     .hash(),
                 "Expected block must be returned"
             );
+
+            assert_eq!(
+                expected_tip_digest,
+                global_state
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .get_latest_leaf()
+                    .await
+                    .unwrap(),
+                "Latest leaf in archival block MMR must match expected block"
+            );
+
+            // Verify that archival-block MMR matches that of block
+            {
+                let mut expected_archival_block_mmr_value =
+                    expected_tip.body().block_mmr_accumulator.clone();
+                expected_archival_block_mmr_value.append(expected_tip_digest);
+                assert_eq!(
+                    expected_archival_block_mmr_value,
+                    global_state
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .to_accumulator_async()
+                        .await,
+                    "archival block-MMR must match that in tip after adding tip digest"
+                );
+            }
 
             let tip_height = expected_tip.header().height;
             assert_eq!(

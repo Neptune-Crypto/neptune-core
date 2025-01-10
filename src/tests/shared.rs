@@ -270,6 +270,7 @@ pub(crate) async fn get_test_genesis_setup(
     ))
 }
 
+/// Set a new block as tip
 pub(crate) async fn add_block_to_archival_state(
     archival_state: &mut ArchivalState,
     new_block: Block,
@@ -277,6 +278,8 @@ pub(crate) async fn add_block_to_archival_state(
     archival_state.write_block_as_tip(&new_block).await?;
 
     archival_state.update_mutator_set(&new_block).await.unwrap();
+
+    archival_state.add_to_archival_block_mmr(&new_block).await;
 
     Ok(())
 }
@@ -765,7 +768,18 @@ pub async fn mock_genesis_archival_state(
         .await
         .unwrap();
 
-    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams, network).await;
+    let archival_block_mmr = ArchivalState::initialize_archival_block_mmr(&data_dir)
+        .await
+        .unwrap();
+
+    let archival_state = ArchivalState::new(
+        data_dir.clone(),
+        block_index_db,
+        ams,
+        archival_block_mmr,
+        network,
+    )
+    .await;
 
     (archival_state, peer_db, data_dir)
 }

@@ -7,6 +7,7 @@ use directories::ProjectDirs;
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
+use crate::models::state::archival_state::ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME;
 use crate::models::state::archival_state::BLOCK_INDEX_DB_NAME;
 use crate::models::state::archival_state::MUTATOR_SET_DIRECTORY_NAME;
 use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
@@ -135,6 +136,16 @@ impl DataDirectory {
     pub fn mutator_set_database_dir_path(&self) -> PathBuf {
         self.database_dir_path()
             .join(Path::new(MUTATOR_SET_DIRECTORY_NAME))
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///
+    /// The archival block MMR database director path
+    ///
+    /// This directory lives within `DataDirectory::database_dir_path()`.
+    pub fn archival_block_mmr_dir_path(&self) -> PathBuf {
+        self.database_dir_path()
+            .join(Path::new(ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////
