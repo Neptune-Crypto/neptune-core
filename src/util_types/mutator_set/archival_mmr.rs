@@ -184,10 +184,19 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         }
     }
 
-    /// Get a leaf from the MMR, will panic if index is out of range
+    /// Get a leaf from the MMR, will panic if index is out of range.
     pub async fn get_leaf_async(&self, leaf_index: u64) -> Digest {
         let node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
         self.digests.get(node_index).await
+    }
+
+    /// Get a leaf from the MMR, returns `None` if index is out of range.
+    pub async fn try_get_leaf(&self, leaf_index: u64) -> Option<Digest> {
+        if leaf_index >= self.num_leafs().await {
+            None
+        } else {
+            Some(self.get_leaf_async(leaf_index).await)
+        }
     }
 
     /// Return membership proof
@@ -867,6 +876,11 @@ pub(crate) mod mmr_test {
                 mmr.get_leaf_async(leaf_index).await,
                 "fetched leaf must match what we put in"
             );
+            assert_eq!(
+                new_leaf,
+                mmr.try_get_leaf(leaf_index).await.unwrap(),
+                "fetched leaf through try-getter must match what we put in"
+            );
         }
 
         assert!(
@@ -922,6 +936,7 @@ pub(crate) mod mmr_test {
             let new_leaf: Digest = Hash::hash(&BFieldElement::new(987223));
             mmr.mutate_leaf(leaf_index, new_leaf).await;
             assert_eq!(new_leaf, mmr.get_leaf_async(leaf_index).await);
+            assert_eq!(new_leaf, mmr.try_get_leaf(leaf_index).await.unwrap());
         }
     }
 
@@ -1130,6 +1145,22 @@ pub(crate) mod mmr_test {
                     .verify_batch_update(&mmr.peaks().await, &[new_leaf_hash], &[])
                     .await
             );
+        }
+    }
+
+    #[proptest(cases = 4, async = "tokio")]
+    async fn get_and_try_get_agree(
+        #[strategy(0u64..200)] num_leafs: u64,
+        #[strategy(vec(arb(), #num_leafs as usize))] digests: Vec<Digest>,
+    ) {
+        let ammr = mock::get_ammr_from_digests(digests.clone()).await;
+        for i in 0..num_leafs {
+            prop_assert_eq!(digests[i as usize], ammr.get_leaf_async(i).await);
+            prop_assert_eq!(digests[i as usize], ammr.try_get_leaf(i).await.unwrap());
+        }
+
+        for i in num_leafs..num_leafs + 10 {
+            prop_assert!(ammr.try_get_leaf(i).await.is_none());
         }
     }
 
