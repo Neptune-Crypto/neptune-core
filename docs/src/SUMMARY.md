@@ -19,3 +19,4 @@
   - [Git Message](./contributing/git-message.md)
   - [Sharing Proofs](./contributing/proof-sharing.md)
   - [Releasing](./contributing/releasing.md)
+  - [Documentation](./contributing/documentation.md)
