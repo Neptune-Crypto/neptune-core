@@ -895,6 +895,34 @@ mod tests {
         mempool
     }
 
+    /// Mocking what the caller might do with the update jobs.
+    async fn mocked_mempool_update_handler(
+        update_jobs: Vec<UpdateMutatorSetDataJob>,
+        mempool: &mut Mempool,
+    ) -> Vec<MempoolEvent> {
+        let mut updated_txs = vec![];
+        for job in update_jobs {
+            let updated = job
+                .upgrade(
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::Highest.into(),
+                )
+                .await
+                .unwrap();
+            updated_txs.push(updated);
+        }
+
+        let mut events = vec![];
+        for updated_tx in updated_txs {
+            let txid = updated_tx.kernel.txid();
+            let tx = mempool.get_mut(txid).unwrap();
+            *tx = updated_tx.clone();
+            events.push(MempoolEvent::UpdateTxMutatorSet(txid, updated_tx));
+        }
+
+        events
+    }
+
     #[traced_test]
     #[tokio::test]
     async fn get_densest_transactions_no_tx_cap() {
@@ -1058,34 +1086,6 @@ mod tests {
 
         // Bob is premine receiver, Alice is not.
 
-        /// Mocking what the caller might do with the update jobs.
-        async fn mocked_mempool_update_handler(
-            update_jobs: Vec<UpdateMutatorSetDataJob>,
-            mempool: &mut Mempool,
-        ) -> Vec<MempoolEvent> {
-            let mut updated_txs = vec![];
-            for job in update_jobs {
-                let updated = job
-                    .upgrade(
-                        &TritonVmJobQueue::dummy(),
-                        TritonVmJobPriority::Highest.into(),
-                    )
-                    .await
-                    .unwrap();
-                updated_txs.push(updated);
-            }
-
-            let mut events = vec![];
-            for updated_tx in updated_txs {
-                let txid = updated_tx.kernel.txid();
-                let tx = mempool.get_mut(txid).unwrap();
-                *tx = updated_tx.clone();
-                events.push(MempoolEvent::UpdateTxMutatorSet(txid, updated_tx));
-            }
-
-            events
-        }
-
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::devnet_wallet();
@@ -1240,7 +1240,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        let (_, update_jobs) = mempool
+        let (_, update_jobs2) = mempool
             .update_with_block_and_predecessor(
                 &block_2,
                 &block_1,
@@ -1248,7 +1248,7 @@ mod tests {
                 true,
             )
             .await;
-        mocked_mempool_update_handler(update_jobs, &mut mempool).await;
+        mocked_mempool_update_handler(update_jobs2, &mut mempool).await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -1273,7 +1273,7 @@ mod tests {
                 make_mock_block(&previous_block, None, alice_key, rng.gen()).await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
-            let (_, joinhandles1) = mempool
+            let (_, update_jobs_n) = mempool
                 .update_with_block_and_predecessor(
                     &next_block,
                     &previous_block,
@@ -1281,7 +1281,7 @@ mod tests {
                     true,
                 )
                 .await;
-            mocked_mempool_update_handler(joinhandles1, &mut mempool).await;
+            mocked_mempool_update_handler(update_jobs_n, &mut mempool).await;
             previous_block = next_block;
         }
 
@@ -1320,7 +1320,7 @@ mod tests {
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);
 
-        let (_, joinhandles2) = mempool
+        let (_, update_jobs5) = mempool
             .update_with_block_and_predecessor(
                 &block_5,
                 &previous_block,
@@ -1328,7 +1328,7 @@ mod tests {
                 true,
             )
             .await;
-        mocked_mempool_update_handler(joinhandles2, &mut mempool).await;
+        mocked_mempool_update_handler(update_jobs5, &mut mempool).await;
 
         assert!(
             mempool.is_empty(),
@@ -1441,9 +1441,10 @@ mod tests {
         // Verify that reorganizations do not crash the client, and other
         // qualities.
 
-        // First put a transaction into the mempool. Then mine block 1a does
-        // not contain this transaction, such that mempool is still non-empty.
-        // Then mine a a block 1b that also does not contain this transaction.
+        // First put a transaction into the mempool. Then mine block 1a that
+        // does not contain this transaction, such that mempool is still
+        // non-empty. Then mine a a block 1b that also does not contain this
+        // transaction.
         let network = Network::Main;
         let alice_wallet = WalletSecret::devnet_wallet();
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
@@ -1490,6 +1491,10 @@ mod tests {
             )
             .await
             .unwrap();
+        assert!(unmined_tx.is_valid().await);
+        assert!(
+            unmined_tx.is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after())
+        );
 
         alice
             .lock_guard_mut()
@@ -1509,7 +1514,10 @@ mod tests {
 
             let (next_block, _) =
                 make_mock_block(&current_block, Some(in_seven_years), bob_key, rng.gen()).await;
-            alice.set_new_tip(next_block.clone()).await.unwrap();
+            let update_jobs = alice.set_new_tip(next_block.clone()).await.unwrap();
+            assert!(update_jobs.len().is_one(), "Must return exactly update-job");
+            mocked_mempool_update_handler(update_jobs, &mut alice.lock_guard_mut().await.mempool)
+                .await;
 
             let mempool_txs =
                 alice
@@ -1525,7 +1533,8 @@ mod tests {
             assert!(
                 mempool_txs[0]
                     .is_confirmable_relative_to(&next_block.mutator_set_accumulator_after()),
-                "Mempool tx must stay confirmable after each new block has been applied"
+                "Mempool tx must stay confirmable after new block of height {} has been applied",
+                next_block.header().height
             );
             assert!(mempool_txs[0].is_valid().await, "Tx should be valid.");
             assert_eq!(
