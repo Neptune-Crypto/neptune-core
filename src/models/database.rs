@@ -100,7 +100,10 @@ pub enum BlockIndexKey {
     File(u32),           // points to file information
     Height(BlockHeight), // Maps from block height to list of blocks
     LastFile,            // points to last file used
-    BlockTipDigest,      // points to block digest of most canonical block known
+
+    // Tip-hash could also be fetched from archival block MMR instead. Maybe
+    // this key is superfluous?
+    BlockTipDigest, // points to block digest of most canonical block known
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
