@@ -384,6 +384,10 @@ impl Block {
         &self.kernel.body
     }
 
+    /// Return the mutator set as it looks after the application of this block.
+    ///
+    /// Includes the guesser-fee UTXOs which are not included by the
+    /// `mutator_set_accumulator` field on the block body.
     pub(crate) fn mutator_set_accumulator_after(&self) -> MutatorSetAccumulator {
         let mut msa = self.kernel.body.mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(vec![], self.guesser_fee_addition_records());
@@ -819,13 +823,9 @@ impl Block {
         // 2.c)
         let mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
-            [
-                previous_block.guesser_fee_addition_records(),
-                self.body().transaction_kernel.outputs.clone(),
-            ]
-            .concat(),
+            self.body().transaction_kernel.outputs.clone(),
         );
-        let mut msa = previous_block.body().mutator_set_accumulator.clone();
+        let mut msa = previous_block.mutator_set_accumulator_after();
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
         if let Err(err) = ms_update_result {
             warn!("Failed to apply mutator set update: {}", err);
