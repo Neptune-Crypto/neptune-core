@@ -613,11 +613,9 @@ impl ArchivalState {
 
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
             block_hash = self
-                .block_height_to_canonical_block_digest(new_guess_height)
-                .await
-                .unwrap_or_else(|| {
-                    panic!("Block record for height {new_guess_height} must exist.")
-                });
+                .archival_block_mmr
+                .get_leaf_async(new_guess_height.into())
+                .await;
             record = self
                 .block_index_db
                 .get(BlockIndexKey::Block(block_hash))
@@ -792,27 +790,6 @@ impl ArchivalState {
                 .map(|x| x.as_height_record())
                 .unwrap_or_else(Vec::new)
         }
-    }
-
-    /// Return the digest of canonical block at a specific height, or None
-    pub(crate) async fn block_height_to_canonical_block_digest(
-        &self,
-        block_height: BlockHeight,
-    ) -> Option<Digest> {
-        let digests = self.block_height_to_block_digests(block_height).await;
-
-        // note: there should only ever be 1 block at a given height that
-        //       is in the canonical chain.
-        //
-        // note: we could do this with an async stream using equivalent of
-        //       Iterator::find() but the for loop is easier to understand.
-        //       see: https://stackoverflow.com/questions/74901029/rust-async-find-use-await-within-predicate
-        for digest in digests.into_iter() {
-            if self.block_belongs_to_canonical_chain(digest).await {
-                return Some(digest);
-            }
-        }
-        None
     }
 
     /// Return a boolean indicating if block belongs to most canonical chain.
