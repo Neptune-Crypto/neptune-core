@@ -875,37 +875,25 @@ impl PeerLoopHandler {
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let block_digests = self
+                let canonical_block_digest = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .chain
                     .archival_state()
-                    .block_height_to_block_digests(block_height)
+                    .archival_block_mmr
+                    .try_get_leaf(block_height.into())
                     .await;
-                debug!("Found {} blocks", block_digests.len());
 
-                if block_digests.is_empty() {
-                    warn!("Got block request by height for unknown block");
-                    self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // If more than one block is found, we need to find the one that's canonical
-                let mut canonical_chain_block_digest = block_digests[0];
-                let global_state = self.global_state_lock.lock_guard().await;
-                for block_digest in block_digests.into_iter().skip(1) {
-                    if global_state
-                        .chain
-                        .archival_state()
-                        .block_belongs_to_canonical_chain(block_digest)
-                        .await
-                    {
-                        canonical_chain_block_digest = block_digest;
-                        break;
+                let canonical_block_digest = match canonical_block_digest {
+                    None => {
+                        warn!("Got block request by height for unknown block");
+                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     }
-                }
+                    Some(digest) => digest,
+                };
 
                 let canonical_chain_block: Block = self
                     .global_state_lock
@@ -913,7 +901,7 @@ impl PeerLoopHandler {
                     .await
                     .chain
                     .archival_state()
-                    .get_block(canonical_chain_block_digest)
+                    .get_block(canonical_block_digest)
                     .await?
                     .unwrap();
                 let block_response: PeerMessage =
@@ -2069,6 +2057,48 @@ mod peer_loop_tests {
             .await?;
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn request_unknown_height_doesnt_crash() {
+        // Scenario: Only genesis block is known. Peer requests block of height
+        // 2.
+        let network = Network::Main;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
+            get_test_genesis_setup(network, 0).await.unwrap();
+        let peer_address = get_dummy_socket_address(0);
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let mut peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state_lock.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+
+        // This will return error if seen read/write order does not match that of the
+        // mocked object.
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
+
+        // Verify that peer is sanctioned for this nonsense.
+        assert!(state_lock
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer_address.ip())
+            .await
+            .unwrap()
+            .standing
+            .is_negative());
     }
 
     #[traced_test]
