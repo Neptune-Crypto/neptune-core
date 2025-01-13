@@ -113,6 +113,11 @@ pub struct Args {
     #[clap(long)]
     pub sleepy_guessing: bool,
 
+    /// Set the number of threads to use while guessing. When no value is set,
+    /// the number is set to the number of available cores.
+    #[clap(long)]
+    pub guesser_threads: Option<usize>,
+
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading a `ProofCollection` to `SingleProof`, or
     /// for merging two `SingleProof`s.
