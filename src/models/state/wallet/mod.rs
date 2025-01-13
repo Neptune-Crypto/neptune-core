@@ -1601,6 +1601,31 @@ mod wallet_tests {
             println!("{}", serde_json::to_string(&addrs).unwrap());
         }
 
+        #[traced_test]
+        #[tokio::test]
+        async fn verify_premine_receipt_works_with_legacy_address() {
+            let network = Network::Main;
+            let cli = cli_args::Args::default();
+            let genesis_block = Block::genesis_block(network);
+            let seven_months_after_launch = genesis_block.header().timestamp + Timestamp::months(7);
+            for seed_phrase in worker::legacy_seed_phrases() {
+                let wallet_secret = WalletSecret::from_phrase(&seed_phrase)
+                    .expect("legacy seed phrase must still be valid");
+                let premine_recipient =
+                    mock_genesis_global_state(network, 0, wallet_secret, cli.clone()).await;
+                assert_eq!(
+                    NeptuneCoins::new(1),
+                    premine_recipient
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .wallet_state
+                        .confirmed_balance(genesis_block.hash(), seven_months_after_launch)
+                        .await
+                );
+            }
+        }
+
         mod worker {
             use super::*;
 
@@ -1647,6 +1672,25 @@ mod wallet_tests {
                 r#"
 [[0,{"seed":"085de9d8ff01b393be81f8f76cc6b153b7b0c20e1097909390e0877fb0d38fe1cb3518c189ecc220"}],[1,{"seed":"3b538bb459132b1f2526ad3172226080699560c05a762d89fd6d73336edb3fb5a0d5c9e36b092fa1"}],[2,{"seed":"287365585508989266466c47b04875fac951a93d6d794ba4de91cfa892db92a3e52bf8e91b85f30d"}],[3,{"seed":"47bdfbbe9803d28101356a9db943a1c5081e15cdea333a27c814c9fc62d274565f08fc1fb57bb2f4"}],[8,{"seed":"e7718293681c2a25f83ec4fcf2adc6c6df9cc67146abca5dfaa129e3c9af3d5d0ff0f7c55e3282b8"}],[16,{"seed":"cdf0082897ce71d4e20eef2f953dfa092cf0a3c015e79af51a262889849f44c23e6ed23fd41d95f9"}],[256,{"seed":"7deebf6aac8a267a50b2c09844f203f1a14117c929c41c4161af663281ea8e102eae65fa0aab9756"}],[512,{"seed":"0ed702bb8d3c3e4801088a6e47158f8fe747ddd0b5d197809b8fb1578e39127ed5a976e26bc4beeb"}],[1024,{"seed":"2eb0d1060c2485c9c8e560954889e8abc64ea3dafeaa2f0a997befda9d5ed932cf5224fad779bc8c"}],[2048,{"seed":"1199406fb70219a94dfccd3e08663d6d4b086034e9d4125760222c16b5ae9e7557e1bd2d22236fea"}],[4096,{"seed":"680a341df644f26ba0188f90f95333987b84dc988cce1dcb3db32a60453b98d3300476177e961646"}],[32767,{"seed":"2f5502fe93db525e75a35ca2315b6c253ea03d324d1dab4bacece8f0c518acfaee137c5b3699c682"}],[65535,{"seed":"12633efc8a1779f3a4da5980812b720dc77ac2dec93bd281589ca7f44bfa2d76c945af5226d0fbc3"}]]
 "#
+            }
+
+            pub(crate) fn legacy_seed_phrases() -> Vec<[String; 18]> {
+                vec![
+                    // alphanet v0.5.0
+                    [
+                        "north", "marble", "choice", "wedding", "leader", "sibling", "switch",
+                        "vocal", "route", "element", "elevator", "grape", "duck", "pyramid",
+                        "record", "almost", "bronze", "license",
+                    ]
+                    .map(|s| s.to_string()),
+                    // betabet v0.10.0
+                    [
+                        "among", "inquiry", "crew", "between", "salad", "brass", "point",
+                        "swallow", "impulse", "enrich", "cabbage", "hope", "lunch", "vacuum",
+                        "message", "apart", "screen", "robust",
+                    ]
+                    .map(|s| s.to_string()),
+                ]
             }
         }
     }
