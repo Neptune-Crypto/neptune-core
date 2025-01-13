@@ -735,7 +735,7 @@ impl PeerLoopHandler {
                 let most_canonical_own_block_match: Block = match most_canonical_own_block_match {
                     Some(block) => block,
                     None => {
-                        warn!("Got batch reponse with invalid start height");
+                        warn!("Got batch reponse with invalid start block");
                         self.punish(NegativePeerSanction::BatchBlocksInvalidStartHeight)
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
