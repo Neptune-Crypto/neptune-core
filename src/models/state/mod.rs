@@ -2169,6 +2169,10 @@ mod global_state_tests {
         .await
         .unwrap();
 
+        assert!(coinbase_transaction.is_valid().await);
+        assert!(coinbase_transaction
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
+
         // Send two outputs each to Alice and Bob, from genesis receiver
         let sender_randomness: Digest = rng.gen();
         let tx_outputs_for_alice = vec![
@@ -2229,6 +2233,10 @@ mod global_state_tests {
             panic!("Expected change output to genesis receiver");
         };
 
+        assert!(tx_to_alice_and_bob.is_valid().await);
+        assert!(tx_to_alice_and_bob
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
+
         // Expect change output
         premine_receiver
             .global_state_lock
@@ -2252,6 +2260,9 @@ mod global_state_tests {
             )
             .await
             .unwrap();
+        assert!(block_transaction.is_valid().await);
+        assert!(block_transaction
+            .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
 
         let block_1 = Block::compose(
             &genesis_block,
@@ -2402,6 +2413,9 @@ mod global_state_tests {
             "No change for Alice as she spent it all"
         );
 
+        assert!(tx_from_alice.is_valid().await);
+        assert!(tx_from_alice.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
+
         // make bob's transaction
         let tx_outputs_from_bob = vec![
             TxOutput::onchain_native_currency(
@@ -2443,6 +2457,9 @@ mod global_state_tests {
             "No change for Bob as he spent it all"
         );
 
+        assert!(tx_from_bob.is_valid().await);
+        assert!(tx_from_bob.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
+
         // Make block_2 with tx that contains:
         // - 4 inputs: 2 from Alice and 2 from Bob
         // - 7 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 2 coinbases
@@ -2461,6 +2478,9 @@ mod global_state_tests {
         )
         .await
         .unwrap();
+        assert!(coinbase_transaction2.is_valid().await);
+        assert!(coinbase_transaction2
+            .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
 
         let block_transaction2 = coinbase_transaction2
             .merge_with(
@@ -2479,6 +2499,11 @@ mod global_state_tests {
             )
             .await
             .unwrap();
+        assert!(block_transaction2.is_valid().await);
+        assert!(
+            block_transaction2.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after())
+        );
+
         let block_2 = Block::compose(
             &block_1,
             block_transaction2,

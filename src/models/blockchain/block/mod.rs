@@ -792,9 +792,7 @@ impl Block {
         // 2.a)
         for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
             if !previous_block
-                .kernel
-                .body
-                .mutator_set_accumulator
+                .mutator_set_accumulator_after()
                 .can_remove(removal_record)
             {
                 warn!("Removal record cannot be removed from mutator set");
