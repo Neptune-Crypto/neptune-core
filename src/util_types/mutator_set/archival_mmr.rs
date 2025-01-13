@@ -186,6 +186,13 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
 
     /// Get a leaf from the MMR, will panic if index is out of range.
     pub async fn get_leaf_async(&self, leaf_index: u64) -> Digest {
+        // Use debug-assert here to limit this lookup to *one* db-lookup in
+        // production. Otherwise, it would be two lookups.
+        debug_assert!(
+            leaf_index < self.num_leafs().await,
+            "Leaf index out-of-bounds. Got leaf index {leaf_index} but num_leafs was {}",
+            self.num_leafs().await
+        );
         let node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
         self.digests.get(node_index).await
     }
@@ -1162,6 +1169,14 @@ pub(crate) mod mmr_test {
         for i in num_leafs..num_leafs + 10 {
             prop_assert!(ammr.try_get_leaf(i).await.is_none());
         }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Leaf index out-of-bounds. Got leaf index 17 but num_leafs was 17")]
+    async fn get_panics_when_out_of_bounds() {
+        let digests = vec![Digest::default(); 17];
+        let ammr = mock::get_ammr_from_digests(digests.clone()).await;
+        ammr.get_leaf_async(17).await;
     }
 
     #[tokio::test]
