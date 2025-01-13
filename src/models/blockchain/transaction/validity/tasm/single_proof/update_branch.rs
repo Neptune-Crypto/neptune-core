@@ -2,7 +2,6 @@ use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
-use tasm_lib::hashing::hash_from_stack::HashFromStack;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
@@ -25,6 +24,7 @@ use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_fie
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -289,8 +289,9 @@ impl UpdateWitness {
             TransactionKernel::MAST_HEIGHT as u32,
         );
 
-        // coinbases are identical
-        let coinbase_hash: Digest = Hash::hash(&uw.new_kernel.coinbase);
+        // coinbases is both transaction is `None`
+        let coinbase: Option<NeptuneCoins> = None;
+        let coinbase_hash: Digest = Tip5::hash(&coinbase);
         tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
             TransactionKernelField::Coinbase as u32,
@@ -354,7 +355,6 @@ impl UpdateBranch {
     pub(crate) const INPUT_SETS_NOT_EQUAL_ERROR: i128 = 1_000_100;
     pub(crate) const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
     pub(crate) const WITNESS_SIZE_CHANGED_ERROR: i128 = 1_000_102;
-    pub(crate) const MERGE_BIT_NOT_BIT: i128 = 1_000_103;
 }
 
 impl BasicSnippet for UpdateBranch {
@@ -452,6 +452,28 @@ impl BasicSnippet for UpdateBranch {
                 }
             };
 
+        let verify_coinbase_is_none = {
+            let coinbase: Option<NeptuneCoins> = None;
+            let hash_of_none = Tip5::hash(&coinbase);
+            let push_hash_none = hash_of_none
+                .values()
+                .into_iter()
+                .rev()
+                .map(|b| triton_instr!(push b))
+                .collect_vec();
+            triton_asm! {
+                // _ [txk_mhash]
+
+                push {TransactionKernel::MAST_HEIGHT}
+                push {TransactionKernelField::Coinbase as u32}
+
+                {&push_hash_none}
+
+                call {merkle_verify}
+                // _
+            }
+        };
+
         let update_witness_field_old_proof = field!(UpdateWitness::old_proof);
 
         let new_aocl_mmr_field = field!(UpdateWitness::new_aocl);
@@ -470,7 +492,6 @@ impl BasicSnippet for UpdateBranch {
         let public_announcements_field_with_size =
             field_with_size!(TransactionKernel::public_announcements);
         let fee_field_with_size = field_with_size!(TransactionKernel::fee);
-        let coinbase_field_with_size = field_with_size!(TransactionKernel::coinbase);
 
         let authenticate_merge_bit = triton_asm! {
                 // _ [txk_mh] merge_bit
@@ -691,8 +712,19 @@ impl BasicSnippet for UpdateBranch {
                 {&authenticate_field_twice_with_no_change(&fee_field_with_size, TransactionKernelField::Fee)}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
-                /* Authenticate coinbase and verify no-change */
-                {&authenticate_field_twice_with_no_change(&coinbase_field_with_size, TransactionKernelField::Coinbase)}
+                /* Authenticate coinbase and verify None in old and new tx */
+                push {old_txk_digest_alloc.read_address()}
+                read_mem {Digest::LEN}
+                pop 1
+                {&verify_coinbase_is_none}
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
+
+                dup 6
+                dup 6
+                dup 6
+                dup 6
+                dup 6
+                {&verify_coinbase_is_none}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
 
                 /* Authenticate timestamps and verify gte */
