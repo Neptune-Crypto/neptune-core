@@ -33,7 +33,7 @@ impl BlockchainState {
     ///
     /// panics if called by a light node.
     #[inline]
-    pub fn archival_state(&self) -> &ArchivalState {
+    pub(crate) fn archival_state(&self) -> &ArchivalState {
         match self {
             Self::Archival(bac) => &bac.archival_state,
             Self::Light(_) => panic!("archival_state not available in LightState mode"),
@@ -55,7 +55,7 @@ impl BlockchainState {
     ///
     /// panics if called by a light node.
     #[inline]
-    pub fn archival_state_mut(&mut self) -> &mut ArchivalState {
+    pub(crate) fn archival_state_mut(&mut self) -> &mut ArchivalState {
         match self {
             Self::Archival(bac) => &mut bac.archival_state,
             Self::Light(_) => panic!("archival_state not available in LightState mode"),
@@ -87,7 +87,7 @@ impl BlockchainState {
 #[derive(Debug)]
 pub struct BlockchainArchivalState {
     /// Historical blockchain data, persisted
-    pub archival_state: ArchivalState,
+    pub(crate) archival_state: ArchivalState,
 
     /// The present tip.
     pub light_state: LightState,

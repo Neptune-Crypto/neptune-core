@@ -43,8 +43,8 @@ use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMut
 
 type ArchivalBlockMmr = ArchivalMmr<DbtVec<Digest>>;
 
-pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
-pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
+pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
+pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
 
 /// Provides interface to historic blockchain data which consists of
@@ -54,7 +54,7 @@ pub(crate) const ARCHIVAL_BLOCK_MMR_DIRECTORY_NAME: &str = "archival_block_mmr";
 ///
 /// all file operations are async, or async-friendly.
 ///       see <https://github.com/Neptune-Crypto/neptune-core/issues/75>
-pub struct ArchivalState {
+pub(crate) struct ArchivalState {
     data_dir: DataDirectory,
 
     /// maps block index key to block index value where key/val pairs can be:
@@ -67,7 +67,7 @@ pub struct ArchivalState {
     /// ```
     ///
     /// So this is effectively 5 logical indexes.
-    pub block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
+    pub(crate) block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker task.
@@ -75,7 +75,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: RustyArchivalMutatorSet,
+    pub(crate) archival_mutator_set: RustyArchivalMutatorSet,
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
     pub(crate) archival_block_mmr: ArchivalBlockMmr,
@@ -95,7 +95,7 @@ impl core::fmt::Debug for ArchivalState {
 
 impl ArchivalState {
     /// Create databases for block persistence
-    pub async fn initialize_block_index_database(
+    pub(crate) async fn initialize_block_index_database(
         data_dir: &DataDirectory,
     ) -> Result<NeptuneLevelDb<BlockIndexKey, BlockIndexValue>> {
         let block_index_db_dir_path = data_dir.block_index_database_dir_path();
@@ -186,7 +186,7 @@ impl ArchivalState {
     /// going down some number of steps and then going up some number
     /// of steps. So this function returns two lists: the list of
     /// down steps and the list of up steps.
-    pub async fn find_path(
+    pub(crate) async fn find_path(
         &self,
         start: Digest,
         stop: Digest,
@@ -282,7 +282,7 @@ impl ArchivalState {
         }
     }
 
-    pub fn genesis_block(&self) -> &Block {
+    pub(crate) fn genesis_block(&self) -> &Block {
         &self.genesis_block
     }
 
@@ -291,7 +291,7 @@ impl ArchivalState {
     /// If block was already written to database, then it is only marked as
     /// tip, and no write to disk occurs. Instead, the old block database entry
     /// is assumed to be valid, and so is the block stored on disk.
-    pub async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
         async fn write_block(
             archival_state: &mut ArchivalState,
             new_block: &Block,
@@ -705,7 +705,7 @@ impl ArchivalState {
 
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub async fn get_tip(&self) -> Block {
+    pub(crate) async fn get_tip(&self) -> Block {
         let lookup_res_info: Option<Block> = self
             .get_tip_from_disk()
             .await
@@ -718,7 +718,7 @@ impl ArchivalState {
     }
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
-    pub async fn get_tip_parent(&self) -> Option<Block> {
+    pub(crate) async fn get_tip_parent(&self) -> Option<Block> {
         let tip_digest = self
             .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
@@ -739,7 +739,7 @@ impl ArchivalState {
         Some(parent.expect("Indicated block must exist"))
     }
 
-    pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
+    pub(crate) async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
             .get(BlockIndexKey::Block(block_digest))
@@ -755,7 +755,7 @@ impl ArchivalState {
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere.
-    pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+    pub(crate) async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
             .block_index_db
             .get(BlockIndexKey::Block(block_digest))
@@ -778,28 +778,11 @@ impl ArchivalState {
         Ok(Some(block))
     }
 
-    /// Return the headers of the known blocks at a specific height
-    pub async fn block_height_to_block_headers(
+    /// Return the digests of the known blocks at a specific height
+    pub(crate) async fn block_height_to_block_digests(
         &self,
         block_height: BlockHeight,
-    ) -> Vec<BlockHeader> {
-        let block_digests = self.block_height_to_block_digests(block_height).await;
-        let mut block_headers = vec![];
-        for block_digest in block_digests.into_iter() {
-            let block = self
-                .block_index_db
-                .get(BlockIndexKey::Block(block_digest))
-                .await
-                .map(|x| x.as_block_record())
-                .unwrap();
-            block_headers.push(block.block_header);
-        }
-
-        block_headers
-    }
-
-    /// Return the digests of the known blocks at a specific height
-    pub async fn block_height_to_block_digests(&self, block_height: BlockHeight) -> Vec<Digest> {
+    ) -> Vec<Digest> {
         if block_height.is_genesis() {
             vec![self.genesis_block().hash()]
         } else {
@@ -812,7 +795,7 @@ impl ArchivalState {
     }
 
     /// Return the digest of canonical block at a specific height, or None
-    pub async fn block_height_to_canonical_block_digest(
+    pub(crate) async fn block_height_to_canonical_block_digest(
         &self,
         block_height: BlockHeight,
     ) -> Option<Digest> {
@@ -830,67 +813,6 @@ impl ArchivalState {
             }
         }
         None
-    }
-
-    pub async fn get_children_block_headers(
-        &self,
-        parent_block_digest: Digest,
-    ) -> Vec<BlockHeader> {
-        // get header
-        let parent_block_header = match self.get_block_header(parent_block_digest).await {
-            Some(header) => header,
-            None => {
-                warn!("Querying for children of unknown parent block digest.");
-                return vec![];
-            }
-        };
-        // Get all blocks with height n + 1
-        let blocks_from_childrens_generation: Vec<BlockHeader> = self
-            .block_height_to_block_headers(parent_block_header.height.next())
-            .await;
-
-        // Filter out those that don't have the right parent
-        blocks_from_childrens_generation
-            .into_iter()
-            .filter(|child_block_header| {
-                child_block_header.prev_block_digest == parent_block_digest
-            })
-            .collect()
-    }
-
-    /// Get all immediate children of the given block, no grandchildren or higher-order
-    /// descendants.
-    pub async fn get_children_block_digests(&self, parent_block_digest: Digest) -> Vec<Digest> {
-        // get header
-        let parent_block_header = match self.get_block_header(parent_block_digest).await {
-            Some(header) => header,
-            None => {
-                warn!("Querying for children of unknown parent block digest.");
-                return vec![];
-            }
-        };
-        // Get all blocks with height n + 1
-        let children_digests = self
-            .block_height_to_block_digests(parent_block_header.height.next())
-            .await;
-        let mut downstream_children = vec![];
-        for child_digest in children_digests {
-            let child_header =
-                self
-                    .get_block_header(child_digest)
-                    .await
-                    .unwrap_or_else(
-                        || panic!(
-                            "Cannot get block header from digest, even though digest was fetched from height. Digest: {}",
-                            child_digest
-                        )
-                    );
-            if child_header.prev_block_digest == parent_block_digest {
-                downstream_children.push(child_digest);
-            }
-        }
-
-        downstream_children
     }
 
     /// Return a boolean indicating if block belongs to most canonical chain.
@@ -919,7 +841,7 @@ impl ArchivalState {
     /// returned list will contain the digests of block 1 and block 0 (the genesis block).
     /// The input block must correspond to a known block but it can be the genesis block in which case
     /// the empty list will be returned.
-    pub async fn get_ancestor_block_digests(
+    pub(crate) async fn get_ancestor_block_digests(
         &self,
         block_digest: Digest,
         mut count: usize,
@@ -1053,7 +975,7 @@ impl ArchivalState {
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
     /// stored in the database are assumed to be valid.
-    pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+    pub(crate) async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         let (forwards, backwards) = {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label().await;
@@ -3606,19 +3528,6 @@ mod archival_state_tests {
                 .unwrap();
             assert_eq!(genesis.kernel.header, genesis_header_from_lock_method);
         }
-
-        // Test `block_height_to_block_headers`
-        let block_headers_of_height_2 =
-            archival_state.block_height_to_block_headers(2.into()).await;
-        assert_eq!(1, block_headers_of_height_2.len());
-        assert_eq!(mock_block_2.kernel.header, block_headers_of_height_2[0]);
-
-        // Test `get_children_blocks`
-        let children_of_mock_block_1 = archival_state
-            .get_children_block_headers(mock_block_1.hash())
-            .await;
-        assert_eq!(1, children_of_mock_block_1.len());
-        assert_eq!(mock_block_2.kernel.header, children_of_mock_block_1[0]);
 
         // Test `get_ancestor_block_digests`
         let ancestor_digests = archival_state

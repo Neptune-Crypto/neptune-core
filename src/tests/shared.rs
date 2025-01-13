@@ -759,7 +759,7 @@ pub async fn mock_genesis_wallet_state_with_data_dir(
 }
 
 /// Return an archival state populated with the genesis block
-pub async fn mock_genesis_archival_state(
+pub(crate) async fn mock_genesis_archival_state(
     network: Network,
 ) -> (ArchivalState, PeerDatabases, DataDirectory) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).await.unwrap();

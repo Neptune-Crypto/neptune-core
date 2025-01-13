@@ -123,7 +123,7 @@ impl MonitoredUtxo {
     }
 
     /// Returns true if the MUTXO was abandoned
-    pub async fn was_abandoned(&self, archival_state: &ArchivalState) -> bool {
+    pub(crate) async fn was_abandoned(&self, archival_state: &ArchivalState) -> bool {
         match self.confirmed_in_block {
             Some((confirm_block_digest, _, _)) => {
                 !archival_state
