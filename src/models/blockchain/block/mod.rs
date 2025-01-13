@@ -1042,10 +1042,14 @@ impl Block {
 
 #[cfg(test)]
 mod block_tests {
+    use rand::random;
+    use rand::rngs::StdRng;
     use rand::thread_rng;
     use rand::Rng;
+    use rand::SeedableRng;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
+    use twenty_first::util_types::mmr::mmr_trait::LeafMutation;
 
     use super::super::transaction::transaction_kernel::TransactionKernelModifier;
     use super::*;
@@ -1062,6 +1066,7 @@ mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::valid_successor_for_tests;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
     #[test]
@@ -1144,18 +1149,33 @@ mod block_tests {
 
     #[tokio::test]
     async fn block_with_wrong_mmra_is_invalid() {
-        let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Main;
         let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
+        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let a_wallet_secret = WalletSecret::new_random();
-        let a_key = a_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let (mut block_1, _) = make_mock_block(&genesis_block, None, a_key, rng.gen()).await;
+        let mut block1 = valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
-        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
-        let timestamp = genesis_block.kernel.header.timestamp;
+        let timestamp = block1.kernel.header.timestamp;
+        assert!(block1.is_valid(&genesis_block, timestamp));
 
-        assert!(!block_1.is_valid(&genesis_block, timestamp));
+        let mut mutated_leaf = genesis_block.body().block_mmr_accumulator.clone();
+        let mp = mutated_leaf.append(genesis_block.hash());
+        mutated_leaf.mutate_leaf(LeafMutation::new(0, random(), mp));
+
+        let mut extra_leaf = block1.body().block_mmr_accumulator.clone();
+        extra_leaf.append(block1.hash());
+
+        let bad_new_mmrs = [
+            MmrAccumulator::new_from_leafs(vec![]),
+            mutated_leaf,
+            extra_leaf,
+        ];
+
+        for bad_new_mmr in bad_new_mmrs {
+            block1.kernel.body.block_mmr_accumulator = bad_new_mmr;
+            assert!(!block1.is_valid(&genesis_block, timestamp));
+        }
     }
 
     #[tokio::test]
