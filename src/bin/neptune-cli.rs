@@ -482,8 +482,12 @@ async fn main() -> Result<()> {
     }
 
     // all other operations need a connection to the server
-    let transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
-    let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
+    let Ok(transport) = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default).await
+    else {
+        eprintln!("This command requires a connection to `neptune-core`, but that connection could not be established. Is `neptune-core` running?");
+        return Ok(());
+    };
+    let client = RPCClient::new(client::Config::default(), transport).spawn();
     let ctx = context::current();
 
     match args.command {
