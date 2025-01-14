@@ -76,19 +76,12 @@ const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_044;
 pub struct NativeCurrency;
 
 impl NativeCurrency {
-    // const TIME_LOCK_HASH: Digest = Digest([
-    //     BFieldElement::new(1099415371751974362_u64),
-    //     BFieldElement::new(274457847644817458_u64),
-    //     BFieldElement::new(5749046657545930452_u64),
-    //     BFieldElement::new(4873191867236712662_u64),
-    //     BFieldElement::new(6955338650254959680_u64),
-    // ]);
     const TIME_LOCK_HASH: Digest = Digest([
-        BFieldElement::new(7207785320433617162_u64),
-        BFieldElement::new(890210137924970311_u64),
-        BFieldElement::new(7901065193700473067_u64),
-        BFieldElement::new(7504530257290336718_u64),
-        BFieldElement::new(9848604556451651092_u64),
+        BFieldElement::new(6665111771760541440_u64),
+        BFieldElement::new(5762904896101160765_u64),
+        BFieldElement::new(2620080113389225266_u64),
+        BFieldElement::new(18085435253716828010_u64),
+        BFieldElement::new(1476078432699601916_u64),
     ]);
 }
 
