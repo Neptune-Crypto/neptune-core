@@ -1265,7 +1265,177 @@ mod block_tests {
         use rand::SeedableRng;
 
         use super::*;
+        use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
+        use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::valid_successor_for_tests;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn blocks_with_0_to_10_inputs_and_successors_are_valid() {
+            // Scenario: Build different blocks of height 2, with varying number
+            // of inputs. Verify all are valid. The build a block of height 3
+            // with non-zero inputs and verify validity. This should ensure that
+            // at least one of block 2's guesser fee UTXOs shift the active
+            // window of the mutator set's Bloom filter, ensuring that the
+            // validity-check of a block handles guesser fee UTXOs correctly
+            // when calculating the expected state of the new mutator set.
+            // Cf., the bug fixed in 4d6b7013624e593c40e76ce93cb6b288b6b3f48b.
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis_block(network);
+            let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
+            let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+            let block1 =
+                valid_successor_for_tests(&genesis_block, plus_seven_months, rng.gen()).await;
+
+            let alice_wallet = WalletSecret::devnet_wallet();
+            let mut alice = mock_genesis_global_state(
+                network,
+                3,
+                alice_wallet.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            alice.set_new_tip(block1.clone()).await.unwrap();
+            let alice_key = alice
+                .lock_guard()
+                .await
+                .wallet_state
+                .nth_spending_key(KeyType::Generation, 0);
+            let output_to_self = TxOutput::onchain_native_currency(
+                NeptuneCoins::new(1),
+                rng.gen(),
+                alice_key.to_address(),
+                true,
+            );
+
+            let plus_eight_months = plus_seven_months + Timestamp::months(1);
+            let (coinbase_for_block2, _) = make_coinbase_transaction_from_state(
+                &block1,
+                &alice,
+                0.5f64,
+                plus_eight_months,
+                TxProvingCapability::SingleProof,
+            )
+            .await
+            .unwrap();
+            let fee = NeptuneCoins::new(1);
+            let plus_nine_months = plus_eight_months + Timestamp::months(1);
+            for i in 0..10 {
+                println!("i: {i}");
+                alice = mock_genesis_global_state(
+                    network,
+                    3,
+                    alice_wallet.clone(),
+                    cli_args::Args::default(),
+                )
+                .await;
+                alice.set_new_tip(block1.clone()).await.unwrap();
+                let outputs = vec![output_to_self.clone(); i];
+                let (tx2, _) = alice
+                    .lock_guard_mut()
+                    .await
+                    .create_transaction_with_prover_capability(
+                        outputs.into(),
+                        alice_key,
+                        UtxoNotificationMedium::OnChain,
+                        fee,
+                        plus_eight_months,
+                        TxProvingCapability::SingleProof,
+                        &TritonVmJobQueue::dummy(),
+                    )
+                    .await
+                    .unwrap();
+                let block2_tx = coinbase_for_block2
+                    .clone()
+                    .merge_with(
+                        tx2,
+                        rng.gen(),
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmProofJobOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                let block2_without_valid_pow = Block::compose(
+                    &block1,
+                    block2_tx,
+                    plus_eight_months,
+                    Digest::default(),
+                    None,
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+
+                assert!(
+                    block2_without_valid_pow
+                        .is_valid(&block1, plus_eight_months)
+                        .await,
+                    "Block with {i} inputs must be valid"
+                );
+
+                alice
+                    .set_new_tip(block2_without_valid_pow.clone())
+                    .await
+                    .unwrap();
+                let (coinbase_for_block3, _) = make_coinbase_transaction_from_state(
+                    &block2_without_valid_pow,
+                    &alice,
+                    0.5f64,
+                    plus_nine_months,
+                    TxProvingCapability::SingleProof,
+                )
+                .await
+                .unwrap();
+                let (tx3, _) = alice
+                    .lock_guard_mut()
+                    .await
+                    .create_transaction_with_prover_capability(
+                        vec![output_to_self.clone()].into(),
+                        alice_key,
+                        UtxoNotificationMedium::OnChain,
+                        fee,
+                        plus_nine_months,
+                        TxProvingCapability::SingleProof,
+                        &TritonVmJobQueue::dummy(),
+                    )
+                    .await
+                    .unwrap();
+                let block3_tx = coinbase_for_block3
+                    .clone()
+                    .merge_with(
+                        tx3,
+                        rng.gen(),
+                        &TritonVmJobQueue::dummy(),
+                        TritonVmProofJobOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                assert!(
+                    !block3_tx.kernel.inputs.len().is_zero(),
+                    "block transaction 3 must have inputs"
+                );
+                let block3_without_valid_pow = Block::compose(
+                    &block2_without_valid_pow,
+                    block3_tx,
+                    plus_nine_months,
+                    Digest::default(),
+                    None,
+                    &TritonVmJobQueue::dummy(),
+                    TritonVmProofJobOptions::default(),
+                )
+                .await
+                .unwrap();
+
+                assert!(
+                    block3_without_valid_pow
+                        .is_valid(&block2_without_valid_pow, plus_nine_months)
+                        .await,
+                    "Block of height 3 after block 2 with {i} inputs must be valid"
+                );
+            }
+        }
 
         #[traced_test]
         #[tokio::test]
