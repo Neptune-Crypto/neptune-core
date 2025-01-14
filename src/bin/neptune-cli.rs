@@ -185,8 +185,23 @@ enum Command {
     /// retrieves number of utxos the wallet expects to receive.
     NumExpectedUtxos,
 
-    /// retrieve next unused receiving address
+    /// Get next unused generation receiving address
     NextReceivingAddress,
+
+    /// Get the nth generation receiving address.
+    ///
+    /// Ignoring the ones that have been generated in the past; re-generate them
+    /// if necessary. Do not increment any counters or modify state in any way.
+    NthReceivingAddress {
+        index: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
+    },
 
     /// list known coins
     ListCoins,
@@ -349,7 +364,7 @@ async fn main() -> Result<()> {
     let args: Config = Config::parse();
 
     // Handle commands that don't require a server
-    match args.command {
+    match &args.command {
         Command::Completions => {
             if let Some(shell) = Shell::from_env() {
                 generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
@@ -359,7 +374,8 @@ async fn main() -> Result<()> {
             }
         }
         Command::WhichWallet { network, data_dir } => {
-            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
+            let wallet_dir =
+                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
@@ -371,7 +387,8 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::GenerateWallet { network, data_dir } => {
-            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
+            let wallet_dir =
+                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
@@ -391,7 +408,8 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Command::ImportSeedPhrase { network, data_dir } => {
-            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
+            let wallet_dir =
+                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists,
@@ -452,7 +470,8 @@ async fn main() -> Result<()> {
         }
         Command::ExportSeedPhrase { network, data_dir } => {
             // The root path is where both the wallet and all databases are stored
-            let wallet_dir = DataDirectory::get(data_dir, network)?.wallet_directory_path();
+            let wallet_dir =
+                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
@@ -478,6 +497,49 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
+        Command::NthReceivingAddress {
+            network,
+            data_dir,
+            index,
+        } => {
+            let wallet_dir =
+                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
+
+            // Get wallet object, create various wallet secret files
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            if !wallet_file.exists() {
+                bail!("No wallet file found at {}.", wallet_file.display());
+            } else {
+                println!("{}", wallet_file.display());
+            }
+
+            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+                Ok(ws) => ws,
+                Err(e) => {
+                    eprintln!(
+                        "Could not open wallet file at {}. Got error: {e}",
+                        wallet_file.to_string_lossy()
+                    );
+                    return Ok(());
+                }
+            };
+
+            let nth_spending_key = wallet_secret.nth_generation_spending_key(*index as u64);
+            let nth_receiving_address = nth_spending_key.to_address();
+            let nth_address_as_string = match nth_receiving_address.to_bech32m(*network) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "Could not export address as bech32m; got error:{e}\nRaw address:\n{:?}",
+                        nth_receiving_address
+                    );
+                    return Ok(());
+                }
+            };
+
+            println!("{nth_address_as_string}");
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -495,7 +557,8 @@ async fn main() -> Result<()> {
         | Command::GenerateWallet { .. }
         | Command::WhichWallet { .. }
         | Command::ExportSeedPhrase { .. }
-        | Command::ImportSeedPhrase { .. } => unreachable!("Case should be handled earlier."),
+        | Command::ImportSeedPhrase { .. }
+        | Command::NthReceivingAddress { .. } => unreachable!("Case should be handled earlier."),
 
         /******** READ STATE ********/
         Command::ListCoins => {
