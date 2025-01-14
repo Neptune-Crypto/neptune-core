@@ -417,9 +417,7 @@ impl BasicSnippet for UpdateBranch {
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<UpdateWitness>::default()));
         let merkle_verify = library.import(Box::new(MerkleVerify));
-        let hash_bfe = library.import(Box::new(HashFromStack {
-            data_type: DataType::Bfe,
-        }));
+        let hash_bfe = library.import(Box::new(HashFromStack::new(DataType::Bfe)));
 
         let mut authenticate_field_twice_with_no_change =
             |field_with_size_getter: &[LabelledInstruction], field: TransactionKernelField| {

@@ -2,9 +2,7 @@ use itertools::Itertools;
 use strum::EnumCount;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::tip5::Digest;
-use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
-use tasm_lib::twenty_first::util_types::merkle_tree::CpuParallel;
-use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTree;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -34,7 +32,7 @@ pub trait MastHash {
             digests.push(Digest::default());
         }
 
-        CpuParallel::from_digests(&digests).unwrap()
+        MerkleTree::par_new(&digests).unwrap()
     }
 
     fn mast_hash(&self) -> Digest {

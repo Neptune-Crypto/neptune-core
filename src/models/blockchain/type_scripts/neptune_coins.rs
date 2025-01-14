@@ -51,20 +51,6 @@ impl TasmObject for NeptuneCoins {
         "NeptuneCoins".to_owned()
     }
 
-    fn get_field(_: &str) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
-        unimplemented!()
-    }
-
-    fn get_field_with_size(_: &str) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
-        unimplemented!()
-    }
-
-    fn get_field_start_with_jump_distance(
-        _: &str,
-    ) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {
-        unimplemented!()
-    }
-
     fn compute_size_and_assert_valid_size_indicator(
         library: &mut tasm_lib::prelude::Library,
     ) -> Vec<tasm_lib::triton_vm::prelude::LabelledInstruction> {

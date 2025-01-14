@@ -138,9 +138,7 @@ impl ConsensusProgram for BlockProgram {
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
         let push_max_amount = NeptuneCoins::max().push_to_stack();
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
-        let hash_from_stack_digest = library.import(Box::new(HashFromStack {
-            data_type: DataType::Digest,
-        }));
+        let hash_from_stack_digest = library.import(Box::new(HashFromStack::new(DataType::Digest)));
         let verify_fee_legality = triton_asm!(
             // _ *w [txkmh]
 

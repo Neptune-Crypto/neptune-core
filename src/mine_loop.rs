@@ -19,7 +19,7 @@ use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -49,7 +49,6 @@ use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
-use crate::twenty_first::util_types::merkle_tree::CpuParallel;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 async fn compose_block(
@@ -344,7 +343,7 @@ fn guess_nonce_iteration(
         appendix_digest,
         Digest::default(),
     ];
-    let block_hash = CpuParallel::from_digests(&digests).unwrap().root();
+    let block_hash = MerkleTree::par_new(&digests).unwrap().root();
     let success = block_hash <= difficulty_info.threshold;
 
     if sleepy_guessing {

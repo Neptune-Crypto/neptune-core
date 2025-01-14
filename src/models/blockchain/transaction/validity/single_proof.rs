@@ -69,23 +69,10 @@ impl SingleProofWitness {
 }
 
 // This implementation of `TasmObject` is required for `decode_iter` and the
-// method `decode_from_memory` that relies on it. The field getters are not
-// relevant because the type in question is an enum.
+// method `decode_from_memory` that relies on it.
 impl TasmObject for SingleProofWitness {
     fn label_friendly_name() -> String {
         "SingleProofWitness".to_string()
-    }
-
-    fn get_field(_field_name: &str) -> Vec<LabelledInstruction> {
-        unimplemented!()
-    }
-
-    fn get_field_with_size(_field_name: &str) -> Vec<LabelledInstruction> {
-        unimplemented!()
-    }
-
-    fn get_field_start_with_jump_distance(_field_name: &str) -> Vec<LabelledInstruction> {
-        unimplemented!()
     }
 
     fn compute_size_and_assert_valid_size_indicator(

@@ -6,8 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::twenty_first::prelude::CpuParallel;
-use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 
@@ -88,7 +87,7 @@ impl TransactionKernel {
             digests.push(Digest::default());
         }
 
-        let as_digest = CpuParallel::from_digests(&digests).unwrap().root();
+        let as_digest = MerkleTree::par_new(&digests).unwrap().root();
 
         TransactionKernelId(as_digest)
     }

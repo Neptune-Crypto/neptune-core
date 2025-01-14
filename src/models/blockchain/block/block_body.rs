@@ -9,7 +9,6 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::prelude::MerkleTree;
-use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
@@ -143,7 +142,7 @@ impl MastHash for BlockBody {
                     digests.push(Digest::default());
                 }
 
-                twenty_first::prelude::CpuParallel::from_digests(&digests).unwrap()
+                twenty_first::prelude::MerkleTree::par_new(&digests).unwrap()
             })
             .clone()
     }

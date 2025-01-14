@@ -367,7 +367,7 @@ pub(crate) mod mmr_test {
             let num_leaves_in_tree = 1 << tree_height;
             let leaf_digests =
                 &digests[num_processed_digests..num_processed_digests + num_leaves_in_tree];
-            let tree: MerkleTree = CpuParallel::from_digests(leaf_digests).unwrap();
+            let tree: MerkleTree = MerkleTree::par_new(leaf_digests).unwrap();
             num_processed_digests += num_leaves_in_tree;
             trees.push(tree);
         }

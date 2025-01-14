@@ -60,8 +60,7 @@ impl MastHash for BlockKernel {
 mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
-    use tasm_lib::twenty_first::prelude::CpuParallel;
-    use tasm_lib::twenty_first::prelude::MerkleTreeMaker;
+    use tasm_lib::twenty_first::prelude::MerkleTree;
 
     use super::*;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
@@ -86,7 +85,7 @@ mod tests {
             Digest::default(),
         ];
 
-        let mt = CpuParallel::from_digests(&merkle_tree_leafs).unwrap();
+        let mt = MerkleTree::par_new(&merkle_tree_leafs).unwrap();
         let expected_root = mt.root();
         assert_eq!(expected_root, calculated);
     }
