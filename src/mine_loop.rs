@@ -372,6 +372,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 ) -> Result<(Transaction, TxOutputList)> {
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
+    info!("Creating coinbase for block of height {next_block_height}.");
 
     let coinbase_amount = Block::block_subsidy(next_block_height);
     let Some(guesser_fee) =
