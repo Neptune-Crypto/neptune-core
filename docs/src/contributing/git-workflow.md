@@ -80,7 +80,7 @@ This aids readability of commit messages and facilitates automated generation of
 
 For all but the most trivial changes, please provide some additional lines with a basic summary of the changes and also the _reason/rationale_ for the changes.
 
-A git template for assisting with creation of conventional commit messages can be found in the [Git Message](contributing/git-message.md). This template can be added globally to git with this command:
+A git template for assisting with creation of conventional commit messages can be found in the [Git Message](git-message.md). This template can be added globally to git with this command:
 
 ```
 git config --global commit.template /path/to/neptune-core/docs/src/contributing/.gitmessage

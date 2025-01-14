@@ -78,7 +78,8 @@ If you set up `neptune-core` on a different address or port from the default (12
 
 ## Branches and Pull Requests
 
-Please see this [this document](./developer_docs/git_branches.md) for documentation of our branching methodology and how to submit a pull request.
+Please see [documentation](https://docs.neptune.cash/contributing/git-workflow.html) of our branching methodology and how to submit a pull request.
+
 
 ## Logging
 
