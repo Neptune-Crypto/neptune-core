@@ -70,6 +70,8 @@ impl TransactionKernel {
 
         let coinbase_hash = Tip5::hash(&self.coinbase);
 
+        let merge_bit_hash = Tip5::hash(&self.merge_bit);
+
         // Build a Merkle tree from all five digests, and treat the root as the
         // digest
         let mut digests = vec![
@@ -78,6 +80,7 @@ impl TransactionKernel {
             public_announcements_hash,
             fee_hash,
             coinbase_hash,
+            merge_bit_hash,
         ];
 
         // pad until length is a power of two
