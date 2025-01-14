@@ -788,7 +788,7 @@ impl WalletState {
     }
 
     /// Get the nth derived spending key of a given type.
-    pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
+    pub fn nth_spending_key(&self, key_type: KeyType, index: u64) -> SpendingKey {
         match key_type {
             KeyType::Generation => self.wallet_secret.nth_generation_spending_key(index).into(),
             KeyType::Symmetric => self.wallet_secret.nth_symmetric_key(index).into(),
