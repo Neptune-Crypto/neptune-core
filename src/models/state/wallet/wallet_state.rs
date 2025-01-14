@@ -259,12 +259,14 @@ impl WalletState {
             known_symmetric_keys,
         };
 
-        // Generation key 0 is reserved for coinbase and pre-mine.  this ensures
-        // derivation-index=0 key is known to wallet, so coinbase and premine
-        // claiming works. See comment in mine_loop::make_coinbase_transaction()
-        // for rationale why coinbase always goes to key 0.
+        // Generation key 0 is reserved for composing and guessing rewards. The
+        // next lines ensure that the key with derivation-index=0 key is known
+        // to the wallet, so that claiming these rewards works.
+        // See comment in [`mine_loop::make_coinbase_transaction()`] for the
+        // rationale why these rewards always go to key 0.
         //
-        // wallets start at index 1 for all non-coinbase tx.
+        // Wallets start at key derivation index 1 for all UTXOs that are
+        // neither composing rewards, nor guessing rewards, nor premine UTXOs.
         //
         // note: this makes test known_keys_are_unique() pass.
         if wallet_state.known_generation_keys.is_empty() {
@@ -273,25 +275,37 @@ impl WalletState {
                 .await;
         }
 
-        // Wallet state has to be initialized with the genesis block, otherwise the outputs
-        // from genesis would be unspendable. This should only be done *once* though.
-        // This also ensures that any premine outputs are added to the file containing the
-        // incoming randomness such that a wallet-DB recovery will include genesis block
-        // outputs.
+        // For premine UTXOs there is an additional complication: we do not know
+        // the derivation index with which they were derived. So we derive a few
+        // keys to have a bit of margin.
+        const NUM_PREMINE_KEYS: usize = 10;
+        let premine_keys = (0..NUM_PREMINE_KEYS)
+            .map(|n| wallet_state.nth_spending_key(KeyType::Generation, n as u64))
+            .collect_vec();
+
+        // The wallet state has to be initialized with the genesis block, so
+        // that it knows about outputs in the genesis block and so that it can
+        // spend them. This initialization should only be done *once*, not every
+        // time the wallet is loaded from disk. To ensure this initialization
+        // happens only once, we condition it on the sync label.
+        // This initialization step also ensures that any premine outputs are
+        // added to the file containing the incoming randomness such that a
+        // wallet-DB recovery will include genesis block outputs.
         if sync_label == Digest::default() {
-            // Check if we are premine recipients
-            let own_spending_key = wallet_state.nth_spending_key(KeyType::Generation, 0);
-            let own_receiving_address = own_spending_key.to_address();
-            for utxo in Block::premine_utxos(cli_args.network) {
-                if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
-                    wallet_state
-                        .add_expected_utxo(ExpectedUtxo::new(
-                            utxo,
-                            Block::premine_sender_randomness(cli_args.network),
-                            own_spending_key.privacy_preimage(),
-                            UtxoNotifier::Premine,
-                        ))
-                        .await;
+            // Check if we are premine recipients, and add expected UTXOs if so.
+            for premine_key in premine_keys {
+                let own_receiving_address = premine_key.to_address();
+                for utxo in Block::premine_utxos(cli_args.network) {
+                    if utxo.lock_script_hash() == own_receiving_address.lock_script().hash() {
+                        wallet_state
+                            .add_expected_utxo(ExpectedUtxo::new(
+                                utxo,
+                                Block::premine_sender_randomness(cli_args.network),
+                                premine_key.privacy_preimage(),
+                                UtxoNotifier::Premine,
+                            ))
+                            .await;
+                    }
                 }
             }
 

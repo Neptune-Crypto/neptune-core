@@ -1603,12 +1603,12 @@ mod wallet_tests {
 
         #[traced_test]
         #[tokio::test]
-        async fn verify_premine_receipt_works_with_legacy_address() {
+        async fn verify_premine_receipt_works_with_test_addresses() {
             let network = Network::Main;
             let cli = cli_args::Args::default();
             let genesis_block = Block::genesis_block(network);
             let seven_months_after_launch = genesis_block.header().timestamp + Timestamp::months(7);
-            for seed_phrase in worker::legacy_seed_phrases() {
+            for seed_phrase in worker::test_seed_phrases() {
                 let wallet_secret = WalletSecret::from_phrase(&seed_phrase)
                     .expect("legacy seed phrase must still be valid");
                 let premine_recipient =
@@ -1674,7 +1674,7 @@ mod wallet_tests {
 "#
             }
 
-            pub(crate) fn legacy_seed_phrases() -> Vec<[String; 18]> {
+            pub(crate) fn test_seed_phrases() -> Vec<[String; 18]> {
                 vec![
                     // alphanet v0.5.0
                     [
@@ -1683,11 +1683,18 @@ mod wallet_tests {
                         "record", "almost", "bronze", "license",
                     ]
                     .map(|s| s.to_string()),
-                    // betabet v0.10.0
+                    // betanet v0.10.0
                     [
                         "among", "inquiry", "crew", "between", "salad", "brass", "point",
                         "swallow", "impulse", "enrich", "cabbage", "hope", "lunch", "vacuum",
                         "message", "apart", "screen", "robust",
+                    ]
+                    // nth-receiving-address (3rd invocation)
+                    .map(|s| s.to_string()),
+                    [
+                        "cherry", "stove", "sick", "veteran", "sketch", "mix", "faint", "virus",
+                        "dutch", "ghost", "celery", "consider", "glory", "february", "shove",
+                        "shallow", "key", "bundle",
                     ]
                     .map(|s| s.to_string()),
                 ]
