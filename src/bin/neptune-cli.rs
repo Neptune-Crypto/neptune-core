@@ -203,6 +203,19 @@ enum Command {
         data_dir: Option<PathBuf>,
     },
 
+    /// Get a static generation receiving address, for premine recipients.
+    ///
+    /// This command is an alias for `nth-receiving-address 0`. It will be
+    /// disabled after mainnet launch.
+    PremineReceivingAddress {
+        #[clap(long, default_value_t)]
+        network: Network,
+
+        /// neptune-core data directory containing wallet and blockchain state
+        #[clap(long)]
+        data_dir: Option<PathBuf>,
+    },
+
     /// list known coins
     ListCoins,
 
@@ -502,43 +515,10 @@ async fn main() -> Result<()> {
             data_dir,
             index,
         } => {
-            let wallet_dir =
-                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
-
-            // Get wallet object, create various wallet secret files
-            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
-            if !wallet_file.exists() {
-                bail!("No wallet file found at {}.", wallet_file.display());
-            } else {
-                println!("{}", wallet_file.display());
-            }
-
-            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
-                Ok(ws) => ws,
-                Err(e) => {
-                    eprintln!(
-                        "Could not open wallet file at {}. Got error: {e}",
-                        wallet_file.to_string_lossy()
-                    );
-                    return Ok(());
-                }
-            };
-
-            let nth_spending_key = wallet_secret.nth_generation_spending_key(*index as u64);
-            let nth_receiving_address = nth_spending_key.to_address();
-            let nth_address_as_string = match nth_receiving_address.to_bech32m(*network) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!(
-                        "Could not export address as bech32m; got error:{e}\nRaw address:\n{:?}",
-                        nth_receiving_address
-                    );
-                    return Ok(());
-                }
-            };
-
-            println!("{nth_address_as_string}");
-            return Ok(());
+            return get_nth_receiving_address(*network, data_dir.clone(), *index);
+        }
+        Command::PremineReceivingAddress { network, data_dir } => {
+            return get_nth_receiving_address(*network, data_dir.clone(), 0);
         }
         _ => {}
     }
@@ -558,7 +538,10 @@ async fn main() -> Result<()> {
         | Command::WhichWallet { .. }
         | Command::ExportSeedPhrase { .. }
         | Command::ImportSeedPhrase { .. }
-        | Command::NthReceivingAddress { .. } => unreachable!("Case should be handled earlier."),
+        | Command::NthReceivingAddress { .. }
+        | Command::PremineReceivingAddress { .. } => {
+            unreachable!("Case should be handled earlier.")
+        }
 
         /******** READ STATE ********/
         Command::ListCoins => {
@@ -932,6 +915,53 @@ async fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Get the nth receiving address directly from the wallet.
+///
+/// Read the wallet file directly; avoid going through the RPC interface of
+/// `neptune-core`.
+fn get_nth_receiving_address(
+    network: Network,
+    data_dir: Option<PathBuf>,
+    index: usize,
+) -> Result<()> {
+    let wallet_dir = DataDirectory::get(data_dir.clone(), network)?.wallet_directory_path();
+
+    // Get wallet object, create various wallet secret files
+    let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+    if !wallet_file.exists() {
+        bail!("No wallet file found at {}.", wallet_file.display());
+    } else {
+        println!("{}", wallet_file.display());
+    }
+
+    let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+        Ok(ws) => ws,
+        Err(e) => {
+            eprintln!(
+                "Could not open wallet file at {}. Got error: {e}",
+                wallet_file.to_string_lossy()
+            );
+            return Ok(());
+        }
+    };
+
+    let nth_spending_key = wallet_secret.nth_generation_spending_key(index as u64);
+    let nth_receiving_address = nth_spending_key.to_address();
+    let nth_address_as_string = match nth_receiving_address.to_bech32m(network) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "Could not export address as bech32m; got error:{e}\nRaw address:\n{:?}",
+                nth_receiving_address
+            );
+            return Ok(());
+        }
+    };
+
+    println!("{nth_address_as_string}");
     Ok(())
 }
 
