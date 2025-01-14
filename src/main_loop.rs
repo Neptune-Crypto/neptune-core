@@ -1845,7 +1845,7 @@ mod test {
                 .await
                 .mempool
                 .get_sorted_iter()
-                .last()
+                .next_back()
                 .expect("mempool should contain one item here");
 
             assert!(
