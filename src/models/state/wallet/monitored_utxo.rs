@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
+use std::fmt::Display;
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Tip5;
@@ -38,6 +40,45 @@ pub struct MonitoredUtxo {
     /// Indicator used to mark the UTXO as belonging to an abandoned fork
     /// Indicates what was the block tip when UTXO was marked as abandoned
     pub abandoned_at: Option<(Digest, Timestamp, BlockHeight)>,
+}
+
+impl Display for MonitoredUtxo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let aocl_leaf_index = match self.get_latest_membership_proof_entry() {
+            Some(msmp) => msmp.1.aocl_leaf_index.to_string(),
+            None => "not mined".to_owned(),
+        };
+        let spent = match self.spent_in_block {
+            Some((block_hash, block_timestamp, block_height)) => {
+                format!("spent in {block_hash}, at {block_timestamp}, block height {block_height}.")
+            }
+            None => "not spent".to_owned(),
+        };
+        let confirmed = match self.confirmed_in_block {
+            Some((block_hash, block_timestamp, block_height)) => {
+                format!(
+                    "received in {block_hash}, at {block_timestamp}, block height {block_height}."
+                )
+            }
+            None => "not mined yet".to_owned(),
+        };
+        let msmp_for_blocks = format!(
+            "valid MSMPs for blocks\n{}\n",
+            self.blockhash_to_membership_proof
+                .iter()
+                .map(|(digest, _)| digest)
+                .join("\n")
+        );
+
+        write!(
+            f,
+            "AOCL-leaf index: {aocl_leaf_index}\n\
+            {spent}\n\
+            {confirmed}\n\
+            {msmp_for_blocks}\n
+            "
+        )
+    }
 }
 
 impl MonitoredUtxo {

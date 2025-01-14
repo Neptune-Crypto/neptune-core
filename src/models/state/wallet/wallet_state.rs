@@ -980,6 +980,11 @@ impl WalletState {
         let (mut valid_membership_proofs_and_own_utxo_count, all_existing_mutxos) =
             preprocess_own_mutxos(monitored_utxos, new_block).await;
 
+        debug!(
+            "handling {} monitored UTXOs",
+            valid_membership_proofs_and_own_utxo_count.len()
+        );
+
         // Loop over all input UTXOs, applying all addition records. In each iteration,
         // a) Update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
@@ -1147,6 +1152,10 @@ impl WalletState {
             valid_membership_proofs_and_own_utxo_count.values()
         {
             let mut monitored_utxo = monitored_utxos.get(*own_utxo_index).await;
+            trace!(
+                "Updating MSMP for MUTXO with wallet-index {own_utxo_index}; with AOCL leaf-index {}. MUTXO:\n{monitored_utxo}",
+                updated_ms_mp.aocl_leaf_index
+            );
             monitored_utxo.add_membership_proof_for_tip(new_block.hash(), updated_ms_mp.to_owned());
 
             // Sanity check that membership proofs of non-spent transactions are still valid
