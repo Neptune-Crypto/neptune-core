@@ -2,6 +2,7 @@
 
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use serde::Deserialize;
 use serde::Serialize;
@@ -98,7 +99,8 @@ impl KeyType {
 /// This enum provides an abstraction API for Address types, so that
 /// a method or struct may simply accept a `ReceivingAddress` and be
 /// forward-compatible with new types of Address as they are implemented.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub enum ReceivingAddress {
     /// a [generation_address]
     Generation(Box<generation_address::GenerationReceivingAddress>),

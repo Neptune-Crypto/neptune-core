@@ -18,6 +18,7 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
@@ -137,6 +138,7 @@ pub struct GenerationReceivingAddress {
     spending_lock: Digest,
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let seed = Digest::arbitrary(u)?;

@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::ops::Add;
 use std::ops::Sub;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use num_traits::ConstZero;
@@ -16,19 +17,9 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use crate::prelude::twenty_first;
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Hash,
-    BFieldCodec,
-    GetSize,
-    Arbitrary,
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,
 )]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct BlockHeight(BFieldElement);
 
 // Assuming a block time of 588 seconds, and a halving every three years,

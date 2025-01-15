@@ -6,6 +6,7 @@ pub mod time_lock;
 use std::collections::HashMap;
 use std::hash::Hasher as StdHasher;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -81,6 +82,7 @@ impl TypeScriptAndWitness {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_with_tokens(program: Program, tokens: Vec<BFieldElement>) -> Self {
         Self {
             program,
@@ -121,6 +123,7 @@ impl TypeScriptAndWitness {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> Arbitrary<'a> for TypeScriptAndWitness {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let program = Program::arbitrary(u)?;

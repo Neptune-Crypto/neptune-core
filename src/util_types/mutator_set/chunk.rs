@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -110,6 +111,7 @@ impl Chunk {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> Arbitrary<'a> for Chunk {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let relative_indices = (0..10)

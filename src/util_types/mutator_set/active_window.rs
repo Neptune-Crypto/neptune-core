@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -12,8 +13,8 @@ use super::chunk::Chunk;
 use super::shared::CHUNK_SIZE;
 use super::shared::WINDOW_SIZE;
 use crate::prelude::twenty_first;
-
-#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary, TasmObject)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ActiveWindow {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,

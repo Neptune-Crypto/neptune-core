@@ -7,6 +7,7 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
@@ -79,7 +80,8 @@ pub const SYMMETRIC_KEY_FLAG: BFieldElement = BFieldElement::new(SYMMETRIC_KEY_F
 ///
 /// The implementation can be easily changed later if needed as the type is
 /// opaque.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Arbitrary)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct SymmetricKey {
     seed: Digest,
 }
