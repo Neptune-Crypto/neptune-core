@@ -2,6 +2,7 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::vec::IntoIter;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -25,18 +26,9 @@ type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
 
 #[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    GetSize,
-    PartialEq,
-    Eq,
-    Default,
-    Arbitrary,
-    BFieldCodec,
-    TasmObject,
+    Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, BFieldCodec, TasmObject,
 )]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     // This list is always sorted. It has max. NUM_TRIALS=45 elements, so we

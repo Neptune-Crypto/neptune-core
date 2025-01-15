@@ -6,6 +6,7 @@ use std::ops::Sub;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use chrono::DateTime;
 use chrono::Local;
@@ -13,7 +14,9 @@ use chrono::NaiveDateTime;
 use chrono::Utc;
 use get_size2::GetSize;
 use num_traits::Zero;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use proptest::strategy::BoxedStrategy;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use proptest::strategy::Strategy;
 use rand::distributions::Distribution;
 use rand::distributions::Standard;
@@ -39,8 +42,8 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
     GetSize,
     Default,
     TasmObject,
-    Arbitrary,
 )]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct Timestamp(pub BFieldElement);
 
 impl PartialOrd for Timestamp {
@@ -161,12 +164,14 @@ impl Timestamp {
         offset.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, false)
     }
 
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     pub fn arbitrary_between(start: Timestamp, stop: Timestamp) -> BoxedStrategy<Timestamp> {
         (start.0.value()..stop.0.value())
             .prop_map(|v| Timestamp(BFieldElement::new(v)))
             .boxed()
     }
 
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     pub fn arbitrary_after(reference: Timestamp) -> BoxedStrategy<Timestamp> {
         (reference.0.value()..BFieldElement::P)
             .prop_map(|v| Timestamp(BFieldElement::new(v)))

@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -50,9 +51,8 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject, Arbitrary,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct MsMembershipProof {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,

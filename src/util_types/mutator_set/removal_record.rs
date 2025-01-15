@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -30,7 +31,8 @@ use super::MutatorSetError;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject, Arbitrary)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec, TasmObject)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
@@ -156,10 +158,8 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
         )?))
     }
 }
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct RemovalRecord {
     pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary,

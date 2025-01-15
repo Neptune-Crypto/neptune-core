@@ -59,6 +59,7 @@ pub mod neptune_arbitrary {
     use crate::util_types::mutator_set::commit;
     use crate::Hash;
 
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     impl Arbitrary for MsaAndRecords {
         /// Parameters:
         ///  - removables : Vec<(Digest, Digest, Digest)> where each triple contains:

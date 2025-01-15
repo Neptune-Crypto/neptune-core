@@ -19,6 +19,7 @@ pub mod validity;
 
 use anyhow::bail;
 use anyhow::Result;
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -102,18 +103,9 @@ impl AnnouncedUtxo {
 ///
 /// See [Transaction], [UtxoNotification]
 #[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    GetSize,
-    BFieldCodec,
-    Default,
-    TasmObject,
-    Arbitrary,
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
 )]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct PublicAnnouncement {
     pub message: Vec<BFieldElement>,
 }

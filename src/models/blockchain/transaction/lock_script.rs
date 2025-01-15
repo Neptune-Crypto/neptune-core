@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -82,6 +83,7 @@ impl LockScript {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> Arbitrary<'a> for LockScript {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let program = Program::arbitrary(u)?;
@@ -190,6 +192,7 @@ impl LockScriptAndWitness {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> Arbitrary<'a> for LockScriptAndWitness {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let program = Program::arbitrary(u)?;

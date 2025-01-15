@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use serde::Deserialize;
@@ -22,9 +23,8 @@ use crate::prelude::twenty_first;
 /// The appendix is the keystone of soft-fork-friendly upgrades to the protocol.
 /// The block proof establishes that all claims in the appendix are valid.
 /// The appendix can softly be extended with new claims.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Arbitrary, Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub(crate) struct BlockAppendix {
     claims: Vec<Claim>,
 }
