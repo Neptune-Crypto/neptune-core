@@ -1309,6 +1309,11 @@ impl WalletState {
         let mut input_funds = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
         for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
+            // Don't allocate more than needed
+            if allocated_amount >= total_spend {
+                break;
+            }
+
             // Don't attempt to use UTXOs that are still timelocked.
             if !wallet_status_element.utxo.can_spend_at(timestamp) {
                 continue;
@@ -1333,11 +1338,6 @@ impl WalletState {
             ));
             allocated_amount =
                 allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
-
-            // Don't allocate more than needed
-            if allocated_amount >= total_spend {
-                break;
-            }
         }
 
         Ok(input_funds)
