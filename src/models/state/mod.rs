@@ -58,6 +58,7 @@ use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
+use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -342,6 +343,23 @@ impl GlobalState {
         debug!("call to get_latest_balance_height() took {time_secs} seconds");
 
         height
+    }
+
+    pub(crate) fn composer_parameters(
+        &self,
+        reward_address: ReceivingAddress,
+    ) -> ComposerParameters {
+        let next_block_height: BlockHeight = self.chain.light_state().header().height.next();
+        let sender_randomness_for_composer = self
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
+
+        ComposerParameters::new(
+            reward_address,
+            sender_randomness_for_composer,
+            self.cli.guesser_fraction,
+        )
     }
 
     /// Returns true iff the incoming block proposal is more favorable than the

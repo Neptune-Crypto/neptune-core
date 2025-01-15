@@ -58,15 +58,9 @@ async fn compose_block(
     now: Timestamp,
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
-    let guesser_fee_fraction = global_state_lock.cli().guesser_fraction;
 
-    let (transaction, composer_utxos) = create_block_transaction(
-        &latest_block,
-        &global_state_lock,
-        timestamp,
-        guesser_fee_fraction,
-    )
-    .await?;
+    let (transaction, composer_utxos) =
+        create_block_transaction(&latest_block, &global_state_lock, timestamp).await?;
 
     let triton_vm_job_queue = global_state_lock.vm_job_queue();
     let proposal = Block::compose(
@@ -525,7 +519,6 @@ pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
-    guesser_fee_fraction: f64,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
@@ -558,21 +551,12 @@ pub(crate) async fn create_block_transaction(
         .wallet_state
         .wallet_secret
         .nth_generation_spending_key(0);
-    let receiving_address = coinbase_recipient_spending_key.to_address();
-    let next_block_height: BlockHeight = predecessor_block.header().height.next();
-    let sender_randomness_for_composer = global_state_lock
+    let composer_parameters = global_state_lock
         .lock_guard()
         .await
-        .wallet_state
-        .wallet_secret
-        .generate_sender_randomness(next_block_height, receiving_address.privacy_digest());
-    let vm_job_queue = global_state_lock.vm_job_queue();
+        .composer_parameters(coinbase_recipient_spending_key.to_address().into());
 
-    let composer_parameters = ComposerParameters::new(
-        receiving_address.into(),
-        sender_randomness_for_composer,
-        guesser_fee_fraction,
-    );
+    let vm_job_queue = global_state_lock.vm_job_queue();
     let (transaction, composer_txos) = create_block_transaction_stateless(
         predecessor_block,
         composer_parameters,
@@ -1167,14 +1151,18 @@ pub(crate) mod mine_loop_tests {
             .await
             .unwrap();
 
+        let mut cli = cli_args::Args::default();
         for guesser_fee_fraction in [0f64, 0.5, 1.0] {
             // Verify constructed coinbase transaction and block template when mempool is empty
             assert!(
                 alice.lock_guard().await.mempool.is_empty(),
                 "Mempool must be empty at start of loop"
             );
+
+            cli.guesser_fraction = guesser_fee_fraction;
+            alice.set_cli(cli.clone()).await;
             let (transaction_empty_mempool, _coinbase_utxo_info) = {
-                create_block_transaction(&genesis_block, &alice, now, guesser_fee_fraction)
+                create_block_transaction(&genesis_block, &alice, now)
                     .await
                     .unwrap()
             };
@@ -1225,7 +1213,7 @@ pub(crate) mod mine_loop_tests {
 
             // Build transaction for block
             let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
-                create_block_transaction(&genesis_block, &alice, now, guesser_fee_fraction)
+                create_block_transaction(&genesis_block, &alice, now)
                     .await
                     .unwrap()
             };
