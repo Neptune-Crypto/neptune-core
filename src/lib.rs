@@ -19,6 +19,9 @@ pub mod mine_loop;
 pub mod models;
 pub mod peer_loop;
 pub mod prelude;
+pub mod rpc_auth;
+#[allow(clippy::too_many_arguments)]
+// clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
 pub mod rpc_server;
 pub mod util_types;
 
@@ -120,7 +123,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Got archival block MMR");
 
     let archival_state = ArchivalState::new(
-        data_dir,
+        data_dir.clone(),
         block_index_db,
         archival_mutator_set,
         archival_block_mmr,
@@ -174,6 +177,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         blockchain_state,
         networking_state,
         cli_args,
+        data_dir,
         mempool,
     );
     let own_handshake_data: HandshakeData = global_state_lock
@@ -253,6 +257,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         tokio::spawn(fut);
     }
 
+    // each time we start neptune-core a new RPC cookie is generated.
+    let valid_tokens: Vec<rpc_auth::Token> =
+        vec![
+            crate::rpc_auth::Cookie::try_new(global_state_lock.data_dir())
+                .await?
+                .into(),
+        ];
+
     let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
@@ -265,6 +277,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
             .map(move |channel| {
                 let server = rpc_server::NeptuneRPCServer {
                     state: rpc_state_lock.clone(),
+                    valid_tokens: valid_tokens.clone(),
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
 

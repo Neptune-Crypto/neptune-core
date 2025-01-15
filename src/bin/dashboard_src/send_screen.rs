@@ -12,6 +12,7 @@ use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::layout::Alignment;
@@ -65,10 +66,11 @@ pub struct SendScreen {
     reset_me: Arc<Mutex<ResetType>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     network: Network,
+    token: rpc_auth::Token,
 }
 
 impl SendScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: rpc_auth::Token) -> Self {
         SendScreen {
             active: false,
             fg: Color::Gray,
@@ -82,11 +84,14 @@ impl SendScreen {
             reset_me: Arc::new(Mutex::new(Default::default())),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             network,
+            token,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         address: String,
         amount: String,
         notice_arc: Arc<Mutex<String>>,
@@ -129,6 +134,7 @@ impl SendScreen {
         let send_result = rpc_client
             .send(
                 send_ctx,
+                token,
                 valid_amount,
                 valid_address,
                 UtxoNotificationMedium::OnChain,
@@ -203,10 +209,11 @@ impl SendScreen {
                                         let notice = self.notice.clone();
                                         let reset_me = self.reset_me.clone();
                                         let network = self.network;
+                                        let token = self.token;
 
                                         tokio::spawn(Self::check_and_pay_sequence(
-                                            rpc_client, address, amount, notice, reset_me, network,
-                                            refresh_tx,
+                                            rpc_client, token, address, amount, notice, reset_me,
+                                            network, refresh_tx,
                                         ));
                                         //                                        escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }

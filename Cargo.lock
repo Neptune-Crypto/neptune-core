@@ -3411,7 +3411,7 @@ dependencies = [
  "arbitrary",
  "const_format",
  "hex",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "ndarray",
  "num",
  "num-traits",

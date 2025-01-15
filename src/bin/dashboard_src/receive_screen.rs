@@ -9,6 +9,7 @@ use crossterm::event::KeyEventKind;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Alignment;
 use ratatui::layout::Margin;
@@ -45,11 +46,12 @@ pub struct ReceiveScreen {
     generating: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     network: Network,
+    token: rpc_auth::Token,
 }
 
 impl ReceiveScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
-        ReceiveScreen {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: rpc_auth::Token) -> Self {
+        Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
@@ -59,12 +61,14 @@ impl ReceiveScreen {
             generating: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             network,
+            token,
         }
     }
 
     fn populate_receiving_address_async(
         &self,
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         data: Arc<Mutex<Option<ReceivingAddress>>>,
     ) {
         if data.lock().unwrap().is_none() {
@@ -73,8 +77,9 @@ impl ReceiveScreen {
             tokio::spawn(async move {
                 // TODO: change to receive most recent wallet
                 let receiving_address = rpc_client
-                    .next_receiving_address(context::current(), KeyType::Generation)
+                    .next_receiving_address(context::current(), token, KeyType::Generation)
                     .await
+                    .unwrap()
                     .unwrap();
                 *data.lock().unwrap() = Some(receiving_address);
                 *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
@@ -85,6 +90,7 @@ impl ReceiveScreen {
     fn generate_new_receiving_address_async(
         &self,
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         data: Arc<Mutex<Option<ReceivingAddress>>>,
         generating: Arc<Mutex<bool>>,
     ) {
@@ -92,8 +98,9 @@ impl ReceiveScreen {
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
             let receiving_address = rpc_client
-                .next_receiving_address(context::current(), KeyType::Generation)
+                .next_receiving_address(context::current(), token, KeyType::Generation)
                 .await
+                .unwrap()
                 .unwrap();
             *data.lock().unwrap() = Some(receiving_address);
             *generating.lock().unwrap() = false;
@@ -113,6 +120,7 @@ impl ReceiveScreen {
                         KeyCode::Enter => {
                             self.generate_new_receiving_address_async(
                                 self.server.clone(),
+                                self.token,
                                 self.data.clone(),
                                 self.generating.clone(),
                             );
@@ -144,7 +152,8 @@ impl Screen for ReceiveScreen {
         self.active = true;
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
-        self.populate_receiving_address_async(server_arc, data_arc);
+        let token = self.token;
+        self.populate_receiving_address_async(server_arc, token, data_arc);
         // *self.escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
     }
 

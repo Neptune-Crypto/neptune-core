@@ -11,6 +11,7 @@ use itertools::Itertools;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
 use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::layout::Constraint;
@@ -115,12 +116,13 @@ pub struct HistoryScreen {
     poll_task: Option<JoinHandleArc>,
     escalatable_event: DashboardEventArc,
     events: Events,
+    token: rpc_auth::Token,
 }
 
 impl HistoryScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
-        HistoryScreen {
+        Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
@@ -130,11 +132,13 @@ impl HistoryScreen {
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             events: data.into(),
+            token,
         }
     }
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         balance_updates: BalanceUpdateArc,
         escalatable_event: DashboardEventArc,
     ) -> ! {
@@ -157,7 +161,7 @@ impl HistoryScreen {
         loop {
             select! {
                 _ = &mut balance_history => {
-                    let bh = rpc_client.history(context::current()).await.unwrap();
+                    let bh = rpc_client.history(context::current(), token).await.unwrap().unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
                     let initial_balance = NeptuneCoins::zero();
                     let updates = bh.iter().map(|(_,_,_, delta)| *delta);
@@ -207,10 +211,12 @@ impl Screen for HistoryScreen {
     fn activate(&mut self) {
         self.active = true;
         let server_arc = self.server.clone();
+        let token = self.token;
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
-            HistoryScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
+            HistoryScreen::run_polling_loop(server_arc, token, data_arc, escalatable_event_arc)
+                .await;
         }))));
     }
 

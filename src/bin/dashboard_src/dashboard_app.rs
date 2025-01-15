@@ -22,6 +22,7 @@ use crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use neptune_cash::config_models::network::Network;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
@@ -155,6 +156,7 @@ impl DashboardApp {
     pub fn new(
         rpc_server: Arc<RPCClient>,
         network: Network,
+        token: rpc_auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
@@ -162,38 +164,45 @@ impl DashboardApp {
         let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(
             rpc_server.clone(),
             network,
+            token,
             listen_addr_for_peers,
         )));
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
 
-        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server.clone())));
+        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server.clone(), token)));
         let peers_screen_dyn = Rc::clone(&peers_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Peers, Rc::clone(&peers_screen_dyn));
 
-        let history_screen = Rc::new(RefCell::new(HistoryScreen::new(rpc_server.clone())));
+        let history_screen = Rc::new(RefCell::new(HistoryScreen::new(rpc_server.clone(), token)));
         let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
 
         let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(
             rpc_server.clone(),
             network,
+            token,
         )));
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
-        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server.clone(), network)));
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(
+            rpc_server.clone(),
+            network,
+            token,
+        )));
         let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
         let address_screen = Rc::new(RefCell::new(AddressScreen::new(
             rpc_server.clone(),
             network,
+            token,
         )));
         let address_screen_dyn = Rc::clone(&address_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Address, Rc::clone(&address_screen_dyn));
 
-        let mempool_screen = Rc::new(RefCell::new(MempoolScreen::new(rpc_server.clone())));
+        let mempool_screen = Rc::new(RefCell::new(MempoolScreen::new(rpc_server.clone(), token)));
         let mempool_screen_dyn = Rc::clone(&mempool_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Mempool, Rc::clone(&mempool_screen_dyn));
 
@@ -264,10 +273,11 @@ impl DashboardApp {
     pub async fn run(
         client: RPCClient,
         network: Network,
+        token: rpc_auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client), network, listen_addr_for_peers);
+        let mut app = DashboardApp::new(Arc::new(client), network, token, listen_addr_for_peers);
         let (refresh_tx, mut refresh_rx) = tokio::sync::mpsc::channel::<()>(2);
 
         // setup terminal
