@@ -1141,13 +1141,10 @@ mod archival_state_tests {
     use crate::tests::shared::add_block_to_archival_state;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_archival_state;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::unit_test_databases;
-    use crate::util_types::mutator_set::addition_record::AdditionRecord;
-    use crate::util_types::test_shared::mutator_set::mock_item_mp_rr_for_init_msa;
     use crate::util_types::test_shared::mutator_set::random_removal_record;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
@@ -1412,80 +1409,66 @@ mod archival_state_tests {
         // blocks.
         let network = Network::RegTest;
         let mut rng = thread_rng();
-        let genesis_wallet_state =
-            mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
+        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let alice_address = alice_key.to_address();
+        let mut alice =
+            mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis_block(network);
-        let genesis_wallet = genesis_wallet_state.wallet_secret;
-        let mut global_state_lock =
-            mock_genesis_global_state(network, 42, genesis_wallet, cli_args::Args::default()).await;
+
         let num_premine_utxos = Block::premine_utxos(network).len();
 
+        let outputs = (0..20)
+            .map(|_| {
+                TxOutput::onchain_native_currency(
+                    NeptuneCoins::new(1),
+                    rng.gen(),
+                    alice_address.into(),
+                    false,
+                )
+            })
+            .collect_vec();
+        let fee = NeptuneCoins::zero();
+
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
-
-        let rrs = |num: usize| {
-            let mut ret = vec![];
-            for _ in 0..num {
-                let (_, _, rr) = mock_item_mp_rr_for_init_msa();
-                ret.push(rr);
-            }
-
-            ret
-        };
-        let mut ars = |num: usize| {
-            let mut ret = vec![];
-            for _ in 0..num {
-                let ar = AdditionRecord::new(rng.gen());
-                ret.push(ar);
-            }
-
-            ret
-        };
-        let magic_number = 5;
-        let removal_records_1a = rrs(2);
-        let addition_records_1a = ars(magic_number);
-        let removal_records_1b = rrs(0);
-        let addition_records_1b = ars(magic_number);
-
-        let tx_1a = make_mock_transaction_with_mutator_set_hash(
-            removal_records_1a,
-            addition_records_1a,
-            genesis_block.mutator_set_accumulator_after().hash(),
-        );
-        let block_1a = Block::block_template_invalid_proof(
-            &genesis_block,
-            tx_1a,
-            in_seven_months,
-            Digest::default(),
-            None,
-        );
-        let tx_1b = make_mock_transaction_with_mutator_set_hash(
-            removal_records_1b,
-            addition_records_1b,
-            genesis_block.mutator_set_accumulator_after().hash(),
-        );
-        let block_1b = Block::block_template_invalid_proof(
-            &genesis_block,
-            tx_1b,
-            in_seven_months,
-            Digest::default(),
-            None,
-        );
-
-        global_state_lock
-            .set_new_tip(block_1a.clone())
+        let (big_tx, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                outputs.clone().into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_seven_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
             .await
             .unwrap();
-        global_state_lock
-            .set_new_tip(block_1b.clone())
+        let block_1a = invalid_block_with_transaction(&genesis_block, big_tx);
+
+        let (empty_tx, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OnChain,
+                fee,
+                in_seven_months,
+                TxProvingCapability::PrimitiveWitness,
+                &TritonVmJobQueue::dummy(),
+            )
             .await
             .unwrap();
+        let block_1b = invalid_block_with_transaction(&genesis_block, empty_tx);
+
+        alice.set_new_tip(block_1a.clone()).await.unwrap();
+        alice.set_new_tip(block_1b.clone()).await.unwrap();
 
         // Verify correct rollback
-
-        // Verify that the new state of the archival mutator set contains
-        // two UTXOs and that none have been removed
         assert!(
-            global_state_lock
+            alice
                 .lock_guard()
                 .await
                 .chain
@@ -1499,8 +1482,8 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            num_premine_utxos + magic_number + block_1b.guesser_fee_utxos().len(),
-            global_state_lock
+            num_premine_utxos + block_1b.guesser_fee_utxos().len(),
+            alice
                 .lock_guard()
                 .await
                 .chain
@@ -1531,7 +1514,7 @@ mod archival_state_tests {
         let mut alice =
             mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
 
-        let mut num_utxos = Block::premine_utxos(network).len();
+        let mut expected_num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
 
         let outputs = (0..20)
@@ -1588,6 +1571,9 @@ mod archival_state_tests {
         )
         .await;
 
+        // Verify that an internal function does not mutate the mutator set, as
+        // it's not allowed to do that, but we can't make that guarantee through
+        // the type system.
         assert_eq!(
             ams_digest_prior,
             alice
@@ -1635,7 +1621,7 @@ mod archival_state_tests {
             // 3. Create competing block 1 and treat it as new tip
             let (mock_block_1b, _) =
                 make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
-            num_utxos += mock_block_1b.body().transaction_kernel.outputs.len()
+            expected_num_utxos += mock_block_1b.body().transaction_kernel.outputs.len()
                 + mock_block_1b.guesser_fee_addition_records().len();
 
             // 4. Update mutator set with this new block of height 1.
@@ -1652,9 +1638,10 @@ mod archival_state_tests {
         // 5. Verify correct rollback
 
         // Verify that the new state of the mutator set contains exactly the
-        // number of AOCL records defined in the premine, and zero removals.
+        // number of AOCL records defined in the premine and block 1b, and zero
+        // removals.
         assert_eq!(
-            num_utxos,
+            expected_num_utxos,
             alice.lock_guard()
             .await
                 .chain
