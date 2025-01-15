@@ -114,6 +114,7 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             triton_vm_job_queue,
             proof_job_options,
+            None,
         )
         .await?;
         info!("Proof-upgrader, update: Done");

@@ -4,6 +4,7 @@ use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -184,9 +185,11 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    /// Create a new `Transaction` by updating the given one with the mutator set
-    /// update contained in the `Block`. No primitive witness is present, instead
-    /// a proof is given. So:
+    /// Create a new `Transaction` by updating the given one with the mutator
+    /// set update. If `new_timestamp` is `None`, the timestamp from the old
+    /// transaction kernel will be used.
+    ///
+    /// No primitive witness is present, instead a proof is given. So:
     ///  1. Verify the proof
     ///  2. Update the records
     ///  3. Prove correctness of 1 and 2
@@ -198,6 +201,7 @@ impl Transaction {
         old_single_proof: Proof,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
+        new_timestamp: Option<Timestamp>,
     ) -> anyhow::Result<Transaction> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
@@ -219,10 +223,13 @@ impl Transaction {
         );
 
         // compute new kernel
-        let new_kernel = TransactionKernelModifier::default()
+        let mut modifier = TransactionKernelModifier::default()
             .inputs(new_inputs)
-            .mutator_set_hash(calculated_new_mutator_set.hash())
-            .clone_modify(&old_transaction_kernel);
+            .mutator_set_hash(calculated_new_mutator_set.hash());
+        if let Some(new_timestamp) = new_timestamp {
+            modifier = modifier.timestamp(new_timestamp);
+        }
+        let new_kernel = modifier.clone_modify(&old_transaction_kernel);
 
         // compute updated proof through recursion
         let update_witness = UpdateWitness::from_old_transaction(
@@ -559,6 +566,7 @@ mod transaction_tests {
                 original_tx.proof.into_single_proof(),
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
+                None,
             )
             .await
             .unwrap();
