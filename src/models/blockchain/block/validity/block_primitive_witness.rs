@@ -77,11 +77,6 @@ impl BlockPrimitiveWitness {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn predecessor_block(&self) -> &Block {
-        &self.predecessor_block
-    }
-
     pub(crate) fn body(&self) -> &BlockBody {
         self.maybe_body.get_or_init(|| {
             let predecessor_msa_digest = self.predecessor_block

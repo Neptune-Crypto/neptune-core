@@ -359,21 +359,31 @@ impl ConsensusProgram for BlockProgram {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
-    use triton_vm::prelude::Digest;
 
     use super::*;
+    use crate::config_models::cli_args;
+    use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::mine_loop::composer_parameters::ComposerParameters;
+    use crate::mine_loop::create_block_transaction_stateless;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::block::BlockPrimitiveWitness;
     use crate::models::blockchain::block::TritonVmProofJobOptions;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::transaction_output::TxOutput;
+    use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::mock_genesis_global_state;
 
     #[traced_test]
     #[test]
@@ -428,63 +438,107 @@ pub(crate) mod test {
     //       disallowed.
 
     #[traced_test]
-    #[test]
-    fn disallow_double_spends_across_blocks() {
-        let current_pw = deterministic_block_primitive_witness();
-        let tx = current_pw.transaction().to_owned();
-        assert!(
-            !tx.kernel.inputs.is_empty(),
-            "Transaction in double-spend test cannot be empty"
-        );
-        let predecessor = current_pw.predecessor_block().to_owned();
-        let mock_now = predecessor.header().timestamp + Timestamp::months(12);
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
-        let current_block = rt
-            .block_on(Block::block_template_from_block_primitive_witness(
-                current_pw,
-                mock_now,
-                Digest::default(),
-                None,
+    #[tokio::test]
+    async fn disallow_double_spends_across_blocks() {
+        async fn mine_tx(
+            tx: Transaction,
+            predecessor: &Block,
+            composer_parameters: ComposerParameters,
+            timestamp: Timestamp,
+            rng: &mut StdRng,
+        ) -> Block {
+            let (block_tx, _) = create_block_transaction_stateless(
+                predecessor,
+                composer_parameters,
+                timestamp,
+                rng.gen(),
                 &TritonVmJobQueue::dummy(),
-                TritonVmProofJobOptions::default(),
-            ))
-            .unwrap();
-
-        let current_block_is_valid =
-            rt.block_on(async { current_block.is_valid(&predecessor, mock_now).await });
-        assert!(current_block_is_valid);
-
-        let mutator_set_update = current_block.mutator_set_update();
-        let updated_tx = rt
-            .block_on(
-                Transaction::new_with_updated_mutator_set_records_given_proof(
-                    tx.kernel,
-                    &predecessor.mutator_set_accumulator_after(),
-                    &mutator_set_update,
-                    tx.proof.into_single_proof(),
-                    &TritonVmJobQueue::dummy(),
-                    TritonVmJobPriority::default().into(),
-                ),
+                vec![tx],
             )
+            .await
             .unwrap();
-        assert!(rt.block_on(updated_tx.is_valid()));
 
-        let mock_later = mock_now + Timestamp::hours(3);
-        let next_pw = BlockPrimitiveWitness::new(current_block.clone(), updated_tx);
-        let next_block = rt
-            .block_on(Block::block_template_from_block_primitive_witness(
-                next_pw,
-                mock_later,
-                Digest::default(),
+            Block::compose(
+                predecessor,
+                block_tx,
+                timestamp,
+                rng.gen(),
                 None,
                 &TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
-            ))
+            )
+            .await
+            .unwrap()
+        }
+
+        let network = Network::Main;
+        let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
+        let alice_wallet = WalletSecret::devnet_wallet();
+        let alice = mock_genesis_global_state(
+            network,
+            3,
+            WalletSecret::devnet_wallet(),
+            cli_args::Args::default(),
+        )
+        .await;
+
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let fee = NeptuneCoins::new(1);
+        let tx_output = TxOutput::offchain_native_currency(
+            NeptuneCoins::new(1),
+            rng.gen(),
+            alice_key.to_address().into(),
+            false,
+        );
+
+        let genesis_block = Block::genesis_block(network);
+        let now = genesis_block.header().timestamp + Timestamp::months(12);
+        let (tx, _) = alice
+            .lock_guard()
+            .await
+            .create_transaction_with_prover_capability(
+                vec![tx_output].into(),
+                alice_key.into(),
+                UtxoNotificationMedium::OffChain,
+                fee,
+                now,
+                TxProvingCapability::SingleProof,
+                &TritonVmJobQueue::dummy(),
+            )
+            .await
             .unwrap();
-        let next_block_is_valid =
-            rt.block_on(async { next_block.is_valid(&current_block, mock_later).await });
-        assert!(!next_block_is_valid);
+        let composer_parameters = alice
+            .lock_guard()
+            .await
+            .composer_parameters(alice_key.to_address().into());
+        let block1 = mine_tx(
+            tx.clone(),
+            &genesis_block,
+            composer_parameters.clone(),
+            now,
+            &mut rng,
+        )
+        .await;
+
+        // Update transaction, stick it into block 2, and verify that block 2
+        // is invalid.
+        let later = now + Timestamp::months(1);
+        let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
+            tx.kernel,
+            &genesis_block.mutator_set_accumulator_after(),
+            &block1.mutator_set_update(),
+            tx.proof.into_single_proof(),
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default().into(),
+            Some(later),
+        )
+        .await
+        .unwrap();
+
+        let block2 = mine_tx(tx, &block1, composer_parameters, later, &mut rng).await;
+        assert!(
+            !block2.is_valid(&block1, later).await,
+            "Block doing a double-spend must be invalid."
+        );
     }
 }
