@@ -11,6 +11,7 @@ use itertools::Itertools;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::SpendingKey;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -115,10 +116,11 @@ pub struct AddressScreen {
     escalatable_event: DashboardEventArc,
     events: Events,
     network: Network,
+    token: rpc_auth::Token,
 }
 
 impl AddressScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network, token: rpc_auth::Token) -> Self {
         let data = Arc::new(Mutex::new(vec![]));
         AddressScreen {
             active: false,
@@ -131,11 +133,13 @@ impl AddressScreen {
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             events: data.into(),
             network,
+            token,
         }
     }
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         address_updates: AddressUpdateArc,
         escalatable_event: DashboardEventArc,
     ) -> ! {
@@ -158,7 +162,7 @@ impl AddressScreen {
         loop {
             select! {
                 _ = &mut addresses => {
-                    let keys = rpc_client.known_keys(context::current()).await.unwrap();
+                    let keys = rpc_client.known_keys(context::current(), token).await.unwrap().unwrap();
 
                     *address_updates.lock().unwrap() = keys;
 
@@ -202,10 +206,12 @@ impl Screen for AddressScreen {
     fn activate(&mut self) {
         self.active = true;
         let server_arc = self.server.clone();
+        let token = self.token;
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
-            AddressScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
+            AddressScreen::run_polling_loop(server_arc, token, data_arc, escalatable_event_arc)
+                .await;
         }))));
     }
 

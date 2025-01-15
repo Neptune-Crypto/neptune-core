@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use itertools::Itertools;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::MempoolTransactionInfo;
 use neptune_cash::rpc_server::RPCClient;
 use num_traits::CheckedSub;
@@ -40,10 +41,11 @@ pub struct MempoolScreen {
     poll_task: Option<Arc<std::sync::Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     page_start: Arc<std::sync::Mutex<usize>>,
+    token: rpc_auth::Token,
 }
 
 impl MempoolScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
         MempoolScreen {
             active: false,
             fg: Color::Gray,
@@ -54,12 +56,14 @@ impl MempoolScreen {
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             page_start: Arc::new(std::sync::Mutex::new(0)),
+            token,
         }
     }
 
     async fn run_polling_loop(
         page_start: Arc<std::sync::Mutex<usize>>,
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         mempool_transaction_info: Arc<std::sync::Mutex<Vec<MempoolTransactionInfo>>>,
         escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) -> ! {
@@ -83,13 +87,16 @@ impl MempoolScreen {
             select! {
                 _ = &mut balance => {
                     let page_start_clone = *page_start.lock().unwrap();
-                    match rpc_client.mempool_overview(context::current(), page_start_clone, PAGE_SIZE).await {
-                        Ok(mo) => {
+                    match rpc_client.mempool_overview(context::current(), token, page_start_clone, PAGE_SIZE).await {
+                        Ok(Ok(mo)) => {
                             *mempool_transaction_info.lock().unwrap() = mo;
 
                             *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
                             reset_poller!(balance, Duration::from_secs(10));
                         },
+                        Ok(Err(e)) => {
+                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
+                        }
                         Err(e) => {
                             *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
                         }
@@ -105,12 +112,14 @@ impl Screen for MempoolScreen {
         self.active = true;
         let page_start_arc = self.page_start.clone();
         let server_arc = self.server.clone();
+        let token = self.token;
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
             MempoolScreen::run_polling_loop(
                 page_start_arc,
                 server_arc,
+                token,
                 data_arc,
                 escalatable_event_arc,
             )
