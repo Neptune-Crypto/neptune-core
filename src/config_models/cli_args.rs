@@ -31,7 +31,7 @@ pub struct Args {
     ///
     /// macOS:   /Users/Alice/Library/Application Support/neptune/main
     #[clap(long, value_name = "DIR")]
-    pub data_dir: Option<PathBuf>,
+    pub(crate) data_dir: Option<PathBuf>,
 
     /// Ban connections to this node from IP address.
     ///
@@ -41,7 +41,7 @@ pub struct Args {
     ///
     /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
     #[clap(long, value_name = "IP")]
-    pub ban: Vec<IpAddr>,
+    pub(crate) ban: Vec<IpAddr>,
 
     /// Refuse connection if peer is in bad standing.
     ///
@@ -50,14 +50,14 @@ pub struct Args {
     ///
     /// For a list of reasons that cause bad standing, see [PeerSanctionReason](crate::models::peer::PeerSanctionReason).
     #[clap(long, default_value = "1000", value_name = "VALUE")]
-    pub peer_tolerance: u16,
+    pub(crate) peer_tolerance: u16,
 
     /// Maximum number of peers to accept connections from.
     ///
     /// Will not prevent outgoing connections made with `--peers`.
     /// Set this value to 0 to refuse all incoming connections.
     #[clap(long, default_value = "10", value_name = "COUNT")]
-    pub max_num_peers: u16,
+    pub(crate) max_num_peers: u16,
 
     /// Whether to act as bootstrapper node.
     ///
@@ -67,7 +67,7 @@ pub struct Args {
     /// incoming connection requests -- in contrast to regular nodes, which
     /// refuse incoming connections when the max is reached.
     #[clap(long)]
-    pub bootstrap: bool,
+    pub(crate) bootstrap: bool,
 
     /// If this flag is set, the node will refuse to initiate a transaction.
     /// This flag makes sense for machines whose resources are dedicated to
@@ -76,14 +76,14 @@ pub struct Args {
     /// wallet of a node where this flag is set, either restart it and drop the
     /// flag, or else copy the wallet file to another machine.
     #[clap(long, alias = "notx")]
-    pub no_transaction_initiation: bool,
+    pub(crate) no_transaction_initiation: bool,
 
     /// Whether to produce block proposals, which is the first step of two-step
     /// mining. Note that composing block proposals involves the computationally
     /// expensive task of producing STARK proofs. You should have plenty of
     /// cores and probably at least 128 GB of RAM.
     #[clap(long)]
-    pub compose: bool,
+    pub(crate) compose: bool,
 
     /// Whether to engage in guess-nonce-and-hash, which is the second step in
     /// two-step mining. If this flag is set and the `compose` flag is not set,
@@ -93,12 +93,12 @@ pub struct Args {
     /// If this flag is set and the `compose` flag is set, then the client will
     /// always guess on their own block proposal.
     #[clap(long)]
-    pub guess: bool,
+    pub(crate) guess: bool,
 
     /// By default, a composer will share block proposals with all peers. If
     /// this flag is set, the composer will *not* share their block proposals.
     #[clap(long)]
-    pub secret_compositions: bool,
+    pub(crate) secret_compositions: bool,
 
     /// Regulates the fraction of the block subsidy that goes to the guesser.
     /// Value must be between 0 and 1.
@@ -106,29 +106,29 @@ pub struct Args {
     /// The remainder goes to the composer. This flag is ignored if the
     /// `compose` flag is not set.
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
-    pub guesser_fraction: f64,
+    pub(crate) guesser_fraction: f64,
 
     /// Whether to sleep between nonce-guesses. Useful if you do not want to
     /// dedicate all your CPU power.
     #[clap(long)]
-    pub sleepy_guessing: bool,
+    pub(crate) sleepy_guessing: bool,
 
     /// Set the number of threads to use while guessing. When no value is set,
     /// the number is set to the number of available cores.
     #[clap(long)]
-    pub guesser_threads: Option<usize>,
+    pub(crate) guesser_threads: Option<usize>,
 
     /// Determines the fraction of the transaction fee consumed by this node as
     /// a reward either for upgrading a `ProofCollection` to `SingleProof`, or
     /// for merging two `SingleProof`s.
     #[clap(long, default_value = "0.2", value_parser = fraction_validator)]
-    pub gobbling_fraction: f64,
+    pub(crate) gobbling_fraction: f64,
 
     /// Determines the minimum fee to take as a reward for upgrading foreign
     /// transaction proofs. Foreign transactions where a fee below this
     /// threshold cannot be collected by proof upgrading will not be upgraded.
     #[clap(long, default_value = "0.01")]
-    pub min_gobbling_fee: NeptuneCoins,
+    pub(crate) min_gobbling_fee: NeptuneCoins,
 
     /// Prune the mempool when it exceeds this size in RAM.
     ///
@@ -136,7 +136,7 @@ pub struct Args {
     ///
     /// E.g. --max-mempool-size 500M
     #[clap(long, default_value = "1G", value_name = "SIZE")]
-    pub max_mempool_size: ByteSize,
+    pub(crate) max_mempool_size: ByteSize,
 
     /// Maximum number of transactions permitted in the mempool.
     ///
@@ -145,7 +145,7 @@ pub struct Args {
     ///
     /// E.g. --max-mempool-num-tx=4
     #[clap(long)]
-    pub max_mempool_num_tx: Option<usize>,
+    pub(crate) max_mempool_num_tx: Option<usize>,
 
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
@@ -153,11 +153,11 @@ pub struct Args {
 
     /// Port on which to listen for RPC connections.
     #[clap(long, default_value = "9799", value_name = "PORT")]
-    pub rpc_port: u16,
+    pub(crate) rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
     #[clap(short, long, default_value = "::")]
-    pub listen_addr: IpAddr,
+    pub(crate) listen_addr: IpAddr,
 
     /// Max number of blocks that the client can catch up to before going into syncing mode.
     ///
@@ -165,19 +165,19 @@ pub struct Args {
     /// in this field multiplied with the max block size amounts of RAM. Probably 1.5 to 2 times
     /// that amount.
     #[clap(long, default_value = "100", value_parser(RangedI64ValueParser::<usize>::new().range(2..100000)))]
-    pub max_number_of_blocks_before_syncing: usize,
+    pub(crate) max_number_of_blocks_before_syncing: usize,
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
     #[structopt(long)]
-    pub peers: Vec<SocketAddr>,
+    pub(crate) peers: Vec<SocketAddr>,
 
     /// Specify network, `alpha`, `beta`, `testnet`, or `regtest`
     #[structopt(long, default_value = "beta", short)]
-    pub network: Network,
+    pub(crate) network: Network,
 
     /// Max number of membership proofs stored per owned UTXO
     #[structopt(long, default_value = "3")]
-    pub number_of_mps_per_utxo: usize,
+    pub(crate) number_of_mps_per_utxo: usize,
 
     /// Configure how complicated proofs this machine is capable of producing.
     /// If no value is set, this parameter is estimated. For privacy, this level
@@ -190,14 +190,14 @@ pub struct Args {
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
     #[clap(long)]
-    pub tx_proving_capability: Option<TxProvingCapability>,
+    pub(crate) tx_proving_capability: Option<TxProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
     /// want to estimate proving capability and afterwards reuse the result from
     /// previous estimations. This argument cannot be set from CLI, so clap
     /// ignores it.
     #[clap(skip)]
-    pub tx_proving_capability_cache: OnceLock<TxProvingCapability>,
+    pub(crate) tx_proving_capability_cache: OnceLock<TxProvingCapability>,
 
     /// The number of seconds between each attempt to upgrade transactions in
     /// the mempool to proofs of a higher quality. Will only run if the machine
@@ -225,13 +225,13 @@ pub struct Args {
     ///
     /// no limit is applied if unset.
     #[structopt(long, short, value_parser = clap::value_parser!(u8).range(10..32))]
-    pub max_log2_padded_height_for_proofs: Option<u8>,
+    pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
 
     /// Sets the maximum number of proofs in a `ProofCollection` that can be
     /// recursively combined into a `SingleProof` by this machine. I.e. how big
     /// STARK proofs this machine can produce.
     #[clap(long, default_value = "16")]
-    pub max_num_proofs: usize,
+    pub(crate) max_num_proofs: usize,
 }
 
 impl Default for Args {
