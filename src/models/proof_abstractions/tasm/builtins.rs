@@ -1,19 +1,12 @@
-use tasm_lib::prelude::Digest;
-use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm;
-use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::twenty_first::math::x_field_element::XFieldElement;
-use tasm_lib::twenty_first::prelude::MmrMembershipProof;
-use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTreeInclusionProof;
+use itertools::Itertools;
+use tasm_lib::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::twenty_first::util_types::mmr::shared_advanced::get_peak_heights;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::verifier::stark_verify::StarkVerify;
+use triton_vm::prelude::*;
+use twenty_first::prelude::*;
 
 use super::environment::ND_INDIVIDUAL_TOKEN;
 use super::environment::ND_MEMORY;
@@ -332,24 +325,41 @@ pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
 /// Verify an MMR successor proof. Crashes if the proof is invalid for the given
 /// MMR accumulators.
 ///
-/// Consumes the right number of non-deterministic digests from
-/// the ND digest stream.
+/// Removes the [`MmrSuccessorProof`]'s authentication path from the
+/// [environment](super::environment)'s [`NonDeterminism`].
+///
+/// # Panics
+///
+/// - if the proof does not establish a valid successor relationship between the
+///   old and new MMRs
+/// - if the authentication path present in non-determinism is different from the
+///   one in the passed-in proof
 pub fn verify_mmr_successor_proof(
     old_mmr: &MmrAccumulator,
     new_mmr: &MmrAccumulator,
     proof: &MmrSuccessorProof,
 ) {
-    let num_digests_consumed = proof.paths.len();
-    let mut consumed_digests = vec![];
+    let mut proof_paths = vec![];
+    if !proof.paths.is_empty() {
+        ND_INDIVIDUAL_TOKEN.with_borrow_mut(|tokens| {
+            let first_digest = (0..Digest::LEN)
+                .map(|_| tokens.pop_front().expect("should find proof path tokens"))
+                .collect_vec()
+                .try_into()
+                .unwrap();
+            proof_paths.push(Digest::new(first_digest).reversed());
+        });
+    }
+
     ND_DIGESTS.with_borrow_mut(|digest_stream| {
-        (0..num_digests_consumed).for_each(|_| {
-            consumed_digests.push(digest_stream.pop_front().expect(
+        for _ in 1..proof.paths.len() {
+            proof_paths.push(digest_stream.pop_front().expect(
                 "digest stream should contain all digests divined by `VerifyMmrSuccessor` snippet",
             ));
-        })
+        }
     });
 
-    assert_eq!(consumed_digests, proof.paths);
+    assert_eq!(proof_paths, proof.paths);
 
     assert!(proof.verify(old_mmr, new_mmr));
 }
