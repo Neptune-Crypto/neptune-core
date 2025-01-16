@@ -1629,7 +1629,7 @@ pub(crate) mod mine_loop_tests {
     fn fast_kernel_mast_hash_agrees_with_mast_hash_function() {
         let block_primitive_witness = deterministic_block_primitive_witness();
         let a_block = block_primitive_witness.predecessor_block();
-        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&a_block);
+        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(a_block);
         assert_eq!(
             a_block.kernel.mast_hash(),
             fast_kernel_mast_hash(kernel_auth_path, header_auth_path, a_block.header().nonce)
