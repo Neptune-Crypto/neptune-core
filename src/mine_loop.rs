@@ -1034,7 +1034,7 @@ pub(crate) mod mine_loop_tests {
         let tick = std::time::SystemTime::now();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
-        let (worker_task_tx, _) = oneshot::channel::<NewBlockFound>();
+        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(rand::thread_rng, |prng, _i| {
@@ -1048,6 +1048,7 @@ pub(crate) mod mine_loop_tests {
                     );
                 })
                 .count();
+        drop(worker_task_rx);
 
         let time_spent_mining = tick.elapsed().unwrap();
 
