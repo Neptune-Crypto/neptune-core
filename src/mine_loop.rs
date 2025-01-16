@@ -132,13 +132,11 @@ async fn guess_nonce(
 fn precalculate_header_ap(block_header_template: &BlockHeader) -> [Digest; 3] {
     let header_mt = block_header_template.merkle_tree();
 
-    let nonce_auth_path = header_mt
+    header_mt
         .authentication_structure(&[BlockHeaderField::Nonce as usize])
         .unwrap()
         .try_into()
-        .unwrap();
-
-    nonce_auth_path
+        .unwrap()
 }
 
 /// Return MAST nodes from which the block hash is calculated, given a
@@ -201,19 +199,16 @@ fn guess_worker(
         .unwrap();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(
-                || rand::thread_rng(),
-                |rng, _i| {
-                    guess_nonce_iteration(
-                        kernel_auth_path,
-                        threshold,
-                        sleepy_guessing,
-                        rng,
-                        header_auth_path,
-                        &sender,
-                    )
-                },
-            )
+            .map_init(rand::thread_rng, |rng, _i| {
+                guess_nonce_iteration(
+                    kernel_auth_path,
+                    threshold,
+                    sleepy_guessing,
+                    rng,
+                    header_auth_path,
+                    &sender,
+                )
+            })
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -1042,19 +1037,16 @@ pub(crate) mod mine_loop_tests {
         let (worker_task_tx, _) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(
-                    || rand::thread_rng(),
-                    |prng, _i| {
-                        guess_nonce_iteration(
-                            kernel_auth_path,
-                            threshold,
-                            sleepy_guessing,
-                            prng,
-                            header_auth_path,
-                            &worker_task_tx,
-                        );
-                    },
-                )
+                .map_init(rand::thread_rng, |prng, _i| {
+                    guess_nonce_iteration(
+                        kernel_auth_path,
+                        threshold,
+                        sleepy_guessing,
+                        prng,
+                        header_auth_path,
+                        &worker_task_tx,
+                    );
+                })
                 .count();
 
         let time_spent_mining = tick.elapsed().unwrap();
