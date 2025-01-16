@@ -22,6 +22,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time;
 use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
@@ -209,6 +210,7 @@ fn guess_worker(
                         sleepy_guessing,
                         rng,
                         header_auth_path,
+                        &sender,
                     )
                 },
             )
@@ -217,6 +219,10 @@ fn guess_worker(
     });
 
     let nonce_preimage = match guess_result {
+        GuessNonceResult::Cancelled => {
+            info!("Abandoning mining of current block",);
+            return;
+        }
         GuessNonceResult::BlockFound { nonce_preimage } => nonce_preimage,
         _ => unreachable!(),
     };
@@ -267,6 +273,7 @@ Difficulty threshold: {threshold}
 enum GuessNonceResult {
     BlockFound { nonce_preimage: Digest },
     BlockNotFound,
+    Cancelled,
 }
 impl GuessNonceResult {
     fn block_not_found(&self) -> bool {
@@ -305,6 +312,7 @@ fn guess_nonce_iteration(
     sleepy_guessing: bool,
     rng: &mut rand::rngs::ThreadRng,
     bh_auth_path: [Digest; 3],
+    sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
     if sleepy_guessing {
         std::thread::sleep(Duration::from_millis(100));
@@ -314,6 +322,13 @@ fn guess_nonce_iteration(
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
     let nonce_preimage: Digest = rng.gen();
     let nonce = nonce_preimage.hash();
+
+    // Check every N guesses if task has been cancelled.
+    if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
+        debug!("Guesser was cancelled.");
+        return GuessNonceResult::Cancelled;
+    }
+
     let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
     let success = block_hash <= threshold;
 
@@ -567,9 +582,24 @@ pub(crate) async fn mine(
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
     let cli_args = global_state_lock.cli().clone();
 
+    // Set PoW guessing to restart every N seconds, if it has been started. Only
+    // the guesser task may set this to actually resolve, as this will otherwise
+    // abort e.g. the composer.
+    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
+    let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
+    let infinite = Duration::from_secs(u32::MAX as u64);
+    let guess_restart_timer = time::sleep(infinite);
+    tokio::pin!(guess_restart_timer);
+
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
     loop {
+        // Ensure restart timer doesn't resolve again, without guesser
+        // task actually being spawned.
+        guess_restart_timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + infinite);
+
         global_state_lock.set_mining_status_to_inactive().await;
 
         let is_connected = global_state_lock.lock(|s| !s.net.peer_map.is_empty()).await;
@@ -615,6 +645,12 @@ pub(crate) async fn mine(
                 None, // using default TARGET_BLOCK_INTERVAL
             );
 
+            // Only run for N seconds to allow for updating of block's timestamp
+            // and difficulty.
+            guess_restart_timer
+                .as_mut()
+                .reset(tokio::time::Instant::now() + guess_restart_interval);
+
             Some(
                 tokio::task::Builder::new()
                     .name("guesser")
@@ -644,6 +680,7 @@ pub(crate) async fn mine(
                 composer_tx,
                 Timestamp::now(),
             );
+
             let task = tokio::task::Builder::new()
                 .name("composer")
                 .spawn(compose_task)
@@ -654,8 +691,17 @@ pub(crate) async fn mine(
             tokio::spawn(async { Ok(()) })
         };
 
-        // Await a message from either the worker task or from the main loop
+        // Await a message from either the worker task or from the main loop,
+        // or the restart of the guesser-task.
         select! {
+            _ = &mut guess_restart_timer => {
+                if let Some(guesser_task) = guesser_task {
+                    guesser_task.abort();
+                    debug!("Restarting guesser task with new parameters");
+                    continue;
+                }
+
+            }
             Ok(Err(e)) = &mut composer_task => {
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
@@ -992,6 +1038,7 @@ pub(crate) mod mine_loop_tests {
         let tick = std::time::SystemTime::now();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
+        let (worker_task_tx, _) = oneshot::channel::<NewBlockFound>();
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(
@@ -1003,6 +1050,7 @@ pub(crate) mod mine_loop_tests {
                             sleepy_guessing,
                             prng,
                             header_auth_path,
+                            &worker_task_tx,
                         );
                     },
                 )
