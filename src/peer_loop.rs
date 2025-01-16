@@ -46,7 +46,7 @@ use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AH
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
 use crate::models::state::GlobalStateLock;
 
-const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
+const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
@@ -643,7 +643,8 @@ impl PeerLoopHandler {
                 );
 
                 // Get the relevant blocks, at most batch-size many, descending from the
-                // peer's (alleged) most canonical block.
+                // peer's (alleged) most canonical block. Don't exceed `max_response_len`
+                // or `STANDARD_BLOCK_BATCH_SIZE` number of blocks in response.
                 let len_of_response = cmp::min(
                     max_response_len,
                     self.global_state_lock
@@ -651,6 +652,7 @@ impl PeerLoopHandler {
                         .max_number_of_blocks_before_syncing,
                 );
                 let len_of_response = cmp::max(len_of_response, MINIMUM_BLOCK_BATCH_SIZE);
+                let len_of_response = cmp::min(len_of_response, STANDARD_BLOCK_BATCH_SIZE);
 
                 let mut digests_of_returned_blocks = Vec::with_capacity(len_of_response);
                 let response_start_height: u64 = peers_preferred_canonical_block.into();
