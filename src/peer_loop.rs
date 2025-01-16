@@ -773,14 +773,11 @@ impl PeerLoopHandler {
                 debug!("Got BlockNotificationRequest");
 
                 peer.send(PeerMessage::BlockNotification(
-                    (&self
-                        .global_state_lock
+                    self.global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .light_state()
-                        .kernel
-                        .header)
                         .into(),
                 ))
                 .await?;
@@ -1209,7 +1206,7 @@ impl PeerLoopHandler {
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
                     peer_state_info.highest_shared_block_height = new_block_height;
-                    peer.send(PeerMessage::BlockNotification((*block).into()))
+                    peer.send(PeerMessage::BlockNotification(block.as_ref().into()))
                         .await?;
                     debug!("Sent PeerMessage::BlockNotification");
                 }
@@ -2591,7 +2588,7 @@ mod peer_loop_tests {
             Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             //
             // Now make the interruption of the block reconciliation process
-            Action::Read(PeerMessage::BlockNotification(block_5.clone().into())),
+            Action::Read(PeerMessage::BlockNotification((&block_5).into())),
             //
             // Complete the block reconciliation process by requesting the last block
             // in this process, to get back to a mutually known block.

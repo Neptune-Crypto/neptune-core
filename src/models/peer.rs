@@ -1,3 +1,4 @@
+pub mod peer_block_notifications;
 pub mod transaction_notification;
 pub mod transfer_block;
 pub mod transfer_transaction;
@@ -6,6 +7,7 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
+use peer_block_notifications::PeerBlockNotification;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
@@ -17,7 +19,6 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
-use super::blockchain::shared::Hash;
 use super::channel::BlockProposalNotification;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
@@ -403,45 +404,6 @@ pub struct HandshakeData {
     pub instance_id: u128,
     pub version: String,
     pub is_archival_node: bool,
-}
-
-/// Used to tell peers that a new block has been found without having to
-/// send the entire block
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PeerBlockNotification {
-    pub hash: Digest,
-    pub height: BlockHeight,
-    pub(crate) cumulative_proof_of_work: ProofOfWork,
-}
-
-impl From<&Block> for PeerBlockNotification {
-    fn from(block: &Block) -> Self {
-        PeerBlockNotification {
-            hash: block.hash(),
-            height: block.kernel.header.height,
-            cumulative_proof_of_work: block.kernel.header.cumulative_proof_of_work,
-        }
-    }
-}
-
-impl From<Block> for PeerBlockNotification {
-    fn from(block: Block) -> Self {
-        PeerBlockNotification {
-            hash: block.hash(),
-            height: block.kernel.header.height,
-            cumulative_proof_of_work: block.kernel.header.cumulative_proof_of_work,
-        }
-    }
-}
-
-impl From<&BlockHeader> for PeerBlockNotification {
-    fn from(value: &BlockHeader) -> Self {
-        PeerBlockNotification {
-            hash: Hash::hash(value),
-            height: value.height,
-            cumulative_proof_of_work: value.cumulative_proof_of_work,
-        }
-    }
 }
 
 /// A message sent between peers to inform them whether the connection was
