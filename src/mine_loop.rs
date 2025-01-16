@@ -9,7 +9,6 @@ use block_header::BlockHeader;
 use block_header::BlockHeaderField;
 use block_header::MINIMUM_BLOCK_TIME;
 use composer_parameters::ComposerParameters;
-use difficulty_control::Difficulty;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
 use primitive_witness::PrimitiveWitness;
@@ -168,7 +167,6 @@ fn guess_worker(
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
-    let input_block_height = block.kernel.header.height;
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
     info!(
         "Guessing with {} threads on block {} with {} outputs and difficulty {}. Target: {}",
@@ -184,7 +182,16 @@ fn guess_worker(
     //
     // note: number of rayon threads can be set with env var RAYON_NUM_THREADS
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
-    let block_header_template = block.header().to_owned();
+    let now = Timestamp::now();
+    let new_difficulty = difficulty_control(
+        now,
+        previous_block_header.timestamp,
+        previous_block_header.difficulty,
+        target_block_interval,
+        previous_block_header.height,
+    );
+    block.set_header_timestamp_and_difficulty(now, new_difficulty);
+
     let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
     let pool = ThreadPoolBuilder::new()
@@ -194,17 +201,11 @@ fn guess_worker(
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
-                || (&block_header_template, rand::thread_rng()),
-                |(block_header_template_, rng), _i| {
+                || rand::thread_rng(),
+                |rng, _i| {
                     guess_nonce_iteration(
                         kernel_auth_path,
-                        block_header_template_.clone(),
-                        &previous_block_header,
-                        &sender,
-                        DifficultyInfo {
-                            target_block_interval,
-                            threshold,
-                        },
+                        threshold,
                         sleepy_guessing,
                         rng,
                         header_auth_path,
@@ -215,19 +216,8 @@ fn guess_worker(
             .unwrap()
     });
 
-    let (nonce_preimage, timestamp, difficulty) = match guess_result {
-        GuessNonceResult::Cancelled => {
-            info!(
-                "Abandoning mining of current block with height {}",
-                input_block_height,
-            );
-            return;
-        }
-        GuessNonceResult::BlockFound {
-            nonce_preimage,
-            timestamp,
-            difficulty,
-        } => (nonce_preimage, timestamp, difficulty),
+    let nonce_preimage = match guess_result {
+        GuessNonceResult::BlockFound { nonce_preimage } => nonce_preimage,
         _ => unreachable!(),
     };
 
@@ -235,8 +225,8 @@ fn guess_worker(
     info!("Found valid block with nonce: ({nonce}).");
 
     block.set_header_nonce(nonce);
-    block.set_header_timestamp_and_difficulty(timestamp, difficulty);
 
+    let timestamp = block.header().timestamp;
     let timestamp_standard = timestamp.standard_format();
     let hash = block.hash();
     let hex = hash.to_hex();
@@ -274,18 +264,8 @@ Difficulty threshold: {threshold}
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
-pub(crate) struct DifficultyInfo {
-    pub(crate) target_block_interval: Option<Timestamp>,
-    pub(crate) threshold: Digest,
-}
-
 enum GuessNonceResult {
-    Cancelled,
-    BlockFound {
-        nonce_preimage: Digest,
-        timestamp: Timestamp,
-        difficulty: Difficulty,
-    },
+    BlockFound { nonce_preimage: Digest },
     BlockNotFound,
 }
 impl GuessNonceResult {
@@ -294,8 +274,12 @@ impl GuessNonceResult {
     }
 }
 
+/// Return the block-kernel MAST hash given a variable nonce, holding all other
+/// fields constant.
+///
+/// Calculates the block hash in as few Tip5 invocations as possible.
 #[inline(always)]
-fn fast_mast_hash(
+fn fast_kernel_mast_hash(
     kernel_auth_path: [Digest; 2],
     header_auth_path: [Digest; 3],
     nonce: Digest,
@@ -314,69 +298,28 @@ fn fast_mast_hash(
 }
 
 /// Run a single iteration of the mining loop.
-///
-/// Returns (found: bool, cancelled: bool).
-///   found is true if a valid block is found
-///   cancelled is true if the task is terminated.
-#[allow(clippy::too_many_arguments)]
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn guess_nonce_iteration(
     kernel_auth_path: [Digest; 2],
-    mut block_header_template: BlockHeader,
-    previous_block_header: &BlockHeader,
-    sender: &oneshot::Sender<NewBlockFound>,
-    difficulty_info: DifficultyInfo,
+    threshold: Digest,
     sleepy_guessing: bool,
     rng: &mut rand::rngs::ThreadRng,
-    mut bh_auth_path: [Digest; 3],
+    bh_auth_path: [Digest; 3],
 ) -> GuessNonceResult {
-    // Modify the nonce in the block header. In order to collect the guesser
-    // fee, this nonce must be the post-image of a known pre-image under Tip5.
-    let nonce_preimage: Digest = rng.gen();
-    let nonce = nonce_preimage.hash();
-
-    // Update some parameters on average every `N` guess.
-    if nonce.values()[0].raw_u64() % (1 << 20) == 0 {
-        // See issue #149 and test block_timestamp_represents_time_block_found()
-        // this ensures header timestamp represents the moment block is found.
-        // this is simplest impl.
-        let now = Timestamp::now();
-        let new_difficulty = difficulty_control(
-            now,
-            previous_block_header.timestamp,
-            previous_block_header.difficulty,
-            difficulty_info.target_block_interval,
-            previous_block_header.height,
-        );
-        block_header_template.timestamp = now;
-        block_header_template.difficulty = new_difficulty;
-
-        if sender.is_canceled() {
-            info!(
-                "Abandoning mining of current block with height {}",
-                block_header_template.height
-            );
-            return GuessNonceResult::Cancelled;
-        }
-
-        bh_auth_path = precalculate_header_ap(&block_header_template);
-    }
-
     if sleepy_guessing {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    let block_hash = fast_mast_hash(kernel_auth_path, bh_auth_path, nonce);
-    let success = block_hash <= difficulty_info.threshold;
+    // Modify the nonce in the block header. In order to collect the guesser
+    // fee, this nonce must be the post-image of a known pre-image under Tip5.
+    let nonce_preimage: Digest = rng.gen();
+    let nonce = nonce_preimage.hash();
+    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
+    let success = block_hash <= threshold;
 
     match success {
         false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::BlockFound {
-            nonce_preimage,
-            timestamp: block_header_template.timestamp,
-            difficulty: block_header_template.difficulty,
-        },
+        true => GuessNonceResult::BlockFound { nonce_preimage },
     }
 }
 
@@ -1045,35 +988,18 @@ pub(crate) mod mine_loop_tests {
             target_block_interval,
         );
         let threshold = previous_block.header().difficulty.target();
-
-        let (worker_task_tx, _worker_task_rx) = oneshot::channel::<NewBlockFound>();
-
         let num_iterations_launched = 1_000_000;
         let tick = std::time::SystemTime::now();
-        let previous_block_header = previous_block.header();
-        let block_header_template = block.header().to_owned();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(
-                    || {
-                        (
-                            previous_block_header,
-                            block_header_template.clone(),
-                            rand::thread_rng(),
-                        )
-                    },
-                    |(prev_header, block_header_templ, prng), _i| {
+                    || rand::thread_rng(),
+                    |prng, _i| {
                         guess_nonce_iteration(
                             kernel_auth_path,
-                            block_header_templ.to_owned(),
-                            prev_header,
-                            &worker_task_tx,
-                            DifficultyInfo {
-                                target_block_interval,
-                                threshold,
-                            },
+                            threshold,
                             sleepy_guessing,
                             prng,
                             header_auth_path,
@@ -1389,7 +1315,7 @@ pub(crate) mod mine_loop_tests {
     ///       and should always pass in later commits.
     #[traced_test]
     #[tokio::test]
-    async fn block_timestamp_represents_time_block_found() -> Result<()> {
+    async fn block_timestamp_represents_time_guessing_started() -> Result<()> {
         let network = Network::Main;
         let global_state_lock = mock_genesis_global_state(
             network,
