@@ -225,6 +225,10 @@ pub(crate) mod test {
     }
 
     impl BlockPrimitiveWitness {
+        pub(crate) fn predecessor_block(&self) -> Block {
+            self.predecessor_block.to_owned()
+        }
+
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
             (

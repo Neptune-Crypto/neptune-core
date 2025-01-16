@@ -884,6 +884,7 @@ pub(crate) mod mine_loop_tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -1629,6 +1630,17 @@ pub(crate) mod mine_loop_tests {
         assert!((actual_duration as f64) < max_duration);
 
         Ok(())
+    }
+
+    #[test]
+    fn fast_kernel_mast_hash_agrees_with_mast_hash_function() {
+        let block_primitive_witness = deterministic_block_primitive_witness();
+        let a_block = block_primitive_witness.predecessor_block();
+        let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&a_block);
+        assert_eq!(
+            a_block.kernel.mast_hash(),
+            fast_kernel_mast_hash(kernel_auth_path, header_auth_path, a_block.header().nonce)
+        );
     }
 
     #[traced_test]
