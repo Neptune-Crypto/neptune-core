@@ -15,8 +15,28 @@ mod tests {
         macro_rules! name_and_lib {
             [$($t:expr),* $(,)?] => {[$({
                 let (library, _) = $t.library_and_code();
-                (stringify!($t), library)
+                let snippet_names = library
+                    .get_all_snippet_names()
+                    .into_iter()
+                    .map(annotate_with_sign_off_status)
+                    .collect_vec();
+                (stringify!($t), snippet_names)
             }),*]};
+        }
+
+        /// Annotate a snippet name with a somewhat dramatic visualization of the
+        /// sign-off status.
+        fn annotate_with_sign_off_status(name: String) -> String {
+            let Some(snippet) = tasm_lib::exported_snippets::name_to_snippet(&name) else {
+                return format!("⚠ {name}");
+            };
+
+            let sign_offs = snippet.sign_offs();
+            if sign_offs.is_empty() {
+                return format!("🅾 {name}");
+            }
+
+            format!("{} {name}", sign_offs.len().to_string())
         }
 
         let all_consensus_critical_imports = name_and_lib![
@@ -38,7 +58,7 @@ mod tests {
             // block_validity::PrincipalBlockValidationLogic,
         ]
         .into_iter()
-        .flat_map(|(name, lib)| [vec![format!("\n{name}")], lib.get_all_snippet_names()].concat())
+        .flat_map(|(name, snippet_names)| [vec![format!("\n{name}")], snippet_names].concat())
         .unique()
         .join("\n");
 
