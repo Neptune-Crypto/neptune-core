@@ -7,6 +7,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 
@@ -20,15 +21,21 @@ pub struct TransferBlock {
     pub proof: Proof,
 }
 
-// todo: change to try_from
-impl From<TransferBlock> for Block {
-    fn from(t_block: TransferBlock) -> Self {
-        Block::new(
+impl TryFrom<TransferBlock> for Block {
+    type Error = anyhow::Error;
+
+    fn try_from(t_block: TransferBlock) -> std::result::Result<Self, Self::Error> {
+        if t_block.header.height == BlockHeight::genesis() {
+            bail!("The genesis block cannot be transferred or decoded from transfer");
+        }
+
+        let block = Block::new(
             t_block.header,
             t_block.body,
             t_block.appendix,
             BlockProof::SingleProof(t_block.proof),
-        )
+        );
+        Ok(block)
     }
 }
 
@@ -106,7 +113,7 @@ mod test {
         .await;
 
         let transfer_block = TransferBlock::try_from(block1.clone()).unwrap();
-        let new_block = Block::from(transfer_block);
+        let new_block = Block::try_from(transfer_block).unwrap();
         assert_eq!(block1.hash(), new_block.hash());
     }
 }

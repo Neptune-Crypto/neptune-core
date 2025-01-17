@@ -28,10 +28,12 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
+use crate::models::peer::peer_block_notifications::PeerBlockNotification;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
+use crate::models::peer::IssuedSyncChallenge;
 use crate::models::peer::MutablePeerState;
 use crate::models::peer::NegativePeerSanction;
 use crate::models::peer::PeerConnectionInfo;
@@ -40,15 +42,19 @@ use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanction;
 use crate::models::peer::PeerStanding;
 use crate::models::peer::PositivePeerSanction;
+use crate::models::peer::SyncChallenge;
+use crate::models::peer::SyncChallengeResponse;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
+const MIN_BLOCK_HEIGHT_FOR_SYNCING: u64 = 10;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
@@ -347,7 +353,8 @@ impl PeerLoopHandler {
                 "not found".to_string()
             }
         );
-        let parent_height = received_block.kernel.header.height.previous();
+        let parent_height = received_block.kernel.header.height.previous()
+            .expect("transferred block must have previous height because genesis block cannot be transferred");
 
         // If parent is not known, request the parent, and add the current to
         // the peer fork resolution list
@@ -368,6 +375,7 @@ impl PeerLoopHandler {
                     .header
                     .height
                     .previous()
+                    .expect("fork reconcilliation blocks cannot contain genesis")
                     == received_block.kernel.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
                         < self
@@ -545,7 +553,16 @@ impl PeerLoopHandler {
                 );
                 let new_block_height = t_block.header.height;
 
-                let block: Box<Block> = Box::new((*t_block).into());
+                let block = match Block::try_from(*t_block) {
+                    Ok(block) => Box::new(block),
+                    Err(e) => {
+                        warn!("Peer sent invalid block");
+                        self.punish(NegativePeerSanction::InvalidTransferBlock)
+                            .await?;
+
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
 
                 // Update the value for the highest known height that peer possesses iff
                 // we are not in a fork reconciliation state.
@@ -748,7 +765,20 @@ impl PeerLoopHandler {
                     "Found own block of height {} to match received batch",
                     most_canonical_own_block_match.kernel.header.height
                 );
-                let received_blocks: Vec<Block> = t_blocks.into_iter().map(|x| x.into()).collect();
+                let mut received_blocks = vec![];
+                for t_block in t_blocks {
+                    match Block::try_from(t_block) {
+                        Ok(block) => {
+                            received_blocks.push(block);
+                        }
+                        Err(e) => {
+                            warn!("Received invalid transfer block from peer.");
+                            self.punish(NegativePeerSanction::InvalidTransferBlock)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                    }
+                }
 
                 // Get the latest block that we know of and handle all received blocks
                 self.handle_blocks(received_blocks, most_canonical_own_block_match)
@@ -784,6 +814,173 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::SyncChallenge(sync_challenge) => {
+                /// Returns (parent, child) pair of blocks.
+                async fn fetch_block_pair(
+                    child_digest: Digest,
+                    global_state: &GlobalState,
+                ) -> Option<(Block, Block)> {
+                    let child = global_state
+                        .chain
+                        .archival_state()
+                        .get_block(child_digest)
+                        .await
+                        .expect("fetching block from archival state should work.");
+                    let Some(child) = child else {
+                        warn!("Got sync challenge for unknown tip");
+
+                        return None;
+                    };
+                    let parent_digest = child.header().prev_block_digest;
+                    let parent = global_state
+                        .chain
+                        .archival_state()
+                        .get_block(parent_digest)
+                        .await
+                        .expect("fetching block from archival state should work.")
+                        .expect("parent of known block from archival state must exist.");
+
+                    Some((parent, child))
+                }
+
+                info!("Got sync challenge from {}", self.peer_address.ip());
+
+                let global_state = self.global_state_lock.lock_guard().await;
+                let ret = fetch_block_pair(sync_challenge.tip_digest, &global_state).await;
+                let Some((tip_parent, tip)) = ret else {
+                    drop(global_state);
+                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                if tip.header().height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
+                    drop(global_state);
+                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
+                let mut block_mmr_mps = vec![];
+                for h in sync_challenge.challenges {
+                    if h < 2u64.into() {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    let Some(child_digest) = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .try_get_leaf(h.into())
+                        .await
+                    else {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+                    let Some((p, c)) = fetch_block_pair(child_digest, &global_state).await else {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+
+                    block_mmr_mps.push(
+                        global_state
+                            .chain
+                            .archival_state()
+                            .archival_block_mmr
+                            .prove_membership_async(h.into())
+                            .await,
+                    );
+                    block_pairs.push((
+                        p.try_into()
+                            .expect("blocks from archive must be transferable"),
+                        c.try_into()
+                            .expect("blocks from archive must be transferable"),
+                    ));
+                }
+
+                let response = SyncChallengeResponse {
+                    tip: tip
+                        .try_into()
+                        .expect("All blocks from archival state should be transferable."),
+                    tip_parent: tip_parent
+                        .try_into()
+                        .expect("All blocks from archival state should be transferable."),
+                    blocks: block_pairs.try_into().unwrap(),
+                    membership_proofs: block_mmr_mps.try_into().unwrap(),
+                };
+
+                info!(
+                    "Responding to sync challenge from {}",
+                    self.peer_address.ip()
+                );
+                peer.send(PeerMessage::SyncChallengeResponse(response))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::SyncChallengeResponse(challenge_response) => {
+                info!(
+                    "Got sync challenge response from {}",
+                    self.peer_address.ip()
+                );
+
+                // Did we issue a challenge?
+                let Some(issued_challenge) = peer_state_info.sync_challenge else {
+                    warn!("Sync challenge response was not prompted.");
+                    self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // Reset the challenge, regardless of the response's success.
+                peer_state_info.sync_challenge = None;
+
+                // Does response match issued challenge?
+                if !challenge_response.matches(issued_challenge) {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Does response verify?
+                let claimed_tip_height = challenge_response.tip.header.height;
+                let now = self.now();
+                if !challenge_response.is_valid(now).await {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Did it come in time?
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
+                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
+                    self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Inform main loop
+                self.to_main_tx
+                    .send(PeerTaskToMain::AddPeerMaxBlockHeight((
+                        self.peer_address,
+                        claimed_tip_height,
+                        issued_challenge.accumulated_pow,
+                    )))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             PeerMessage::BlockNotification(block_notification) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
 
@@ -791,55 +988,64 @@ impl PeerLoopHandler {
                     "Got BlockNotification of height {}",
                     block_notification.height
                 );
-                peer_state_info.highest_shared_block_height = block_notification.height;
-                {
-                    let block_is_new = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .kernel
-                        .header
-                        .cumulative_proof_of_work
-                        < block_notification.cumulative_proof_of_work;
-
-                    debug!("block_is_new: {}", block_is_new);
-
-                    // Only request block if it is new, and if we are not currently reconciling
-                    // a fork. If we are reconciling, that is handled later, and the information
-                    // about that is stored in `highest_shared_block_height`. If we are syncing
-                    // we are also not requesting the block but instead updating the sync state.
-                    if self.global_state_lock.lock_guard().await.net.syncing {
-                        debug!(
-                            "ignoring peer block with height {} because we are presently syncing",
-                            block_notification.height
-                        );
-
-                        self.to_main_tx
-                            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                                self.peer_address,
-                                block_notification.height,
-                                block_notification.cumulative_proof_of_work,
-                            )))
-                            .await
-                            .expect("Sending to main task must succeed");
-                    } else if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    {
-                        debug!(
-                            "sending BlockRequestByHeight to peer for block with height {}",
-                            block_notification.height
-                        );
-                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                            .await?;
-                    } else {
-                        debug!(
-                            "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
-                            block_notification.height,
-                            block_is_new,
-                            !peer_state_info.fork_reconciliation_blocks.is_empty()
-                        );
+                let state = self.global_state_lock.lock_guard().await;
+                if state.should_enter_sync_mode(
+                    block_notification.height,
+                    block_notification.cumulative_proof_of_work,
+                ) {
+                    if peer_state_info.sync_challenge.is_some() {
+                        warn!("Cannot launch new sync challenge because one is already on-going.");
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     }
+
+                    info!(
+                        "Peer indicates block which would activate sync mode, issuing challenge."
+                    );
+                    let challenge = SyncChallenge::generate(
+                        &block_notification,
+                        state.chain.light_state().header().height,
+                    );
+                    peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
+                        challenge,
+                        block_notification.cumulative_proof_of_work,
+                    ));
+
+                    peer.send(PeerMessage::SyncChallenge(challenge)).await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                peer_state_info.highest_shared_block_height = block_notification.height;
+                let block_is_new = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .kernel
+                    .header
+                    .cumulative_proof_of_work
+                    < block_notification.cumulative_proof_of_work;
+
+                debug!("block_is_new: {}", block_is_new);
+
+                if block_is_new
+                    && peer_state_info.fork_reconciliation_blocks.is_empty()
+                    && !self.global_state_lock.lock_guard().await.net.syncing
+                {
+                    debug!(
+                        "sending BlockRequestByHeight to peer for block with height {}",
+                        block_notification.height
+                    );
+                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                        .await?;
+                } else {
+                    debug!(
+                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
+                        block_notification.height,
+                        block_is_new,
+                        !peer_state_info.fork_reconciliation_blocks.is_empty()
+                    );
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)

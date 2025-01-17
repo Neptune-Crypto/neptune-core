@@ -6,10 +6,16 @@ pub mod transfer_transaction;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use peer_block_notifications::PeerBlockNotification;
+use rand::thread_rng;
+use rand::Rng;
+use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tracing::trace;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
@@ -19,7 +25,9 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
+use super::blockchain::block::BlockProof;
 use super::channel::BlockProposalNotification;
+use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::peer::transfer_block::TransferBlock;
@@ -132,6 +140,12 @@ pub enum NegativePeerSanction {
     DifferentGenesis,
     ForkResolutionError((BlockHeight, u16, Digest)),
     SynchronizationTimeout,
+
+    InvalidSyncChallenge,
+    InvalidSyncChallengeResponse,
+    TimedOutSyncChallengeResponse,
+    UnexpectedSyncChallengeResponse,
+
     FloodPeerListResponse,
     BlockRequestUnknownHeight,
     // Be careful about using this too much as it's bad for log opportunities
@@ -144,6 +158,8 @@ pub enum NegativePeerSanction {
     BatchBlocksRequestEmpty,
     InvalidTransaction,
     UnconfirmableTransaction,
+
+    InvalidTransferBlock,
 
     BlockProposalNotFound,
     InvalidBlockProposal,
@@ -197,6 +213,15 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::UnwantedMessage => "unwanted message",
             NegativePeerSanction::NonFavorableBlockProposal => "non-favorable block proposal",
             NegativePeerSanction::BatchBlocksRequestEmpty => "batch block request empty",
+            NegativePeerSanction::InvalidSyncChallenge => "invalid sync challenge",
+            NegativePeerSanction::InvalidSyncChallengeResponse => "invalid sync challenge response",
+            NegativePeerSanction::UnexpectedSyncChallengeResponse => {
+                "unexpected sync challenge response"
+            }
+            NegativePeerSanction::InvalidTransferBlock => "invalid transfer block",
+            NegativePeerSanction::TimedOutSyncChallengeResponse => {
+                "timed-out sync challenge response"
+            }
         };
         write!(f, "{string}")
     }
@@ -259,6 +284,11 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::UnwantedMessage => -1,
             NegativePeerSanction::NonFavorableBlockProposal => -1,
             NegativePeerSanction::BatchBlocksRequestEmpty => -10,
+            NegativePeerSanction::InvalidSyncChallenge => -50,
+            NegativePeerSanction::InvalidSyncChallengeResponse => -500,
+            NegativePeerSanction::UnexpectedSyncChallengeResponse => -1,
+            NegativePeerSanction::InvalidTransferBlock => -50,
+            NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
         }
     }
 }
@@ -480,6 +510,9 @@ pub(crate) enum PeerMessage {
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     UnableToSatisfyBatchRequest,
 
+    SyncChallenge(SyncChallenge),
+    SyncChallengeResponse(SyncChallengeResponse),
+
     BlockProposalNotification(BlockProposalNotification),
 
     BlockProposalRequest(BlockProposalRequest),
@@ -525,6 +558,8 @@ impl PeerMessage {
             PeerMessage::BlockProposalRequest(_) => "block proposal request",
             PeerMessage::BlockProposal(_) => "block proposal",
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
+            PeerMessage::SyncChallenge(_) => "sync challenge",
+            PeerMessage::SyncChallengeResponse(_) => "sync challenge response",
         }
         .to_string()
     }
@@ -550,6 +585,8 @@ impl PeerMessage {
             PeerMessage::BlockProposalRequest(_) => false,
             PeerMessage::BlockProposal(_) => false,
             PeerMessage::UnableToSatisfyBatchRequest => true,
+            PeerMessage::SyncChallenge(_) => false,
+            PeerMessage::SyncChallengeResponse(_) => false,
         }
     }
 
@@ -575,6 +612,8 @@ impl PeerMessage {
             PeerMessage::BlockProposalRequest(_) => true,
             PeerMessage::BlockProposal(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => false,
+            PeerMessage::SyncChallenge(_) => false,
+            PeerMessage::SyncChallengeResponse(_) => false,
         }
     }
 }
@@ -585,6 +624,7 @@ impl PeerMessage {
 pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
+    pub(crate) sync_challenge: Option<IssuedSyncChallenge>,
 }
 
 impl MutablePeerState {
@@ -592,6 +632,161 @@ impl MutablePeerState {
         Self {
             highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
+            sync_challenge: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IssuedSyncChallenge {
+    pub(crate) challenge: SyncChallenge,
+    pub(crate) issued_at: Timestamp,
+    pub(crate) accumulated_pow: ProofOfWork,
+}
+impl IssuedSyncChallenge {
+    pub(crate) fn new(challenge: SyncChallenge, claimed_pow: ProofOfWork) -> Self {
+        Self {
+            challenge,
+            issued_at: Timestamp::now(),
+            accumulated_pow: claimed_pow,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct SyncChallenge {
+    pub(crate) tip_digest: Digest,
+    pub(crate) challenges: [BlockHeight; 10],
+}
+
+impl SyncChallenge {
+    /// Generate a `SyncChallenge`.
+    ///
+    /// Sample 10 block heights, 5 each from two distributions:
+    ///  1. An exponential distribution smaller than the peer's claimed height
+    ///     but skewed towards this number.
+    ///  2. A uniform distribution between own tip height and the peer's claimed
+    ///     height.
+    ///
+    /// # Panics
+    ///
+    ///  - Panics if the difference in height between own tip and peer's tip is
+    ///    less than 10.
+    pub(crate) fn generate(
+        block_notification: &PeerBlockNotification,
+        own_tip_height: BlockHeight,
+    ) -> Self {
+        let mut rng = thread_rng();
+        let mut heights = vec![];
+
+        assert!(
+            block_notification.height - own_tip_height >= 10,
+            "Cannot issue sync challenge when height difference is less than 10."
+        );
+
+        // sample 5 block heights skewed towards peer's claimed tip height
+        while heights.len() < 5 {
+            let distance = rng.next_u64().leading_zeros() * 31
+                + rng.next_u64().leading_zeros() * 7
+                + rng.next_u64().leading_zeros() * 3
+                + rng.next_u64().leading_zeros()
+                + 1;
+            let Some(height) = block_notification.height.checked_sub(distance.into()) else {
+                continue;
+            };
+
+            // Don't require peer to send genesis block, as that's impossible.
+            if height <= 1.into() {
+                continue;
+            }
+            heights.push(height);
+        }
+
+        // sample 5 block heights uniformly from the interval between own tip
+        // height and peer's claimed tip height
+        let interval = u64::from(own_tip_height)..u64::from(block_notification.height);
+        while heights.len() < 10 {
+            heights.push(rng.gen_range(interval.clone()).into());
+        }
+
+        Self {
+            tip_digest: block_notification.hash,
+            challenges: heights.try_into().unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct SyncChallengeResponse {
+    pub(crate) tip: TransferBlock,
+    pub(crate) tip_parent: TransferBlock,
+    pub(crate) blocks: [(TransferBlock, TransferBlock); 10],
+    pub(crate) membership_proofs: [MmrMembershipProof; 10],
+}
+
+impl SyncChallengeResponse {
+    pub(crate) fn matches(&self, issued_challenge: IssuedSyncChallenge) -> bool {
+        let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
+            return false;
+        };
+        let Ok(tip) = Block::try_from(self.tip.clone()) else {
+            return false;
+        };
+
+        self.blocks
+            .iter()
+            .zip(issued_challenge.challenge.challenges.iter())
+            .all(|((_, child), challenge_height)| child.header.height == *challenge_height)
+            && issued_challenge.challenge.tip_digest == tip.hash()
+            && issued_challenge.accumulated_pow == tip.header().cumulative_proof_of_work
+            && tip.has_proof_of_work(tip_predecessor.header())
+    }
+
+    pub(crate) async fn is_valid(self, now: Timestamp) -> bool {
+        let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
+            return false;
+        };
+        let Ok(tip) = Block::try_from(self.tip.clone()) else {
+            return false;
+        };
+        if !tip.is_valid(&tip_predecessor, now).await
+            || !tip.has_proof_of_work(tip_predecessor.header())
+        {
+            return false;
+        }
+
+        for ((parent, child), membership_proof) in self
+            .blocks
+            .into_iter()
+            .zip(self.membership_proofs.into_iter())
+        {
+            let child = Block::new(
+                child.header,
+                child.body,
+                child.appendix,
+                BlockProof::SingleProof(child.proof),
+            );
+            if !membership_proof.verify(
+                child.header().height.into(),
+                child.hash(),
+                &tip.body().block_mmr_accumulator.peaks(),
+                tip.header().height.into(),
+            ) {
+                return false;
+            }
+
+            let parent = Block::new(
+                parent.header,
+                parent.body,
+                parent.appendix,
+                BlockProof::SingleProof(parent.proof),
+            );
+
+            if !child.is_valid(&parent, now).await || !child.has_proof_of_work(parent.header()) {
+                return false;
+            }
+        }
+
+        true
     }
 }
