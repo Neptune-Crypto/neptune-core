@@ -229,3 +229,7 @@ harness = false
 name = "consensus"
 harness = false
 required-features = ["arbitrary-impls"]
+
+[patch.crates-io]
+# 04309be3 is tip of “better_snippet_export_pr” on 2025-01-17
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "04309be3" }
