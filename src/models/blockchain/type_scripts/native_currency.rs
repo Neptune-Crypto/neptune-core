@@ -1205,9 +1205,7 @@ pub mod test {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::proof::Claim;
-    use tasm_lib::triton_vm::stark::Stark;
     use test_strategy::proptest;
 
     use super::*;
@@ -1224,6 +1222,7 @@ pub mod test {
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::proof_abstractions::verifier::verify;
 
     fn assert_both_rust_and_tasm_halt_gracefully(
         native_currency_witness: NativeCurrencyWitness,
@@ -1492,10 +1491,7 @@ pub mod test {
             )
             .await
             .unwrap();
-        assert!(
-            triton_vm::verify(Stark::default(), &claim, &proof),
-            "proof fails"
-        );
+        assert!(verify(claim, proof).await, "proof fails");
     }
 
     #[proptest]
