@@ -621,7 +621,7 @@ impl MainLoopHandler {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             &last_block.kernel.header,
                             &main_loop_state.sync_state,
-                            cli_args.max_number_of_blocks_before_syncing,
+                            cli_args.sync_mode_threshold,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
@@ -692,7 +692,7 @@ impl MainLoopHandler {
                 // mode.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if global_state_mut
-                    .should_enter_sync_mode(claimed_max_height, claimed_max_accumulative_pow)
+                    .sync_mode_criterion(claimed_max_height, claimed_max_accumulative_pow)
                 {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
@@ -721,7 +721,7 @@ impl MainLoopHandler {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
-                        cli_args.max_number_of_blocks_before_syncing,
+                        cli_args.sync_mode_threshold,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");

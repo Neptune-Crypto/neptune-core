@@ -50,8 +50,6 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::peer::peer_block_notifications::PeerBlockNotification;
-use super::peer::PeerSynchronizationState;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -348,16 +346,24 @@ impl GlobalState {
         height
     }
 
-    /// Return a boolean indicating if synchronization mode should be entered
-    pub(crate) fn should_enter_sync_mode(
+    /// Determine whether the conditions are met to enter into sync mode.
+    ///
+    /// Specifically, compute a boolean value based on
+    ///  - whether the foreign cumulative proof-of-work exceeds that of our own;
+    ///  - whether the foreign block has a bigger block height and the height
+    ///    difference exceeds the threshold set by the CLI.
+    ///
+    /// The main loop relies on this criterion to decide whether to enter sync
+    /// mode. If the main loop activates sync mode, it affects the entire
+    /// application.
+    pub(crate) fn sync_mode_criterion(
         &self,
         max_height: BlockHeight,
         cumulative_pow: ProofOfWork,
     ) -> bool {
         let own_block_tip_header = self.chain.light_state().header();
         own_block_tip_header.cumulative_proof_of_work < cumulative_pow
-            && max_height - own_block_tip_header.height
-                > self.cli().max_number_of_blocks_before_syncing as i128
+            && max_height - own_block_tip_header.height > self.cli().sync_mode_threshold as i128
     }
 
     pub(crate) fn composer_parameters(
