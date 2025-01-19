@@ -692,7 +692,7 @@ impl MainLoopHandler {
                 // mode.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if global_state_mut
-                    .should_enter_sync_mode(claimed_max_height, claimed_max_accumulative_pow)
+                    .sync_mode_criterion(claimed_max_height, claimed_max_accumulative_pow)
                 {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",

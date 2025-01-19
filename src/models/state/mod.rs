@@ -346,8 +346,17 @@ impl GlobalState {
         height
     }
 
-    /// Return a boolean indicating if synchronization mode should be entered
-    pub(crate) fn should_enter_sync_mode(
+    /// Determine whether the conditions are met to enter into sync mode.
+    ///
+    /// Specifically, compute a boolean value based on
+    ///  - whether the foreign cumulative proof-of-work exceeds that of our own;
+    ///  - whether the foreign block has a bigger block height and the height
+    ///    difference exceeds the threshold set by the CLI.
+    ///
+    /// The main loop relies on this criterion to decide whether to enter sync
+    /// mode. If the main loop activates sync mode, it affects the entire
+    /// application.
+    pub(crate) fn sync_mode_criterion(
         &self,
         max_height: BlockHeight,
         cumulative_pow: ProofOfWork,

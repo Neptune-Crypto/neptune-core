@@ -563,7 +563,7 @@ impl PeerLoopHandler {
                     block_notification.height
                 );
                 let state = self.global_state_lock.lock_guard().await;
-                if state.should_enter_sync_mode(
+                if state.sync_mode_criterion(
                     block_notification.height,
                     block_notification.cumulative_proof_of_work,
                 ) {
