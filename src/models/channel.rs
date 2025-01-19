@@ -133,7 +133,7 @@ impl MainToPeerTask {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, ProofOfWork)),
@@ -144,7 +144,7 @@ pub(crate) enum PeerTaskToMain {
     DisconnectFromLongestLivedPeer,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerTaskToMainTransaction {
     pub transaction: Transaction,
     pub confirmable_for_block: Digest,

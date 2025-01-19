@@ -591,7 +591,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(Network::Alpha, 0, cli_args::Args::default()).await?;
         call_peer_inner(
             mock,
             state.clone(),
@@ -623,7 +623,7 @@ mod connect_tests {
             _to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 1).await?;
+        ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
 
         // Get an address for a peer that's not already connected
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1).await;
@@ -787,7 +787,7 @@ mod connect_tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         answer_peer_inner(
             mock,
             state_lock.clone(),
@@ -821,7 +821,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
             mock,
@@ -854,7 +854,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(Network::Alpha, 0, cli_args::Args::default()).await?;
 
         let answer = answer_peer_inner(
             mock,
@@ -875,7 +875,9 @@ mod connect_tests {
     async fn test_incoming_connection_fail_bad_version() {
         let mut other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet).await;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await.unwrap();
+            get_test_genesis_setup(Network::Alpha, 0, cli_args::Args::default())
+                .await
+                .unwrap();
         let state = state_lock.lock_guard().await;
         let mut own_handshake = state.get_own_handshakedata().await;
 
@@ -959,7 +961,7 @@ mod connect_tests {
             _to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(Network::Alpha, 2).await?;
+        ) = get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default()).await?;
 
         // set max_peers to 2 to ensure failure on next connection attempt
         let mut cli = state_lock.cli().clone();
@@ -1013,6 +1015,7 @@ mod connect_tests {
         ) = get_test_genesis_setup(
             Network::Alpha,
             peer_count_before_incoming_connection_request,
+            cli_args::Args::default(),
         )
         .await?;
         let bad_standing: PeerStanding = PeerStanding::init(

@@ -58,13 +58,13 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::WalletSecret;
 use crate::prelude::twenty_first;
-use crate::triton_vm;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -254,8 +254,7 @@ impl Block {
         let header =
             primitive_witness.header(timestamp, nonce_preimage.hash(), target_block_interval);
         let (appendix, proof) = {
-            let block_proof_witness =
-                BlockProofWitness::produce(primitive_witness, triton_vm_job_queue).await?;
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness).await?;
             let appendix = block_proof_witness.appendix();
             let claim = BlockProgram::claim(&body, &appendix);
             let proof = BlockProgram
@@ -283,11 +282,11 @@ impl Block {
     ) -> anyhow::Result<Block> {
         let tx_claim = SingleProof::claim(transaction.kernel.mast_hash());
         assert!(
-            triton_vm::verify(
-                Stark::default(),
-                &tx_claim,
-                &transaction.proof.clone().into_single_proof()
-            ),
+            verify(
+                tx_claim.clone(),
+                transaction.proof.clone().into_single_proof().clone()
+            )
+            .await,
             "Transaction proof must be valid to generate a block"
         );
         assert!(

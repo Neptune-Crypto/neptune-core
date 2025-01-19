@@ -10,7 +10,6 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -21,7 +20,6 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::verifier::stark_verify::StarkVerify;
-use tokio::task;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
@@ -35,6 +33,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::verifier::verify;
 
 /// Verifies that all claims listed in the appendix are true.
 ///
@@ -60,10 +59,7 @@ impl BlockProgram {
         let proof_clone = proof.clone();
 
         debug!("** Calling triton_vm::verify to verify block proof ...");
-        let verdict =
-            task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof_clone))
-                .await
-                .expect("should be able to verify block proof in new tokio task");
+        let verdict = verify(claim, proof_clone).await;
         debug!("** Call to triton_vm::verify to verify block proof completed; verdict: {verdict}.");
 
         verdict
@@ -401,10 +397,7 @@ pub(crate) mod test {
         let _guard = rt.enter();
 
         let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(
-                block_primitive_witness,
-                &TritonVmJobQueue::dummy(),
-            ))
+            .block_on(BlockProofWitness::produce(block_primitive_witness))
             .unwrap();
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
