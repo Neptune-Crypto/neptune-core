@@ -397,10 +397,7 @@ pub(crate) mod test {
         let _guard = rt.enter();
 
         let block_proof_witness = rt
-            .block_on(BlockProofWitness::produce(
-                block_primitive_witness,
-                &TritonVmJobQueue::dummy(),
-            ))
+            .block_on(BlockProofWitness::produce(block_primitive_witness))
             .unwrap();
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
