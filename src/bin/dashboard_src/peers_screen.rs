@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use neptune_cash::models::peer::PeerInfo;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;
 use ratatui::layout::Margin;
@@ -34,19 +35,21 @@ pub struct PeersScreen {
     in_focus: bool,
     data: Arc<std::sync::Mutex<Vec<PeerInfo>>>,
     server: Arc<RPCClient>,
+    token: rpc_auth::Token,
     poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
 impl PeersScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
-        PeersScreen {
+    pub fn new(rpc_server: Arc<RPCClient>, token: rpc_auth::Token) -> Self {
+        Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
             data: Arc::new(Mutex::new(vec![])),
             server: rpc_server,
+            token,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
@@ -54,6 +57,7 @@ impl PeersScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         peer_info: Arc<std::sync::Mutex<Vec<PeerInfo>>>,
         escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) -> ! {
@@ -99,13 +103,16 @@ impl PeersScreen {
                     //         is_archival_node: false,
                     //     }
                     // ];
-                    match rpc_client.peer_info(context::current()).await {
-                        Ok(pi) => {
+                    match rpc_client.peer_info(context::current(), token).await {
+                        Ok(Ok(pi)) => {
                             *peer_info.lock().unwrap() = pi;
 
                             *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
                             reset_poller!(balance, Duration::from_secs(10));
                         },
+                        Ok(Err(e)) => {
+                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
+                        }
                         Err(e) => {
                             *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string()));
                         }
@@ -122,8 +129,9 @@ impl Screen for PeersScreen {
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
+        let token = self.token;
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
-            PeersScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
+            PeersScreen::run_polling_loop(server_arc, token, data_arc, escalatable_event_arc).await;
         }))));
     }
 

@@ -232,6 +232,16 @@ pub struct Args {
     /// STARK proofs this machine can produce.
     #[clap(long, default_value = "16")]
     pub(crate) max_num_proofs: usize,
+
+    /// Disables the cookie_hint RPC API
+    ///
+    /// client software can ask for a cookie hint to automatically determine the
+    /// root data directory used by a running node, which enables loading a
+    /// cookie file for authentication.
+    ///
+    /// Exposing the data directory leaks some privacy. Disable to prevent.
+    #[clap(long)]
+    pub disable_cookie_hint: bool,
 }
 
 impl Default for Args {

@@ -14,6 +14,7 @@ use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_cash::models::state::mining_status::MiningStatus;
 use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
 use neptune_cash::prelude::twenty_first;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
@@ -90,6 +91,7 @@ pub struct OverviewScreen {
     in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
+    token: rpc_auth::Token,
     poll_task: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
@@ -98,9 +100,10 @@ impl OverviewScreen {
     pub fn new(
         rpc_server: Arc<RPCClient>,
         network: Network,
+        token: rpc_auth::Token,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
-        OverviewScreen {
+        Self {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
@@ -110,6 +113,7 @@ impl OverviewScreen {
                 listen_addr_for_peers,
             ))),
             server: rpc_server,
+            token,
             poll_task: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
@@ -117,6 +121,7 @@ impl OverviewScreen {
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
+        token: rpc_auth::Token,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
         escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) {
@@ -139,8 +144,8 @@ impl OverviewScreen {
         loop {
             select! {
                 _ = &mut dashboard_overview_data => {
-                        match rpc_client.dashboard_overview_data(context::current()).await {
-                        Ok(resp) => {
+                        match rpc_client.dashboard_overview_data(context::current(), token).await {
+                        Ok(Ok(resp)) => {
 
                             {
                                 let mut own_overview_data = overview_data.lock().unwrap();
@@ -166,6 +171,7 @@ impl OverviewScreen {
 
                             reset_poller!(dashboard_overview_data, Duration::from_secs(3));
                         },
+                        Ok(Err(e)) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
                 }
@@ -220,9 +226,11 @@ impl Screen for OverviewScreen {
         self.active = true;
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
+        let token = self.token;
         let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_task = Some(Arc::new(Mutex::new(tokio::spawn(async move {
-            OverviewScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
+            OverviewScreen::run_polling_loop(server_arc, token, data_arc, escalatable_event_arc)
+                .await;
         }))));
     }
 
