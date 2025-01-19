@@ -541,6 +541,325 @@ impl PeerLoopHandler {
                     .await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::BlockNotificationRequest => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
+
+                debug!("Got BlockNotificationRequest");
+
+                peer.send(PeerMessage::BlockNotification(
+                    self.global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .into(),
+                ))
+                .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockNotification(block_notification) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
+
+                debug!(
+                    "Got BlockNotification of height {}",
+                    block_notification.height
+                );
+                let state = self.global_state_lock.lock_guard().await;
+                if state.should_enter_sync_mode(
+                    block_notification.height,
+                    block_notification.cumulative_proof_of_work,
+                ) {
+                    if peer_state_info.sync_challenge.is_some() {
+                        warn!("Cannot launch new sync challenge because one is already on-going.");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    info!(
+                        "Peer indicates block which would activate sync mode, issuing challenge."
+                    );
+                    let challenge = SyncChallenge::generate(
+                        &block_notification,
+                        state.chain.light_state().header().height,
+                    );
+                    peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
+                        challenge,
+                        block_notification.cumulative_proof_of_work,
+                    ));
+
+                    peer.send(PeerMessage::SyncChallenge(challenge)).await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                peer_state_info.highest_shared_block_height = block_notification.height;
+                let block_is_new = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .kernel
+                    .header
+                    .cumulative_proof_of_work
+                    < block_notification.cumulative_proof_of_work;
+
+                debug!("block_is_new: {}", block_is_new);
+
+                if block_is_new
+                    && peer_state_info.fork_reconciliation_blocks.is_empty()
+                    && !self.global_state_lock.lock_guard().await.net.syncing
+                {
+                    debug!(
+                        "sending BlockRequestByHeight to peer for block with height {}",
+                        block_notification.height
+                    );
+                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                        .await?;
+                } else {
+                    debug!(
+                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
+                        block_notification.height,
+                        block_is_new,
+                        !peer_state_info.fork_reconciliation_blocks.is_empty()
+                    );
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::SyncChallenge(sync_challenge) => {
+                /// Returns (parent, child) pair of blocks.
+                async fn fetch_block_pair(
+                    child_digest: Digest,
+                    global_state: &GlobalState,
+                ) -> Option<(Block, Block)> {
+                    let child = global_state
+                        .chain
+                        .archival_state()
+                        .get_block(child_digest)
+                        .await
+                        .expect("fetching block from archival state should work.");
+                    let Some(child) = child else {
+                        warn!("Got sync challenge for unknown tip");
+
+                        return None;
+                    };
+                    let parent_digest = child.header().prev_block_digest;
+                    let parent = global_state
+                        .chain
+                        .archival_state()
+                        .get_block(parent_digest)
+                        .await
+                        .expect("fetching block from archival state should work.")
+                        .expect("parent of known block from archival state must exist.");
+
+                    Some((parent, child))
+                }
+
+                info!("Got sync challenge from {}", self.peer_address.ip());
+
+                let global_state = self.global_state_lock.lock_guard().await;
+                let ret = fetch_block_pair(sync_challenge.tip_digest, &global_state).await;
+                let Some((tip_parent, tip)) = ret else {
+                    drop(global_state);
+                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                if tip.header().height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
+                    drop(global_state);
+                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
+                let mut block_mmr_mps = vec![];
+                for h in sync_challenge.challenges {
+                    if h < 2u64.into() {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    let Some(child_digest) = self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .try_get_leaf(h.into())
+                        .await
+                    else {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+                    let Some((p, c)) = fetch_block_pair(child_digest, &global_state).await else {
+                        drop(global_state);
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+
+                    block_mmr_mps.push(
+                        global_state
+                            .chain
+                            .archival_state()
+                            .archival_block_mmr
+                            .prove_membership_async(h.into())
+                            .await,
+                    );
+                    block_pairs.push((
+                        p.try_into()
+                            .expect("blocks from archive must be transferable"),
+                        c.try_into()
+                            .expect("blocks from archive must be transferable"),
+                    ));
+                }
+
+                let response = SyncChallengeResponse {
+                    tip: tip
+                        .try_into()
+                        .expect("All blocks from archival state should be transferable."),
+                    tip_parent: tip_parent
+                        .try_into()
+                        .expect("All blocks from archival state should be transferable."),
+                    blocks: block_pairs.try_into().unwrap(),
+                    membership_proofs: block_mmr_mps.try_into().unwrap(),
+                };
+
+                info!(
+                    "Responding to sync challenge from {}",
+                    self.peer_address.ip()
+                );
+                peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::SyncChallengeResponse(challenge_response) => {
+                info!(
+                    "Got sync challenge response from {}",
+                    self.peer_address.ip()
+                );
+
+                // Did we issue a challenge?
+                let Some(issued_challenge) = peer_state_info.sync_challenge else {
+                    warn!("Sync challenge response was not prompted.");
+                    self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // Reset the challenge, regardless of the response's success.
+                peer_state_info.sync_challenge = None;
+
+                // Does response match issued challenge?
+                if !challenge_response.matches(issued_challenge) {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Does response verify?
+                let claimed_tip_height = challenge_response.tip.header.height;
+                let now = self.now();
+                if !challenge_response.is_valid(now).await {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Did it come in time?
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
+                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
+                    self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Inform main loop
+                self.to_main_tx
+                    .send(PeerTaskToMain::AddPeerMaxBlockHeight((
+                        self.peer_address,
+                        claimed_tip_height,
+                        issued_challenge.accumulated_pow,
+                    )))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockRequestByHash(block_digest) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
+
+                match self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(block_digest)
+                    .await?
+                {
+                    None => {
+                        // TODO: Consider punishing here
+                        warn!("Peer requested unkown block with hash {}", block_digest);
+                        Ok(KEEP_CONNECTION_ALIVE)
+                    }
+                    Some(b) => {
+                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
+                            .await?;
+                        Ok(KEEP_CONNECTION_ALIVE)
+                    }
+                }
+            }
+            PeerMessage::BlockRequestByHeight(block_height) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+
+                debug!("Got BlockRequestByHeight of height {}", block_height);
+
+                let canonical_block_digest = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .try_get_leaf(block_height.into())
+                    .await;
+
+                let canonical_block_digest = match canonical_block_digest {
+                    None => {
+                        warn!("Got block request by height for unknown block");
+                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                    Some(digest) => digest,
+                };
+
+                let canonical_chain_block: Block = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(canonical_block_digest)
+                    .await?
+                    .unwrap();
+                let block_response: PeerMessage =
+                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
+
+                debug!("Sending block");
+                peer.send(block_response).await?;
+                debug!("Sent block");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             PeerMessage::Block(t_block) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Block");
 
@@ -794,325 +1113,6 @@ impl PeerLoopHandler {
                     self.peer_address
                 );
 
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockNotificationRequest => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
-
-                debug!("Got BlockNotificationRequest");
-
-                peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .into(),
-                ))
-                .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::SyncChallenge(sync_challenge) => {
-                /// Returns (parent, child) pair of blocks.
-                async fn fetch_block_pair(
-                    child_digest: Digest,
-                    global_state: &GlobalState,
-                ) -> Option<(Block, Block)> {
-                    let child = global_state
-                        .chain
-                        .archival_state()
-                        .get_block(child_digest)
-                        .await
-                        .expect("fetching block from archival state should work.");
-                    let Some(child) = child else {
-                        warn!("Got sync challenge for unknown tip");
-
-                        return None;
-                    };
-                    let parent_digest = child.header().prev_block_digest;
-                    let parent = global_state
-                        .chain
-                        .archival_state()
-                        .get_block(parent_digest)
-                        .await
-                        .expect("fetching block from archival state should work.")
-                        .expect("parent of known block from archival state must exist.");
-
-                    Some((parent, child))
-                }
-
-                info!("Got sync challenge from {}", self.peer_address.ip());
-
-                let global_state = self.global_state_lock.lock_guard().await;
-                let ret = fetch_block_pair(sync_challenge.tip_digest, &global_state).await;
-                let Some((tip_parent, tip)) = ret else {
-                    drop(global_state);
-                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                if tip.header().height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
-                    drop(global_state);
-                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
-                let mut block_mmr_mps = vec![];
-                for h in sync_challenge.challenges {
-                    if h < 2u64.into() {
-                        drop(global_state);
-                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-
-                    let Some(child_digest) = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .archival_state()
-                        .archival_block_mmr
-                        .try_get_leaf(h.into())
-                        .await
-                    else {
-                        drop(global_state);
-                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    };
-                    let Some((p, c)) = fetch_block_pair(child_digest, &global_state).await else {
-                        drop(global_state);
-                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    };
-
-                    block_mmr_mps.push(
-                        global_state
-                            .chain
-                            .archival_state()
-                            .archival_block_mmr
-                            .prove_membership_async(h.into())
-                            .await,
-                    );
-                    block_pairs.push((
-                        p.try_into()
-                            .expect("blocks from archive must be transferable"),
-                        c.try_into()
-                            .expect("blocks from archive must be transferable"),
-                    ));
-                }
-
-                let response = SyncChallengeResponse {
-                    tip: tip
-                        .try_into()
-                        .expect("All blocks from archival state should be transferable."),
-                    tip_parent: tip_parent
-                        .try_into()
-                        .expect("All blocks from archival state should be transferable."),
-                    blocks: block_pairs.try_into().unwrap(),
-                    membership_proofs: block_mmr_mps.try_into().unwrap(),
-                };
-
-                info!(
-                    "Responding to sync challenge from {}",
-                    self.peer_address.ip()
-                );
-                peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
-                    .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::SyncChallengeResponse(challenge_response) => {
-                info!(
-                    "Got sync challenge response from {}",
-                    self.peer_address.ip()
-                );
-
-                // Did we issue a challenge?
-                let Some(issued_challenge) = peer_state_info.sync_challenge else {
-                    warn!("Sync challenge response was not prompted.");
-                    self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                // Reset the challenge, regardless of the response's success.
-                peer_state_info.sync_challenge = None;
-
-                // Does response match issued challenge?
-                if !challenge_response.matches(issued_challenge) {
-                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Does response verify?
-                let claimed_tip_height = challenge_response.tip.header.height;
-                let now = self.now();
-                if !challenge_response.is_valid(now).await {
-                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Did it come in time?
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
-                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
-                    self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // Inform main loop
-                self.to_main_tx
-                    .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                        self.peer_address,
-                        claimed_tip_height,
-                        issued_challenge.accumulated_pow,
-                    )))
-                    .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockNotification(block_notification) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
-
-                debug!(
-                    "Got BlockNotification of height {}",
-                    block_notification.height
-                );
-                let state = self.global_state_lock.lock_guard().await;
-                if state.should_enter_sync_mode(
-                    block_notification.height,
-                    block_notification.cumulative_proof_of_work,
-                ) {
-                    if peer_state_info.sync_challenge.is_some() {
-                        warn!("Cannot launch new sync challenge because one is already on-going.");
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-
-                    info!(
-                        "Peer indicates block which would activate sync mode, issuing challenge."
-                    );
-                    let challenge = SyncChallenge::generate(
-                        &block_notification,
-                        state.chain.light_state().header().height,
-                    );
-                    peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
-                        challenge,
-                        block_notification.cumulative_proof_of_work,
-                    ));
-
-                    peer.send(PeerMessage::SyncChallenge(challenge)).await?;
-
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                peer_state_info.highest_shared_block_height = block_notification.height;
-                let block_is_new = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .kernel
-                    .header
-                    .cumulative_proof_of_work
-                    < block_notification.cumulative_proof_of_work;
-
-                debug!("block_is_new: {}", block_is_new);
-
-                if block_is_new
-                    && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && !self.global_state_lock.lock_guard().await.net.syncing
-                {
-                    debug!(
-                        "sending BlockRequestByHeight to peer for block with height {}",
-                        block_notification.height
-                    );
-                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                        .await?;
-                } else {
-                    debug!(
-                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
-                        block_notification.height,
-                        block_is_new,
-                        !peer_state_info.fork_reconciliation_blocks.is_empty()
-                    );
-                }
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockRequestByHash(block_digest) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
-
-                match self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .get_block(block_digest)
-                    .await?
-                {
-                    None => {
-                        // TODO: Consider punishing here
-                        warn!("Peer requested unkown block with hash {}", block_digest);
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
-                    Some(b) => {
-                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
-                            .await?;
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
-                }
-            }
-            PeerMessage::BlockRequestByHeight(block_height) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
-
-                debug!("Got BlockRequestByHeight of height {}", block_height);
-
-                let canonical_block_digest = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .archival_block_mmr
-                    .try_get_leaf(block_height.into())
-                    .await;
-
-                let canonical_block_digest = match canonical_block_digest {
-                    None => {
-                        warn!("Got block request by height for unknown block");
-                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-                    Some(digest) => digest,
-                };
-
-                let canonical_chain_block: Block = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .get_block(canonical_block_digest)
-                    .await?
-                    .unwrap();
-                let block_response: PeerMessage =
-                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
-
-                debug!("Sending block");
-                peer.send(block_response).await?;
-                debug!("Sent block");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Handshake(_) => {
