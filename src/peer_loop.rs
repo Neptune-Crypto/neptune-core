@@ -377,10 +377,7 @@ impl PeerLoopHandler {
                     .expect("fork reconcilliation blocks cannot contain genesis")
                     == received_block.kernel.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
-                        < self
-                            .global_state_lock
-                            .cli()
-                            .max_number_of_blocks_before_syncing
+                        < self.global_state_lock.cli().sync_mode_threshold
             {
                 peer_state.fork_reconciliation_blocks.push(*received_block);
             } else {
@@ -982,9 +979,7 @@ impl PeerLoopHandler {
                 // or `STANDARD_BLOCK_BATCH_SIZE` number of blocks in response.
                 let len_of_response = cmp::min(
                     max_response_len,
-                    self.global_state_lock
-                        .cli()
-                        .max_number_of_blocks_before_syncing,
+                    self.global_state_lock.cli().sync_mode_threshold,
                 );
                 let len_of_response = cmp::max(len_of_response, MINIMUM_BLOCK_BATCH_SIZE);
                 let len_of_response = cmp::min(len_of_response, STANDARD_BLOCK_BATCH_SIZE);
@@ -1427,9 +1422,7 @@ impl PeerLoopHandler {
 
                 let max_response_len = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
-                    self.global_state_lock
-                        .cli()
-                        .max_number_of_blocks_before_syncing,
+                    self.global_state_lock.cli().sync_mode_threshold,
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
@@ -2520,7 +2513,7 @@ mod peer_loop_tests {
 
         // Restrict max number of blocks held in memory to 2.
         let mut cli = state_lock.cli().clone();
-        cli.max_number_of_blocks_before_syncing = 2;
+        cli.sync_mode_threshold = 2;
         state_lock.set_cli(cli).await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;

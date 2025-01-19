@@ -354,8 +354,7 @@ impl GlobalState {
     ) -> bool {
         let own_block_tip_header = self.chain.light_state().header();
         own_block_tip_header.cumulative_proof_of_work < cumulative_pow
-            && max_height - own_block_tip_header.height
-                > self.cli().max_number_of_blocks_before_syncing as i128
+            && max_height - own_block_tip_header.height > self.cli().sync_mode_threshold as i128
     }
 
     pub(crate) fn composer_parameters(

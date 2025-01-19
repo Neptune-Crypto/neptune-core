@@ -621,7 +621,7 @@ impl MainLoopHandler {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             &last_block.kernel.header,
                             &main_loop_state.sync_state,
-                            cli_args.max_number_of_blocks_before_syncing,
+                            cli_args.sync_mode_threshold,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
@@ -721,7 +721,7 @@ impl MainLoopHandler {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
-                        cli_args.max_number_of_blocks_before_syncing,
+                        cli_args.sync_mode_threshold,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
