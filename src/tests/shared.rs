@@ -52,8 +52,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::job_queue::JobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
@@ -65,6 +63,9 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+use crate::models::blockchain::block::validity::block_program::BlockProgram;
+use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -845,26 +846,35 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }
 
+/// Create a block from a transaction without the hassle of proving but such
+/// that it appears valid.
 pub(crate) async fn valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
 ) -> Block {
+    let mut rng = StdRng::from_seed(seed);
     let timestamp = tx.kernel.timestamp;
-    let mut block = Block::compose(
-        predecessor,
-        tx,
-        timestamp,
-        Digest::default(),
-        None,
-        &TritonVmJobQueue::dummy(),
-        TritonVmJobPriority::default().into(),
-    )
-    .await
-    .unwrap();
+
+    let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx);
+
+    let body = primitive_witness.body().to_owned();
+    let nonce_preimage = rng.gen::<Digest>();
+    let header = primitive_witness.header(timestamp, nonce_preimage.hash(), None);
+    let (appendix, proof) = {
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness)
+            .await
+            .expect("producing block proof witness from block primitive witness should succeed");
+        let appendix = block_proof_witness.appendix();
+        let claim = BlockProgram::claim(&body, &appendix);
+        cache_true_claim(claim).await;
+        let bogus_proof_data = (0..11).map(|_| rng.gen::<BFieldElement>()).collect_vec();
+        (appendix, BlockProof::SingleProof(Proof(bogus_proof_data)))
+    };
+
+    let mut block = Block::new(header, body, appendix, proof);
 
     let threshold = predecessor.header().difficulty.target();
-    let mut rng = StdRng::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
         mine_iteration_for_tests(&mut block, threshold, &mut rng);
     }

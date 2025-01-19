@@ -18,7 +18,6 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
@@ -66,7 +65,6 @@ impl BlockProofWitness {
 
     pub(crate) async fn produce(
         block_primitive_witness: BlockPrimitiveWitness,
-        _triton_vm_job_queue: &TritonVmJobQueue,
     ) -> anyhow::Result<BlockProofWitness> {
         let txk_mast_hash = block_primitive_witness
             .body()
