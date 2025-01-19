@@ -8,9 +8,10 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use peer_block_notifications::PeerBlockNotification;
-use rand::thread_rng;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::RngCore;
+use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -642,10 +643,14 @@ pub(crate) struct IssuedSyncChallenge {
     pub(crate) accumulated_pow: ProofOfWork,
 }
 impl IssuedSyncChallenge {
-    pub(crate) fn new(challenge: SyncChallenge, claimed_pow: ProofOfWork) -> Self {
+    pub(crate) fn new(
+        challenge: SyncChallenge,
+        claimed_pow: ProofOfWork,
+        timestamp: Timestamp,
+    ) -> Self {
         Self {
             challenge,
-            issued_at: Timestamp::now(),
+            issued_at: timestamp,
             accumulated_pow: claimed_pow,
         }
     }
@@ -673,13 +678,17 @@ impl SyncChallenge {
     pub(crate) fn generate(
         block_notification: &PeerBlockNotification,
         own_tip_height: BlockHeight,
+        randomness: [u8; 32],
     ) -> Self {
-        let mut rng = thread_rng();
+        let mut rng = StdRng::from_seed(randomness);
         let mut heights = vec![];
 
         assert!(
             block_notification.height - own_tip_height >= 10,
-            "Cannot issue sync challenge when height difference is less than 10."
+            "Cannot issue sync challenge when height difference ({} - {} = {}) is less than 10.",
+            block_notification.height,
+            own_tip_height,
+            block_notification.height - own_tip_height
         );
 
         // sample 5 block heights skewed towards peer's claimed tip height
@@ -704,7 +713,13 @@ impl SyncChallenge {
         // height and peer's claimed tip height
         let interval = u64::from(own_tip_height)..u64::from(block_notification.height);
         while heights.len() < 10 {
-            heights.push(rng.gen_range(interval.clone()).into());
+            let height = rng.gen_range(interval.clone()).into();
+
+            // Don't require peer to send genesis block, as that's impossible.
+            if height <= 1.into() {
+                continue;
+            }
+            heights.push(height);
         }
 
         Self {

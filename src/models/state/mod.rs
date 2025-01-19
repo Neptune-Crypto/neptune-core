@@ -50,6 +50,9 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use super::peer::transfer_block::TransferBlock;
+use super::peer::SyncChallenge;
+use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -72,6 +75,7 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+use crate::peer_loop::MIN_BLOCK_HEIGHT_FOR_SYNCING;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1476,6 +1480,92 @@ impl GlobalState {
         todo!("We don't yet support non-archival nodes");
 
         // Ok(())
+    }
+
+    /// Returns (parent, child) pair of blocks.
+    pub(crate) async fn fetch_block_pair(&self, child_digest: Digest) -> Option<(Block, Block)> {
+        let child = self
+            .chain
+            .archival_state()
+            .get_block(child_digest)
+            .await
+            .expect("fetching block from archival state should work.");
+        let Some(child) = child else {
+            warn!("Got sync challenge for unknown tip");
+
+            return None;
+        };
+        let parent_digest = child.header().prev_block_digest;
+        let parent = self
+            .chain
+            .archival_state()
+            .get_block(parent_digest)
+            .await
+            .expect("fetching block from archival state should work.")
+            .expect("parent of known block from archival state must exist.");
+
+        Some((parent, child))
+    }
+
+    pub(crate) async fn response_to_sync_challenge(
+        &self,
+        sync_challenge: SyncChallenge,
+    ) -> Result<SyncChallengeResponse> {
+        let Some((tip_parent, tip)) = self.fetch_block_pair(sync_challenge.tip_digest).await else {
+            bail!("could not fetch tip and tip predecessor");
+        };
+
+        if tip.header().height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
+            bail!("tip height is too small for sync mode")
+        }
+
+        let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
+        let mut block_mmr_mps = vec![];
+        for h in sync_challenge.challenges {
+            if h < 2u64.into() {
+                bail!("challenge asks for genesis block");
+            }
+
+            let Some(child_digest) = self
+                .chain
+                .archival_state()
+                .archival_block_mmr
+                .try_get_leaf(h.into())
+                .await
+            else {
+                bail!("could not get leaf from archival block mmr");
+            };
+            let Some((p, c)) = self.fetch_block_pair(child_digest).await else {
+                bail!("could not fetch indicated block pair");
+            };
+
+            block_mmr_mps.push(
+                self.chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .prove_membership_async(h.into())
+                    .await,
+            );
+            block_pairs.push((
+                p.try_into()
+                    .expect("blocks from archive must be transferable"),
+                c.try_into()
+                    .expect("blocks from archive must be transferable"),
+            ));
+        }
+
+        let response = SyncChallengeResponse {
+            tip: tip
+                .try_into()
+                .expect("All blocks from archival state should be transferable."),
+            tip_parent: tip_parent
+                .try_into()
+                .expect("All blocks from archival state should be transferable."),
+            blocks: block_pairs.try_into().unwrap(),
+            membership_proofs: block_mmr_mps.try_into().unwrap(),
+        };
+
+        Ok(response)
     }
 
     #[inline]
