@@ -859,7 +859,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash));
+            assert!(proof_collection.verify(txk_mast_hash).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();
@@ -898,7 +898,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash));
+            assert!(proof_collection.verify(txk_mast_hash).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();

@@ -10,6 +10,7 @@ use triton_vm::prelude::PublicInput;
 pub mod mast_hash;
 pub mod tasm;
 pub mod timestamp;
+pub mod verifier;
 
 /// A `SecretWitness` is data that makes a `ConsensusProgram` halt gracefully, but
 /// that should be hidden behind a zero-knowledge proof.
