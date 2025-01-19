@@ -364,7 +364,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
 /// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
 /// transaction.
-fn prepare_coinbase_transaction_stateless(
+pub(super) fn prepare_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
