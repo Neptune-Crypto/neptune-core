@@ -1641,7 +1641,7 @@ mod test {
             peer_to_main_rx,
             state,
             _own_handshake_data,
-        ) = get_test_genesis_setup(network, num_init_peers_outgoing)
+        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli_args::Args::default())
             .await
             .unwrap();
         assert!(

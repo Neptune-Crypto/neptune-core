@@ -250,6 +250,7 @@ pub(crate) async fn mock_genesis_global_state(
 pub(crate) async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
+    cli: cli_args::Args,
 ) -> Result<(
     broadcast::Sender<MainToPeerTask>,
     broadcast::Receiver<MainToPeerTask>,
@@ -264,13 +265,7 @@ pub(crate) async fn get_test_genesis_setup(
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let devnet_wallet = WalletSecret::devnet_wallet();
-    let state = mock_genesis_global_state(
-        network,
-        peer_count,
-        devnet_wallet,
-        cli_args::Args::default(),
-    )
-    .await;
+    let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,

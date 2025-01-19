@@ -5,7 +5,6 @@ use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
@@ -48,7 +47,6 @@ impl BlockProofWitness {
     }
 
     fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
-        debug_assert!(triton_vm::verify(Stark::default(), &claim, &proof));
         self.claims.push(claim);
         self.proofs.push(proof);
 
