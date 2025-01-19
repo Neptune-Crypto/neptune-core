@@ -28,7 +28,6 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::channel::PeerTaskToMainTransaction;
-use crate::models::peer::peer_block_notifications::PeerBlockNotification;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
@@ -556,7 +555,7 @@ impl PeerLoopHandler {
                 let block = match Block::try_from(*t_block) {
                     Ok(block) => Box::new(block),
                     Err(e) => {
-                        warn!("Peer sent invalid block");
+                        warn!("Peer sent invalid block: {e:?}");
                         self.punish(NegativePeerSanction::InvalidTransferBlock)
                             .await?;
 
@@ -772,7 +771,7 @@ impl PeerLoopHandler {
                             received_blocks.push(block);
                         }
                         Err(e) => {
-                            warn!("Received invalid transfer block from peer.");
+                            warn!("Received invalid transfer block from peer: {e:?}");
                             self.punish(NegativePeerSanction::InvalidTransferBlock)
                                 .await?;
                             return Ok(KEEP_CONNECTION_ALIVE);
@@ -924,7 +923,7 @@ impl PeerLoopHandler {
                     "Responding to sync challenge from {}",
                     self.peer_address.ip()
                 );
-                peer.send(PeerMessage::SyncChallengeResponse(response))
+                peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)

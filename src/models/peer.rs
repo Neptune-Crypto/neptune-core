@@ -6,7 +6,6 @@ pub mod transfer_transaction;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use peer_block_notifications::PeerBlockNotification;
 use rand::thread_rng;
@@ -25,7 +24,6 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
-use super::blockchain::block::BlockProof;
 use super::channel::BlockProposalNotification;
 use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
@@ -511,7 +509,7 @@ pub(crate) enum PeerMessage {
     UnableToSatisfyBatchRequest,
 
     SyncChallenge(SyncChallenge),
-    SyncChallengeResponse(SyncChallengeResponse),
+    SyncChallengeResponse(Box<SyncChallengeResponse>),
 
     BlockProposalNotification(BlockProposalNotification),
 
@@ -742,7 +740,7 @@ impl SyncChallengeResponse {
             && tip.has_proof_of_work(tip_predecessor.header())
     }
 
-    pub(crate) async fn is_valid(self, now: Timestamp) -> bool {
+    pub(crate) async fn is_valid(&self, now: Timestamp) -> bool {
         let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
@@ -755,17 +753,12 @@ impl SyncChallengeResponse {
             return false;
         }
 
-        for ((parent, child), membership_proof) in self
-            .blocks
-            .into_iter()
-            .zip(self.membership_proofs.into_iter())
+        for ((parent, child), membership_proof) in
+            self.blocks.iter().zip(self.membership_proofs.iter())
         {
-            let child = Block::new(
-                child.header,
-                child.body,
-                child.appendix,
-                BlockProof::SingleProof(child.proof),
-            );
+            let Ok(child) = Block::try_from(child.clone()) else {
+                return false;
+            };
             if !membership_proof.verify(
                 child.header().height.into(),
                 child.hash(),
@@ -775,12 +768,9 @@ impl SyncChallengeResponse {
                 return false;
             }
 
-            let parent = Block::new(
-                parent.header,
-                parent.body,
-                parent.appendix,
-                BlockProof::SingleProof(parent.proof),
-            );
+            let Ok(parent) = Block::try_from(parent.clone()) else {
+                return false;
+            };
 
             if !child.is_valid(&parent, now).await || !child.has_proof_of_work(parent.header()) {
                 return false;

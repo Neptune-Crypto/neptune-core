@@ -50,8 +50,6 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::peer::peer_block_notifications::PeerBlockNotification;
-use super::peer::PeerSynchronizationState;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
