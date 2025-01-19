@@ -30,9 +30,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::Tip5;
-use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -48,6 +46,7 @@ use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
 use self::transaction_kernel::TransactionKernelModifier;
 use self::transaction_kernel::TransactionKernelProxy;
+use crate::models::proof_abstractions::verifier::verify;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::proof::Proof;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -160,10 +159,10 @@ impl TransactionProof {
             }
             TransactionProof::SingleProof(single_proof) => {
                 let claim = SingleProof::claim(kernel_mast_hash);
-                triton_vm::verify(Stark::default(), &claim, single_proof)
+                verify(claim, single_proof.clone()).await
             }
             TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash)
+                proof_collection.verify(kernel_mast_hash).await
             }
         }
     }
@@ -370,8 +369,8 @@ impl Transaction {
 #[cfg(test)]
 mod tests {
     use tasm_lib::prelude::Digest;
+    use tasm_lib::triton_vm::prelude::Tip5;
     use tests::primitive_witness::SaltedUtxos;
-    use triton_vm::prelude::Tip5;
 
     use super::*;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -511,9 +510,9 @@ mod transaction_tests {
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
     use rand::random;
+    use tasm_lib::triton_vm::prelude::Tip5;
     use tracing_test::traced_test;
     use transaction_tests::utxo::Utxo;
-    use triton_vm::prelude::Tip5;
 
     use super::*;
     use crate::config_models::network::Network;

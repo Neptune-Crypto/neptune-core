@@ -4,10 +4,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::stark::Stark;
 use tracing::debug;
 use tracing::info;
 use tracing::trace;
@@ -28,6 +26,7 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 
@@ -209,7 +208,7 @@ impl ProofCollection {
         })
     }
 
-    pub fn verify(&self, txk_mast_hash: Digest) -> bool {
+    pub(crate) async fn verify(&self, txk_mast_hash: Digest) -> bool {
         debug!("verifying, txk hash: {}", txk_mast_hash);
         debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
         debug!(
@@ -279,44 +278,44 @@ impl ProofCollection {
 
         // verify
         debug!("verifying removal records integrity ...");
-        let rri = triton_vm::verify(
-            Stark::default(),
-            &removal_records_integrity_claim,
-            &self.removal_records_integrity,
-        );
+        let rri = verify(
+            removal_records_integrity_claim.clone(),
+            self.removal_records_integrity.clone(),
+        )
+        .await;
         debug!("{rri}");
         debug!("verifying kernel to outputs ...");
-        let k2o = triton_vm::verify(
-            Stark::default(),
-            &kernel_to_outputs_claim,
-            &self.kernel_to_outputs,
-        );
+        let k2o = verify(
+            kernel_to_outputs_claim.clone(),
+            self.kernel_to_outputs.clone(),
+        )
+        .await;
         debug!("{k2o}");
         debug!("verifying collect lock scripts ...");
-        let cls = triton_vm::verify(
-            Stark::default(),
-            &collect_lock_scripts_claim,
-            &self.collect_lock_scripts,
-        );
+        let cls = verify(
+            collect_lock_scripts_claim.clone(),
+            self.collect_lock_scripts.clone(),
+        )
+        .await;
         debug!("{cls}");
         debug!("verifying collect type scripts ...");
-        let cts = triton_vm::verify(
-            Stark::default(),
-            &collect_type_scripts_claim,
-            &self.collect_type_scripts,
-        );
+        let cts = verify(
+            collect_type_scripts_claim.clone(),
+            self.collect_type_scripts.clone(),
+        )
+        .await;
         debug!("{cts}");
         debug!("verifying that all lock scripts halt ...");
-        let lsh = lock_script_claims
-            .iter()
-            .zip(self.lock_scripts_halt.iter())
-            .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
+        let mut lsh = true;
+        for (cl, pr) in lock_script_claims.iter().zip(self.lock_scripts_halt.iter()) {
+            lsh &= verify(cl.clone(), pr.clone()).await;
+        }
         debug!("{lsh}");
         debug!("verifying that all type scripts halt ...");
-        let tsh = type_script_claims
-            .iter()
-            .zip(self.type_scripts_halt.iter())
-            .all(|(cl, pr)| triton_vm::verify(Stark::default(), cl, pr));
+        let mut tsh = true;
+        for (cl, pr) in type_script_claims.iter().zip(self.type_scripts_halt.iter()) {
+            tsh &= verify(cl.clone(), pr.clone()).await;
+        }
         debug!("{tsh}");
 
         // and all bits together and return

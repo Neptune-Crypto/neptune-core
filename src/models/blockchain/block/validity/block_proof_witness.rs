@@ -49,7 +49,7 @@ impl BlockProofWitness {
     }
 
     fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
-        assert!(triton_vm::verify(Stark::default(), &claim, &proof));
+        debug_assert!(triton_vm::verify(Stark::default(), &claim, &proof));
         self.claims.push(claim);
         self.proofs.push(proof);
 
