@@ -344,7 +344,7 @@ mod test {
         ///
         /// tests:
         ///  1. Cookie::auth() succeeds for valid cookie
-        ///  2. Cookie::auth() returns AuthError::InvalidCookei for invalid cookie
+        ///  2. Cookie::auth() returns AuthError::InvalidCookie for invalid cookie
         #[tokio::test]
         pub async fn auth() -> anyhow::Result<()> {
             let data_dir = unit_test_data_directory(Network::Alpha)?;
