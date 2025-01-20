@@ -3058,31 +3058,93 @@ mod global_state_tests {
             assert_correct_global_state(&alice, block_1.clone(), genesis_block, 1, 0).await;
         }
 
+        /// Return a list of (Block, parent) pairs, of length N.
+        async fn chain_of_blocks_and_parents(
+            network: Network,
+            length: usize,
+        ) -> Vec<(Block, Block)> {
+            let mut rng = thread_rng();
+            let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
+            let mut parent = Block::genesis_block(network);
+            let mut chain = vec![];
+            for _ in 0..length {
+                let (block, _) = make_mock_block(&parent, None, cb_key, rng.gen()).await;
+                chain.push((block.clone(), parent.clone()));
+                parent = block;
+            }
+
+            chain
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn can_jump_to_new_tip_over_blocks_that_were_never_tips() {
+            let network = Network::Main;
+            let wallet_secret = WalletSecret::new_random();
+            let mut alice = mock_genesis_global_state(
+                network,
+                2,
+                wallet_secret.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let mut alice = alice.global_state_lock.lock_guard_mut().await;
+
+            let a_length = 12;
+            let chain_a = chain_of_blocks_and_parents(network, a_length).await;
+            for (block, _) in chain_a.iter() {
+                alice.set_new_tip(block.to_owned()).await.unwrap();
+            }
+
+            let chain_a_tip = &chain_a[a_length - 1].0;
+            let chain_a_tip_parent = &chain_a[a_length - 1].1;
+            assert_correct_global_state(
+                &alice,
+                chain_a_tip.to_owned(),
+                chain_a_tip_parent.to_owned(),
+                1,
+                0,
+            )
+            .await;
+
+            // Store all blocks from a new chain, except the last, without
+            // marking any of them as tips.  Verify no change in tip.
+            let b_length = 15;
+            let chain_b = chain_of_blocks_and_parents(network, b_length).await;
+            for (block, _) in chain_b.iter().take(b_length - 1) {
+                alice.store_block_not_tip(block.clone()).await.unwrap();
+            }
+            assert_correct_global_state(
+                &alice,
+                chain_a_tip.to_owned(),
+                chain_a_tip_parent.to_owned(),
+                2,
+                0,
+            )
+            .await;
+
+            // Set chain B's last block to tip to verify that all the stored
+            // blocks from chain B can be used to connect it to LUCA, which in
+            // this case is genesis block.
+            let chain_b_tip = &chain_b[b_length - 1].0;
+            let chain_b_tip_parent = &chain_b[b_length - 1].1;
+            alice.set_new_tip(chain_b_tip.to_owned()).await.unwrap();
+            assert_correct_global_state(
+                &alice,
+                chain_b_tip.to_owned(),
+                chain_b_tip_parent.to_owned(),
+                1,
+                0,
+            )
+            .await;
+        }
+
         #[traced_test]
         #[tokio::test]
         async fn reorganization_with_blocks_that_were_never_tips_n_blocks_deep() {
             // Verify that [GlobalState::store_block_not_tip] stores block
             // correctly, and that [GlobalState::set_new_tip] can be used to
             // build upon blocks stored through the former method.
-
-            /// Return a list of (Block, parent) pairs, of length N.
-            async fn chain_of_blocks_and_parents(
-                network: Network,
-                length: usize,
-            ) -> Vec<(Block, Block)> {
-                let mut rng = thread_rng();
-                let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
-                let mut parent = Block::genesis_block(network);
-                let mut chain = vec![];
-                for _ in 0..length {
-                    let (block, _) = make_mock_block(&parent, None, cb_key, rng.gen()).await;
-                    chain.push((block.clone(), parent.clone()));
-                    parent = block;
-                }
-
-                chain
-            }
-
             let network = Network::Main;
             let genesis_block = Block::genesis_block(network);
             let wallet_secret = WalletSecret::new_random();
