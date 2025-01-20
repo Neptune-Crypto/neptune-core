@@ -1553,6 +1553,10 @@ impl GlobalState {
                 bail!("could not fetch indicated block pair");
             };
 
+            // The MMR membership proofs will be invalid here if the peer's tip
+            // does not match ours. That's a known deficiency of this function,
+            // and can be fixed by correctly handling the construction of old
+            // MMR-MPs from the current archival MMR state.
             block_mmr_mps.push(
                 self.chain
                     .archival_state()
