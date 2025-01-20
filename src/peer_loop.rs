@@ -1592,15 +1592,6 @@ impl PeerLoopHandler {
             .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
             .await;
 
-        // This message is used to determine if we are to enter synchronization mode.
-        self.to_main_tx
-            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                self.peer_address,
-                self.peer_handshake_data.tip_header.height,
-                self.peer_handshake_data.tip_header.cumulative_proof_of_work,
-            )))
-            .await?;
-
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
 
@@ -1616,6 +1607,8 @@ impl PeerLoopHandler {
                 .header
                 .cumulative_proof_of_work
         {
+            // Send block notification request to catch up ASAP, in case we're
+            // behind the newly-connected peer.
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
@@ -1639,7 +1632,6 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::Rng;
     use rand::SeedableRng;
@@ -1651,7 +1643,6 @@ mod peer_loop_tests {
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
-    use crate::models::blockchain::block::difficulty_control::ProofOfWork;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
@@ -1796,12 +1787,6 @@ mod peer_loop_tests {
             "run_wrapper must return failure when genesis is different"
         );
 
-        // Verify that max peer height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
-
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
@@ -1888,12 +1873,6 @@ mod peer_loop_tests {
             .await
             .expect("sending (one) invalid block should not result in closed connection");
 
-        // Verify that max peer height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
-
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
@@ -1973,11 +1952,6 @@ mod peer_loop_tests {
             .run_wrapper(mock_peer_messages, from_main_rx_clone)
             .await?;
 
-        // Verify that no block was sent to main loop
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             other => bail!("Must receive remove of peer block max height. Got:\n {other:?}"),
@@ -2342,12 +2316,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
-
         // Verify that a block was sent to `main_loop`
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(_block)) => (),
@@ -2413,12 +2381,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2497,11 +2459,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
@@ -2584,12 +2541,6 @@ mod peer_loop_tests {
             .await
             .unwrap();
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => panic!("Must receive add of peer block max height"),
-        }
-
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
@@ -2661,12 +2612,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2771,12 +2716,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2884,12 +2823,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
-        }
-
         // Verify that blocks are sent to `main_loop` in expected ordering
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2905,11 +2838,6 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main task"),
         };
-
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive remove of peer block max height"),
-        }
 
         assert_eq!(
             1,
@@ -3583,32 +3511,16 @@ mod peer_loop_tests {
                 .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
                 .await?;
 
-            // AddPeerMaxBlockHeight message triggered in run_wrapper, before
-            // peer_loop starts
-            let expected_message_from_alice_peer_loop_1 = PeerTaskToMain::AddPeerMaxBlockHeight((
-                bob_socket_address,
-                BlockHeight::genesis(),
-                ProofOfWork::zero(),
-            ));
-            let observed_message_from_alice_peer_loop_1 =
-                alice_peer_to_main_rx.recv().await.unwrap();
-
-            assert_eq!(
-                expected_message_from_alice_peer_loop_1,
-                observed_message_from_alice_peer_loop_1
-            );
-
             // AddPeerMaxBlockHeight message triggered *after* sync challenge
-            let expected_message_from_alice_peer_loop_2 = PeerTaskToMain::AddPeerMaxBlockHeight((
+            let expected_message_from_alice_peer_loop = PeerTaskToMain::AddPeerMaxBlockHeight((
                 bob_socket_address,
                 bob_tip.header().height,
                 bob_tip.header().cumulative_proof_of_work,
             ));
-            let observed_message_from_alice_peer_loop_2 =
-                alice_peer_to_main_rx.recv().await.unwrap();
+            let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();
             assert_eq!(
-                expected_message_from_alice_peer_loop_2,
-                observed_message_from_alice_peer_loop_2
+                expected_message_from_alice_peer_loop,
+                observed_message_from_alice_peer_loop
             );
 
             Ok(())
