@@ -5,7 +5,6 @@ use serde::Serialize;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
@@ -18,7 +17,6 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
@@ -49,7 +47,6 @@ impl BlockProofWitness {
     }
 
     fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
-        assert!(triton_vm::verify(Stark::default(), &claim, &proof));
         self.claims.push(claim);
         self.proofs.push(proof);
 
@@ -66,7 +63,6 @@ impl BlockProofWitness {
 
     pub(crate) async fn produce(
         block_primitive_witness: BlockPrimitiveWitness,
-        _triton_vm_job_queue: &TritonVmJobQueue,
     ) -> anyhow::Result<BlockProofWitness> {
         let txk_mast_hash = block_primitive_witness
             .body()

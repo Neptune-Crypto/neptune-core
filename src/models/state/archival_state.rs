@@ -613,7 +613,11 @@ impl ArchivalState {
         loop {
             if aocl_leaf_index < record.min_aocl_index {
                 // Look below current height
-                max_block_height = record.block_header.height.previous();
+                max_block_height = record
+                    .block_header
+                    .height
+                    .previous()
+                    .expect("Genesis-block should be special-cased earlier in function.");
             } else if aocl_leaf_index > record.max_aocl_index() {
                 // Look above current height
                 min_block_height = record.block_header.height.next();

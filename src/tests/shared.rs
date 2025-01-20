@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::time::SystemTime;
 
+use anyhow::bail;
 use anyhow::Result;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -32,6 +33,7 @@ use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::broadcast;
@@ -49,26 +51,30 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::job_queue::JobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
-use crate::mine_loop::create_block_transaction_stateless;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::mine_loop_tests::mine_iteration_for_tests;
+use crate::mine_loop::prepare_coinbase_transaction_stateless;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+use crate::models::blockchain::block::validity::block_program::BlockProgram;
+use crate::models::blockchain::block::validity::block_proof_witness::BlockProofWitness;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 use crate::models::blockchain::transaction::lock_script::LockScript;
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -83,18 +89,22 @@ use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerConnectionInfo;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::proof_abstractions::verifier::cache_true_claim;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalStateLock;
@@ -239,6 +249,7 @@ pub(crate) async fn mock_genesis_global_state(
 pub(crate) async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
+    cli: cli_args::Args,
 ) -> Result<(
     broadcast::Sender<MainToPeerTask>,
     broadcast::Receiver<MainToPeerTask>,
@@ -253,13 +264,7 @@ pub(crate) async fn get_test_genesis_setup(
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let devnet_wallet = WalletSecret::devnet_wallet();
-    let state = mock_genesis_global_state(
-        network,
-        peer_count,
-        devnet_wallet,
-        cli_args::Args::default(),
-    )
-    .await;
+    let state = mock_genesis_global_state(network, peer_count, devnet_wallet, cli).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,
@@ -835,26 +840,34 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }
 
-pub(crate) async fn valid_block_from_tx_for_tests(
+/// Create a block from a transaction without the hassle of proving but such
+/// that it appears valid.
+pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
 ) -> Block {
+    let mut rng = StdRng::from_seed(seed);
     let timestamp = tx.kernel.timestamp;
-    let mut block = Block::compose(
-        predecessor,
-        tx,
-        timestamp,
-        Digest::default(),
-        None,
-        &TritonVmJobQueue::dummy(),
-        TritonVmJobPriority::default().into(),
-    )
-    .await
-    .unwrap();
+
+    let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx);
+
+    let body = primitive_witness.body().to_owned();
+    let nonce_preimage = rng.gen::<Digest>();
+    let header = primitive_witness.header(timestamp, nonce_preimage.hash(), None);
+    let (appendix, proof) = {
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness)
+            .await
+            .expect("producing block proof witness from block primitive witness should succeed");
+        let appendix = block_proof_witness.appendix();
+        let claim = BlockProgram::claim(&body, &appendix);
+        cache_true_claim(claim).await;
+        (appendix, BlockProof::SingleProof(Proof(vec![])))
+    };
+
+    let mut block = Block::new(header, body, appendix, proof);
 
     let threshold = predecessor.header().difficulty.target();
-    let mut rng = StdRng::from_seed(seed);
     while !block.has_proof_of_work(predecessor.header()) {
         mine_iteration_for_tests(&mut block, threshold, &mut rng);
     }
@@ -862,7 +875,87 @@ pub(crate) async fn valid_block_from_tx_for_tests(
     block
 }
 
-pub(crate) async fn valid_successor_for_tests(
+/// Create a `Transaction` from `TransactionDetails` such that verification
+/// seems to pass but without the hassle of producing a proof for it. Behind the
+/// scenes, this method updates the true claims cache, such that the call to
+/// `triton_vm::verify` will be by-passed.
+async fn fake_create_transaction_from_details_for_tests(
+    transaction_details: TransactionDetails,
+) -> Transaction {
+    let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
+
+    let claim = SingleProof::claim(kernel.mast_hash());
+    cache_true_claim(claim).await;
+
+    Transaction {
+        kernel,
+        proof: TransactionProof::SingleProof(Proof(vec![])),
+    }
+}
+
+/// Merge two transactions for tests, without the hassle of proving but such
+/// that the result seems valid.
+async fn fake_merge_transactions_for_tests(
+    lhs: Transaction,
+    rhs: Transaction,
+    shuffle_seed: [u8; 32],
+) -> Result<Transaction> {
+    let TransactionProof::SingleProof(lhs_proof) = lhs.proof else {
+        bail!("arguments must be bogus singleproof transactions")
+    };
+    let TransactionProof::SingleProof(rhs_proof) = rhs.proof else {
+        bail!("arguments must be bogus singleproof transactions")
+    };
+    let merge_witness =
+        MergeWitness::from_transactions(lhs.kernel, lhs_proof, rhs.kernel, rhs_proof, shuffle_seed);
+    let new_kernel = merge_witness.new_kernel.clone();
+
+    let claim = SingleProof::claim(new_kernel.mast_hash());
+    cache_true_claim(claim).await;
+
+    Ok(Transaction {
+        kernel: new_kernel,
+        proof: TransactionProof::SingleProof(Proof(vec![])),
+    })
+}
+
+/// Create a block-transaction with a bogus proof but such that `verify` passes.
+pub(crate) async fn fake_create_block_transaction_for_tests(
+    predecessor_block: &Block,
+    composer_parameters: ComposerParameters,
+    timestamp: Timestamp,
+    shuffle_seed: [u8; 32],
+    mut selected_mempool_txs: Vec<Transaction>,
+) -> Result<(Transaction, TxOutputList)> {
+    let (composer_txos, transaction_details) =
+        prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp)?;
+
+    let coinbase_transaction =
+        fake_create_transaction_from_details_for_tests(transaction_details).await;
+
+    let mut block_transaction = coinbase_transaction;
+    if selected_mempool_txs.is_empty() {
+        // create the nop-tx and merge into the coinbase transaction to set the
+        // merge bit to allow the tx to be included in a block.
+        let nop_details =
+            TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
+        let nop_transaction = fake_create_transaction_from_details_for_tests(nop_details).await;
+
+        selected_mempool_txs = vec![nop_transaction];
+    }
+
+    let mut rng = StdRng::from_seed(shuffle_seed);
+    for tx_to_include in selected_mempool_txs.into_iter() {
+        block_transaction =
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.gen())
+                .await
+                .expect("Must be able to merge transactions in mining context");
+    }
+
+    Ok((block_transaction, composer_txos))
+}
+
+pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
     seed: [u8; 32],
@@ -874,27 +967,30 @@ pub(crate) async fn valid_successor_for_tests(
         rng.gen(),
         0.5f64,
     );
-    let (block_tx, _) = create_block_transaction_stateless(
+    let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
         composer_parameters,
         timestamp,
         rng.gen(),
-        &TritonVmJobQueue::dummy(),
         vec![],
     )
     .await
     .unwrap();
 
-    valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
+    fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
 }
 
-/// Create a valid block with coinbase going to self. For testing purposes.
+/// Create a block with coinbase going to self. For testing purposes.
 ///
-/// The block will be valid both in terms of PoW and block proof and will pass
-/// the Block::is_valid() function.
-pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u8; 32]) -> Block {
+/// The block will be valid both in terms of PoW and and will pass the
+/// Block::is_valid() function. However, the associated (claim, proof) pair will
+/// will not pass `triton_vm::verify`, as its validity is only mocked.
+pub(crate) async fn fake_valid_block_for_tests(
+    state_lock: &GlobalStateLock,
+    seed: [u8; 32],
+) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    valid_successor_for_tests(
+    fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
         seed,
@@ -907,7 +1003,7 @@ pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u
 /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
 /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
 /// block is valid in terms of both `is_valid` and `has_proof_of_work`.
-pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
+pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     mut predecessor: &Block,
     block_interval: Timestamp,
     seed: [u8; 32],
@@ -915,7 +1011,7 @@ pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
     let mut blocks = vec![];
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     for _ in 0..N {
-        let block = valid_successor_for_tests(
+        let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
             rng.gen(),

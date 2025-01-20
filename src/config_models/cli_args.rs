@@ -159,13 +159,17 @@ pub struct Args {
     #[clap(short, long, default_value = "::")]
     pub(crate) listen_addr: IpAddr,
 
-    /// Max number of blocks that the client can catch up to before going into syncing mode.
+    /// Maximum number of blocks that the client can catch up to without going
+    /// into sync mode.
     ///
-    /// The process running this program should have access to at least the number of blocks
-    /// in this field multiplied with the max block size amounts of RAM. Probably 1.5 to 2 times
-    /// that amount.
-    #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(2..100000)))]
-    pub(crate) max_number_of_blocks_before_syncing: usize,
+    /// Default: 1000.
+    ///
+    /// The process running this program should have access to enough RAM: at
+    /// least the number of blocks set by this argument multiplied with the max
+    /// block size (around 2 MB). Probably 1.5 to 2 times that amount for good
+    /// margin.
+    #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
+    pub(crate) sync_mode_threshold: usize,
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
     #[structopt(long)]

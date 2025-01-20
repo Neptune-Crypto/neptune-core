@@ -348,22 +348,11 @@ impl PotentialPeersState {
     }
 }
 
-/// Return a boolean indicating if synchronization mode should be entered
-fn enter_sync_mode(
-    own_block_tip_header: &BlockHeader,
-    peer_synchronization_state: PeerSynchronizationState,
-    max_number_of_blocks_before_syncing: usize,
-) -> bool {
-    own_block_tip_header.cumulative_proof_of_work < peer_synchronization_state.claimed_max_pow
-        && peer_synchronization_state.claimed_max_height - own_block_tip_header.height
-            > max_number_of_blocks_before_syncing as i128
-}
-
 /// Return a boolean indicating if synchronization mode should be left
 fn stay_in_sync_mode(
     own_block_tip_header: &BlockHeader,
     sync_state: &SyncState,
-    max_number_of_blocks_before_syncing: usize,
+    sync_mode_threshold: usize,
 ) -> bool {
     let max_claimed_pow = sync_state
         .peer_sync_states
@@ -377,7 +366,7 @@ fn stay_in_sync_mode(
         Some(max_claim) => {
             own_block_tip_header.cumulative_proof_of_work < max_claim.claimed_max_pow
                 && max_claim.claimed_max_height - own_block_tip_header.height
-                    > max_number_of_blocks_before_syncing as i128 / 2
+                    > sync_mode_threshold as i128 / 2
         }
     }
 }
@@ -613,7 +602,7 @@ impl MainLoopHandler {
                         warn!("Blocks were not new. Not storing blocks.");
 
                         // TODO: Consider fixing deep reorganization problem described above.
-                        // Alternatively set the `max_number_of_blocks_before_syncing` value higher
+                        // Alternatively set the `sync_mode_threshold` value higher
                         // if this problem is encountered.
                         return Ok(());
                     }
@@ -632,7 +621,7 @@ impl MainLoopHandler {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             &last_block.kernel.header,
                             &main_loop_state.sync_state,
-                            cli_args.max_number_of_blocks_before_syncing,
+                            cli_args.sync_mode_threshold,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
@@ -683,30 +672,31 @@ impl MainLoopHandler {
             PeerTaskToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,
-                claimed_max_pow_family,
+                claimed_max_accumulative_pow,
             )) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
 
                 let claimed_state =
-                    PeerSynchronizationState::new(claimed_max_height, claimed_max_pow_family);
+                    PeerSynchronizationState::new(claimed_max_height, claimed_max_accumulative_pow);
                 main_loop_state
                     .sync_state
                     .peer_sync_states
                     .insert(socket_addr, claimed_state);
 
-                // Check if synchronization mode should be activated. Synchronization mode is entered if
-                // PoW family exceeds our tip and if the height difference is beyond a threshold value.
-                // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
-                // the client into synchronization mode.
+                // Check if synchronization mode should be activated.
+                // Synchronization mode is entered if accumulated PoW exceeds
+                // our tip and if the height difference is positive and beyond
+                // a threshold value.
+                // TODO: If we are not checking the PoW claims of the tip this
+                // can be abused by forcing the client into synchronization
+                // mode.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                if enter_sync_mode(
-                    global_state_mut.chain.light_state().header(),
-                    claimed_state,
-                    cli_args.max_number_of_blocks_before_syncing / 3,
-                ) {
+                if global_state_mut
+                    .sync_mode_criterion(claimed_max_height, claimed_max_accumulative_pow)
+                {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
-                    socket_addr, claimed_max_height, claimed_max_pow_family
+                    socket_addr, claimed_max_height, claimed_max_accumulative_pow
                 );
                     global_state_mut.net.syncing = true;
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
@@ -731,7 +721,7 @@ impl MainLoopHandler {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
-                        cli_args.max_number_of_blocks_before_syncing,
+                        cli_args.sync_mode_threshold,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
@@ -1651,7 +1641,7 @@ mod test {
             peer_to_main_rx,
             state,
             _own_handshake_data,
-        ) = get_test_genesis_setup(network, num_init_peers_outgoing)
+        ) = get_test_genesis_setup(network, num_init_peers_outgoing, cli_args::Args::default())
             .await
             .unwrap();
         assert!(

@@ -35,8 +35,12 @@ impl BlockHeight {
         Self(self.0 + BFieldElement::one())
     }
 
-    pub fn previous(&self) -> Self {
-        Self(self.0 - BFieldElement::one())
+    pub fn previous(&self) -> Option<Self> {
+        if self.is_genesis() {
+            None
+        } else {
+            Some(Self(self.0 - BFieldElement::one()))
+        }
     }
 
     pub const fn genesis() -> Self {
@@ -54,6 +58,13 @@ impl BlockHeight {
         let ret = (left / 2) + (right / 2) + (left % 2 + right % 2) / 2;
 
         Self(BFieldElement::new(ret))
+    }
+
+    /// Subtract a number from a block height.
+    //
+    // *NOT* implemented as trait `CheckedSub` because of type mismatch.
+    pub(crate) fn checked_sub(&self, v: u64) -> Option<Self> {
+        self.0.value().checked_sub(v).map(|x| x.into())
     }
 }
 

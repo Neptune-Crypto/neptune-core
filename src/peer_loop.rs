@@ -10,6 +10,10 @@ use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::Digest;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -32,6 +36,7 @@ use crate::models::peer::transfer_block::TransferBlock;
 use crate::models::peer::BlockProposalRequest;
 use crate::models::peer::BlockRequestBatch;
 use crate::models::peer::HandshakeData;
+use crate::models::peer::IssuedSyncChallenge;
 use crate::models::peer::MutablePeerState;
 use crate::models::peer::NegativePeerSanction;
 use crate::models::peer::PeerConnectionInfo;
@@ -40,6 +45,7 @@ use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerSanction;
 use crate::models::peer::PeerStanding;
 use crate::models::peer::PositivePeerSanction;
+use crate::models::peer::SyncChallenge;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
@@ -49,6 +55,7 @@ use crate::models::state::GlobalStateLock;
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
+pub(crate) const MIN_BLOCK_HEIGHT_FOR_SYNCING: u64 = 10;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
@@ -66,6 +73,7 @@ pub struct PeerLoopHandler {
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
     distance: u8,
+    rng: StdRng,
     #[cfg(test)]
     mock_now: Option<Timestamp>,
 }
@@ -86,6 +94,8 @@ impl PeerLoopHandler {
             peer_handshake_data,
             inbound_connection,
             distance,
+            rng: StdRng::from_rng(thread_rng())
+                .expect("should be able to seed new StdRng from thread_rng"),
             #[cfg(test)]
             mock_now: None,
         }
@@ -110,7 +120,17 @@ impl PeerLoopHandler {
             inbound_connection,
             distance,
             mock_now: Some(mocked_time),
+            rng: StdRng::from_rng(thread_rng())
+                .expect("should be able to seed new StdRng from thread_rng"),
         }
+    }
+
+    /// Overwrite the random number generator object with a specific one.
+    ///
+    /// Useful for derandomizing tests.
+    #[cfg(test)]
+    fn set_rng(&mut self, rng: StdRng) {
+        self.rng = rng;
     }
 
     fn now(&self) -> Timestamp {
@@ -347,7 +367,8 @@ impl PeerLoopHandler {
                 "not found".to_string()
             }
         );
-        let parent_height = received_block.kernel.header.height.previous();
+        let parent_height = received_block.kernel.header.height.previous()
+            .expect("transferred block must have previous height because genesis block cannot be transferred");
 
         // If parent is not known, request the parent, and add the current to
         // the peer fork resolution list
@@ -368,12 +389,10 @@ impl PeerLoopHandler {
                     .header
                     .height
                     .previous()
+                    .expect("fork reconcilliation blocks cannot contain genesis")
                     == received_block.kernel.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
-                        < self
-                            .global_state_lock
-                            .cli()
-                            .max_number_of_blocks_before_syncing
+                        < self.global_state_lock.cli().sync_mode_threshold
             {
                 peer_state.fork_reconciliation_blocks.push(*received_block);
             } else {
@@ -534,6 +553,248 @@ impl PeerLoopHandler {
                     .await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::BlockNotificationRequest => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
+
+                debug!("Got BlockNotificationRequest");
+
+                peer.send(PeerMessage::BlockNotification(
+                    self.global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .into(),
+                ))
+                .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockNotification(block_notification) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
+
+                debug!(
+                    "Got BlockNotification of height {}",
+                    block_notification.height
+                );
+                let state = self.global_state_lock.lock_guard().await;
+                if state.sync_mode_criterion(
+                    block_notification.height,
+                    block_notification.cumulative_proof_of_work,
+                ) {
+                    debug!("sync mode criterion satisfied.");
+
+                    if peer_state_info.sync_challenge.is_some() {
+                        warn!("Cannot launch new sync challenge because one is already on-going.");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    info!(
+                        "Peer indicates block which satisfies sync mode criterion, issuing challenge."
+                    );
+                    let challenge = SyncChallenge::generate(
+                        &block_notification,
+                        state.chain.light_state().header().height,
+                        self.rng.gen(),
+                    );
+                    peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
+                        challenge,
+                        block_notification.cumulative_proof_of_work,
+                        self.now(),
+                    ));
+
+                    debug!("sending challenge ...");
+                    peer.send(PeerMessage::SyncChallenge(challenge)).await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                peer_state_info.highest_shared_block_height = block_notification.height;
+                let block_is_new = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .kernel
+                    .header
+                    .cumulative_proof_of_work
+                    < block_notification.cumulative_proof_of_work;
+
+                debug!("block_is_new: {}", block_is_new);
+
+                if block_is_new
+                    && peer_state_info.fork_reconciliation_blocks.is_empty()
+                    && !self.global_state_lock.lock_guard().await.net.syncing
+                {
+                    debug!(
+                        "sending BlockRequestByHeight to peer for block with height {}",
+                        block_notification.height
+                    );
+                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                        .await?;
+                } else {
+                    debug!(
+                        "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
+                        block_notification.height,
+                        block_is_new,
+                        !peer_state_info.fork_reconciliation_blocks.is_empty()
+                    );
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::SyncChallenge(sync_challenge) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallenge");
+
+                info!("Got sync challenge from {}", self.peer_address.ip());
+
+                let response = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .response_to_sync_challenge(sync_challenge)
+                    .await;
+                let response = match response {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        warn!("could not generate sync challenge response:\n{e}");
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
+
+                info!(
+                    "Responding to sync challenge from {}",
+                    self.peer_address.ip()
+                );
+                peer.send(PeerMessage::SyncChallengeResponse(Box::new(response)))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::SyncChallengeResponse(challenge_response) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
+                info!(
+                    "Got sync challenge response from {}",
+                    self.peer_address.ip()
+                );
+
+                // Did we issue a challenge?
+                let Some(issued_challenge) = peer_state_info.sync_challenge else {
+                    warn!("Sync challenge response was not prompted.");
+                    self.punish(NegativePeerSanction::UnexpectedSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // Reset the challenge, regardless of the response's success.
+                peer_state_info.sync_challenge = None;
+
+                // Does response match issued challenge?
+                if !challenge_response.matches(issued_challenge) {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Does response verify?
+                let claimed_tip_height = challenge_response.tip.header.height;
+                let now = self.now();
+                if !challenge_response.is_valid(now).await {
+                    self.punish(NegativePeerSanction::InvalidSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Did it come in time?
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
+                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
+                    self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                info!("Successful sync challenge response; relaying peer tip info to main loop.");
+
+                // Inform main loop
+                self.to_main_tx
+                    .send(PeerTaskToMain::AddPeerMaxBlockHeight((
+                        self.peer_address,
+                        claimed_tip_height,
+                        issued_challenge.accumulated_pow,
+                    )))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockRequestByHash(block_digest) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
+
+                match self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(block_digest)
+                    .await?
+                {
+                    None => {
+                        // TODO: Consider punishing here
+                        warn!("Peer requested unkown block with hash {}", block_digest);
+                        Ok(KEEP_CONNECTION_ALIVE)
+                    }
+                    Some(b) => {
+                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
+                            .await?;
+                        Ok(KEEP_CONNECTION_ALIVE)
+                    }
+                }
+            }
+            PeerMessage::BlockRequestByHeight(block_height) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+
+                debug!("Got BlockRequestByHeight of height {}", block_height);
+
+                let canonical_block_digest = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .try_get_leaf(block_height.into())
+                    .await;
+
+                let canonical_block_digest = match canonical_block_digest {
+                    None => {
+                        warn!("Got block request by height for unknown block");
+                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                    Some(digest) => digest,
+                };
+
+                let canonical_chain_block: Block = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .get_block(canonical_block_digest)
+                    .await?
+                    .unwrap();
+                let block_response: PeerMessage =
+                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
+
+                debug!("Sending block");
+                peer.send(block_response).await?;
+                debug!("Sent block");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             PeerMessage::Block(t_block) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Block");
 
@@ -545,7 +806,16 @@ impl PeerLoopHandler {
                 );
                 let new_block_height = t_block.header.height;
 
-                let block: Box<Block> = Box::new((*t_block).into());
+                let block = match Block::try_from(*t_block) {
+                    Ok(block) => Box::new(block),
+                    Err(e) => {
+                        warn!("Peer sent invalid block: {e:?}");
+                        self.punish(NegativePeerSanction::InvalidTransferBlock)
+                            .await?;
+
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
 
                 // Update the value for the highest known height that peer possesses iff
                 // we are not in a fork reconciliation state.
@@ -647,9 +917,7 @@ impl PeerLoopHandler {
                 // or `STANDARD_BLOCK_BATCH_SIZE` number of blocks in response.
                 let len_of_response = cmp::min(
                     max_response_len,
-                    self.global_state_lock
-                        .cli()
-                        .max_number_of_blocks_before_syncing,
+                    self.global_state_lock.cli().sync_mode_threshold,
                 );
                 let len_of_response = cmp::max(len_of_response, MINIMUM_BLOCK_BATCH_SIZE);
                 let len_of_response = cmp::min(len_of_response, STANDARD_BLOCK_BATCH_SIZE);
@@ -748,7 +1016,20 @@ impl PeerLoopHandler {
                     "Found own block of height {} to match received batch",
                     most_canonical_own_block_match.kernel.header.height
                 );
-                let received_blocks: Vec<Block> = t_blocks.into_iter().map(|x| x.into()).collect();
+                let mut received_blocks = vec![];
+                for t_block in t_blocks {
+                    match Block::try_from(t_block) {
+                        Ok(block) => {
+                            received_blocks.push(block);
+                        }
+                        Err(e) => {
+                            warn!("Received invalid transfer block from peer: {e:?}");
+                            self.punish(NegativePeerSanction::InvalidTransferBlock)
+                                .await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                    }
+                }
 
                 // Get the latest block that we know of and handle all received blocks
                 self.handle_blocks(received_blocks, most_canonical_own_block_match)
@@ -765,149 +1046,6 @@ impl PeerLoopHandler {
                     self.peer_address
                 );
 
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockNotificationRequest => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotificationRequest");
-
-                debug!("Got BlockNotificationRequest");
-
-                peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .into(),
-                ))
-                .await?;
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockNotification(block_notification) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
-
-                debug!(
-                    "Got BlockNotification of height {}",
-                    block_notification.height
-                );
-                peer_state_info.highest_shared_block_height = block_notification.height;
-                {
-                    let block_is_new = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .kernel
-                        .header
-                        .cumulative_proof_of_work
-                        < block_notification.cumulative_proof_of_work;
-
-                    debug!("block_is_new: {}", block_is_new);
-
-                    // Only request block if it is new, and if we are not currently reconciling
-                    // a fork. If we are reconciling, that is handled later, and the information
-                    // about that is stored in `highest_shared_block_height`. If we are syncing
-                    // we are also not requesting the block but instead updating the sync state.
-                    if self.global_state_lock.lock_guard().await.net.syncing {
-                        debug!(
-                            "ignoring peer block with height {} because we are presently syncing",
-                            block_notification.height
-                        );
-
-                        self.to_main_tx
-                            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                                self.peer_address,
-                                block_notification.height,
-                                block_notification.cumulative_proof_of_work,
-                            )))
-                            .await
-                            .expect("Sending to main task must succeed");
-                    } else if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    {
-                        debug!(
-                            "sending BlockRequestByHeight to peer for block with height {}",
-                            block_notification.height
-                        );
-                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                            .await?;
-                    } else {
-                        debug!(
-                            "ignoring peer block. height {}. new: {}, reconciling_fork: {}",
-                            block_notification.height,
-                            block_is_new,
-                            !peer_state_info.fork_reconciliation_blocks.is_empty()
-                        );
-                    }
-                }
-
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
-            PeerMessage::BlockRequestByHash(block_digest) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHash");
-
-                match self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .get_block(block_digest)
-                    .await?
-                {
-                    None => {
-                        // TODO: Consider punishing here
-                        warn!("Peer requested unkown block with hash {}", block_digest);
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
-                    Some(b) => {
-                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
-                            .await?;
-                        Ok(KEEP_CONNECTION_ALIVE)
-                    }
-                }
-            }
-            PeerMessage::BlockRequestByHeight(block_height) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
-
-                debug!("Got BlockRequestByHeight of height {}", block_height);
-
-                let canonical_block_digest = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .archival_block_mmr
-                    .try_get_leaf(block_height.into())
-                    .await;
-
-                let canonical_block_digest = match canonical_block_digest {
-                    None => {
-                        warn!("Got block request by height for unknown block");
-                        self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-                    Some(digest) => digest,
-                };
-
-                let canonical_chain_block: Block = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .archival_state()
-                    .get_block(canonical_block_digest)
-                    .await?
-                    .unwrap();
-                let block_response: PeerMessage =
-                    PeerMessage::Block(Box::new(canonical_chain_block.try_into().unwrap()));
-
-                debug!("Sending block");
-                peer.send(block_response).await?;
-                debug!("Sent block");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::Handshake(_) => {
@@ -1222,9 +1360,7 @@ impl PeerLoopHandler {
 
                 let max_response_len = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
-                    self.global_state_lock
-                        .cli()
-                        .max_number_of_blocks_before_syncing,
+                    self.global_state_lock.cli().sync_mode_threshold,
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
@@ -1456,15 +1592,6 @@ impl PeerLoopHandler {
             .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
             .await;
 
-        // This message is used to determine if we are to enter synchronization mode.
-        self.to_main_tx
-            .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                self.peer_address,
-                self.peer_handshake_data.tip_header.height,
-                self.peer_handshake_data.tip_header.cumulative_proof_of_work,
-            )))
-            .await?;
-
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
 
@@ -1480,6 +1607,8 @@ impl PeerLoopHandler {
                 .header
                 .cumulative_proof_of_work
         {
+            // Send block notification request to catch up ASAP, in case we're
+            // behind the newly-connected peer.
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
@@ -1510,19 +1639,22 @@ mod peer_loop_tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::fake_valid_block_for_tests;
+    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
-    use crate::tests::shared::valid_block_for_tests;
-    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -1532,7 +1664,7 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+            get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default()).await?;
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -1555,7 +1687,9 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_peer_list() {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await.unwrap();
+            get_test_genesis_setup(Network::Alpha, 2, cli_args::Args::default())
+                .await
+                .unwrap();
 
         let mut peer_infos = state_lock
             .lock_guard()
@@ -1612,7 +1746,7 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         assert_eq!(1000, state_lock.cli().peer_tolerance);
         let peer_address = get_dummy_socket_address(0);
 
@@ -1627,7 +1761,7 @@ mod peer_loop_tests {
             .await;
 
         different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).gen());
-        let [block_1_with_different_genesis] = valid_sequence_of_blocks_for_tests(
+        let [block_1_with_different_genesis] = fake_valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -1652,12 +1786,6 @@ mod peer_loop_tests {
             res.is_err(),
             "run_wrapper must return failure when genesis is different"
         );
-
-        // Verify that max peer height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
@@ -1698,7 +1826,7 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state_lock
             .lock_guard()
@@ -1709,7 +1837,7 @@ mod peer_loop_tests {
             .await;
 
         // Make a with hash above what the implied threshold from
-        let [mut block_without_valid_pow] = valid_sequence_of_blocks_for_tests(
+        let [mut block_without_valid_pow] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -1744,12 +1872,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await
             .expect("sending (one) invalid block should not result in closed connection");
-
-        // Verify that max peer height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
@@ -1795,12 +1917,13 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, mut alice, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = Block::genesis_block(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
+        let block_1 =
+            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
@@ -1829,11 +1952,6 @@ mod peer_loop_tests {
             .run_wrapper(mock_peer_messages, from_main_rx_clone)
             .await?;
 
-        // Verify that no block was sent to main loop
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             other => bail!("Must receive remove of peer block max height. Got:\n {other:?}"),
@@ -1859,15 +1977,18 @@ mod peer_loop_tests {
         // correct list of blocks.
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await.unwrap();
+            get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
         let genesis_block: Block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2, block_3, block_4, block_5] = valid_sequence_of_blocks_for_tests(
-            &genesis_block,
-            Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
-        )
-        .await;
+        let [block_1, block_2, block_3, block_4, block_5] =
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550001).gen(),
+            )
+            .await;
         let blocks = vec![genesis_block, block_1, block_2, block_3, block_4, block_5];
         for block in blocks.iter().skip(1) {
             state_lock.set_new_tip(block.to_owned()).await.unwrap();
@@ -1910,16 +2031,16 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block: Block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2001,16 +2122,16 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2064,7 +2185,9 @@ mod peer_loop_tests {
         // 2.
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await.unwrap();
+            get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
         let peer_address = get_dummy_socket_address(0);
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
@@ -2108,17 +2231,17 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
 
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2169,10 +2292,10 @@ mod peer_loop_tests {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(5550001);
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
 
-        let block_1 = valid_block_for_tests(&state_lock, rng.gen()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.gen()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
@@ -2192,12 +2315,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         // Verify that a block was sent to `main_loop`
         match to_main_rx1.recv().await {
@@ -2225,7 +2342,7 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state_lock
             .lock_guard()
@@ -2234,7 +2351,7 @@ mod peer_loop_tests {
             .archival_state()
             .get_tip()
             .await;
-        let [block_1, block_2] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2264,12 +2381,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2310,17 +2421,17 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 1).await?;
+        ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis_block(network);
 
         // Restrict max number of blocks held in memory to 2.
         let mut cli = state_lock.cli().clone();
-        cli.max_number_of_blocks_before_syncing = 2;
+        cli.sync_mode_threshold = 2;
         state_lock.set_cli(cli).await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let [block_1, _block_2, block_3, block_4] =
-            valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
+            fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
                 .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
@@ -2348,11 +2459,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
             _ => bail!("Must receive remove of peer block max height"),
@@ -2393,10 +2499,12 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             hsd,
-        ) = get_test_genesis_setup(network, 0).await.unwrap();
+        ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+            .await
+            .unwrap();
         let peer_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block = Block::genesis_block(network);
-        let [block_1, block_2, block_3, block_4] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2433,12 +2541,6 @@ mod peer_loop_tests {
             .await
             .unwrap();
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => panic!("Must receive add of peer block max height"),
-        }
-
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
@@ -2472,11 +2574,11 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block = Block::genesis_block(network);
 
-        let [block_1, block_2, block_3] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2510,12 +2612,6 @@ mod peer_loop_tests {
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
-
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
 
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2559,7 +2655,7 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             hsd,
-        ) = get_test_genesis_setup(network, 0).await?;
+        ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = state_lock
             .lock_guard()
@@ -2569,12 +2665,13 @@ mod peer_loop_tests {
             .get_tip()
             .await;
 
-        let [block_1, block_2, block_3, block_4, block_5] = valid_sequence_of_blocks_for_tests(
-            &genesis_block,
-            Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
-        )
-        .await;
+        let [block_1, block_2, block_3, block_4, block_5] =
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550001).gen(),
+            )
+            .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2620,12 +2717,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive add of peer block max height"),
-        }
-
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash() != block_2.hash() {
@@ -2668,7 +2759,7 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 1).await?;
+        ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_infos: Vec<PeerInfo> = state_lock
             .lock_guard()
@@ -2679,7 +2770,7 @@ mod peer_loop_tests {
             .into_values()
             .collect::<Vec<_>>();
 
-        let [block_1, block_2, block_3, block_4] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2732,12 +2823,6 @@ mod peer_loop_tests {
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
-        // Verify that peer max block height was sent
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
-        }
-
         // Verify that blocks are sent to `main_loop` in expected ordering
         match to_main_rx1.recv().await {
             Some(PeerTaskToMain::NewBlocks(blocks)) => {
@@ -2753,11 +2838,6 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main task"),
         };
-
-        match to_main_rx1.recv().await {
-            Some(PeerTaskToMain::RemovePeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive remove of peer block max height"),
-        }
 
         assert_eq!(
             1,
@@ -2776,7 +2856,9 @@ mod peer_loop_tests {
 
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 1).await.unwrap();
+            get_test_genesis_setup(network, 1, cli_args::Args::default())
+                .await
+                .unwrap();
 
         let spending_key = state_lock
             .lock_guard()
@@ -2857,7 +2939,9 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(network, 1).await.unwrap();
+        ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+            .await
+            .unwrap();
         let spending_key = state_lock
             .lock_guard()
             .await
@@ -2945,7 +3029,9 @@ mod peer_loop_tests {
 
         async fn genesis_setup(network: Network) -> TestSetup {
             let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, alice, _hsd) =
-                get_test_genesis_setup(network, 0).await.unwrap();
+                get_test_genesis_setup(network, 0, cli_args::Args::default())
+                    .await
+                    .unwrap();
             let peer_hsd = get_dummy_handshake_data_for_genesis(network).await;
             let peer_loop_handler = PeerLoopHandler::new(
                 to_main_tx.clone(),
@@ -2984,7 +3070,7 @@ mod peer_loop_tests {
                 to_main_tx,
                 genesis_block,
             } = genesis_setup(Network::Main).await;
-            let block1 = valid_block_for_tests(
+            let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550001).gen(),
             )
@@ -3025,7 +3111,7 @@ mod peer_loop_tests {
                 to_main_tx,
                 ..
             } = genesis_setup(Network::Main).await;
-            let block1 = valid_block_for_tests(
+            let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550001).gen(),
             )
@@ -3111,7 +3197,9 @@ mod peer_loop_tests {
                     mut to_main_rx1,
                     mut alice,
                     handshake_data,
-                ) = get_test_genesis_setup(network, 1).await.unwrap();
+                ) = get_test_genesis_setup(network, 1, cli_args::Args::default())
+                    .await
+                    .unwrap();
 
                 use TransactionProofQuality::*;
                 let (own_tx, new_tx) = match (own_tx_pq, new_tx_pq) {
@@ -3184,6 +3272,258 @@ mod peer_loop_tests {
                     }
                 }
             }
+        }
+    }
+
+    mod sync_challenges {
+        use super::*;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn bad_sync_challenge_height_greater_than_tip() {
+            // Criterium: Challenge height may not exceed that of tip in the
+            // request.
+
+            let network = Network::Main;
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                alice_peer_to_main_rx,
+                mut alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
+            let genesis_block: Block = Block::genesis_block(network);
+            let blocks: [Block; 11] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                [0u8; 32],
+            )
+            .await;
+            for block in blocks.iter() {
+                alice.set_new_tip(block.clone()).await.unwrap();
+            }
+
+            let bh12 = blocks.last().unwrap().header().height;
+            let sync_challenge = SyncChallenge {
+                tip_digest: blocks[9].hash(),
+                challenges: [bh12; 10],
+            };
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                peer_address,
+                alice_hsd,
+                false,
+                1,
+            );
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await
+                .unwrap();
+
+            drop(alice_peer_to_main_rx);
+
+            let latest_sanction = alice
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::InvalidSyncChallenge,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned")
+                    .0
+            );
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn bad_sync_challenge_genesis_block_doesnt_crash_client() {
+            // Criterium: Challenge may not point to genesis block, or block 1, as
+            // tip.
+
+            let network = Network::Main;
+            let genesis_block: Block = Block::genesis_block(network);
+
+            let alice_cli = cli_args::Args::default();
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                alice_peer_to_main_rx,
+                alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, alice_cli).await.unwrap();
+
+            let sync_challenge = SyncChallenge {
+                tip_digest: genesis_block.hash(),
+                challenges: [BlockHeight::genesis(); 10],
+            };
+
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                peer_address,
+                alice_hsd,
+                false,
+                1,
+            );
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await
+                .unwrap();
+
+            drop(alice_peer_to_main_rx);
+
+            let latest_sanction = alice
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::InvalidSyncChallenge,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned")
+                    .0
+            );
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn sync_challenge_happy_path() -> Result<()> {
+            // Bob notifies Alice of a block whose parameters satisfy the sync mode
+            // criterion. Alice issues a challenge. Bob responds. Alice enters into
+            // sync mode.
+
+            let mut rng = StdRng::seed_from_u64(5550001);
+            let network = Network::Main;
+            let genesis_block: Block = Block::genesis_block(network);
+
+            let alice_cli = cli_args::Args {
+                sync_mode_threshold: 10,
+                ..Default::default()
+            };
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                mut alice_peer_to_main_rx,
+                mut alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, alice_cli).await?;
+            let _alice_socket_address = get_dummy_socket_address(0);
+
+            let (
+                _bob_main_to_peer_tx,
+                _bob_main_to_peer_rx,
+                _bob_peer_to_main_tx,
+                _bob_peer_to_main_rx,
+                mut bob,
+                _bob_hsd,
+            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            let bob_socket_address = get_dummy_socket_address(0);
+
+            let now = genesis_block.header().timestamp + Timestamp::hours(1);
+            let block_1 = fake_valid_block_for_tests(&alice, rng.gen()).await;
+            assert!(
+                block_1.is_valid(&genesis_block, now).await,
+                "Block must be valid for this test to make sense"
+            );
+            let alice_tip = &block_1;
+            alice.set_new_tip(block_1.clone()).await?;
+            bob.set_new_tip(block_1.clone()).await?;
+
+            let blocks: [Block; 11] =
+                fake_valid_sequence_of_blocks_for_tests(&block_1, TARGET_BLOCK_INTERVAL, rng.gen())
+                    .await;
+            for block in &blocks {
+                bob.set_new_tip(block.clone()).await?;
+            }
+            let bob_tip = blocks.last().unwrap();
+
+            let block_notification_from_bob = PeerBlockNotification {
+                hash: bob_tip.hash(),
+                height: bob_tip.header().height,
+                cumulative_proof_of_work: bob_tip.header().cumulative_proof_of_work,
+            };
+
+            let alice_rng_seed = rng.gen::<[u8; 32]>();
+            let mut alice_rng_clone = StdRng::from_seed(alice_rng_seed);
+            let sync_challenge_from_alice = SyncChallenge::generate(
+                &block_notification_from_bob,
+                alice_tip.header().height,
+                alice_rng_clone.gen(),
+            );
+
+            println!(
+                "sync challenge from alice:\n{:?}",
+                sync_challenge_from_alice
+            );
+
+            let sync_challenge_response_from_bob = bob
+                .lock_guard()
+                .await
+                .response_to_sync_challenge(sync_challenge_from_alice)
+                .await
+                .expect("should be able to respond to sync challenge");
+
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification(block_notification_from_bob)),
+                Action::Write(PeerMessage::SyncChallenge(sync_challenge_from_alice)),
+                Action::Read(PeerMessage::SyncChallengeResponse(Box::new(
+                    sync_challenge_response_from_bob,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let mut alice_peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                bob_socket_address,
+                alice_hsd,
+                false,
+                1,
+                bob_tip.header().timestamp,
+            );
+            alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await?;
+
+            // AddPeerMaxBlockHeight message triggered *after* sync challenge
+            let expected_message_from_alice_peer_loop = PeerTaskToMain::AddPeerMaxBlockHeight((
+                bob_socket_address,
+                bob_tip.header().height,
+                bob_tip.header().cumulative_proof_of_work,
+            ));
+            let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();
+            assert_eq!(
+                expected_message_from_alice_peer_loop,
+                observed_message_from_alice_peer_loop
+            );
+
+            Ok(())
         }
     }
 }

@@ -7,6 +7,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use crate::models::blockchain::block::block_appendix::BlockAppendix;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockProof;
 
@@ -20,15 +21,21 @@ pub struct TransferBlock {
     pub proof: Proof,
 }
 
-// todo: change to try_from
-impl From<TransferBlock> for Block {
-    fn from(t_block: TransferBlock) -> Self {
-        Block::new(
+impl TryFrom<TransferBlock> for Block {
+    type Error = anyhow::Error;
+
+    fn try_from(t_block: TransferBlock) -> std::result::Result<Self, Self::Error> {
+        if t_block.header.height == BlockHeight::genesis() {
+            bail!("The genesis block cannot be transferred or decoded from transfer");
+        }
+
+        let block = Block::new(
             t_block.header,
             t_block.body,
             t_block.appendix,
             BlockProof::SingleProof(t_block.proof),
-        )
+        );
+        Ok(block)
     }
 }
 
@@ -72,8 +79,8 @@ mod test {
     use super::*;
     use crate::models::peer::Network;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::invalid_empty_block;
-    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
@@ -98,7 +105,7 @@ mod test {
         // TransferBlock::into() will panic if it
         // encounters the genesis block.
         let genesis = Block::genesis_block(network);
-        let [block1] = valid_sequence_of_blocks_for_tests(
+        let [block1] = fake_valid_sequence_of_blocks_for_tests(
             &genesis,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -106,7 +113,7 @@ mod test {
         .await;
 
         let transfer_block = TransferBlock::try_from(block1.clone()).unwrap();
-        let new_block = Block::from(transfer_block);
+        let new_block = Block::try_from(transfer_block).unwrap();
         assert_eq!(block1.hash(), new_block.hash());
     }
 }

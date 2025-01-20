@@ -343,6 +343,32 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     proving_power: TxProvingCapability,
     vm_job_queue: &JobQueue<TritonVmJobPriority>,
 ) -> Result<(Transaction, TxOutputList)> {
+    let (composer_outputs, transaction_details) =
+        prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
+
+    info!("Start: generate single proof for coinbase transaction");
+    let transaction = GlobalState::create_raw_transaction(
+        transaction_details,
+        proving_power,
+        vm_job_queue,
+        TritonVmProofJobOptions {
+            job_priority: TritonVmJobPriority::High,
+            job_settings: Default::default(),
+        },
+    )
+    .await?;
+    info!("Done: generating single proof for coinbase transaction");
+
+    Ok((transaction, composer_outputs))
+}
+
+/// Compute `TransactionDetails` and a list of `TxOutput`s for a coinbase
+/// transaction.
+pub(super) fn prepare_coinbase_transaction_stateless(
+    latest_block: &Block,
+    composer_parameters: ComposerParameters,
+    timestamp: Timestamp,
+) -> Result<(TxOutputList, TransactionDetails)> {
     let mutator_set_accumulator = latest_block.mutator_set_accumulator_after().clone();
     let next_block_height: BlockHeight = latest_block.header().height.next();
     info!("Creating coinbase for block of height {next_block_height}.");
@@ -411,20 +437,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
  and tx must be balanced because the one output receives exactly the coinbase amount",
     );
 
-    info!("Start: generate single proof for coinbase transaction");
-    let transaction = GlobalState::create_raw_transaction(
-        transaction_details,
-        proving_power,
-        vm_job_queue,
-        TritonVmProofJobOptions {
-            job_priority: TritonVmJobPriority::High,
-            job_settings: Default::default(),
-        },
-    )
-    .await?;
-    info!("Done: generating single proof for coinbase transaction");
-
-    Ok((transaction, composer_outputs))
+    Ok((composer_outputs, transaction_details))
 }
 
 /// Create a transaction with a coinbase for the indicated address.
@@ -884,6 +897,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -891,8 +905,6 @@ pub(crate) mod mine_loop_tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
-    use crate::triton_vm;
-    use crate::triton_vm::stark::Stark;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
@@ -1165,11 +1177,15 @@ pub(crate) mod mine_loop_tests {
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
             let cb_tx_claim = SingleProof::claim(cb_txkmh);
             assert!(
-                triton_vm::verify(
-                    Stark::default(),
-                    &cb_tx_claim,
-                    &transaction_empty_mempool.proof.clone().into_single_proof()
-                ),
+                verify(
+                    cb_tx_claim.clone(),
+                    transaction_empty_mempool
+                        .proof
+                        .clone()
+                        .into_single_proof()
+                        .clone()
+                )
+                .await,
                 "Transaction proof for coinbase transaction must be valid."
             );
 

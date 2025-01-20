@@ -1550,7 +1550,7 @@ mod tests {
         let (block_1b, _) =
             make_mock_block(&genesis_block, Some(in_seven_years), bob_key, rng.gen()).await;
         assert!(
-            block_1b.header().height.previous().is_genesis(),
+            block_1b.header().height.previous().unwrap().is_genesis(),
             "Sanity check that new tip has height 1"
         );
         alice.set_new_tip(block_1b.clone()).await.unwrap();
