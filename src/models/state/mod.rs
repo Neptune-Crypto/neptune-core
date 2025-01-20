@@ -1482,36 +1482,47 @@ impl GlobalState {
         // Ok(())
     }
 
-    /// Returns (parent, child) pair of blocks.
-    pub(crate) async fn fetch_block_pair(&self, child_digest: Digest) -> Option<(Block, Block)> {
-        let child = self
-            .chain
-            .archival_state()
-            .get_block(child_digest)
-            .await
-            .expect("fetching block from archival state should work.");
-        let Some(child) = child else {
-            warn!("Got sync challenge for unknown tip");
-
-            return None;
-        };
-        let parent_digest = child.header().prev_block_digest;
-        let parent = self
-            .chain
-            .archival_state()
-            .get_block(parent_digest)
-            .await
-            .expect("fetching block from archival state should work.")
-            .expect("parent of known block from archival state must exist.");
-
-        Some((parent, child))
-    }
-
     pub(crate) async fn response_to_sync_challenge(
         &self,
         sync_challenge: SyncChallenge,
     ) -> Result<SyncChallengeResponse> {
-        let Some((tip_parent, tip)) = self.fetch_block_pair(sync_challenge.tip_digest).await else {
+        async fn fetch_block_pair(
+            state: &GlobalState,
+            child_digest: Digest,
+        ) -> Option<(Block, Block)> {
+            let child = state
+                .chain
+                .archival_state()
+                .get_block(child_digest)
+                .await
+                .expect("fetching block from archival state should work.");
+            let Some(child) = child else {
+                warn!("Got sync challenge for unknown tip");
+
+                return None;
+            };
+            if child.header().height < 2.into() {
+                warn!("Got sync challenge for tip of too low height; cannot send genesis block");
+
+                return None;
+            }
+
+            let parent_digest = child.header().prev_block_digest;
+            let parent = state
+                .chain
+                .archival_state()
+                .get_block(parent_digest)
+                .await
+                .expect("fetching block from archival state should work.")
+                .expect(
+                    "parent of known block from archival state must exist, if height exceeds 1.",
+                );
+
+            Some((parent, child))
+        }
+
+        let Some((tip_parent, tip)) = fetch_block_pair(self, sync_challenge.tip_digest).await
+        else {
             bail!("could not fetch tip and tip predecessor");
         };
 
@@ -1525,6 +1536,9 @@ impl GlobalState {
             if h < 2u64.into() {
                 bail!("challenge asks for genesis block");
             }
+            if h >= tip.header().height {
+                bail!("challenge asks for height that's not ancestor to tip.");
+            }
 
             let Some(child_digest) = self
                 .chain
@@ -1535,7 +1549,7 @@ impl GlobalState {
             else {
                 bail!("could not get leaf from archival block mmr");
             };
-            let Some((p, c)) = self.fetch_block_pair(child_digest).await else {
+            let Some((p, c)) = fetch_block_pair(self, child_digest).await else {
                 bail!("could not fetch indicated block pair");
             };
 
@@ -1636,9 +1650,9 @@ mod global_state_tests {
     use crate::config_models::network::Network;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
+    use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::valid_successor_for_tests;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
     #[traced_test]
@@ -2666,7 +2680,7 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 = valid_successor_for_tests(&genesis_block, now, Default::default()).await;
+        let block1 = fake_valid_successor_for_tests(&genesis_block, now, Default::default()).await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 

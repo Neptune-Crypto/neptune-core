@@ -649,16 +649,20 @@ impl PeerLoopHandler {
 
                 info!("Got sync challenge from {}", self.peer_address.ip());
 
-                let global_state = self.global_state_lock.lock_guard().await;
-
-                let Ok(response) = global_state
-                    .response_to_sync_challenge(sync_challenge)
+                let response = self
+                    .global_state_lock
+                    .lock_guard()
                     .await
-                else {
-                    drop(global_state);
-                    self.punish(NegativePeerSanction::InvalidSyncChallenge)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
+                    .response_to_sync_challenge(sync_challenge)
+                    .await;
+                let response = match response {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        warn!("could not generate sync challenge response:\n{e}");
+                        self.punish(NegativePeerSanction::InvalidSyncChallenge)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
                 };
 
                 info!(
@@ -1655,11 +1659,11 @@ mod peer_loop_tests {
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::fake_valid_block_for_tests;
+    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::get_dummy_socket_address;
     use crate::tests::shared::get_test_genesis_setup;
-    use crate::tests::shared::valid_block_for_tests;
-    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
 
@@ -1766,7 +1770,7 @@ mod peer_loop_tests {
             .await;
 
         different_genesis_block.set_header_nonce(StdRng::seed_from_u64(5550001).gen());
-        let [block_1_with_different_genesis] = valid_sequence_of_blocks_for_tests(
+        let [block_1_with_different_genesis] = fake_valid_sequence_of_blocks_for_tests(
             &different_genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -1848,7 +1852,7 @@ mod peer_loop_tests {
             .await;
 
         // Make a with hash above what the implied threshold from
-        let [mut block_without_valid_pow] = valid_sequence_of_blocks_for_tests(
+        let [mut block_without_valid_pow] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -1939,7 +1943,8 @@ mod peer_loop_tests {
         let genesis_block: Block = Block::genesis_block(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
+        let block_1 =
+            fake_valid_block_for_tests(&alice, StdRng::seed_from_u64(5550001).gen()).await;
         assert!(
             block_1.is_valid(&genesis_block, now).await,
             "Block must be valid for this test to make sense"
@@ -2003,12 +2008,13 @@ mod peer_loop_tests {
                 .unwrap();
         let genesis_block: Block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2, block_3, block_4, block_5] = valid_sequence_of_blocks_for_tests(
-            &genesis_block,
-            Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
-        )
-        .await;
+        let [block_1, block_2, block_3, block_4, block_5] =
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550001).gen(),
+            )
+            .await;
         let blocks = vec![genesis_block, block_1, block_2, block_3, block_4, block_5];
         for block in blocks.iter().skip(1) {
             state_lock.set_new_tip(block.to_owned()).await.unwrap();
@@ -2054,13 +2060,13 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block: Block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2145,13 +2151,13 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2255,13 +2261,13 @@ mod peer_loop_tests {
         let genesis_block = Block::genesis_block(network);
         let peer_address = get_dummy_socket_address(0);
 
-        let [block_1, block_2_a, block_3_a] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
         )
         .await;
-        let [block_2_b, block_3_b] = valid_sequence_of_blocks_for_tests(
+        let [block_2_b, block_3_b] = fake_valid_sequence_of_blocks_for_tests(
             &block_1,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550002).gen(),
@@ -2315,7 +2321,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
 
-        let block_1 = valid_block_for_tests(&state_lock, rng.gen()).await;
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.gen()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
                 block_1.clone().try_into().unwrap(),
@@ -2377,7 +2383,7 @@ mod peer_loop_tests {
             .archival_state()
             .get_tip()
             .await;
-        let [block_1, block_2] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2463,7 +2469,7 @@ mod peer_loop_tests {
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
         let [block_1, _block_2, block_3, block_4] =
-            valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
+            fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
                 .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
@@ -2541,7 +2547,7 @@ mod peer_loop_tests {
             .unwrap();
         let peer_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block = Block::genesis_block(network);
-        let [block_1, block_2, block_3, block_4] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2621,7 +2627,7 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let genesis_block = Block::genesis_block(network);
 
-        let [block_1, block_2, block_3] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -2714,12 +2720,13 @@ mod peer_loop_tests {
             .get_tip()
             .await;
 
-        let [block_1, block_2, block_3, block_4, block_5] = valid_sequence_of_blocks_for_tests(
-            &genesis_block,
-            Timestamp::hours(1),
-            StdRng::seed_from_u64(5550001).gen(),
-        )
-        .await;
+        let [block_1, block_2, block_3, block_4, block_5] =
+            fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550001).gen(),
+            )
+            .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2824,7 +2831,7 @@ mod peer_loop_tests {
             .into_values()
             .collect::<Vec<_>>();
 
-        let [block_1, block_2, block_3, block_4] = valid_sequence_of_blocks_for_tests(
+        let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),
@@ -3135,7 +3142,7 @@ mod peer_loop_tests {
                 to_main_tx,
                 genesis_block,
             } = genesis_setup(Network::Main).await;
-            let block1 = valid_block_for_tests(
+            let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550001).gen(),
             )
@@ -3176,7 +3183,7 @@ mod peer_loop_tests {
                 to_main_tx,
                 ..
             } = genesis_setup(Network::Main).await;
-            let block1 = valid_block_for_tests(
+            let block1 = fake_valid_block_for_tests(
                 &peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550001).gen(),
             )
@@ -3340,133 +3347,271 @@ mod peer_loop_tests {
         }
     }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn test_sync_challenge() -> Result<()> {
-        // Bob notifies Alice of a block whose parameters satisfy the sync mode
-        // criterion. Alice issues a challenge. Bob responds. Alice enters into
-        // sync mode.
+    mod sync_challenges {
+        use super::*;
 
-        let mut rng = StdRng::seed_from_u64(5550001);
-        let network = Network::Main;
-        let genesis_block: Block = Block::genesis_block(network);
+        #[traced_test]
+        #[tokio::test]
+        async fn bad_sync_challenge_height_greater_than_tip() {
+            // Criterium: Challenge height may not exceed that of tip in the
+            // request.
 
-        let alice_cli = cli_args::Args {
-            sync_mode_threshold: 10,
-            ..Default::default()
-        };
-        let (
-            _alice_main_to_peer_tx,
-            alice_main_to_peer_rx,
-            alice_peer_to_main_tx,
-            mut alice_peer_to_main_rx,
-            mut alice,
-            alice_hsd,
-        ) = get_test_genesis_setup(network, 0, alice_cli).await?;
-        let _alice_socket_address = get_dummy_socket_address(0);
+            let network = Network::Main;
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                alice_peer_to_main_rx,
+                mut alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
+            let genesis_block: Block = Block::genesis_block(network);
+            let blocks: [Block; 11] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                [0u8; 32],
+            )
+            .await;
+            for block in blocks.iter() {
+                alice.set_new_tip(block.clone()).await.unwrap();
+            }
 
-        let (
-            _bob_main_to_peer_tx,
-            _bob_main_to_peer_rx,
-            _bob_peer_to_main_tx,
-            _bob_peer_to_main_rx,
-            mut bob,
-            _bob_hsd,
-        ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
-        let bob_socket_address = get_dummy_socket_address(0);
+            let bh12 = blocks.last().unwrap().header().height;
+            let sync_challenge = SyncChallenge {
+                tip_digest: blocks[9].hash(),
+                challenges: [bh12; 10],
+            };
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
+                Action::Read(PeerMessage::Bye),
+            ]);
 
-        let now = genesis_block.header().timestamp + Timestamp::hours(1);
-        let block_1 = valid_block_for_tests(&alice, rng.gen()).await;
-        assert!(
-            block_1.is_valid(&genesis_block, now).await,
-            "Block must be valid for this test to make sense"
-        );
-        let alice_tip = &block_1;
-        alice.set_new_tip(block_1.clone()).await?;
-        bob.set_new_tip(block_1.clone()).await?;
+            let peer_address = get_dummy_socket_address(0);
+            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                peer_address,
+                alice_hsd,
+                false,
+                1,
+            );
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await
+                .unwrap();
 
-        let blocks: [Block; 11] =
-            valid_sequence_of_blocks_for_tests(&block_1, TARGET_BLOCK_INTERVAL, rng.gen()).await;
-        for block in &blocks {
-            bob.set_new_tip(block.clone()).await?;
+            drop(alice_peer_to_main_rx);
+
+            let latest_sanction = alice
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::InvalidSyncChallenge,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned")
+                    .0
+            );
         }
-        let bob_tip = blocks.last().unwrap();
 
-        let block_notification_from_bob = PeerBlockNotification {
-            hash: bob_tip.hash(),
-            height: bob_tip.header().height,
-            cumulative_proof_of_work: bob_tip.header().cumulative_proof_of_work,
-        };
+        #[traced_test]
+        #[tokio::test]
+        async fn bad_sync_challenge_genesis_block_doesnt_crash_client() {
+            // Criterium: Challenge may not point to genesis block, or block 1, as
+            // tip.
 
-        let alice_rng_seed = rng.gen::<[u8; 32]>();
-        let mut alice_rng_clone = StdRng::from_seed(alice_rng_seed);
-        let sync_challenge_from_alice = SyncChallenge::generate(
-            &block_notification_from_bob,
-            alice_tip.header().height,
-            alice_rng_clone.gen(),
-        );
+            let network = Network::Main;
+            let genesis_block: Block = Block::genesis_block(network);
 
-        println!(
-            "sync challenge from alice:\n{:?}",
-            sync_challenge_from_alice
-        );
+            let alice_cli = cli_args::Args::default();
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                alice_peer_to_main_rx,
+                alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, alice_cli).await.unwrap();
 
-        let sync_challenge_response_from_bob = bob
-            .lock_guard()
-            .await
-            .response_to_sync_challenge(sync_challenge_from_alice)
-            .await
-            .expect("should be able to respond to sync challenge");
+            let sync_challenge = SyncChallenge {
+                tip_digest: genesis_block.hash(),
+                challenges: [BlockHeight::genesis(); 10],
+            };
 
-        let alice_p2p_messages = Mock::new(vec![
-            Action::Read(PeerMessage::BlockNotification(block_notification_from_bob)),
-            Action::Write(PeerMessage::SyncChallenge(sync_challenge_from_alice)),
-            Action::Read(PeerMessage::SyncChallengeResponse(Box::new(
-                sync_challenge_response_from_bob,
-            ))),
-            Action::Read(PeerMessage::Bye),
-        ]);
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::SyncChallenge(sync_challenge)),
+                Action::Read(PeerMessage::Bye),
+            ]);
 
-        let mut alice_peer_loop_handler = PeerLoopHandler::with_mocked_time(
-            alice_peer_to_main_tx.clone(),
-            alice.clone(),
-            bob_socket_address,
-            alice_hsd,
-            false,
-            1,
-            bob_tip.header().timestamp,
-        );
-        alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
-        alice_peer_loop_handler
-            .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
-            .await?;
+            let peer_address = get_dummy_socket_address(0);
+            let mut alice_peer_loop_handler = PeerLoopHandler::new(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                peer_address,
+                alice_hsd,
+                false,
+                1,
+            );
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await
+                .unwrap();
 
-        // AddPeerMaxBlockHeight message triggered in run_wrapper, before
-        // peer_loop starts
-        let expected_message_from_alice_peer_loop_1 = PeerTaskToMain::AddPeerMaxBlockHeight((
-            bob_socket_address,
-            BlockHeight::genesis(),
-            ProofOfWork::zero(),
-        ));
-        let observed_message_from_alice_peer_loop_1 = alice_peer_to_main_rx.recv().await.unwrap();
+            drop(alice_peer_to_main_rx);
 
-        assert_eq!(
-            expected_message_from_alice_peer_loop_1,
-            observed_message_from_alice_peer_loop_1
-        );
+            let latest_sanction = alice
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::InvalidSyncChallenge,
+                latest_sanction
+                    .latest_punishment
+                    .expect("peer must be sanctioned")
+                    .0
+            );
+        }
 
-        // AddPeerMaxBlockHeight message triggered *after* sync challenge
-        let expected_message_from_alice_peer_loop_2 = PeerTaskToMain::AddPeerMaxBlockHeight((
-            bob_socket_address,
-            bob_tip.header().height,
-            bob_tip.header().cumulative_proof_of_work,
-        ));
-        let observed_message_from_alice_peer_loop_2 = alice_peer_to_main_rx.recv().await.unwrap();
-        assert_eq!(
-            expected_message_from_alice_peer_loop_2,
-            observed_message_from_alice_peer_loop_2
-        );
+        #[traced_test]
+        #[tokio::test]
+        async fn sync_challenge_happy_path() -> Result<()> {
+            // Bob notifies Alice of a block whose parameters satisfy the sync mode
+            // criterion. Alice issues a challenge. Bob responds. Alice enters into
+            // sync mode.
 
-        Ok(())
+            let mut rng = StdRng::seed_from_u64(5550001);
+            let network = Network::Main;
+            let genesis_block: Block = Block::genesis_block(network);
+
+            let alice_cli = cli_args::Args {
+                sync_mode_threshold: 10,
+                ..Default::default()
+            };
+            let (
+                _alice_main_to_peer_tx,
+                alice_main_to_peer_rx,
+                alice_peer_to_main_tx,
+                mut alice_peer_to_main_rx,
+                mut alice,
+                alice_hsd,
+            ) = get_test_genesis_setup(network, 0, alice_cli).await?;
+            let _alice_socket_address = get_dummy_socket_address(0);
+
+            let (
+                _bob_main_to_peer_tx,
+                _bob_main_to_peer_rx,
+                _bob_peer_to_main_tx,
+                _bob_peer_to_main_rx,
+                mut bob,
+                _bob_hsd,
+            ) = get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
+            let bob_socket_address = get_dummy_socket_address(0);
+
+            let now = genesis_block.header().timestamp + Timestamp::hours(1);
+            let block_1 = fake_valid_block_for_tests(&alice, rng.gen()).await;
+            assert!(
+                block_1.is_valid(&genesis_block, now).await,
+                "Block must be valid for this test to make sense"
+            );
+            let alice_tip = &block_1;
+            alice.set_new_tip(block_1.clone()).await?;
+            bob.set_new_tip(block_1.clone()).await?;
+
+            let blocks: [Block; 11] =
+                fake_valid_sequence_of_blocks_for_tests(&block_1, TARGET_BLOCK_INTERVAL, rng.gen())
+                    .await;
+            for block in &blocks {
+                bob.set_new_tip(block.clone()).await?;
+            }
+            let bob_tip = blocks.last().unwrap();
+
+            let block_notification_from_bob = PeerBlockNotification {
+                hash: bob_tip.hash(),
+                height: bob_tip.header().height,
+                cumulative_proof_of_work: bob_tip.header().cumulative_proof_of_work,
+            };
+
+            let alice_rng_seed = rng.gen::<[u8; 32]>();
+            let mut alice_rng_clone = StdRng::from_seed(alice_rng_seed);
+            let sync_challenge_from_alice = SyncChallenge::generate(
+                &block_notification_from_bob,
+                alice_tip.header().height,
+                alice_rng_clone.gen(),
+            );
+
+            println!(
+                "sync challenge from alice:\n{:?}",
+                sync_challenge_from_alice
+            );
+
+            let sync_challenge_response_from_bob = bob
+                .lock_guard()
+                .await
+                .response_to_sync_challenge(sync_challenge_from_alice)
+                .await
+                .expect("should be able to respond to sync challenge");
+
+            let alice_p2p_messages = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification(block_notification_from_bob)),
+                Action::Write(PeerMessage::SyncChallenge(sync_challenge_from_alice)),
+                Action::Read(PeerMessage::SyncChallengeResponse(Box::new(
+                    sync_challenge_response_from_bob,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let mut alice_peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                alice_peer_to_main_tx.clone(),
+                alice.clone(),
+                bob_socket_address,
+                alice_hsd,
+                false,
+                1,
+                bob_tip.header().timestamp,
+            );
+            alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
+            alice_peer_loop_handler
+                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .await?;
+
+            // AddPeerMaxBlockHeight message triggered in run_wrapper, before
+            // peer_loop starts
+            let expected_message_from_alice_peer_loop_1 = PeerTaskToMain::AddPeerMaxBlockHeight((
+                bob_socket_address,
+                BlockHeight::genesis(),
+                ProofOfWork::zero(),
+            ));
+            let observed_message_from_alice_peer_loop_1 =
+                alice_peer_to_main_rx.recv().await.unwrap();
+
+            assert_eq!(
+                expected_message_from_alice_peer_loop_1,
+                observed_message_from_alice_peer_loop_1
+            );
+
+            // AddPeerMaxBlockHeight message triggered *after* sync challenge
+            let expected_message_from_alice_peer_loop_2 = PeerTaskToMain::AddPeerMaxBlockHeight((
+                bob_socket_address,
+                bob_tip.header().height,
+                bob_tip.header().cumulative_proof_of_work,
+            ));
+            let observed_message_from_alice_peer_loop_2 =
+                alice_peer_to_main_rx.recv().await.unwrap();
+            assert_eq!(
+                expected_message_from_alice_peer_loop_2,
+                observed_message_from_alice_peer_loop_2
+            );
+
+            Ok(())
+        }
     }
 }

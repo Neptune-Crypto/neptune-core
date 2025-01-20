@@ -1065,11 +1065,11 @@ mod block_tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
+    use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::tests::shared::valid_successor_for_tests;
     use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
 
     #[test]
@@ -1157,7 +1157,7 @@ mod block_tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-        let mut block1 = valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
+        let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
         let timestamp = block1.kernel.header.timestamp;
         assert!(block1.is_valid(&genesis_block, timestamp).await);
@@ -1266,7 +1266,7 @@ mod block_tests {
         use super::*;
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
         use crate::models::state::wallet::address::KeyType;
-        use crate::tests::shared::valid_successor_for_tests;
+        use crate::tests::shared::fake_valid_successor_for_tests;
 
         #[traced_test]
         #[tokio::test]
@@ -1285,7 +1285,7 @@ mod block_tests {
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
             let block1 =
-                valid_successor_for_tests(&genesis_block, plus_seven_months, rng.gen()).await;
+                fake_valid_successor_for_tests(&genesis_block, plus_seven_months, rng.gen()).await;
 
             let alice_wallet = WalletSecret::devnet_wallet();
             let mut alice = mock_genesis_global_state(
@@ -1444,7 +1444,7 @@ mod block_tests {
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
-            let mut block1 = valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
+            let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
             // Set block timestamp 1 hour in the future.  (is valid)
             let future_time1 = now + Timestamp::hours(1);

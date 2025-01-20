@@ -79,8 +79,8 @@ mod test {
     use super::*;
     use crate::models::peer::Network;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
     use crate::tests::shared::invalid_empty_block;
-    use crate::tests::shared::valid_sequence_of_blocks_for_tests;
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
@@ -105,7 +105,7 @@ mod test {
         // TransferBlock::into() will panic if it
         // encounters the genesis block.
         let genesis = Block::genesis_block(network);
-        let [block1] = valid_sequence_of_blocks_for_tests(
+        let [block1] = fake_valid_sequence_of_blocks_for_tests(
             &genesis,
             Timestamp::hours(1),
             StdRng::seed_from_u64(5550001).gen(),

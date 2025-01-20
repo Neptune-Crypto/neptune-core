@@ -738,6 +738,8 @@ pub(crate) struct SyncChallengeResponse {
 }
 
 impl SyncChallengeResponse {
+    /// Determine whether the `SyncChallengeResponse` answers the given
+    /// `IssuedSyncChallenge`, and not some other one.
     pub(crate) fn matches(&self, issued_challenge: IssuedSyncChallenge) -> bool {
         let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
             return false;
@@ -755,6 +757,8 @@ impl SyncChallengeResponse {
             && tip.has_proof_of_work(tip_predecessor.header())
     }
 
+    /// Determine whether the proofs in `SyncChallengeResponse` are valid. Also
+    /// checks proof-of-work.
     pub(crate) async fn is_valid(&self, now: Timestamp) -> bool {
         let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
             return false;

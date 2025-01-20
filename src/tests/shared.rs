@@ -33,7 +33,6 @@ use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
-use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -843,7 +842,7 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
 
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
-pub(crate) async fn valid_block_from_tx_for_tests(
+pub(crate) async fn fake_valid_block_from_tx_for_tests(
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
@@ -863,8 +862,7 @@ pub(crate) async fn valid_block_from_tx_for_tests(
         let appendix = block_proof_witness.appendix();
         let claim = BlockProgram::claim(&body, &appendix);
         cache_true_claim(claim).await;
-        let bogus_proof_data = (0..11).map(|_| rng.gen::<BFieldElement>()).collect_vec();
-        (appendix, BlockProof::SingleProof(Proof(bogus_proof_data)))
+        (appendix, BlockProof::SingleProof(Proof(vec![])))
     };
 
     let mut block = Block::new(header, body, appendix, proof);
@@ -881,24 +879,23 @@ pub(crate) async fn valid_block_from_tx_for_tests(
 /// seems to pass but without the hassle of producing a proof for it. Behind the
 /// scenes, this method updates the true claims cache, such that the call to
 /// `triton_vm::verify` will be by-passed.
-async fn create_transaction_from_details_for_tests(
+async fn fake_create_transaction_from_details_for_tests(
     transaction_details: TransactionDetails,
 ) -> Transaction {
     let kernel = PrimitiveWitness::from_transaction_details(transaction_details).kernel;
 
-    let bogus_proof_data = Tip5::hash_varlen(&kernel.encode()).values().to_vec();
     let claim = SingleProof::claim(kernel.mast_hash());
     cache_true_claim(claim).await;
 
     Transaction {
         kernel,
-        proof: TransactionProof::SingleProof(Proof(bogus_proof_data)),
+        proof: TransactionProof::SingleProof(Proof(vec![])),
     }
 }
 
 /// Merge two transactions for tests, without the hassle of proving but such
 /// that the result seems valid.
-async fn merge_transactions_for_tests(
+async fn fake_merge_transactions_for_tests(
     lhs: Transaction,
     rhs: Transaction,
     shuffle_seed: [u8; 32],
@@ -913,18 +910,17 @@ async fn merge_transactions_for_tests(
         MergeWitness::from_transactions(lhs.kernel, lhs_proof, rhs.kernel, rhs_proof, shuffle_seed);
     let new_kernel = merge_witness.new_kernel.clone();
 
-    let bogus_proof_data = Tip5::hash_varlen(&new_kernel.encode()).values().to_vec();
     let claim = SingleProof::claim(new_kernel.mast_hash());
     cache_true_claim(claim).await;
 
     Ok(Transaction {
         kernel: new_kernel,
-        proof: TransactionProof::SingleProof(Proof(bogus_proof_data)),
+        proof: TransactionProof::SingleProof(Proof(vec![])),
     })
 }
 
 /// Create a block-transaction with a bogus proof but such that `verify` passes.
-pub(crate) async fn create_block_transaction_for_tests(
+pub(crate) async fn fake_create_block_transaction_for_tests(
     predecessor_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
@@ -934,7 +930,8 @@ pub(crate) async fn create_block_transaction_for_tests(
     let (composer_txos, transaction_details) =
         prepare_coinbase_transaction_stateless(predecessor_block, composer_parameters, timestamp)?;
 
-    let coinbase_transaction = create_transaction_from_details_for_tests(transaction_details).await;
+    let coinbase_transaction =
+        fake_create_transaction_from_details_for_tests(transaction_details).await;
 
     let mut block_transaction = coinbase_transaction;
     if selected_mempool_txs.is_empty() {
@@ -942,7 +939,7 @@ pub(crate) async fn create_block_transaction_for_tests(
         // merge bit to allow the tx to be included in a block.
         let nop_details =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
-        let nop_transaction = create_transaction_from_details_for_tests(nop_details).await;
+        let nop_transaction = fake_create_transaction_from_details_for_tests(nop_details).await;
 
         selected_mempool_txs = vec![nop_transaction];
     }
@@ -950,7 +947,7 @@ pub(crate) async fn create_block_transaction_for_tests(
     let mut rng = StdRng::from_seed(shuffle_seed);
     for tx_to_include in selected_mempool_txs.into_iter() {
         block_transaction =
-            merge_transactions_for_tests(block_transaction, tx_to_include, rng.gen())
+            fake_merge_transactions_for_tests(block_transaction, tx_to_include, rng.gen())
                 .await
                 .expect("Must be able to merge transactions in mining context");
     }
@@ -958,7 +955,7 @@ pub(crate) async fn create_block_transaction_for_tests(
     Ok((block_transaction, composer_txos))
 }
 
-pub(crate) async fn valid_successor_for_tests(
+pub(crate) async fn fake_valid_successor_for_tests(
     predecessor: &Block,
     timestamp: Timestamp,
     seed: [u8; 32],
@@ -970,7 +967,7 @@ pub(crate) async fn valid_successor_for_tests(
         rng.gen(),
         0.5f64,
     );
-    let (block_tx, _) = create_block_transaction_for_tests(
+    let (block_tx, _) = fake_create_block_transaction_for_tests(
         predecessor,
         composer_parameters,
         timestamp,
@@ -980,17 +977,20 @@ pub(crate) async fn valid_successor_for_tests(
     .await
     .unwrap();
 
-    valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
+    fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
 }
 
-/// Create a valid block with coinbase going to self. For testing purposes.
+/// Create a block with coinbase going to self. For testing purposes.
 ///
-/// The block will be valid both in terms of PoW and block proof and will pass
-/// the Block::is_valid() function. However, the associated (claim, proof) pair
-/// will not pass `triton_vm::verify`.
-pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u8; 32]) -> Block {
+/// The block will be valid both in terms of PoW and and will pass the
+/// Block::is_valid() function. However, the associated (claim, proof) pair will
+/// will not pass `triton_vm::verify`, as its validity is only mocked.
+pub(crate) async fn fake_valid_block_for_tests(
+    state_lock: &GlobalStateLock,
+    seed: [u8; 32],
+) -> Block {
     let current_tip = state_lock.lock_guard().await.chain.light_state().clone();
-    valid_successor_for_tests(
+    fake_valid_successor_for_tests(
         &current_tip,
         current_tip.header().timestamp + Timestamp::hours(1),
         seed,
@@ -1003,7 +1003,7 @@ pub(crate) async fn valid_block_for_tests(state_lock: &GlobalStateLock, seed: [u
 /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
 /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
 /// block is valid in terms of both `is_valid` and `has_proof_of_work`.
-pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
+pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
     mut predecessor: &Block,
     block_interval: Timestamp,
     seed: [u8; 32],
@@ -1011,7 +1011,7 @@ pub(crate) async fn valid_sequence_of_blocks_for_tests<const N: usize>(
     let mut blocks = vec![];
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     for _ in 0..N {
-        let block = valid_successor_for_tests(
+        let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
             rng.gen(),

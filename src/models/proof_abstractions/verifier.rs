@@ -44,8 +44,8 @@ pub(crate) async fn cache_true_claim(claim: Claim) {
 #[cfg(test)]
 pub(crate) mod test {
     use itertools::Itertools;
-    use rand::{thread_rng, Rng};
-
+    use rand::thread_rng;
+    use rand::Rng;
     use tasm_lib::prelude::Tip5;
     use triton_vm::prelude::BFieldCodec;
 
