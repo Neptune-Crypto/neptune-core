@@ -287,158 +287,151 @@ impl ArchivalState {
         &self.genesis_block
     }
 
-    /// Write a newly found block to database and to disk, and set it as tip.
+    /// Write a block to database and disk, without setting it as tip.
     ///
-    /// If block was already written to database, then it is only marked as
-    /// tip, and no write to disk occurs. Instead, the old block database entry
-    /// is assumed to be valid, and so is the block stored on disk.
-    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
-        async fn write_block(
-            archival_state: &mut ArchivalState,
-            new_block: &Block,
-        ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
-            // Fetch last file record to find disk location to store block.
-            // This record must exist in the DB already, unless this is the first block
-            // stored on disk.
-            let mut last_rec: LastFileRecord = archival_state
-                .block_index_db
-                .get(BlockIndexKey::LastFile)
-                .await
-                .map(|x| x.as_last_file_record())
-                .unwrap_or_default();
+    /// The caller should verify that the block is not already stored, otherwise
+    /// the block will be stored twice which will lead to inconsistencies.
+    async fn store_block(
+        self: &mut ArchivalState,
+        new_block: &Block,
+    ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
+        // Fetch last file record to find disk location to store block.
+        // This record must exist in the DB already, unless this is the first block
+        // stored on disk.
+        let mut last_rec: LastFileRecord = self
+            .block_index_db
+            .get(BlockIndexKey::LastFile)
+            .await
+            .map(|x| x.as_last_file_record())
+            .unwrap_or_default();
 
-            // Open the file that was last used for storing a block
-            let mut block_file_path = archival_state.data_dir.block_file_path(last_rec.last_file);
-            let serialized_block: Vec<u8> = bincode::serialize(new_block)?;
-            let serialized_block_size: u64 = serialized_block.len() as u64;
+        // Open the file that was last used for storing a block
+        let mut block_file_path = self.data_dir.block_file_path(last_rec.last_file);
+        let serialized_block: Vec<u8> = bincode::serialize(new_block)?;
+        let serialized_block_size: u64 = serialized_block.len() as u64;
 
-            // file operations are async.
+        let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
 
-            let mut block_file =
-                DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
-
-            // Check if we should use the last file, or we need a new one.
-            if new_block_file_is_needed(&block_file, serialized_block_size).await {
-                last_rec = LastFileRecord {
-                    last_file: last_rec.last_file + 1,
-                };
-                block_file_path = archival_state.data_dir.block_file_path(last_rec.last_file);
-                block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
-            }
-
-            debug!("Writing block to: {}", block_file_path.display());
-            // Get associated file record from database, otherwise create it
-            let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
-            let file_record_value: Option<FileRecord> = archival_state
-                .block_index_db
-                .get(file_record_key.clone())
-                .await
-                .map(|x| x.as_file_record());
-            let file_record_value: FileRecord = match file_record_value {
-                Some(record) => record.add(serialized_block_size, new_block.header()),
-                None => {
-                    assert!(
-                        block_file.metadata().await.unwrap().len().is_zero(),
-                        "If no file record exists, block file must be empty"
-                    );
-                    FileRecord::new(serialized_block_size, new_block.header())
-                }
+        // Check if we should use the last file, or we need a new one.
+        if new_block_file_is_needed(&block_file, serialized_block_size).await {
+            last_rec = LastFileRecord {
+                last_file: last_rec.last_file + 1,
             };
+            block_file_path = self.data_dir.block_file_path(last_rec.last_file);
+            block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
+        }
 
-            // Make room in file for mmapping and record where block starts
-            let pos = block_file.seek(SeekFrom::End(0)).await.unwrap();
-            debug!("Size of file prior to block writing: {}", pos);
-            block_file
-                .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
-                .await
-                .unwrap();
-            block_file.write_all(&[0]).await.unwrap();
-            let file_offset: u64 = block_file
-                .seek(SeekFrom::Current(-(serialized_block_size as i64)))
-                .await
-                .unwrap();
-            debug!(
-                "New file size: {} bytes",
-                block_file.metadata().await.unwrap().len()
-            );
+        debug!("Writing block to: {}", block_file_path.display());
+        // Get associated file record from database, otherwise create it
+        let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
+        let file_record_value: Option<FileRecord> = self
+            .block_index_db
+            .get(file_record_key.clone())
+            .await
+            .map(|x| x.as_file_record());
+        let file_record_value: FileRecord = match file_record_value {
+            Some(record) => record.add(serialized_block_size, new_block.header()),
+            None => {
+                assert!(
+                    block_file.metadata().await.unwrap().len().is_zero(),
+                    "If no file record exists, block file must be empty"
+                );
+                FileRecord::new(serialized_block_size, new_block.header())
+            }
+        };
 
-            let height_record_key = BlockIndexKey::Height(new_block.header().height);
-            let mut blocks_at_same_height: Vec<Digest> = match archival_state
-                .block_index_db
-                .get(height_record_key.clone())
-                .await
-            {
+        // Make room in file for mmapping and record where block starts
+        let pos = block_file.seek(SeekFrom::End(0)).await.unwrap();
+        debug!("Size of file prior to block writing: {}", pos);
+        block_file
+            .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
+            .await
+            .unwrap();
+        block_file.write_all(&[0]).await.unwrap();
+        let file_offset: u64 = block_file
+            .seek(SeekFrom::Current(-(serialized_block_size as i64)))
+            .await
+            .unwrap();
+        debug!(
+            "New file size: {} bytes",
+            block_file.metadata().await.unwrap().len()
+        );
+
+        let height_record_key = BlockIndexKey::Height(new_block.header().height);
+        let mut blocks_at_same_height: Vec<Digest> =
+            match self.block_index_db.get(height_record_key.clone()).await {
                 Some(rec) => rec.as_height_record(),
                 None => vec![],
             };
 
-            // Write to file with mmap, only map relevant part of file into memory
-            // we use spawn_blocking to make the blocking mmap async-friendly.
-            tokio::task::spawn_blocking(move || {
-                let mmap = unsafe {
-                    MmapOptions::new()
-                        .offset(pos)
-                        .len(serialized_block_size as usize)
-                        .map(&block_file)
-                        .unwrap()
-                };
-                let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
-                mmap.deref_mut()[..].copy_from_slice(&serialized_block);
-            })
-            .await?;
+        // Write to file with mmap, only map relevant part of file into memory
+        // we use spawn_blocking to make the blocking mmap async-friendly.
+        tokio::task::spawn_blocking(move || {
+            let mmap = unsafe {
+                MmapOptions::new()
+                    .offset(pos)
+                    .len(serialized_block_size as usize)
+                    .map(&block_file)
+                    .unwrap()
+            };
+            let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
+            mmap.deref_mut()[..].copy_from_slice(&serialized_block);
+        })
+        .await?;
 
-            // Update block index database with newly stored block
-            let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
-            let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
-            let num_additions: u64 = new_block
-                .mutator_set_update()
-                .additions
-                .len()
-                .try_into()
-                .expect("Num addition records cannot exceed u64::MAX");
-            let block_record_value: BlockIndexValue =
-                BlockIndexValue::Block(Box::new(BlockRecord {
-                    block_header: new_block.header().clone(),
-                    file_location: BlockFileLocation {
-                        file_index: last_rec.last_file,
-                        offset: file_offset,
-                        block_length: serialized_block_size as usize,
-                    },
-                    min_aocl_index: new_block.mutator_set_accumulator_after().aocl.num_leafs()
-                        - num_additions,
-                    num_additions,
-                }));
+        // Update block index database with newly stored block
+        let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
+        let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
+        let num_additions: u64 = new_block
+            .mutator_set_update()
+            .additions
+            .len()
+            .try_into()
+            .expect("Num addition records cannot exceed u64::MAX");
+        let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
+            block_header: new_block.header().clone(),
+            file_location: BlockFileLocation {
+                file_index: last_rec.last_file,
+                offset: file_offset,
+                block_length: serialized_block_size as usize,
+            },
+            min_aocl_index: new_block.mutator_set_accumulator_after().aocl.num_leafs()
+                - num_additions,
+            num_additions,
+        }));
 
-            block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
-            block_index_entries.push((block_record_key, block_record_value));
+        block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
+        block_index_entries.push((block_record_key, block_record_value));
 
-            block_index_entries
-                .push((BlockIndexKey::LastFile, BlockIndexValue::LastFile(last_rec)));
-            blocks_at_same_height.push(new_block.hash());
-            block_index_entries.push((
-                height_record_key,
-                BlockIndexValue::Height(blocks_at_same_height),
-            ));
+        block_index_entries.push((BlockIndexKey::LastFile, BlockIndexValue::LastFile(last_rec)));
+        blocks_at_same_height.push(new_block.hash());
+        block_index_entries.push((
+            height_record_key,
+            BlockIndexValue::Height(blocks_at_same_height),
+        ));
 
-            Ok(block_index_entries)
-        }
+        Ok(block_index_entries)
+    }
 
-        let block_is_new = self.get_block_header(new_block.hash()).await.is_none();
+    async fn write_block_internal(&mut self, block: &Block, is_new_tip: bool) -> Result<()> {
+        let block_is_new = self.get_block_header(block.hash()).await.is_none();
         let mut block_index_entries = if block_is_new {
-            write_block(self, new_block).await?
+            self.store_block(block).await?
         } else {
             warn!(
                 "Attempted to store block but block was already stored.\nBlock digest: {}",
-                new_block.hash()
+                block.hash()
             );
             vec![]
         };
 
-        // Mark block as tip
-        block_index_entries.push((
-            BlockIndexKey::BlockTipDigest,
-            BlockIndexValue::BlockTipDigest(new_block.hash()),
-        ));
+        // Mark block as tip, conditionally
+        if is_new_tip {
+            block_index_entries.push((
+                BlockIndexKey::BlockTipDigest,
+                BlockIndexValue::BlockTipDigest(block.hash()),
+            ));
+        }
 
         let mut batch = WriteBatchAsync::new();
         for (k, v) in block_index_entries.into_iter() {
@@ -450,11 +443,29 @@ impl ArchivalState {
         Ok(())
     }
 
+    /// Write a newly found block to database and to disk, without setting it as
+    /// tip.
+    ///
+    /// If block was already written to database, then this is a nop as the old
+    /// database entries and block stored on disk are considered valid.
+    pub(crate) async fn write_block_not_tip(&mut self, block: &Block) -> Result<()> {
+        self.write_block_internal(block, false).await
+    }
+
+    /// Write a newly found block to database and to disk, and set it as tip.
+    ///
+    /// If block was already written to database, then it is only marked as
+    /// tip, and no write to disk occurs. Instead, the old block database entry
+    /// is assumed to be valid, and so is the block stored on disk.
+    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+        self.write_block_internal(new_block, true).await
+    }
+
     /// Add a new block as tip for the archival block MMR.
     ///
     /// All predecessors of this block must be known and stored in the block
     /// index database for this update to work.
-    pub(crate) async fn add_to_archival_block_mmr(&mut self, new_block: &Block) {
+    pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
         // Roll back to length of parent (accounting for genesis block),
         // then add new digest.
         let num_leafs_prior_to_this_block = new_block.header().height.into();
