@@ -323,18 +323,19 @@ impl PeerLoopHandler {
         Ok(Some(new_block_height))
     }
 
-    /// Takes a single block received from a peer and (attempts to) find a path
-    /// from some known stored block to the received block.
+    /// Take a single block received from a peer and (attempt to) find a path
+    /// between the received block and a common block stored in the blocks
+    /// database.
     ///
-    /// This function attempts to find the parent of a new block, either by
-    /// searching the database or, if necessary, by requesting it from a peer.
-    ///  - If the parent is stored in the database, block handling continues.
+    /// This function attempts to find the parent of the received block, either
+    /// by searching the database or by requesting it from a peer.
     ///  - If the parent is not stored, it is requested from the peer and the
     ///    received block is pushed to the fork reconciliation list for later
-    ///    handling by this function.
-    ///
-    /// If the parent is stored, the block and any fork reconciliation blocks
-    /// are passed down the pipeline.
+    ///    handling by this function. The fork reconciliation list starts out
+    ///    empty, but grows as more parents are requested and transmitted.
+    ///  - If the parent is found in the database, block handling continues:
+    ///    the entire list of fork reconciliation blocks are passed down the
+    ///    pipeline, potentially leading to a state update.
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
@@ -350,67 +351,139 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        let parent_digest = received_block.kernel.header.prev_block_digest;
-        debug!("Try ensure path: fetching parent block");
-        let global_state = self.global_state_lock.lock_guard().await;
-        let parent_block = global_state
-            .chain
-            .archival_state()
-            .get_block(parent_digest)
-            .await?;
-        drop(global_state);
-        debug!(
-            "Completed parent block fetching from DB: {}",
-            if parent_block.is_some() {
-                "found".to_string()
+        // Does the received block match the fork reconciliation list?
+        //  - The list is empty, or
+        //  - the list does not contain a successor (determined by block
+        //     height); or
+        //  - this successor is valid.
+        // Note that blocks can arrive out of order due to network delays or due
+        // to new blocks being found in the meantime. So we cannot assume the
+        // order is correct.
+        let received_block_matches_reconciliation_list = if let Some(successor) = peer_state
+            .fork_reconciliation_blocks
+            .iter()
+            .find(|s| s.header().height == received_block.header().height.next())
+        {
+            if successor.header().prev_block_digest != received_block.hash() {
+                warn!(
+                    "Fork reconciliation failed after receiving {} blocks: hash mismatch",
+                    peer_state.fork_reconciliation_blocks.len() + 1
+                );
+                false
+            } else if !successor
+                .is_valid(&received_block, successor.header().timestamp)
+                .await
+            {
+                warn!(
+                    "Fork reconciliation failed after receiving {} blocks: invalid successor block",
+                    peer_state.fork_reconciliation_blocks.len() + 1
+                );
+                false
             } else {
-                "not found".to_string()
+                true
             }
-        );
-        let parent_height = received_block.kernel.header.height.previous()
+        } else {
+            true
+        };
+
+        // If we are getting blocks out of order, then it is possible that the
+        // received block's predecessor is in the reconciliation list already.
+        // If so, we can verify the received block.
+        let received_block_is_invalid = if let Some(predecessor) = peer_state
+            .fork_reconciliation_blocks
+            .iter()
+            .find(|p| p.header().height.next() == received_block.header().height)
+        {
+            if !received_block
+                .is_valid(predecessor, received_block.header().timestamp)
+                .await
+            {
+                warn!(
+                    "Fork reconciliation failed after receiving {} blocks: invalid predecessor block",
+                    peer_state.fork_reconciliation_blocks.len() + 1
+                );
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Lastly, we might be on the happy path (all checks pass) but the
+        // number of blocks to reconcile is too big. Then abort to save RAM.
+        // The problem should be fixed through sync mode instead.
+        let too_many_blocks = peer_state.fork_reconciliation_blocks.len() + 1
+            >= self.global_state_lock.cli().sync_mode_threshold;
+        if too_many_blocks {
+            warn!(
+                "Fork reconciliation failed after receiving {} blocks: block count exceeds sync mode threshold",
+                peer_state.fork_reconciliation_blocks.len() + 1
+            );
+        }
+
+        // Block mismatch or too many blocks: abort!
+        if !received_block_matches_reconciliation_list
+            || too_many_blocks
+            || received_block_is_invalid
+        {
+            self.punish(NegativePeerSanction::ForkResolutionError((
+                received_block.header().height,
+                peer_state.fork_reconciliation_blocks.len() as u16,
+                received_block.hash(),
+            )))
+            .await?;
+            peer_state.fork_reconciliation_blocks = vec![];
+            return Ok(());
+        }
+
+        // Add the block to the fork reconciliation list and sort it for good
+        // measure, as though all block had come in the right order.
+        let received_block_header = received_block.header().clone();
+        peer_state.fork_reconciliation_blocks.push(*received_block);
+        peer_state
+            .fork_reconciliation_blocks
+            .sort_by(|a, b| b.header().height.cmp(&a.header().height));
+
+        // Get received block's parent.
+        let parent_digest = received_block_header.prev_block_digest;
+        let parent_height = received_block_header.height.previous()
             .expect("transferred block must have previous height because genesis block cannot be transferred");
 
-        // If parent is not known, request the parent, and add the current to
-        // the peer fork resolution list
-        if parent_block.is_none() && parent_height > BlockHeight::genesis() {
+        // Was the parent transmitted previously (out of order)?
+        let parent = peer_state
+            .fork_reconciliation_blocks
+            .iter()
+            .find(|p| p.header().height == parent_height)
+            .cloned();
+
+        // Does the parent live in the blocks database?
+        let parent = parent.or({
+            debug!("Try ensure path: fetching parent block");
+            let global_state = self.global_state_lock.lock_guard().await;
+            let parent_block = global_state
+                .chain
+                .archival_state()
+                .get_block(parent_digest)
+                .await?;
+            drop(global_state);
+            debug!(
+                "Completed parent block fetching from DB: {}",
+                if parent_block.is_some() {
+                    "found".to_string()
+                } else {
+                    "not found".to_string()
+                }
+            );
+            parent_block
+        });
+
+        // If the parent of the received block is not known, request it.
+        if parent.is_none() && parent_height > BlockHeight::genesis() {
             info!(
                 "Parent not known: Requesting previous block with height {} from peer",
                 parent_height
             );
-
-            // If the received block matches the block reconciliation state
-            // push it there and request its parent
-            if peer_state.fork_reconciliation_blocks.is_empty()
-                || peer_state
-                    .fork_reconciliation_blocks
-                    .last()
-                    .unwrap()
-                    .kernel
-                    .header
-                    .height
-                    .previous()
-                    .expect("fork reconcilliation blocks cannot contain genesis")
-                    == received_block.kernel.header.height
-                    && peer_state.fork_reconciliation_blocks.len() + 1
-                        < self.global_state_lock.cli().sync_mode_threshold
-            {
-                peer_state.fork_reconciliation_blocks.push(*received_block);
-            } else {
-                // Blocks received out of order. Or more than allowed received without
-                // going into sync mode. Give up on block resolution attempt.
-                self.punish(NegativePeerSanction::ForkResolutionError((
-                    received_block.kernel.header.height,
-                    peer_state.fork_reconciliation_blocks.len() as u16,
-                    received_block.hash(),
-                )))
-                .await?;
-                warn!(
-                    "Fork reconciliation failed after receiving {} blocks",
-                    peer_state.fork_reconciliation_blocks.len() + 1
-                );
-                peer_state.fork_reconciliation_blocks = vec![];
-                return Ok(());
-            }
 
             peer.send(PeerMessage::BlockRequestByHash(parent_digest))
                 .await?;
@@ -419,7 +492,7 @@ impl PeerLoopHandler {
         }
 
         // We got all the way back to genesis, but disagree about genesis. Ban peer.
-        if parent_block.is_none() && parent_height == BlockHeight::genesis() {
+        if parent.is_none() && parent_height == BlockHeight::genesis() {
             self.punish(NegativePeerSanction::DifferentGenesis).await?;
             return Ok(());
         }
@@ -428,34 +501,27 @@ impl PeerLoopHandler {
         // received block) in reverse order, from oldest to newest, because
         // they were requested from high to low block height.
         let mut new_blocks = peer_state.fork_reconciliation_blocks.clone();
-        new_blocks.push(*received_block);
         new_blocks.reverse();
 
-        // Reset the fork resolution state since we got all the way back to find a block that we have
+        // Reset the fork resolution state since we went all the way back to
+        // find a common block that was stored (or genesis)
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
         peer_state.fork_reconciliation_blocks = vec![];
 
         // Sanity check, that the blocks are correctly sorted (they should be)
-        // TODO: This has failed: Investigate!
-        // See: https://neptune.builders/core-team/neptune-core/issues/125
-        // TODO: This assert should be replaced with something to punish or disconnect
-        // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
-        let mut new_blocks_sorted_check = new_blocks.clone();
-        new_blocks_sorted_check.sort_by(|a, b| a.kernel.header.height.cmp(&b.kernel.header.height));
-        assert_eq!(
-            new_blocks_sorted_check,
-            new_blocks,
-            "Block list in fork resolution must be sorted. Got blocks in this order: {}",
-            new_blocks
-                .iter()
-                .map(|b| b.kernel.header.height.to_string())
-                .join(", ")
-        );
+        assert!(new_blocks
+            .iter()
+            .tuple_windows()
+            .all(|(pred, succ)| pred.header().height.next() == succ.header().height));
 
-        // Parent block is guaranteed to be set here. Because: either it was fetched from the
-        // database, or it's the genesis block.
+        // Process all blocks
         if let Some(new_block_height) = self
-            .handle_blocks(new_blocks, parent_block.unwrap())
+            .handle_blocks(
+                new_blocks,
+                parent.expect(
+                    "parent was successfully fetched from database or it is the genesis block",
+                ),
+            )
             .await?
         {
             // If `BlockNotification` was received during a block reconciliation
@@ -2408,9 +2474,10 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn prevent_ram_exhaustion_test() -> Result<()> {
-        // In this scenario the peer sends more blocks than the client allows to store in the
-        // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
-        // process as the alternative is that the program will crash because it runs out of RAM.
+        // In this scenario the peer sends more blocks than the client allows to
+        // store in the fork-reconciliation field. This should result in
+        // abandonment of the fork-reconciliation process as the alternative is
+        // that the program will crash because it runs out of RAM.
 
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(5550001);
@@ -2429,7 +2496,7 @@ mod peer_loop_tests {
         cli.sync_mode_threshold = 2;
         state_lock.set_cli(cli).await;
 
-        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
+        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(network, 1).await;
         let [block_1, _block_2, block_3, block_4] =
             fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
                 .await;
