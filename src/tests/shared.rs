@@ -222,14 +222,11 @@ pub(crate) async fn mock_genesis_global_state(
 
     let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
-    let data_dir: DataDirectory = unit_test_data_directory(network).unwrap();
-
     GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
         cli.clone(),
-        data_dir,
         mempool,
     )
 }
