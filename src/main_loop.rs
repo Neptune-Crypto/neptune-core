@@ -352,7 +352,7 @@ impl PotentialPeersState {
 fn stay_in_sync_mode(
     own_block_tip_header: &BlockHeader,
     sync_state: &SyncState,
-    max_number_of_blocks_before_syncing: usize,
+    sync_mode_threshold: usize,
 ) -> bool {
     let max_claimed_pow = sync_state
         .peer_sync_states
@@ -366,7 +366,7 @@ fn stay_in_sync_mode(
         Some(max_claim) => {
             own_block_tip_header.cumulative_proof_of_work < max_claim.claimed_max_pow
                 && max_claim.claimed_max_height - own_block_tip_header.height
-                    > max_number_of_blocks_before_syncing as i128 / 2
+                    > sync_mode_threshold as i128 / 2
         }
     }
 }
@@ -602,7 +602,7 @@ impl MainLoopHandler {
                         warn!("Blocks were not new. Not storing blocks.");
 
                         // TODO: Consider fixing deep reorganization problem described above.
-                        // Alternatively set the `max_number_of_blocks_before_syncing` value higher
+                        // Alternatively set the `sync_mode_threshold` value higher
                         // if this problem is encountered.
                         return Ok(());
                     }

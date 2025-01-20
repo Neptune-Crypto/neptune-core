@@ -30,7 +30,7 @@ sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 18 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 2>&1 | tee -a integration_test.log | sed 's/(.*)/\0 \[I1\]/g'  &
 pid[1]=$!
 sleep 5s;
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --guess --peers 127.0.0.1:29791 --max-number-of-blocks-before-syncing 1000 2>&1 | tee -a integration_test.log | sed 's/(.*)/\0 \[I2\]/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --guess --peers 127.0.0.1:29791 --sync-mode-threshold 1000 2>&1 | tee -a integration_test.log | sed 's/(.*)/\0 \[I2\]/g'  &
 pid[2]=$!
 
 # Inspired by https://stackoverflow.com/a/52033580/2574407

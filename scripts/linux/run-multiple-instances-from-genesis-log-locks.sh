@@ -38,7 +38,7 @@ sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/1/ nice -n 1 --  cargo $NIGHTLY run $FEATURES -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-1.log | sed 's/(.*)/\0 \[I1\]/g'  &
 pid[1]=$!
 sleep 5s;
-RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/2/ nice -n 1 --  cargo $NIGHTLY run $FEATURES  -- --network regtest --peer-port 29792 --rpc-port 19792 --peers 127.0.0.1:29791 --max-number-of-blocks-before-syncing 1000 $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-2.log | sed 's/(.*)/\0 \[I2\]/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=$LOCAL_STATE_DIR/2/ nice -n 1 --  cargo $NIGHTLY run $FEATURES  -- --network regtest --peer-port 29792 --rpc-port 19792 --peers 127.0.0.1:29791 --sync-mode-threshold 1000 $EXTRA_ARGS 2>&1 | tee /tmp/integration_test_from_genesis-2.log | sed 's/(.*)/\0 \[I2\]/g'  &
 pid[2]=$!
 
 # Inspired by https://stackoverflow.com/a/52033580/2574407
