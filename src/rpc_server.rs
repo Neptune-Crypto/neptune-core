@@ -62,6 +62,7 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
+use crate::DataDirectory;
 
 /// result returned by RPC methods
 pub type RpcResult<T> = Result<T, error::RpcError>;
@@ -428,11 +429,33 @@ pub trait RPC {
 #[derive(Clone)]
 pub(crate) struct NeptuneRPCServer {
     pub(crate) state: GlobalStateLock,
-    pub(crate) valid_tokens: Vec<rpc_auth::Token>,
     pub(crate) rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
+
+    // copy of DataDirectory for this neptune-core instance.
+    data_directory: DataDirectory,
+
+    // list of tokens that are valid.  RPC clients must present a token that
+    // matches one of these.  there should only be one of each `Token` variant
+    // in the list (dups ignored).
+    valid_tokens: Vec<rpc_auth::Token>,
 }
 
 impl NeptuneRPCServer {
+    /// instantiate a new [NeptuneRPCServer]
+    pub fn new(
+        state: GlobalStateLock,
+        rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
+        data_directory: DataDirectory,
+        valid_tokens: Vec<rpc_auth::Token>,
+    ) -> Self {
+        Self {
+            state,
+            valid_tokens,
+            rpc_server_to_main_tx,
+            data_directory,
+        }
+    }
+
     async fn confirmations_internal(&self, state: &GlobalState) -> Option<BlockHeight> {
         match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
@@ -811,6 +834,11 @@ impl NeptuneRPCServer {
             expected_utxo,
         }))
     }
+
+    /// get the data_directory for this neptune-core instance
+    pub fn data_directory(&self) -> &DataDirectory {
+        &self.data_directory
+    }
 }
 
 impl RPC for NeptuneRPCServer {
@@ -822,7 +850,7 @@ impl RPC for NeptuneRPCServer {
             Err(error::RpcError::CookieHintDisabled)
         } else {
             Ok(rpc_auth::CookieHint {
-                data_directory: self.state.data_dir().to_owned(),
+                data_directory: self.data_directory().to_owned(),
                 network: self.state.cli().network,
             })
         }
@@ -1953,6 +1981,7 @@ mod rpc_server_tests {
     use crate::rpc_server::NeptuneRPCServer;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::mock_genesis_global_state;
+    use crate::tests::shared::unit_test_data_directory;
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
 
@@ -1973,21 +2002,18 @@ mod rpc_server_tests {
             }
         });
 
-        let valid_tokens: Vec<rpc_auth::Token> =
-            vec![rpc_auth::Cookie::try_new(global_state_lock.data_dir())
-                .await
-                .unwrap()
-                .into()];
+        let data_directory = unit_test_data_directory(network).unwrap();
 
-        NeptuneRPCServer {
-            state: global_state_lock,
-            valid_tokens,
-            rpc_server_to_main_tx: dummy_tx,
-        }
+        let valid_tokens: Vec<rpc_auth::Token> = vec![rpc_auth::Cookie::try_new(&data_directory)
+            .await
+            .unwrap()
+            .into()];
+
+        NeptuneRPCServer::new(global_state_lock, dummy_tx, data_directory, valid_tokens)
     }
 
     async fn cookie_token(server: &NeptuneRPCServer) -> rpc_auth::Token {
-        rpc_auth::Cookie::try_load(server.state.data_dir())
+        rpc_auth::Cookie::try_load(server.data_directory())
             .await
             .unwrap()
             .into()

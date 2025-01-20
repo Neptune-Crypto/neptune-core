@@ -55,7 +55,6 @@ use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
-use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -145,9 +144,6 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    /// data-dir is read-only and accessible by all tasks/threads.
-    data_dir: DataDirectory,
-
     vm_job_queue: TritonVmJobQueue,
 }
 
@@ -157,7 +153,6 @@ impl GlobalStateLock {
         chain: BlockchainState,
         net: NetworkingState,
         cli: cli_args::Args,
-        data_dir: DataDirectory,
         mempool: Mempool,
     ) -> Self {
         let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool);
@@ -169,7 +164,6 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            data_dir,
             vm_job_queue: TritonVmJobQueue::start(),
         }
     }
@@ -267,12 +261,6 @@ impl GlobalStateLock {
     pub async fn set_cli(&mut self, cli: cli_args::Args) {
         self.lock_guard_mut().await.cli = cli.clone();
         self.cli = cli;
-    }
-
-    /// Return the read-only arguments set at startup.
-    #[inline]
-    pub fn data_dir(&self) -> &DataDirectory {
-        &self.data_dir
     }
 }
 
