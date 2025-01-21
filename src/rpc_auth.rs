@@ -2,6 +2,12 @@
 //!
 //! These types are designed to be flexible to facilitate adding additional
 //! authentication methods in the future.
+//!
+//! (Almost) every RPC method accepts a `token` parameter which includes
+//! authentication details.
+//!
+//! At present, [Token] supports only [Cookie] based authentication.  In the
+//! future, more types will likely be added.
 use std::path::PathBuf;
 
 use rand::distributions::Alphanumeric;
