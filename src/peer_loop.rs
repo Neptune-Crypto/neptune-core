@@ -323,18 +323,20 @@ impl PeerLoopHandler {
         Ok(Some(new_block_height))
     }
 
-    /// Takes a single block received from a peer and (attempts to) find a path
-    /// from some known stored block to the received block.
+    /// Take a single block received from a peer and (attempt to) find a path
+    /// between the received block and a common ancestor stored in the blocks
+    /// database.
     ///
-    /// This function attempts to find the parent of a new block, either by
-    /// searching the database or, if necessary, by requesting it from a peer.
-    ///  - If the parent is stored in the database, block handling continues.
+    /// This function attempts to find the parent of the received block, either
+    /// by searching the database or by requesting it from a peer.
     ///  - If the parent is not stored, it is requested from the peer and the
     ///    received block is pushed to the fork reconciliation list for later
-    ///    handling by this function.
-    ///
-    /// If the parent is stored, the block and any fork reconciliation blocks
-    /// are passed down the pipeline.
+    ///    handling by this function. The fork reconciliation list starts out
+    ///    empty, but grows as more parents are requested and transmitted.
+    ///  - If the parent is found in the database, a) block handling continues:
+    ///    the entire list of fork reconciliation blocks are passed down the
+    ///    pipeline, potentially leading to a state update; and b) the fork
+    ///    reconciliation list is cleared.
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
@@ -394,6 +396,22 @@ impl PeerLoopHandler {
                     && peer_state.fork_reconciliation_blocks.len() + 1
                         < self.global_state_lock.cli().sync_mode_threshold
             {
+                if let Some(child) = peer_state.fork_reconciliation_blocks.last() {
+                    let valid = child.is_valid(&received_block, self.now()).await;
+                    if !valid {
+                        self.punish(NegativePeerSanction::InvalidBlock((
+                            child.header().height,
+                            child.hash(),
+                        )))
+                        .await?;
+                        warn!(
+                            "Received invalid block in fork-reconciliation process of length {}",
+                            peer_state.fork_reconciliation_blocks.len() + 1
+                        );
+                        peer_state.fork_reconciliation_blocks.clear();
+                        return Ok(());
+                    }
+                }
                 peer_state.fork_reconciliation_blocks.push(*received_block);
             } else {
                 // Blocks received out of order. Or more than allowed received without
