@@ -413,7 +413,7 @@ impl ArchivalState {
         Ok(block_index_entries)
     }
 
-    async fn write_block_internal(&mut self, block: &Block, is_new_tip: bool) -> Result<()> {
+    async fn write_block_internal(&mut self, block: &Block, is_canonical_tip: bool) -> Result<()> {
         let block_is_new = self.get_block_header(block.hash()).await.is_none();
         let mut block_index_entries = if block_is_new {
             self.store_block(block).await?
@@ -426,7 +426,7 @@ impl ArchivalState {
         };
 
         // Mark block as tip, conditionally
-        if is_new_tip {
+        if is_canonical_tip {
             block_index_entries.push((
                 BlockIndexKey::BlockTipDigest,
                 BlockIndexValue::BlockTipDigest(block.hash()),
