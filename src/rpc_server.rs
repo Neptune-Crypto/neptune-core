@@ -1421,7 +1421,7 @@ impl RPC for NeptuneRPCServer {
             log_slow_scope!(fn_name!() + "::hash() tip digest");
             state.chain.light_state().hash()
         };
-        let tip_header = state.chain.light_state().header().clone();
+        let tip_header = *state.chain.light_state().header();
         let wallet_status = {
             log_slow_scope!(fn_name!() + "::get_wallet_status_for_tip()");
             state.get_wallet_status_for_tip().await

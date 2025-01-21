@@ -264,7 +264,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidBlock(_) => -10,
             NegativePeerSanction::DifferentGenesis => i32::MIN,
             NegativePeerSanction::ForkResolutionError((_height, count, _digest)) => {
-                i32::from(count).saturating_mul(-3)
+                i32::from(count).saturating_mul(-1)
             }
             NegativePeerSanction::SynchronizationTimeout => -5,
             NegativePeerSanction::FloodPeerListResponse => -2,

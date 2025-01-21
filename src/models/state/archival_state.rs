@@ -389,7 +389,7 @@ impl ArchivalState {
             .try_into()
             .expect("Num addition records cannot exceed u64::MAX");
         let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
-            block_header: new_block.header().clone(),
+            block_header: *new_block.header(),
             file_location: BlockFileLocation {
                 file_index: last_rec.last_file,
                 offset: file_offset,
@@ -771,7 +771,7 @@ impl ArchivalState {
 
         // If no block was found, check if digest is genesis digest
         if ret.is_none() && block_digest == self.genesis_block.hash() {
-            ret = Some(self.genesis_block.header().clone());
+            ret = Some(*self.genesis_block.header());
         }
 
         ret

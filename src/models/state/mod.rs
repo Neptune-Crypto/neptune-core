@@ -880,7 +880,7 @@ impl GlobalState {
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_port = self.cli().own_listen_port();
         HandshakeData {
-            tip_header: self.chain.light_state().header().clone(),
+            tip_header: *self.chain.light_state().header(),
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
