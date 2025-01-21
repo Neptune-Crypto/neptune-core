@@ -8,11 +8,13 @@
 //!
 //! ```no_run
 //! use neptune_cash::rpc_server::RPCClient;
-//! use neptune_cash::rpc_server::rpc_auth;
+//! use neptune_cash::rpc_auth;
 //! use tarpc::tokio_serde::formats::Json;
 //! use tarpc::serde_transport::tcp;
 //! use tarpc::client;
 //! use tarpc::context;
+//!
+//! # tokio_test::block_on(async {
 //!
 //! // create a serde/json transport over tcp.
 //! let transport = tcp::connect("127.0.0.1:9799", Json::default).await.unwrap();
@@ -24,10 +26,12 @@
 //! let cookie_hint = client.cookie_hint(context::current()).await.unwrap().unwrap();
 //!
 //! // load the cookie file from disk and assign it to a token.
-//! let token: Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await.unwrap().into();
+//! let token: rpc_auth::Token = rpc_auth::Cookie::try_load(&cookie_hint.data_directory).await.unwrap().into();
 //!
 //! // query any RPC API, passing the auth token.  here we query block_height.
-//! let block_height = client.block_height(ctx, token).await.unwrap().unwrap();
+//! let block_height = client.block_height(context::current(), token).await.unwrap().unwrap();
+//!
+//! # })
 //! ```
 //!
 //! For other languages, one would need to connect to the RPC TCP port and then
