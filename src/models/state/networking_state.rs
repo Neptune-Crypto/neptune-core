@@ -4,11 +4,13 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
+use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;
 use crate::models::peer;
 use crate::models::peer::PeerStanding;
@@ -17,24 +19,31 @@ pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
 type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 
+/// Information about a foreign tip towards which the client is syncing.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SyncAnchor {
+    pub(crate) cumulative_proof_of_work: ProofOfWork,
+    pub(crate) block_mmr: MmrAccumulator,
+}
+
 /// `NetworkingState` contains in-memory and persisted data for interacting
 /// with network peers.
 #[derive(Debug, Clone)]
 pub struct NetworkingState {
-    // Stores info about the peers that the client is connected to
-    // Peer tasks may update their own entries into this map.
+    /// Stores info about the peers that the client is connected to
+    /// Peer tasks may update their own entries into this map.
     pub peer_map: PeerMap,
 
-    // `peer_databases` are used to persist IPs with their standing.
-    // The peer tasks may update their own entries into this map.
+    /// `peer_databases` are used to persist IPs with their standing.
+    /// The peer tasks may update their own entries into this map.
     pub peer_databases: PeerDatabases,
 
-    // This value is only true if instance is running an archival node
-    // that is currently downloading blocks to catch up.
-    // Only the main task may update this flag
-    pub syncing: bool,
+    /// This value is only Some if the instance is running an archival node
+    /// that is currently in sync mode (downloading blocks in batches).
+    /// Only the main task may update this flag
+    pub(crate) sync_anchor: Option<SyncAnchor>,
 
-    // Read-only value set during startup
+    /// Read-only value set at random during startup
     pub instance_id: u128,
 
     /// Timestamp for when the last tx-proof upgrade was attempted. Does not
@@ -44,11 +53,11 @@ pub struct NetworkingState {
 }
 
 impl NetworkingState {
-    pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
+    pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases) -> Self {
         Self {
             peer_map,
             peer_databases,
-            syncing,
+            sync_anchor: None,
             instance_id: rand::random(),
 
             // Initialize to now to prevent tx proof upgrade to run immediately

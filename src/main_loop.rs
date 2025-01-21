@@ -50,6 +50,7 @@ use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::mempool::TransactionOrigin;
+use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
@@ -617,7 +618,7 @@ impl MainLoopHandler {
                     self.main_to_miner_tx.send(MainToMiner::WaitForContinue);
 
                     // Get out of sync mode if needed
-                    if global_state_mut.net.syncing {
+                    if global_state_mut.net.sync_anchor.is_some() {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             &last_block.kernel.header,
                             &main_loop_state.sync_state,
@@ -625,7 +626,7 @@ impl MainLoopHandler {
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
-                            global_state_mut.net.syncing = false;
+                            global_state_mut.net.sync_anchor = None;
                             self.main_to_miner_tx.send(MainToMiner::StopSyncing);
                         }
                     }
@@ -669,36 +670,41 @@ impl MainLoopHandler {
                 // Inform miner about new block.
                 self.main_to_miner_tx.send(MainToMiner::NewBlock);
             }
-            PeerTaskToMain::AddPeerMaxBlockHeight((
-                socket_addr,
-                claimed_max_height,
-                claimed_max_accumulative_pow,
-            )) => {
+            PeerTaskToMain::AddPeerMaxBlockHeight {
+                peer_address,
+                claimed_height,
+                claimed_cumulative_pow,
+                claimed_block_mmra,
+            } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
 
                 let claimed_state =
-                    PeerSynchronizationState::new(claimed_max_height, claimed_max_accumulative_pow);
+                    PeerSynchronizationState::new(claimed_height, claimed_cumulative_pow);
                 main_loop_state
                     .sync_state
                     .peer_sync_states
-                    .insert(socket_addr, claimed_state);
+                    .insert(peer_address, claimed_state);
 
                 // Check if synchronization mode should be activated.
                 // Synchronization mode is entered if accumulated PoW exceeds
                 // our tip and if the height difference is positive and beyond
                 // a threshold value.
-                // TODO: If we are not checking the PoW claims of the tip this
-                // can be abused by forcing the client into synchronization
-                // mode.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-                if global_state_mut
-                    .sync_mode_criterion(claimed_max_height, claimed_max_accumulative_pow)
+                if global_state_mut.sync_mode_criterion(claimed_height, claimed_cumulative_pow)
+                    && global_state_mut
+                        .net
+                        .sync_anchor
+                        .as_ref()
+                        .is_none_or(|sa| sa.cumulative_proof_of_work < claimed_cumulative_pow)
                 {
                     info!(
-                    "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
-                    socket_addr, claimed_max_height, claimed_max_accumulative_pow
-                );
-                    global_state_mut.net.syncing = true;
+                        "Entering synchronization mode due to peer {} indicating tip height {}; cumulative pow: {:?}",
+                        peer_address, claimed_height, claimed_cumulative_pow
+                    );
+                    global_state_mut.net.sync_anchor = Some(SyncAnchor {
+                        cumulative_proof_of_work: claimed_cumulative_pow,
+                        block_mmr: claimed_block_mmra,
+                    });
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
                 }
             }
@@ -717,7 +723,7 @@ impl MainLoopHandler {
                 // Get out of sync mode if needed.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                if global_state_mut.net.syncing {
+                if global_state_mut.net.sync_anchor.is_some() {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
@@ -725,7 +731,7 @@ impl MainLoopHandler {
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
-                        global_state_mut.net.syncing = false;
+                        global_state_mut.net.sync_anchor = None;
                     }
                 }
             }
@@ -1031,9 +1037,9 @@ impl MainLoopHandler {
         let global_state = self.global_state_lock.lock_guard().await;
 
         // Check if we are in sync mode
-        if !global_state.net.syncing {
+        let Some(anchor) = &global_state.net.sync_anchor else {
             return Ok(());
-        }
+        };
 
         info!("Running sync");
 
@@ -1101,6 +1107,7 @@ impl MainLoopHandler {
                 MainToPeerTaskBatchBlockRequest {
                     peer_addr_target: *chosen_peer,
                     known_blocks: most_canonical_digests,
+                    anchor_mmr: anchor.block_mmr.clone(),
                 },
             ))
             .expect("Sending message to peers must succeed");
@@ -1136,7 +1143,7 @@ impl MainLoopHandler {
                 .proof_upgrader_task
                 .as_ref()
                 .is_some_and(|x| !x.is_finished());
-            Ok(!global_state.net.syncing
+            Ok(global_state.net.sync_anchor.is_none()
                 && global_state.proving_capability() == TxProvingCapability::SingleProof
                 && !previous_upgrade_task_is_still_running
                 && tx_upgrade_interval

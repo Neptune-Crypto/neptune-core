@@ -1473,7 +1473,7 @@ impl GlobalState {
     pub async fn resync_membership_proofs(&mut self) -> Result<()> {
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if self.net.syncing {
+        if self.net.sync_anchor.is_some() {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }
@@ -1573,6 +1573,10 @@ impl GlobalState {
             // does not match ours. That's a known deficiency of this function,
             // and can be fixed by correctly handling the construction of old
             // MMR-MPs from the current archival MMR state.
+            // Notice that the MMR membership proofs are relative to an MMR
+            // where the tip digest *has* been added. So it is not relative to
+            // the block MMR accumulator present in the tip block, as it only
+            // refers to its ancestors.
             block_mmr_mps.push(
                 self.chain
                     .archival_state()

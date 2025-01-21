@@ -202,14 +202,13 @@ pub(crate) async fn mock_genesis_global_state(
 ) -> GlobalStateLock {
     let (archival_state, peer_db, _data_dir) = mock_genesis_archival_state(network).await;
 
-    let syncing = false;
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db);
     let genesis_block = archival_state.get_tip().await;
 
     // Sanity check
@@ -1004,15 +1003,34 @@ pub(crate) async fn fake_valid_block_for_tests(
 ///
 /// Sequence is N-long. Every block i with i > 0 has block i-1 as its
 /// predecessor; block 0 has the `predecessor` argument as predecessor. Every
-/// block is valid in terms of both `is_valid` and `has_proof_of_work`.
+/// block is valid in terms of both `is_valid` and `has_proof_of_work`. But
+/// the STARK proofs are mocked.
 pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
-    mut predecessor: &Block,
+    predecessor: &Block,
     block_interval: Timestamp,
     seed: [u8; 32],
 ) -> [Block; N] {
+    fake_valid_sequence_of_blocks_for_tests_dyn(predecessor, block_interval, seed, N)
+        .await
+        .try_into()
+        .unwrap()
+}
+
+/// Create a deterministic sequence of valid blocks.
+///
+/// Sequence is N-long. Every block i with i > 0 has block i-1 as its
+/// predecessor; block 0 has the `predecessor` argument as predecessor. Every
+/// block is valid in terms of both `is_valid` and `has_proof_of_work`. But
+/// the STARK proofs are mocked.
+pub(crate) async fn fake_valid_sequence_of_blocks_for_tests_dyn(
+    mut predecessor: &Block,
+    block_interval: Timestamp,
+    seed: [u8; 32],
+    n: usize,
+) -> Vec<Block> {
     let mut blocks = vec![];
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    for _ in 0..N {
+    for _ in 0..n {
         let block = fake_valid_successor_for_tests(
             predecessor,
             predecessor.header().timestamp + block_interval,
@@ -1022,7 +1040,7 @@ pub(crate) async fn fake_valid_sequence_of_blocks_for_tests<const N: usize>(
         blocks.push(block);
         predecessor = blocks.last().unwrap();
     }
-    blocks.try_into().unwrap()
+    blocks
 }
 
 pub(crate) async fn wallet_state_has_all_valid_mps(

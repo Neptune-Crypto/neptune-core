@@ -620,7 +620,9 @@ pub(crate) async fn mine(
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
-        let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
+        let is_syncing = global_state_lock
+            .lock(|s| s.net.sync_anchor.is_some())
+            .await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
