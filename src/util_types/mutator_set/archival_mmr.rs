@@ -210,6 +210,62 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         }
     }
 
+    /// Return membership proof, as it looks relative to a smaller version of
+    /// the MMR which only has `num_leafs` leafs. `num_leafs` may not exceed
+    /// the actual number of leafs.
+    pub(crate) async fn prove_membership_relative_to_smaller_mmr(
+        &self,
+        leaf_index: u64,
+        num_leafs: u64,
+    ) -> MmrMembershipProof {
+        // TODO: Replace this local function with the one in `twenty_first` once
+        // available through never version.
+        fn auth_path_node_indices(num_leafs: u64, leaf_index: u64) -> Vec<u64> {
+            assert!(
+                leaf_index < num_leafs,
+                "Leaf index out-of-bounds: {leaf_index}/{num_leafs}"
+            );
+
+            let (mut merkle_tree_index, _) =
+                leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
+            let mut node_index = leaf_index_to_node_index(leaf_index);
+            let mut height = 0;
+            let tree_height = u64::BITS - merkle_tree_index.leading_zeros() - 1;
+            let mut ret = Vec::with_capacity(tree_height as usize);
+            while merkle_tree_index > 1 {
+                let is_left_sibling = merkle_tree_index & 1 == 0;
+                let height_pow = 1u64 << (height + 1);
+                let as_1_or_minus_1: u64 = (2 * (is_left_sibling as i64) - 1) as u64;
+                let signed_height_pow = height_pow.wrapping_mul(as_1_or_minus_1);
+                let sibling = node_index
+                    .wrapping_add(signed_height_pow)
+                    .wrapping_sub(as_1_or_minus_1);
+
+                node_index += 1 << ((height + 1) * is_left_sibling as u32);
+
+                ret.push(sibling);
+                merkle_tree_index >>= 1;
+                height += 1;
+            }
+
+            debug_assert_eq!(tree_height, ret.len() as u32, "Allocation must be optimal");
+
+            ret
+        }
+
+        assert!(
+            num_leafs <= self.num_leafs().await,
+            "Cannot find membership proofs relative to bigger MMR"
+        );
+
+        let node_indices = auth_path_node_indices(num_leafs, leaf_index);
+        let ap_elements = self.digests.get_many(&node_indices).await;
+
+        MmrMembershipProof {
+            authentication_path: ap_elements,
+        }
+    }
+
     /// Return membership proof
     pub async fn prove_membership_async(&self, leaf_index: u64) -> MmrMembershipProof {
         // A proof consists of an authentication path
