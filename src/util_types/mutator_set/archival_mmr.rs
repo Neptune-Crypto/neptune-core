@@ -770,21 +770,50 @@ pub(crate) mod mmr_test {
         }
     }
 
+    #[proptest(async = "tokio")]
+    async fn prove_membership_relative_to_smaller_mmr_test(
+        #[strategy(1u64..200)] _num_leafs: u64,
+        #[strategy(vec(arb(), #_num_leafs as usize))] digests: Vec<Digest>,
+        #[strategy(1u64..=#_num_leafs)] reduced_num_leafs: u64,
+        #[strategy(0u64..#reduced_num_leafs)] leaf_index: u64,
+    ) {
+        let leaf = digests[leaf_index as usize];
+        let smaller_mmr =
+            MmrAccumulator::new_from_leafs(digests[0..reduced_num_leafs as usize].to_vec());
+        let ammr = mock::get_ammr_from_digests(digests).await;
+        let mp = ammr
+            .prove_membership_relative_to_smaller_mmr(leaf_index, reduced_num_leafs)
+            .await;
+        prop_assert!(mp.verify(
+            leaf_index,
+            leaf,
+            &smaller_mmr.peaks(),
+            smaller_mmr.num_leafs()
+        ));
+    }
+
     #[tokio::test]
     async fn mmr_prove_verify_leaf_mutation_test() {
-        for size in 1..150 {
+        for size in 1u64..150 {
             let new_leaf: Digest = random();
             let bad_leaf: Digest = random();
-            let leaf_hashes_tip5: Vec<Digest> = random_elements(size);
+            let leaf_hashes_tip5: Vec<Digest> = random_elements(size as usize);
             let mut acc = MmrAccumulator::new_from_leafs(leaf_hashes_tip5.clone());
             let mut archival: ArchivalMmr<Storage> =
                 mock::get_ammr_from_digests(leaf_hashes_tip5.clone()).await;
             let archival_end_state: ArchivalMmr<Storage> =
-                mock::get_ammr_from_digests(vec![new_leaf; size]).await;
+                mock::get_ammr_from_digests(vec![new_leaf; size as usize]).await;
             for i in 0..size {
-                let i = i as u64;
                 let peaks_before_update = archival.peaks().await;
                 let mp = archival.prove_membership_async(i).await;
+                assert_eq!(
+                    mp,
+                    archival
+                        .prove_membership_relative_to_smaller_mmr(i, size)
+                        .await,
+                    "Two ways of getting MMRMPs must agree"
+                );
+
                 assert_eq!(archival.peaks().await, peaks_before_update);
 
                 // Verify the update operation using the batch verifier
@@ -809,8 +838,8 @@ pub(crate) mod mmr_test {
                 acc.mutate_leaf(LeafMutation::new(i, new_leaf, mp));
                 let new_archival_peaks = archival.peaks().await;
                 assert_eq!(new_archival_peaks, acc.peaks());
-                assert_eq!(size as u64, archival.num_leafs().await);
-                assert_eq!(size as u64, acc.num_leafs());
+                assert_eq!(size, archival.num_leafs().await);
+                assert_eq!(size, acc.num_leafs());
             }
             assert_eq!(archival_end_state.peaks().await, acc.peaks());
         }
