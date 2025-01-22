@@ -68,6 +68,16 @@ const EXPECTED_UTXOS_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
 const TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS: u64 = 60; // 1 minute
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
+
+/// Number of seconds within which an individual peer is expected to respond
+/// to a synchronization request.
+const INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS: u64 =
+    SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS;
+
+/// Number of seconds that a synchronization may run without any progress.
+const GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS: u64 =
+    INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS * 4;
+
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 pub(crate) const MAX_NUM_DIGESTS_IN_BATCH_REQUEST: usize = 200;
 const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
@@ -193,9 +203,7 @@ impl SyncState {
                     // The last sync request updated the state
                     (None, true)
                 } else if req_time
-                    + Duration::from_secs(
-                        SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS,
-                    )
+                    + Duration::from_secs(INDIVIDUAL_PEER_SYNCHRONIZATION_TIMEOUT_IN_SECONDS)
                     < now
                 {
                     // The last sync request was not answered, sanction peer
@@ -713,11 +721,8 @@ impl MainLoopHandler {
                         "Entering synchronization mode due to peer {} indicating tip height {}; cumulative pow: {:?}",
                         peer_address, claimed_height, claimed_cumulative_pow
                     );
-                    global_state_mut.net.sync_anchor = Some(SyncAnchor {
-                        cumulative_proof_of_work: claimed_cumulative_pow,
-                        block_mmr: claimed_block_mmra,
-                        champion: None,
-                    });
+                    global_state_mut.net.sync_anchor =
+                        Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
                 }
             }
@@ -1081,7 +1086,7 @@ impl MainLoopHandler {
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for read
-    async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+    async fn block_sync(&mut self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         let global_state = self.global_state_lock.lock_guard().await;
 
         // Check if we are in sync mode
@@ -1091,7 +1096,6 @@ impl MainLoopHandler {
 
         info!("Running sync");
 
-        // Check when latest batch of blocks was requested
         let (own_tip_hash, own_tip_height, own_cumulative_pow) = (
             global_state.chain.light_state().hash(),
             global_state.chain.light_state().kernel.header.height,
@@ -1102,6 +1106,35 @@ impl MainLoopHandler {
                 .header
                 .cumulative_proof_of_work,
         );
+
+        // Check if sync mode has timed out entirely, in which case it should
+        // be abandoned.
+        let anchor = anchor.to_owned();
+        if self.now().duration_since(anchor.updated)?.as_secs()
+            > GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS
+        {
+            warn!("Sync mode has timed out. Abandoning sync mode.");
+
+            // Abandon attempt, and punish all peers claiming to serve these
+            // blocks.
+            drop(global_state);
+            self.global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .sync_anchor = None;
+
+            let peers_to_punish = main_loop_state
+                .sync_state
+                .get_potential_peers_for_sync_request(own_cumulative_pow);
+
+            for peer in peers_to_punish {
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerTask::PeerSynchronizationTimeout(peer))?;
+            }
+
+            return Ok(());
+        }
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
@@ -1748,9 +1781,11 @@ mod test {
     }
 
     mod sync_mode {
+        use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
         use test_strategy::proptest;
 
         use super::*;
+        use crate::tests::shared::get_dummy_socket_address;
 
         #[proptest]
         fn batch_request_heights_prop(#[strategy(0u64..100_000_000_000)] own_height: u64) {
@@ -1780,6 +1815,100 @@ mod test {
             assert!(
                 heights.last().unwrap().is_genesis(),
                 "ends with genesis block"
+            );
+        }
+
+        #[tokio::test]
+        #[traced_test]
+        async fn sync_mode_abandoned_on_global_timeout() {
+            let test_setup = setup(0).await;
+            let TestSetup {
+                task_join_handles,
+                mut main_loop_handler,
+                ..
+            } = test_setup;
+
+            let mut mutable_main_loop_state = MutableMainLoopState::new(task_join_handles);
+
+            main_loop_handler
+                .block_sync(&mut mutable_main_loop_state)
+                .await
+                .expect("Must return OK when no sync mode is set");
+
+            // Mock that we are in a valid sync state
+            let claimed_max_height = 1_000u64.into();
+            let claimed_max_pow = ProofOfWork::new([100; 6]);
+            main_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .sync_anchor = Some(SyncAnchor::new(
+                claimed_max_pow,
+                MmrAccumulator::new_from_leafs(vec![]),
+            ));
+            mutable_main_loop_state.sync_state.peer_sync_states.insert(
+                get_dummy_socket_address(0),
+                PeerSynchronizationState::new(claimed_max_height, claimed_max_pow),
+            );
+
+            let sync_start_time = main_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .sync_anchor
+                .as_ref()
+                .unwrap()
+                .updated;
+            main_loop_handler
+                .block_sync(&mut mutable_main_loop_state)
+                .await
+                .expect("Must return OK when sync mode has not timed out yet");
+            assert!(
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .is_some(),
+                "Sync mode must still be set before timeout has occurred"
+            );
+
+            assert_eq!(
+                sync_start_time,
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .as_ref()
+                    .unwrap()
+                    .updated,
+                "timestamp may not be updated without state change"
+            );
+
+            // Mock that sync-mode has timed out
+            main_loop_handler = main_loop_handler.with_mocked_time(
+                SystemTime::now()
+                    + Duration::from_secs(GLOBAL_SYNCHRONIZATION_TIMEOUT_IN_SECONDS + 1),
+            );
+
+            main_loop_handler
+                .block_sync(&mut mutable_main_loop_state)
+                .await
+                .expect("Must return OK when sync mode has timed out");
+            assert!(
+                main_loop_handler
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .is_none(),
+                "Sync mode must be unset on timeout"
             );
         }
     }
