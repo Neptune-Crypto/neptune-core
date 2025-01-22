@@ -834,10 +834,8 @@ impl PeerLoopHandler {
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let canonical_block_digest = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                let state = self.global_state_lock.lock_guard().await;
+                let canonical_block_digest = state
                     .chain
                     .archival_state()
                     .archival_block_mmr
@@ -846,18 +844,18 @@ impl PeerLoopHandler {
 
                 let canonical_block_digest = match canonical_block_digest {
                     None => {
-                        warn!("Got block request by height for unknown block");
+                        let own_tip_height = state.chain.light_state().header().height;
+                        warn!("Got block request by height ({block_height}) for unknown block. Own tip height is {own_tip_height}.");
+                        drop(state);
                         self.punish(NegativePeerSanction::BlockRequestUnknownHeight)
                             .await?;
+
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                     Some(digest) => digest,
                 };
 
-                let canonical_chain_block: Block = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                let canonical_chain_block: Block = state
                     .chain
                     .archival_state()
                     .get_block(canonical_block_digest)
@@ -2454,6 +2452,90 @@ mod peer_loop_tests {
             .await?;
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn receival_of_block_notification_height_1() {
+        // Scenario: client only knows genesis block. Then receives block
+        // notification of height 1. Must request block 1.
+        let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5552401);
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, to_main_rx1, state_lock, hsd) =
+            get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
+        let block_1 = fake_valid_block_for_tests(&state_lock, rng.gen()).await;
+        let notification_height1 = (&block_1).into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockNotification(notification_height1)),
+            Action::Write(PeerMessage::BlockRequestByHeight(1u64.into())),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_address = get_dummy_socket_address(0);
+        let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+            to_main_tx.clone(),
+            state_lock.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+            block_1.header().timestamp,
+        );
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
+
+        drop(to_main_rx1);
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn receive_block_request_by_height_block_7() {
+        // Scenario: client only knows blocks up to height 7. Then receives block-
+        // request-by-height for height 7. Must respond with block 7.
+        let network = Network::Main;
+        let mut rng = StdRng::seed_from_u64(5552401);
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, to_main_rx1, mut state_lock, hsd) =
+            get_test_genesis_setup(network, 0, cli_args::Args::default())
+                .await
+                .unwrap();
+        let genesis_block = Block::genesis_block(network);
+        let blocks: [Block; 7] =
+            fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
+                .await;
+        let block7 = blocks.last().unwrap().to_owned();
+        let tip_height: u64 = block7.header().height.into();
+        assert_eq!(7, tip_height);
+
+        for block in blocks.iter() {
+            state_lock.set_new_tip(block.to_owned()).await.unwrap();
+        }
+
+        let block7_response = PeerMessage::Block(Box::new(block7.try_into().unwrap()));
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestByHeight(7u64.into())),
+            Action::Write(block7_response),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_address = get_dummy_socket_address(0);
+        let mut peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state_lock.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await
+            .unwrap();
+
+        drop(to_main_rx1);
     }
 
     #[traced_test]
