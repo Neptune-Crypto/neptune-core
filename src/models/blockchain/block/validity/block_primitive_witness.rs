@@ -297,7 +297,7 @@ pub(crate) mod test {
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {
                                         let parent_kernel = BlockKernel {
-                                            header: header.clone(),
+                                            header,
                                             body: body.clone(),
                                             appendix: appendix.clone(),
                                         };
