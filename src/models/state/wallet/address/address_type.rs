@@ -231,7 +231,7 @@ impl ReceivingAddress {
     /// the secret-key.  As such, great care must be taken and it should
     /// never be used for display purposes.
     ///
-    /// For most uses, prefer [Self::to_diplay_bech32m()] instead.
+    /// For most uses, prefer [Self::to_display_bech32m()] instead.
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
@@ -266,8 +266,8 @@ impl ReceivingAddress {
     /// [ReceivingAddress] if provided as input to [Self::from_bech32m()].  For
     /// that, [Self::to_bech32m()] should be used instead.
     ///
-    /// For [generation::Generation] keys, this is equivalent to calling [Self::to_bech32m()].
-    /// For [symmetric::Symmetric] keys, this returns the privacy_preimage hash bech32m encoded
+    /// For [Self::Generation] keys, this is equivalent to calling [Self::to_bech32m()].
+    /// For [Self::Symmetric] keys, this returns the privacy_preimage hash bech32m encoded
     /// instead of the key itself.
     pub fn to_display_bech32m(&self, network: Network) -> anyhow::Result<String> {
         match self {
@@ -423,9 +423,9 @@ impl SpendingKey {
         }
     }
 
-    /// scans public announcements in a [Transaction] and finds any that match this key
+    /// scans public announcements in a `Transaction` and finds any that match this key
     ///
-    /// note that a single [Transaction] may represent an entire block
+    /// note that a single `Transaction` may represent an entire block
     ///
     /// returns an iterator over [AnnouncedUtxo]
     ///

@@ -577,7 +577,7 @@ impl GlobalState {
     /// generates [TxOutputList] from a list of address:amount pairs (outputs).
     ///
     /// This is a helper method for generating the `TxOutputList` that
-    /// is required by [Self::create_transaction()] and [Self::create_raw_transaction()].
+    /// is required by [Self::create_transaction()].
     ///
     /// Each output may use either `OnChain` or `OffChain` notifications.  See documentation of
     /// of [TxOutput::auto()] for a description of the logic and the
@@ -625,13 +625,10 @@ impl GlobalState {
     /// creates a Transaction.
     ///
     /// This API provides a simple-to-use interface for creating a transaction.
-    /// [Utxo] inputs are automatically chosen and a change output is
+    /// [Utxo](crate::models::blockchain::transaction::utxo::Utxo) inputs are automatically chosen and a change output is
     /// automatically created, such that:
     ///
     ///   change = sum(inputs) - sum(outputs) - fee.
-    ///
-    /// When finer control is required, [Self::create_raw_transaction()]
-    /// can be used instead.
     ///
     /// The `tx_outputs` parameter should normally be generated with
     /// [Self::generate_tx_outputs()] which determines which outputs should be
@@ -702,8 +699,7 @@ impl GlobalState {
     ///         .await?;
     /// }
     /// ```
-    #[allow(dead_code)]
-    pub(crate) async fn create_transaction(
+    pub async fn create_transaction(
         &self,
         tx_outputs: TxOutputList,
         change_key: SpendingKey,
@@ -712,9 +708,6 @@ impl GlobalState {
         timestamp: Timestamp,
         triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
-        // TODO: function not used because all callers got through its
-        // equivalent method `create_transaction_with_prover_capability`,
-        // for testing purposes. Consider deleting or fixing this somehow.
         self.create_transaction_with_prover_capability(
             tx_outputs,
             change_key,

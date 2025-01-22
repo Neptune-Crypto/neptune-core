@@ -326,7 +326,7 @@ pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
 /// MMR accumulators.
 ///
 /// Removes the [`MmrSuccessorProof`]'s authentication path from the
-/// [environment](super::environment)'s [`NonDeterminism`].
+/// environment's [`NonDeterminism`].
 ///
 /// # Panics
 ///

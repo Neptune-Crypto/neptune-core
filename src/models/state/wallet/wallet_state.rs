@@ -577,7 +577,7 @@ impl WalletState {
     ///   n = number of ExpectedUtxo in database. (all-time)
     ///   m = number of transaction outputs.
     ///
-    /// see https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025
+    /// see <https://github.com/Neptune-Crypto/neptune-core/pull/175#issuecomment-2302511025>
     ///
     /// Returns an iterator of [AnnouncedUtxo]. (addition record, UTXO, sender randomness, receiver_preimage)
     pub async fn scan_addition_records_for_expected_utxos<'a>(

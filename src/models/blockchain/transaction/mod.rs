@@ -59,7 +59,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 ///   onchain asymmetric-key public announcements
 ///   offchain expected-utxos
 ///
-/// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
+/// See [PublicAnnouncement], [ExpectedUtxo]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnnouncedUtxo {
     pub utxo: Utxo,
@@ -101,7 +101,7 @@ impl AnnouncedUtxo {
 /// initially these are used for transmitting encrypted secrets necessary
 /// for a utxo recipient to identify and claim it.
 ///
-/// See [Transaction], [UtxoNotification]
+/// See [Transaction]
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, TasmObject,
 )]

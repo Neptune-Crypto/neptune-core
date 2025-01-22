@@ -17,7 +17,7 @@
 //! This is much like tokio::sync::mpsc::unbounded except:
 //!  1. it supports prioritizing channel events (jobs)
 //!  2. order of events with same priority is undefined.
-//!     see: https://github.com/rmcgibbo/async-priority-channel/issues/75
+//!     see: <https://github.com/rmcgibbo/async-priority-channel/issues/75>
 //!
 //! Using an unbounded channel means that there is no backpressure and no
 //! upper limit on the number of jobs. (except RAM).

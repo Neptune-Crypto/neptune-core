@@ -398,7 +398,7 @@ pub trait RPC {
     ///
     /// `owned_utxo_notify_method` specifies how our wallet will be notified of
     /// any outputs destined for it. This includes the change output if one is
-    /// necessary. [UtxoNotifyMethod] defines `OnChain` and `OffChain` delivery
+    /// necessary. [UtxoNotificationMedium] defines `OnChain` and `OffChain` delivery
     /// of notifications.
     ///
     /// `OffChain` delivery requires less blockchain space and may result in a
@@ -423,7 +423,7 @@ pub trait RPC {
     /// should be sent to the transaction receiver in case `Offchain` notifications are used.
     ///
     /// future work: add `unowned_utxo_notify_medium` param.
-    ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
+    ///   see comment for [TxOutput::auto()](crate::models::state::wallet::transaction_output::TxOutput::auto())
     async fn send_to_many(
         token: rpc_auth::Token,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
