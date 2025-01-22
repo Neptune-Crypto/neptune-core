@@ -287,7 +287,9 @@ impl ArchivalState {
         &self.genesis_block
     }
 
-    /// Write a block to database and disk, without setting it as tip.
+    /// Write a block disk, without setting it as tip. The returned (key, value)
+    /// pairs must be stored to the block-index database for this block to be
+    /// retrievable.
     ///
     /// The caller should verify that the block is not already stored, otherwise
     /// the block will be stored twice which will lead to inconsistencies.
