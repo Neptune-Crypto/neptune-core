@@ -620,7 +620,9 @@ pub(crate) async fn mine(
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
-        let is_syncing = global_state_lock.lock(|s| s.net.syncing).await;
+        let is_syncing = global_state_lock
+            .lock(|s| s.net.sync_anchor.is_some())
+            .await;
 
         let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         let guess = cli_args.guess;
@@ -1577,7 +1579,7 @@ pub(crate) mod mine_loop_tests {
 
             guess_worker(
                 block,
-                prev_block.header().clone(),
+                *prev_block.header(),
                 worker_task_tx,
                 composer_utxos,
                 sleepy_guessing,
@@ -1774,7 +1776,7 @@ pub(crate) mod mine_loop_tests {
         let mut rng = thread_rng();
         let mut counter = 0;
         let mut successor_block = Block::new(
-            successor_header.clone(),
+            successor_header,
             successor_body.clone(),
             appendix,
             BlockProof::Invalid,

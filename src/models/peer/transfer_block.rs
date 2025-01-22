@@ -61,7 +61,7 @@ impl TryFrom<&Block> for TransferBlock {
             }
         };
         Ok(Self {
-            header: block.kernel.header.clone(),
+            header: block.kernel.header,
             body: block.kernel.body.clone(),
             proof,
             appendix: block.kernel.appendix.clone(),

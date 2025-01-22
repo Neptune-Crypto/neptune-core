@@ -880,7 +880,7 @@ impl GlobalState {
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_port = self.cli().own_listen_port();
         HandshakeData {
-            tip_header: self.chain.light_state().header().clone(),
+            tip_header: *self.chain.light_state().header(),
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
@@ -1331,7 +1331,10 @@ impl GlobalState {
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<UpdateMutatorSetDataJob>> {
+    pub(crate) async fn set_new_tip(
+        &mut self,
+        new_block: Block,
+    ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         self.set_new_tip_internal(new_block, vec![]).await
     }
 
@@ -1341,13 +1344,33 @@ impl GlobalState {
     ///
     /// Returns a list of update-jobs that should be
     /// performed by this client.
-    pub async fn set_new_self_mined_tip(
+    pub(crate) async fn set_new_self_mined_tip(
         &mut self,
         new_block: Block,
         miner_reward_utxo_infos: Vec<ExpectedUtxo>,
     ) -> Result<Vec<UpdateMutatorSetDataJob>> {
         self.set_new_tip_internal(new_block, miner_reward_utxo_infos)
             .await
+    }
+
+    /// Store a block to client's state *without* marking this block as a new
+    /// tip. No validation of block happens, as this is the caller's
+    /// responsibility.
+    pub(crate) async fn store_block_not_tip(&mut self, block: Block) -> Result<()> {
+        crate::macros::log_scope_duration!();
+
+        self.chain
+            .archival_state_mut()
+            .write_block_not_tip(&block)
+            .await?;
+
+        // Mempool is not updated, as it's only defined relative to the tip.
+        // Wallet is not updated, as it can be synced to tip at any point.
+
+        // Flush databases
+        self.flush_databases().await?;
+
+        Ok(())
     }
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
@@ -1371,7 +1394,7 @@ impl GlobalState {
 
         self.chain
             .archival_state_mut()
-            .add_to_archival_block_mmr(&new_block)
+            .append_to_archival_block_mmr(&new_block)
             .await;
 
         // update the mutator set with the UTXOs from this block
@@ -1450,7 +1473,7 @@ impl GlobalState {
     pub async fn resync_membership_proofs(&mut self) -> Result<()> {
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if self.net.syncing {
+        if self.net.sync_anchor.is_some() {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }
@@ -1550,6 +1573,10 @@ impl GlobalState {
             // does not match ours. That's a known deficiency of this function,
             // and can be fixed by correctly handling the construction of old
             // MMR-MPs from the current archival MMR state.
+            // Notice that the MMR membership proofs are relative to an MMR
+            // where the tip digest *has* been added. So it is not relative to
+            // the block MMR accumulator present in the tip block, as it only
+            // refers to its ancestors.
             block_mmr_mps.push(
                 self.chain
                     .archival_state()
@@ -2795,7 +2822,6 @@ mod global_state_tests {
         ) {
             // Verifying light state integrity
             let expected_tip_digest = expected_tip.hash();
-            let expected_parent_digest = expected_parent.hash();
             assert_eq!(expected_tip_digest, global_state.chain.light_state().hash());
 
             // Peeking into archival state
@@ -2808,6 +2834,17 @@ mod global_state_tests {
                     .get_sync_label()
                     .await,
                 "Archival state must have expected sync-label"
+            );
+            assert_eq!(
+                expected_tip.mutator_set_accumulator_after(),
+                global_state
+                    .chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .ams()
+                    .accumulator()
+                    .await,
+                "Archival mutator set must match that in expected tip"
             );
 
             assert_eq!(
@@ -2863,6 +2900,8 @@ mod global_state_tests {
                     .len(),
                 "Exactly {expected_num_blocks_at_tip_height} blocks at height must be known"
             );
+
+            let expected_parent_digest = expected_parent.hash();
             assert_eq!(
                 expected_parent_digest,
                 global_state
@@ -2979,6 +3018,175 @@ mod global_state_tests {
                 )
                 .await;
                 previous_block = next_block;
+            }
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn can_store_block_without_marking_it_as_tip_1_block() {
+            // Verify that [GlobalState::store_block_not_tip] stores block
+            // correctly, and that [GlobalState::set_new_tip] can be used to
+            // build upon blocks stored through the former method.
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let genesis_block = Block::genesis_block(network);
+            let wallet_secret = WalletSecret::new_random();
+
+            let mut alice = mock_genesis_global_state(
+                network,
+                2,
+                wallet_secret.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+
+            let mut alice = alice.global_state_lock.lock_guard_mut().await;
+            assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
+
+            let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
+            let (block_1, _) = make_mock_block(&genesis_block, None, cb_key, rng.gen()).await;
+
+            alice.store_block_not_tip(block_1.clone()).await.unwrap();
+            assert_eq!(
+                genesis_block.hash(),
+                alice.chain.light_state().hash(),
+                "method may not update light state's tip"
+            );
+            assert_eq!(
+                genesis_block.hash(),
+                alice.chain.archival_state().get_tip().await.hash(),
+                "method may not update archival state's tip"
+            );
+
+            alice.set_new_tip(block_1.clone()).await.unwrap();
+            assert_correct_global_state(&alice, block_1.clone(), genesis_block, 1, 0).await;
+        }
+
+        /// Return a list of (Block, parent) pairs, of length N.
+        async fn chain_of_blocks_and_parents(
+            network: Network,
+            length: usize,
+        ) -> Vec<(Block, Block)> {
+            let mut rng = thread_rng();
+            let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
+            let mut parent = Block::genesis_block(network);
+            let mut chain = vec![];
+            for _ in 0..length {
+                let (block, _) = make_mock_block(&parent, None, cb_key, rng.gen()).await;
+                chain.push((block.clone(), parent.clone()));
+                parent = block;
+            }
+
+            chain
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn can_jump_to_new_tip_over_blocks_that_were_never_tips() {
+            let network = Network::Main;
+            let wallet_secret = WalletSecret::new_random();
+            let mut alice = mock_genesis_global_state(
+                network,
+                2,
+                wallet_secret.clone(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let mut alice = alice.global_state_lock.lock_guard_mut().await;
+
+            let a_length = 12;
+            let chain_a = chain_of_blocks_and_parents(network, a_length).await;
+            for (block, _) in chain_a.iter() {
+                alice.set_new_tip(block.to_owned()).await.unwrap();
+            }
+
+            let chain_a_tip = &chain_a[a_length - 1].0;
+            let chain_a_tip_parent = &chain_a[a_length - 1].1;
+            assert_correct_global_state(
+                &alice,
+                chain_a_tip.to_owned(),
+                chain_a_tip_parent.to_owned(),
+                1,
+                0,
+            )
+            .await;
+
+            // Store all blocks from a new chain, except the last, without
+            // marking any of them as tips.  Verify no change in tip.
+            let b_length = 15;
+            let chain_b = chain_of_blocks_and_parents(network, b_length).await;
+            for (block, _) in chain_b.iter().take(b_length - 1) {
+                alice.store_block_not_tip(block.clone()).await.unwrap();
+            }
+            assert_correct_global_state(
+                &alice,
+                chain_a_tip.to_owned(),
+                chain_a_tip_parent.to_owned(),
+                2,
+                0,
+            )
+            .await;
+
+            // Set chain B's last block to tip to verify that all the stored
+            // blocks from chain B can be used to connect it to LUCA, which in
+            // this case is genesis block.
+            let chain_b_tip = &chain_b[b_length - 1].0;
+            let chain_b_tip_parent = &chain_b[b_length - 1].1;
+            alice.set_new_tip(chain_b_tip.to_owned()).await.unwrap();
+            assert_correct_global_state(
+                &alice,
+                chain_b_tip.to_owned(),
+                chain_b_tip_parent.to_owned(),
+                1,
+                0,
+            )
+            .await;
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn reorganization_with_blocks_that_were_never_tips_n_blocks_deep() {
+            // Verify that [GlobalState::store_block_not_tip] stores block
+            // correctly, and that [GlobalState::set_new_tip] can be used to
+            // build upon blocks stored through the former method.
+            let network = Network::Main;
+            let genesis_block = Block::genesis_block(network);
+            let wallet_secret = WalletSecret::new_random();
+
+            for depth in 1..=4 {
+                let mut alice = mock_genesis_global_state(
+                    network,
+                    2,
+                    wallet_secret.clone(),
+                    cli_args::Args::default(),
+                )
+                .await;
+                let mut alice = alice.global_state_lock.lock_guard_mut().await;
+                assert_eq!(genesis_block.hash(), alice.chain.light_state().hash());
+                let chain_a = chain_of_blocks_and_parents(network, depth).await;
+                let chain_b = chain_of_blocks_and_parents(network, depth).await;
+                let blocks_and_parents = [chain_a, chain_b].concat();
+                for (block, _) in blocks_and_parents.iter() {
+                    alice.store_block_not_tip(block.clone()).await.unwrap();
+                    assert_eq!(
+                        genesis_block.hash(),
+                        alice.chain.light_state().hash(),
+                        "method may not update light state's tip, depth = {depth}"
+                    );
+                    assert_eq!(
+                        genesis_block.hash(),
+                        alice.chain.archival_state().get_tip().await.hash(),
+                        "method may not update archival state's tip, depth = {depth}"
+                    );
+                }
+
+                // Loop over all blocks and verify that all can be marked as
+                // tip, resulting in a consistent, correct state.
+                for (block, parent) in blocks_and_parents.iter() {
+                    alice.set_new_tip(block.clone()).await.unwrap();
+                    assert_correct_global_state(&alice, block.clone(), parent.to_owned(), 2, 0)
+                        .await;
+                }
             }
         }
 

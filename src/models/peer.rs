@@ -16,6 +16,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tracing::trace;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
@@ -155,8 +156,10 @@ pub enum NegativePeerSanction {
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     BatchBlocksRequestEmpty,
+    BatchBlocksRequestTooManyDigests,
     InvalidTransaction,
     UnconfirmableTransaction,
+    InvalidBlockMmrAuthentication,
 
     InvalidTransferBlock,
 
@@ -221,6 +224,12 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::TimedOutSyncChallengeResponse => {
                 "timed-out sync challenge response"
             }
+            NegativePeerSanction::InvalidBlockMmrAuthentication => {
+                "invalid block mmr authentication"
+            }
+            NegativePeerSanction::BatchBlocksRequestTooManyDigests => {
+                "too many digests in batch block request"
+            }
         };
         write!(f, "{string}")
     }
@@ -264,7 +273,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidBlock(_) => -10,
             NegativePeerSanction::DifferentGenesis => i32::MIN,
             NegativePeerSanction::ForkResolutionError((_height, count, _digest)) => {
-                i32::from(count).saturating_mul(-3)
+                i32::from(count).saturating_mul(-1)
             }
             NegativePeerSanction::SynchronizationTimeout => -5,
             NegativePeerSanction::FloodPeerListResponse => -2,
@@ -288,6 +297,8 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::UnexpectedSyncChallengeResponse => -1,
             NegativePeerSanction::InvalidTransferBlock => -50,
             NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
+            NegativePeerSanction::InvalidBlockMmrAuthentication => -4,
+            NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
         }
     }
 }
@@ -483,6 +494,16 @@ pub struct BlockRequestBatch {
 
     /// Indicates the maximum allowed number of blocks in the response.
     pub(crate) max_response_len: usize,
+
+    /// The block MMR accumulator of the tip of the chain which the node is
+    /// syncing towards. Its number of leafs is the block height the node is
+    /// syncing towards.
+    ///
+    /// The receiver needs this value to know which MMR authentication paths to
+    /// attach to the blocks in the response. These paths allow the receiver of
+    /// a batch of blocks to verify that the received blocks are indeed
+    /// ancestors to a given tip.
+    pub(crate) anchor: MmrAccumulator,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -506,7 +527,7 @@ pub(crate) enum PeerMessage {
     BlockRequestByHash(Digest),
 
     BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
-    BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // TODO: Consider restricting this in size
     UnableToSatisfyBatchRequest,
 
     SyncChallenge(SyncChallenge),
@@ -741,7 +762,7 @@ impl SyncChallengeResponse {
     /// Determine whether the `SyncChallengeResponse` answers the given
     /// `IssuedSyncChallenge`, and not some other one.
     pub(crate) fn matches(&self, issued_challenge: IssuedSyncChallenge) -> bool {
-        let Ok(tip_predecessor) = Block::try_from(self.tip_parent.clone()) else {
+        let Ok(tip_parent) = Block::try_from(self.tip_parent.clone()) else {
             return false;
         };
         let Ok(tip) = Block::try_from(self.tip.clone()) else {
@@ -754,7 +775,7 @@ impl SyncChallengeResponse {
             .all(|((_, child), challenge_height)| child.header.height == *challenge_height)
             && issued_challenge.challenge.tip_digest == tip.hash()
             && issued_challenge.accumulated_pow == tip.header().cumulative_proof_of_work
-            && tip.has_proof_of_work(tip_predecessor.header())
+            && tip.has_proof_of_work(tip_parent.header())
     }
 
     /// Determine whether the proofs in `SyncChallengeResponse` are valid. Also
@@ -772,6 +793,8 @@ impl SyncChallengeResponse {
             return false;
         }
 
+        let mut mmra_anchor = tip.body().block_mmr_accumulator.to_owned();
+        mmra_anchor.append(tip.hash());
         for ((parent, child), membership_proof) in
             self.blocks.iter().zip(self.membership_proofs.iter())
         {
@@ -781,8 +804,8 @@ impl SyncChallengeResponse {
             if !membership_proof.verify(
                 child.header().height.into(),
                 child.hash(),
-                &tip.body().block_mmr_accumulator.peaks(),
-                tip.header().height.into(),
+                &mmra_anchor.peaks(),
+                mmra_anchor.num_leafs(),
             ) {
                 return false;
             }

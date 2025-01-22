@@ -15,6 +15,9 @@ use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::Digest;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::select;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -26,6 +29,7 @@ use tracing::warn;
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
@@ -50,6 +54,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD;
 use crate::models::state::mempool::MEMPOOL_TX_THRESHOLD_AGE_IN_SECS;
+use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
@@ -206,16 +211,71 @@ impl PeerLoopHandler {
         }
     }
 
+    /// Construct a batch response, with blocks and their MMR membership proofs
+    /// relative to a specified anchor.
+    ///
+    /// Returns `None` if the anchor has a lower leaf count than the blocks, or
+    /// a block height of the response exceeds own tip height.
+    async fn batch_response(
+        state: &GlobalState,
+        blocks: Vec<Block>,
+        anchor: &MmrAccumulator,
+    ) -> Option<Vec<(TransferBlock, MmrMembershipProof)>> {
+        let own_tip_height = state.chain.light_state().header().height;
+        let block_heights_match_anchor = blocks
+            .iter()
+            .all(|bl| bl.header().height < anchor.num_leafs().into());
+        let block_heights_known = blocks.iter().all(|bl| bl.header().height <= own_tip_height);
+        if !block_heights_match_anchor || !block_heights_known {
+            let max_block_height = match blocks.iter().map(|bl| bl.header().height).max() {
+                Some(height) => height.to_string(),
+                None => "None".to_owned(),
+            };
+
+            debug!("max_block_height: {max_block_height}");
+            debug!("own_tip_height: {own_tip_height}");
+            debug!("anchor.num_leafs(): {}", anchor.num_leafs());
+            debug!("block_heights_match_anchor: {block_heights_match_anchor}");
+            debug!("block_heights_known: {block_heights_known}");
+            return None;
+        }
+
+        let mut ret = vec![];
+        for block in blocks {
+            let mmr_mp = state
+                .chain
+                .archival_state()
+                .archival_block_mmr
+                .prove_membership_relative_to_smaller_mmr(
+                    block.header().height.into(),
+                    anchor.num_leafs(),
+                )
+                .await;
+            let block: TransferBlock = block.try_into().unwrap();
+            ret.push((block, mmr_mp));
+        }
+
+        Some(ret)
+    }
+
     /// Handle validation and send all blocks to the main task if they're all
     /// valid. Use with a list of blocks or a single block. When the
     /// `received_blocks` is a list, the parent of the `i+1`th block in the
     /// list is the `i`th block. The parent of element zero in this list is
     /// `parent_of_first_block`.
     ///
-    /// Returns Err when the connection should be closed; returns Ok(None) if
-    /// some block is invalid or if the last block is not canonical; returns
-    /// Ok(Some(block_height)) otherwise, referring to the largest block height
-    /// in the batch.
+    /// # Return Value
+    ///  - `Err` when the connection should be closed;
+    ///  - `Ok(None)` if some block is invalid
+    ///  - `Ok(None)` if the last block has insufficient cumulative PoW and we
+    ///     are not syncing;
+    ///  - `Ok(None)` if the last block has insufficient height and we are
+    ///     syncing;
+    ///  - `Ok(Some(block_height))` otherwise, referring to the block with the
+    ///     highest height in the batch.
+    ///
+    /// A return value of Ok(Some(_)) means that the message was passed on to
+    /// main loop.
     ///
     /// # Locking
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
@@ -289,16 +349,28 @@ impl PeerLoopHandler {
 
         // evaluate the fork choice rule
         debug!("Checking last block's canonicity ...");
+        let last_block = received_blocks.last().unwrap();
         let is_canonical = self
             .global_state_lock
             .lock_guard()
             .await
-            .incoming_block_is_more_canonical(received_blocks.last().unwrap());
-        debug!("is canonical? {is_canonical}");
-        if !is_canonical {
+            .incoming_block_is_more_canonical(last_block);
+        let last_block_height = last_block.header().height;
+        let sync_mode_active_and_have_new_champion = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .sync_anchor
+            .as_ref()
+            .is_some_and(|x| {
+                x.champion
+                    .is_none_or(|(height, _)| height < last_block_height)
+            });
+        if !is_canonical && !sync_mode_active_and_have_new_champion {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
-            canonical than current tip.",
+            canonical than current tip, or current sync-champion.",
                 received_blocks.len()
             );
             return Ok(None);
@@ -306,35 +378,36 @@ impl PeerLoopHandler {
 
         // Send the new blocks to the main task which handles the state update
         // and storage to the database.
-        let new_block_height = received_blocks.last().unwrap().header().height;
         let number_of_received_blocks = received_blocks.len();
         self.to_main_tx
             .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
         info!(
             "Updated block info by block from peer. block height {}",
-            new_block_height
+            last_block_height
         );
 
         // Valuable, new, hard-to-produce information. Reward peer.
         self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))
             .await?;
 
-        Ok(Some(new_block_height))
+        Ok(Some(last_block_height))
     }
 
-    /// Takes a single block received from a peer and (attempts to) find a path
-    /// from some known stored block to the received block.
+    /// Take a single block received from a peer and (attempt to) find a path
+    /// between the received block and a common ancestor stored in the blocks
+    /// database.
     ///
-    /// This function attempts to find the parent of a new block, either by
-    /// searching the database or, if necessary, by requesting it from a peer.
-    ///  - If the parent is stored in the database, block handling continues.
+    /// This function attempts to find the parent of the received block, either
+    /// by searching the database or by requesting it from a peer.
     ///  - If the parent is not stored, it is requested from the peer and the
     ///    received block is pushed to the fork reconciliation list for later
-    ///    handling by this function.
-    ///
-    /// If the parent is stored, the block and any fork reconciliation blocks
-    /// are passed down the pipeline.
+    ///    handling by this function. The fork reconciliation list starts out
+    ///    empty, but grows as more parents are requested and transmitted.
+    ///  - If the parent is found in the database, a) block handling continues:
+    ///    the entire list of fork reconciliation blocks are passed down the
+    ///    pipeline, potentially leading to a state update; and b) the fork
+    ///    reconciliation list is cleared.
     ///
     /// Locking:
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
@@ -350,15 +423,68 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        let parent_digest = received_block.kernel.header.prev_block_digest;
+        // Does the received block match the fork reconciliation list?
+        let received_block_matches_fork_reconciliation_list = if let Some(successor) =
+            peer_state.fork_reconciliation_blocks.last()
+        {
+            let valid = successor
+                .is_valid(received_block.as_ref(), self.now())
+                .await;
+            if !valid {
+                warn!(
+                        "Fork reconciliation failed after receiving {} blocks: successor of received block is invalid",
+                        peer_state.fork_reconciliation_blocks.len() + 1
+                    );
+            }
+            valid
+        } else {
+            true
+        };
+
+        // Are we running out of RAM?
+        let too_many_blocks = peer_state.fork_reconciliation_blocks.len() + 1
+            >= self.global_state_lock.cli().sync_mode_threshold;
+        if too_many_blocks {
+            warn!(
+                "Fork reconciliation failed after receiving {} blocks: block count exceeds sync mode threshold",
+                peer_state.fork_reconciliation_blocks.len() + 1
+            );
+        }
+
+        // Block mismatch or too many blocks: abort!
+        if !received_block_matches_fork_reconciliation_list || too_many_blocks {
+            self.punish(NegativePeerSanction::ForkResolutionError((
+                received_block.header().height,
+                peer_state.fork_reconciliation_blocks.len() as u16,
+                received_block.hash(),
+            )))
+            .await?;
+            peer_state.fork_reconciliation_blocks = vec![];
+            return Ok(());
+        }
+
+        // otherwise, append
+        peer_state.fork_reconciliation_blocks.push(*received_block);
+
+        // Try fetch parent
+        let received_block_header = *peer_state
+            .fork_reconciliation_blocks
+            .last()
+            .unwrap()
+            .header();
+
+        let parent_digest = received_block_header.prev_block_digest;
+        let parent_height = received_block_header.height.previous()
+            .expect("transferred block must have previous height because genesis block cannot be transferred");
         debug!("Try ensure path: fetching parent block");
-        let global_state = self.global_state_lock.lock_guard().await;
-        let parent_block = global_state
+        let parent_block = self
+            .global_state_lock
+            .lock_guard()
+            .await
             .chain
             .archival_state()
             .get_block(parent_digest)
             .await?;
-        drop(global_state);
         debug!(
             "Completed parent block fetching from DB: {}",
             if parent_block.is_some() {
@@ -367,97 +493,37 @@ impl PeerLoopHandler {
                 "not found".to_string()
             }
         );
-        let parent_height = received_block.kernel.header.height.previous()
-            .expect("transferred block must have previous height because genesis block cannot be transferred");
 
-        // If parent is not known, request the parent, and add the current to
-        // the peer fork resolution list
-        if parent_block.is_none() && parent_height > BlockHeight::genesis() {
+        // If parent is not known (but not genesis) request it.
+        let Some(parent_block) = parent_block else {
+            if parent_height.is_genesis() {
+                peer_state.fork_reconciliation_blocks.clear();
+                self.punish(NegativePeerSanction::DifferentGenesis).await?;
+                return Ok(());
+            }
             info!(
                 "Parent not known: Requesting previous block with height {} from peer",
                 parent_height
             );
 
-            // If the received block matches the block reconciliation state
-            // push it there and request its parent
-            if peer_state.fork_reconciliation_blocks.is_empty()
-                || peer_state
-                    .fork_reconciliation_blocks
-                    .last()
-                    .unwrap()
-                    .kernel
-                    .header
-                    .height
-                    .previous()
-                    .expect("fork reconcilliation blocks cannot contain genesis")
-                    == received_block.kernel.header.height
-                    && peer_state.fork_reconciliation_blocks.len() + 1
-                        < self.global_state_lock.cli().sync_mode_threshold
-            {
-                peer_state.fork_reconciliation_blocks.push(*received_block);
-            } else {
-                // Blocks received out of order. Or more than allowed received without
-                // going into sync mode. Give up on block resolution attempt.
-                self.punish(NegativePeerSanction::ForkResolutionError((
-                    received_block.kernel.header.height,
-                    peer_state.fork_reconciliation_blocks.len() as u16,
-                    received_block.hash(),
-                )))
-                .await?;
-                warn!(
-                    "Fork reconciliation failed after receiving {} blocks",
-                    peer_state.fork_reconciliation_blocks.len() + 1
-                );
-                peer_state.fork_reconciliation_blocks = vec![];
-                return Ok(());
-            }
-
             peer.send(PeerMessage::BlockRequestByHash(parent_digest))
                 .await?;
 
             return Ok(());
-        }
-
-        // We got all the way back to genesis, but disagree about genesis. Ban peer.
-        if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-            self.punish(NegativePeerSanction::DifferentGenesis).await?;
-            return Ok(());
-        }
+        };
 
         // We want to treat the received fork reconciliation blocks (plus the
         // received block) in reverse order, from oldest to newest, because
         // they were requested from high to low block height.
         let mut new_blocks = peer_state.fork_reconciliation_blocks.clone();
-        new_blocks.push(*received_block);
         new_blocks.reverse();
 
-        // Reset the fork resolution state since we got all the way back to find a block that we have
+        // Reset the fork resolution state since we got all the way back to a
+        // block that we have.
         let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
-        peer_state.fork_reconciliation_blocks = vec![];
+        peer_state.fork_reconciliation_blocks.clear();
 
-        // Sanity check, that the blocks are correctly sorted (they should be)
-        // TODO: This has failed: Investigate!
-        // See: https://neptune.builders/core-team/neptune-core/issues/125
-        // TODO: This assert should be replaced with something to punish or disconnect
-        // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
-        let mut new_blocks_sorted_check = new_blocks.clone();
-        new_blocks_sorted_check.sort_by(|a, b| a.kernel.header.height.cmp(&b.kernel.header.height));
-        assert_eq!(
-            new_blocks_sorted_check,
-            new_blocks,
-            "Block list in fork resolution must be sorted. Got blocks in this order: {}",
-            new_blocks
-                .iter()
-                .map(|b| b.kernel.header.height.to_string())
-                .join(", ")
-        );
-
-        // Parent block is guaranteed to be set here. Because: either it was fetched from the
-        // database, or it's the genesis block.
-        if let Some(new_block_height) = self
-            .handle_blocks(new_blocks, parent_block.unwrap())
-            .await?
-        {
+        if let Some(new_block_height) = self.handle_blocks(new_blocks, parent_block).await? {
             // If `BlockNotification` was received during a block reconciliation
             // event, then the peer might have one (or more (unlikely)) blocks
             // that we do not have. We should thus request those blocks.
@@ -625,7 +691,13 @@ impl PeerLoopHandler {
 
                 if block_is_new
                     && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && !self.global_state_lock.lock_guard().await.net.syncing
+                    && self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .net
+                        .sync_anchor
+                        .is_none()
                 {
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
@@ -718,13 +790,17 @@ impl PeerLoopHandler {
 
                 info!("Successful sync challenge response; relaying peer tip info to main loop.");
 
+                let mut sync_mmra_anchor = challenge_response.tip.body.block_mmr_accumulator;
+                sync_mmra_anchor.append(issued_challenge.challenge.tip_digest);
+
                 // Inform main loop
                 self.to_main_tx
-                    .send(PeerTaskToMain::AddPeerMaxBlockHeight((
-                        self.peer_address,
-                        claimed_tip_height,
-                        issued_challenge.accumulated_pow,
-                    )))
+                    .send(PeerTaskToMain::AddPeerMaxBlockHeight {
+                        peer_address: self.peer_address,
+                        claimed_height: claimed_tip_height,
+                        claimed_cumulative_pow: issued_challenge.accumulated_pow,
+                        claimed_block_mmra: sync_mmra_anchor,
+                    })
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -832,12 +908,20 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(BlockRequestBatch {
                 known_blocks,
                 max_response_len,
+                anchor,
             }) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestBatch");
                 debug!(
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
                     self.peer_address
                 );
+
+                if known_blocks.len() > MAX_NUM_DIGESTS_IN_BATCH_REQUEST {
+                    self.punish(NegativePeerSanction::BatchBlocksRequestTooManyDigests)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 // The last block in the list of the peers known block is the
                 // earliest block, block with lowest height, the peer has
@@ -853,15 +937,15 @@ impl PeerLoopHandler {
                     }
                 };
 
-                if !self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
+                let state = self.global_state_lock.lock_guard().await;
+                let block_mmr_num_leafs = state.chain.light_state().header().height.next().into();
+                let luca_is_known = state
                     .chain
                     .archival_state()
                     .block_belongs_to_canonical_chain(least_preferred)
-                    .await
-                {
+                    .await;
+                if !luca_is_known || anchor.num_leafs() > block_mmr_num_leafs {
+                    drop(state);
                     self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
                         .await?;
                     peer.send(PeerMessage::UnableToSatisfyBatchRequest).await?;
@@ -871,17 +955,16 @@ impl PeerLoopHandler {
 
                 // Happy case: At least *one* of the blocks referenced by peer
                 // is known to us.
-                let mut first_block_in_response: Option<BlockHeight> = None;
-                {
-                    let global_state = self.global_state_lock.lock_guard().await;
+                let first_block_in_response = {
+                    let mut first_block_in_response: Option<BlockHeight> = None;
                     for block_digest in known_blocks {
-                        if global_state
+                        if state
                             .chain
                             .archival_state()
                             .block_belongs_to_canonical_chain(block_digest)
                             .await
                         {
-                            let height = global_state
+                            let height = state
                                 .chain
                                 .archival_state()
                                 .get_block_header(block_digest)
@@ -896,42 +979,36 @@ impl PeerLoopHandler {
                             break;
                         }
                     }
-                }
 
-                let peers_preferred_canonical_block = match first_block_in_response {
-                    Some(block) => block,
-                    None => {
-                        self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                            .await?;
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
+                    first_block_in_response
+                        .expect("existence of LUCA should have been established already.")
                 };
 
                 debug!(
-                    "Peer's most preferred block has height {peers_preferred_canonical_block}.\
+                    "Peer's most preferred block has height {first_block_in_response}.\
                  Now building response from that height."
                 );
 
                 // Get the relevant blocks, at most batch-size many, descending from the
                 // peer's (alleged) most canonical block. Don't exceed `max_response_len`
                 // or `STANDARD_BLOCK_BATCH_SIZE` number of blocks in response.
-                let len_of_response = cmp::min(
+                let max_response_len = cmp::min(
                     max_response_len,
                     self.global_state_lock.cli().sync_mode_threshold,
                 );
-                let len_of_response = cmp::max(len_of_response, MINIMUM_BLOCK_BATCH_SIZE);
-                let len_of_response = cmp::min(len_of_response, STANDARD_BLOCK_BATCH_SIZE);
+                let max_response_len = cmp::max(max_response_len, MINIMUM_BLOCK_BATCH_SIZE);
+                let max_response_len = cmp::min(max_response_len, STANDARD_BLOCK_BATCH_SIZE);
 
-                let mut digests_of_returned_blocks = Vec::with_capacity(len_of_response);
-                let response_start_height: u64 = peers_preferred_canonical_block.into();
+                let mut digests_of_returned_blocks = Vec::with_capacity(max_response_len);
+                let response_start_height: u64 = first_block_in_response.into();
                 let mut i: u64 = 1;
-                let global_state = self.global_state_lock.lock_guard().await;
-                while digests_of_returned_blocks.len() < len_of_response {
-                    match global_state
+                while digests_of_returned_blocks.len() < max_response_len {
+                    let block_height = response_start_height + i;
+                    match state
                         .chain
                         .archival_state()
                         .archival_block_mmr
-                        .try_get_leaf(response_start_height + i)
+                        .try_get_leaf(block_height)
                         .await
                     {
                         Some(digest) => {
@@ -942,36 +1019,47 @@ impl PeerLoopHandler {
                     i += 1;
                 }
 
-                let mut returned_blocks: Vec<TransferBlock> =
+                let mut returned_blocks: Vec<Block> =
                     Vec::with_capacity(digests_of_returned_blocks.len());
                 for block_digest in digests_of_returned_blocks {
-                    let block = global_state
+                    let block = state
                         .chain
                         .archival_state()
                         .get_block(block_digest)
                         .await?
                         .unwrap();
-                    returned_blocks.push(block.try_into().unwrap());
+                    returned_blocks.push(block);
                 }
 
-                debug!(
-                    "Returning {} blocks in batch response",
-                    returned_blocks.len()
-                );
+                let response = Self::batch_response(&state, returned_blocks, &anchor).await;
+                let response = match response {
+                    Some(response) => response,
+                    None => {
+                        drop(state);
+                        warn!("Unable to satisfy batch-block request");
+                        self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
 
-                let response = PeerMessage::BlockResponseBatch(returned_blocks);
+                debug!("Returning {} blocks in batch response", response.len());
+
+                let response = PeerMessage::BlockResponseBatch(response);
                 peer.send(response).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockResponseBatch(t_blocks) => {
+            PeerMessage::BlockResponseBatch(authenticated_blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockResponseBatch");
 
                 debug!(
                     "handling block response batch with {} blocks",
-                    t_blocks.len()
+                    authenticated_blocks.len()
                 );
-                if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
+
+                // (Alan:) why is there even a minimum?
+                if authenticated_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
                     self.punish(NegativePeerSanction::TooShortBlockBatch)
                         .await?;
@@ -981,17 +1069,25 @@ impl PeerLoopHandler {
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !self.global_state_lock.lock_guard().await.net.syncing {
+                let Some(sync_achor) = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .clone()
+                else {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(NegativePeerSanction::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                };
 
                 // Verify that the response matches the current state
                 // We get the latest block from the DB here since this message is
                 // only valid for archival nodes.
-                let first_blocks_parent_digest: Digest = t_blocks[0].header.prev_block_digest;
+                let (first_block, _) = &authenticated_blocks[0];
+                let first_blocks_parent_digest: Digest = first_block.header.prev_block_digest;
                 let most_canonical_own_block_match: Option<Block> = self
                     .global_state_lock
                     .lock_guard()
@@ -1017,18 +1113,27 @@ impl PeerLoopHandler {
                     most_canonical_own_block_match.kernel.header.height
                 );
                 let mut received_blocks = vec![];
-                for t_block in t_blocks {
-                    match Block::try_from(t_block) {
-                        Ok(block) => {
-                            received_blocks.push(block);
-                        }
-                        Err(e) => {
-                            warn!("Received invalid transfer block from peer: {e:?}");
-                            self.punish(NegativePeerSanction::InvalidTransferBlock)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
+                for (t_block, membership_proof) in authenticated_blocks {
+                    let Ok(block) = Block::try_from(t_block) else {
+                        warn!("Received invalid transfer block from peer");
+                        self.punish(NegativePeerSanction::InvalidTransferBlock)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+
+                    if !membership_proof.verify(
+                        block.header().height.into(),
+                        block.hash(),
+                        &sync_achor.block_mmr.peaks(),
+                        sync_achor.block_mmr.num_leafs(),
+                    ) {
+                        warn!("Authentication of received block fails relative to anchor");
+                        self.punish(NegativePeerSanction::InvalidBlockMmrAuthentication)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
                     }
+
+                    received_blocks.push(block);
                 }
 
                 // Get the latest block that we know of and handle all received blocks
@@ -1366,6 +1471,7 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
                     known_blocks: batch_block_request.known_blocks,
                     max_response_len,
+                    anchor: batch_block_request.anchor_mmr,
                 }))
                 .await?;
 
@@ -1461,7 +1567,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.global_state_lock.lock(|s| s.net.syncing).await;
+                                    let syncing = self.global_state_lock.lock(|s| s.net.sync_anchor.is_some()).await;
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
@@ -1989,21 +2095,41 @@ mod peer_loop_tests {
                 StdRng::seed_from_u64(5550001).gen(),
             )
             .await;
-        let blocks = vec![genesis_block, block_1, block_2, block_3, block_4, block_5];
+        let blocks = vec![
+            genesis_block,
+            block_1,
+            block_2,
+            block_3,
+            block_4,
+            block_5.clone(),
+        ];
         for block in blocks.iter().skip(1) {
             state_lock.set_new_tip(block.to_owned()).await.unwrap();
         }
 
+        let mmra = state_lock
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .to_accumulator_async()
+            .await;
         for i in 0..=4 {
-            let response = (i + 1..=5)
-                .map(|j| blocks[j].clone().try_into().unwrap())
-                .collect_vec();
+            let expected_response = {
+                let state = state_lock.lock_guard().await;
+                let blocks_for_response = blocks.iter().skip(i + 1).cloned().collect_vec();
+                PeerLoopHandler::batch_response(&state, blocks_for_response, &mmra)
+                    .await
+                    .unwrap()
+            };
             let mock = Mock::new(vec![
                 Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
                     known_blocks: vec![blocks[i].hash()],
                     max_response_len: 14,
+                    anchor: mmra.clone(),
                 })),
-                Action::Write(PeerMessage::BlockResponseBatch(response)),
+                Action::Write(PeerMessage::BlockResponseBatch(expected_response)),
                 Action::Read(PeerMessage::Bye),
             ]);
             let mut peer_loop_handler = PeerLoopHandler::new(
@@ -2054,16 +2180,32 @@ mod peer_loop_tests {
         state_lock.set_new_tip(block_3_b.clone()).await?;
         state_lock.set_new_tip(block_3_a.clone()).await?;
 
+        let anchor = state_lock
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .to_accumulator_async()
+            .await;
+        let response_1 = {
+            let state_lock = state_lock.lock_guard().await;
+            PeerLoopHandler::batch_response(
+                &state_lock,
+                vec![block_1.clone(), block_2_a.clone(), block_3_a.clone()],
+                &anchor,
+            )
+            .await
+            .unwrap()
+        };
+
         let mut mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
                 known_blocks: vec![genesis_block.hash()],
                 max_response_len: 14,
+                anchor: anchor.clone(),
             })),
-            Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_1.clone().try_into().unwrap(),
-                block_2_a.clone().try_into().unwrap(),
-                block_3_a.clone().try_into().unwrap(),
-            ])),
+            Action::Write(PeerMessage::BlockResponseBatch(response_1)),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2082,15 +2224,23 @@ mod peer_loop_tests {
             .await?;
 
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
+        let response_2 = {
+            let state_lock = state_lock.lock_guard().await;
+            PeerLoopHandler::batch_response(
+                &state_lock,
+                vec![block_2_a, block_3_a.clone()],
+                &anchor,
+            )
+            .await
+            .unwrap()
+        };
         mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
                 known_blocks: vec![block_2_b.hash(), block_1.hash(), genesis_block.hash()],
                 max_response_len: 14,
+                anchor,
             })),
-            Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_2_a.try_into().unwrap(),
-                block_3_a.clone().try_into().unwrap(),
-            ])),
+            Action::Write(PeerMessage::BlockResponseBatch(response_2)),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2146,18 +2296,40 @@ mod peer_loop_tests {
         state_lock.set_new_tip(block_3_a.clone()).await?;
 
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
+        let mut expected_anchor = block_3_a.body().block_mmr_accumulator.clone();
+        expected_anchor.append(block_3_a.hash());
+        let state_anchor = state_lock
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_block_mmr
+            .to_accumulator_async()
+            .await;
+        assert_eq!(
+            expected_anchor, state_anchor,
+            "Catching assumption about MMRA in tip and in archival state"
+        );
+
+        let response = {
+            let state_lock = state_lock.lock_guard().await;
+            PeerLoopHandler::batch_response(
+                &state_lock,
+                vec![block_1.clone(), block_2_a, block_3_a.clone()],
+                &expected_anchor,
+            )
+            .await
+            .unwrap()
+        };
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(BlockRequestBatch {
                 known_blocks: vec![block_2_b.hash(), genesis_block.hash(), block_1.hash()],
                 max_response_len: 14,
+                anchor: expected_anchor,
             })),
             // Since genesis block is the 1st known in the list of known blocks,
             // it's immediate descendent, block_1, is the first one returned.
-            Action::Write(PeerMessage::BlockResponseBatch(vec![
-                block_1.try_into().unwrap(),
-                block_2_a.try_into().unwrap(),
-                block_3_a.clone().try_into().unwrap(),
-            ])),
+            Action::Write(PeerMessage::BlockResponseBatch(response)),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -3277,6 +3449,7 @@ mod peer_loop_tests {
 
     mod sync_challenges {
         use super::*;
+        use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
         #[tokio::test]
@@ -3416,7 +3589,7 @@ mod peer_loop_tests {
             // criterion. Alice issues a challenge. Bob responds. Alice enters into
             // sync mode.
 
-            let mut rng = StdRng::seed_from_u64(5550001);
+            let mut rng = thread_rng();
             let network = Network::Main;
             let genesis_block: Block = Block::genesis_block(network);
 
@@ -3454,9 +3627,13 @@ mod peer_loop_tests {
             alice.set_new_tip(block_1.clone()).await?;
             bob.set_new_tip(block_1.clone()).await?;
 
-            let blocks: [Block; 11] =
-                fake_valid_sequence_of_blocks_for_tests(&block_1, TARGET_BLOCK_INTERVAL, rng.gen())
-                    .await;
+            let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
+                &block_1,
+                TARGET_BLOCK_INTERVAL,
+                rng.gen(),
+                rng.gen_range(11..20),
+            )
+            .await;
             for block in &blocks {
                 bob.set_new_tip(block.clone()).await?;
             }
@@ -3512,11 +3689,14 @@ mod peer_loop_tests {
                 .await?;
 
             // AddPeerMaxBlockHeight message triggered *after* sync challenge
-            let expected_message_from_alice_peer_loop = PeerTaskToMain::AddPeerMaxBlockHeight((
-                bob_socket_address,
-                bob_tip.header().height,
-                bob_tip.header().cumulative_proof_of_work,
-            ));
+            let mut expected_anchor_mmra = bob_tip.body().block_mmr_accumulator.clone();
+            expected_anchor_mmra.append(bob_tip.hash());
+            let expected_message_from_alice_peer_loop = PeerTaskToMain::AddPeerMaxBlockHeight {
+                peer_address: bob_socket_address,
+                claimed_height: bob_tip.header().height,
+                claimed_cumulative_pow: bob_tip.header().cumulative_proof_of_work,
+                claimed_block_mmra: expected_anchor_mmra,
+            };
             let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();
             assert_eq!(
                 expected_message_from_alice_peer_loop,

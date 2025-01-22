@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
@@ -82,6 +83,10 @@ pub struct MainToPeerTaskBatchBlockRequest {
     /// that the we would prefer to build on top off, if it belongs to the
     /// canonical chain.
     pub(crate) known_blocks: Vec<Digest>,
+
+    /// The block MMR accumulator relative to which incoming blocks are
+    /// authenticated.
+    pub(crate) anchor_mmr: MmrAccumulator,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,7 +141,15 @@ impl MainToPeerTask {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PeerTaskToMain {
     NewBlocks(Vec<Block>),
-    AddPeerMaxBlockHeight((SocketAddr, BlockHeight, ProofOfWork)),
+    AddPeerMaxBlockHeight {
+        peer_address: SocketAddr,
+        claimed_height: BlockHeight,
+        claimed_cumulative_pow: ProofOfWork,
+
+        /// The MMR *after* adding the tip hash, so not the one contained in the
+        /// tip, but in its child.
+        claimed_block_mmra: MmrAccumulator,
+    },
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
     Transaction(Box<PeerTaskToMainTransaction>),
@@ -154,7 +167,7 @@ impl PeerTaskToMain {
     pub fn get_type(&self) -> String {
         match self {
             PeerTaskToMain::NewBlocks(_) => "new blocks",
-            PeerTaskToMain::AddPeerMaxBlockHeight(_) => "add peer max block height",
+            PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
             PeerTaskToMain::RemovePeerMaxBlockHeight(_) => "remove peer max block height",
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
