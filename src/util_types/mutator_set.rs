@@ -17,7 +17,6 @@ pub mod active_window;
 pub mod addition_record;
 pub mod archival_mmr;
 pub mod archival_mutator_set;
-pub mod boxed_big_array;
 pub mod chunk;
 pub mod chunk_dictionary;
 pub mod mmra_and_membership_proofs;
