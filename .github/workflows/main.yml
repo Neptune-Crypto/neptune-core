@@ -14,34 +14,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all-targets -- -D warnings
+      - name: Build documentation
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: -D warnings
 
-      - name: Run cargo test without benches
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: -- --skip benches --skip mine_20_blocks_in_40_seconds --skip hash_rate_independent_of_tx_size
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests without benches
+        run: >
+          cargo test
+          --lib --bins --tests --examples
+          --
+          --skip mine_20_blocks_in_40_seconds
+          --skip hash_rate_independent_of_tx_size
+
+        # `--doc` cannot be mixed with other target option
+      - name: Run documentation tests
+        run: cargo test --doc
