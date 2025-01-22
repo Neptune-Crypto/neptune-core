@@ -1356,7 +1356,7 @@ impl GlobalState {
     /// Store a block to client's state *without* marking this block as a new
     /// tip. No validation of block happens, as this is the caller's
     /// responsibility.
-    async fn store_block_not_tip(&mut self, block: Block) -> Result<()> {
+    pub(crate) async fn store_block_not_tip(&mut self, block: Block) -> Result<()> {
         crate::macros::log_scope_duration!();
 
         self.chain

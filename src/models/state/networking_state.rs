@@ -4,12 +4,14 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
+use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::create_db_if_missing;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;
 use crate::models::peer;
@@ -22,8 +24,30 @@ type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 /// Information about a foreign tip towards which the client is syncing.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct SyncAnchor {
+    /// Cumulative proof-of-work number of the target fork that we are syncing
+    /// towards. This number is immutable for each `SyncAnchor`.
     pub(crate) cumulative_proof_of_work: ProofOfWork,
+
+    /// The block MMR accumulator *after* appending the claimed tip digest. This
+    /// value is immutable for each `SyncAnchor`.
     pub(crate) block_mmr: MmrAccumulator,
+
+    /// Indicates the block that we have currently synced to under this anchor.
+    pub(crate) champion: Option<(BlockHeight, Digest)>,
+}
+
+impl SyncAnchor {
+    pub(crate) fn catch_up(&mut self, height: BlockHeight, block_hash: Digest) {
+        let new_champion = Some((height, block_hash));
+        match self.champion {
+            Some((current_height, _)) => {
+                if current_height < height {
+                    self.champion = new_champion
+                }
+            }
+            None => self.champion = new_champion,
+        };
+    }
 }
 
 /// `NetworkingState` contains in-memory and persisted data for interacting

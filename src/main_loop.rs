@@ -69,7 +69,7 @@ const TRANSACTION_UPGRADE_CHECK_INTERVAL_IN_SECONDS: u64 = 60; // 1 minute
 
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
-const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
+pub(crate) const MAX_NUM_DIGESTS_IN_BATCH_REQUEST: usize = 200;
 const TX_UPDATER_CHANNEL_CAPACITY: usize = 1;
 
 /// Wraps a transmission channel.
@@ -145,19 +145,13 @@ impl MutableMainLoopState {
 }
 
 /// handles batch-downloading of blocks if we are more than n blocks behind
+#[derive(Default, Debug)]
 struct SyncState {
     peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
     last_sync_request: Option<(SystemTime, BlockHeight, SocketAddr)>,
 }
 
 impl SyncState {
-    fn default() -> Self {
-        Self {
-            peer_sync_states: HashMap::new(),
-            last_sync_request: None,
-        }
-    }
-
     fn record_request(
         &mut self,
         requested_block_height: BlockHeight,
@@ -177,9 +171,11 @@ impl SyncState {
             .collect()
     }
 
-    /// Determine if a peer should be sanctioned for failing to respond to a synchronization
-    /// request. Also determine if a new request should be made or the previous one should be
-    /// allowed to run for longer.
+    /// Determine if a peer should be sanctioned for failing to respond to a
+    /// synchronization request fast enough. Also determine if a new request
+    /// should be made or the previous one should be allowed to run for longer.
+    ///
+    /// Returns (peer to be sanctioned, attempt new request).
     fn get_status_of_last_request(
         &self,
         current_block_height: BlockHeight,
@@ -360,7 +356,7 @@ fn stay_in_sync_mode(
         .values()
         .max_by_key(|x| x.claimed_max_pow);
     match max_claimed_pow {
-        None => false, // we lost all connections. Can't sync.
+        None => false, // No peer have passed the sync challenge phase.
 
         // Synchronization is left when the remaining number of block is half of what has
         // been indicated to fit into RAM
@@ -593,18 +589,34 @@ impl MainLoopHandler {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer (or from own miner).
-                    // TODO: Is this check right? We might still want to store the blocks even though
-                    // they are not more canonical than what we currently have, in the case of deep reorganizations
-                    // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
-                    // or should deep reorganizations simply be fixed by clearing the database?
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    let new_canonical =
+                        global_state_mut.incoming_block_is_more_canonical(&last_block);
 
-                    if !global_state_mut.incoming_block_is_more_canonical(&last_block) {
-                        warn!("Blocks were not new. Not storing blocks.");
+                    if !new_canonical {
+                        // The blocks are not canonical, but: if we are in sync
+                        // mode and these blocks beat our current champion, then
+                        // we store them anyway, without marking them as tip.
+                        let Some(sync_anchor) = global_state_mut.net.sync_anchor.as_mut() else {
+                            warn!(
+                                "Blocks were not new, and we're not syncing. Not storing blocks."
+                            );
+                            return Ok(());
+                        };
+                        if sync_anchor
+                            .champion
+                            .is_some_and(|(height, _)| height >= last_block.header().height)
+                        {
+                            warn!("Repeated blocks received in sync mode, not storing");
+                            return Ok(());
+                        }
 
-                        // TODO: Consider fixing deep reorganization problem described above.
-                        // Alternatively set the `sync_mode_threshold` value higher
-                        // if this problem is encountered.
+                        sync_anchor.catch_up(last_block.header().height, last_block.hash());
+
+                        for block in blocks {
+                            global_state_mut.store_block_not_tip(block).await?;
+                        }
+
                         return Ok(());
                     }
 
@@ -704,6 +716,7 @@ impl MainLoopHandler {
                     global_state_mut.net.sync_anchor = Some(SyncAnchor {
                         cumulative_proof_of_work: claimed_cumulative_pow,
                         block_mmr: claimed_block_mmra,
+                        champion: None,
                     });
                     self.main_to_miner_tx.send(MainToMiner::StartSyncing);
                 }
@@ -1029,6 +1042,41 @@ impl MainLoopHandler {
         Ok(())
     }
 
+    /// Return a list of block heights for a block-batch request.
+    ///
+    /// Returns an ordered list of the heights of *most preferred block*
+    /// to build on, where current tip is always the most preferred block.
+    ///
+    /// Uses a factor to ensure that the peer will always have something to
+    /// build on top of by providing potential starting points all the way
+    /// back to genesis.
+    fn batch_request_uca_candidate_heights(own_tip_height: BlockHeight) -> Vec<BlockHeight> {
+        let mut look_behind = 0;
+        let mut ret = vec![];
+
+        // A factor of 1.07 can look back ~1m blocks in 200 digests.
+        const FACTOR: f64 = 1.07f64;
+        while ret.len() < MAX_NUM_DIGESTS_IN_BATCH_REQUEST - 1 {
+            let height = match own_tip_height.checked_sub(look_behind) {
+                None => break,
+                Some(height) => {
+                    if height.is_genesis() {
+                        break;
+                    } else {
+                        height
+                    }
+                }
+            };
+
+            ret.push(height);
+            look_behind = ((look_behind as f64 + 1.0) * FACTOR).floor() as u64;
+        }
+
+        ret.push(BlockHeight::genesis());
+
+        ret
+    }
+
     /// Logic for requesting the batch-download of blocks from peers
     ///
     /// Locking:
@@ -1044,7 +1092,7 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let (current_block_hash, current_block_height, current_block_proof_of_work_family) = (
+        let (own_tip_hash, own_tip_height, own_cumulative_pow) = (
             global_state.chain.light_state().hash(),
             global_state.chain.light_state().kernel.header.height,
             global_state
@@ -1057,7 +1105,7 @@ impl MainLoopHandler {
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block_height, self.now());
+            .get_status_of_last_request(own_tip_height, self.now());
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -1076,7 +1124,7 @@ impl MainLoopHandler {
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
             .sync_state
-            .get_potential_peers_for_sync_request(current_block_proof_of_work_family);
+            .get_potential_peers_for_sync_request(own_cumulative_pow);
         let mut rng = thread_rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
@@ -1084,36 +1132,44 @@ impl MainLoopHandler {
             "A synchronization candidate must be available for a request. Otherwise the data structure is in an invalid state and syncing should not be active"
         );
 
-        // Find the blocks to request
-        let tip_digest = current_block_hash;
-        let most_canonical_digests = global_state
-            .chain
-            .archival_state()
-            .get_ancestor_block_digests(tip_digest, STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE)
-            .await;
-
-        // List of digests, ordered after which block we would like to find descendents from,
-        // from highest to lowest.
-        let most_canonical_digests = [vec![tip_digest], most_canonical_digests].concat();
+        let ordered_preferred_block_digests = match anchor.champion {
+            Some((_height, digest)) => vec![digest],
+            None => {
+                // Find candidate-UCA digests based on a sparse distribution of
+                // block heights skewed towards own tip height
+                let request_heights = Self::batch_request_uca_candidate_heights(own_tip_height);
+                let mut ordered_preferred_block_digests = vec![];
+                for height in request_heights {
+                    let digest = global_state
+                        .chain
+                        .archival_state()
+                        .archival_block_mmr
+                        .get_leaf_async(height.into())
+                        .await;
+                    ordered_preferred_block_digests.push(digest);
+                }
+                ordered_preferred_block_digests
+            }
+        };
 
         // Send message to the relevant peer loop to request the blocks
         let chosen_peer = chosen_peer.unwrap();
         info!(
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
-            chosen_peer, current_block_hash, current_block_height
+            chosen_peer, own_tip_hash, own_tip_height
         );
         self.main_to_peer_broadcast_tx
             .send(MainToPeerTask::RequestBlockBatch(
                 MainToPeerTaskBatchBlockRequest {
                     peer_addr_target: *chosen_peer,
-                    known_blocks: most_canonical_digests,
+                    known_blocks: ordered_preferred_block_digests,
                     anchor_mmr: anchor.block_mmr.clone(),
                 },
             ))
             .expect("Sending message to peers must succeed");
 
         // Record that this request was sent to the peer
-        let requested_block_height = current_block_height.next();
+        let requested_block_height = own_tip_height.next();
         main_loop_state
             .sync_state
             .record_request(requested_block_height, *chosen_peer, self.now());
@@ -1688,6 +1744,43 @@ mod test {
             task_join_handles,
             main_loop_handler,
             main_to_peer_rx,
+        }
+    }
+
+    mod sync_mode {
+        use test_strategy::proptest;
+
+        use super::*;
+
+        #[proptest]
+        fn batch_request_heights_prop(#[strategy(0u64..100_000_000_000)] own_height: u64) {
+            batch_request_heights_sanity(own_height);
+        }
+
+        #[test]
+        fn batch_request_heights_unit() {
+            let own_height = 1_000_000u64;
+            batch_request_heights_sanity(own_height);
+        }
+
+        fn batch_request_heights_sanity(own_height: u64) {
+            let heights = MainLoopHandler::batch_request_uca_candidate_heights(own_height.into());
+
+            let mut heights_rev = heights.clone();
+            heights_rev.reverse();
+            assert!(
+                heights_rev.is_sorted(),
+                "Heights must be sorted from high-to-low"
+            );
+
+            heights_rev.dedup();
+            assert_eq!(heights_rev.len(), heights.len(), "duplicates");
+
+            assert_eq!(heights[0], own_height.into(), "starts with own tip height");
+            assert!(
+                heights.last().unwrap().is_genesis(),
+                "ends with genesis block"
+            );
         }
     }
 

@@ -156,6 +156,7 @@ pub enum NegativePeerSanction {
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     BatchBlocksRequestEmpty,
+    BatchBlocksRequestTooManyDigests,
     InvalidTransaction,
     UnconfirmableTransaction,
     InvalidBlockMmrAuthentication,
@@ -226,6 +227,9 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::InvalidBlockMmrAuthentication => {
                 "invalid block mmr authentication"
             }
+            NegativePeerSanction::BatchBlocksRequestTooManyDigests => {
+                "too many digests in batch block request"
+            }
         };
         write!(f, "{string}")
     }
@@ -294,6 +298,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidTransferBlock => -50,
             NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
             NegativePeerSanction::InvalidBlockMmrAuthentication => -4,
+            NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
         }
     }
 }

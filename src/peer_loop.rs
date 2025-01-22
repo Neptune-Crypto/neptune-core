@@ -29,6 +29,7 @@ use tracing::warn;
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
+use crate::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::Transaction;
@@ -263,10 +264,18 @@ impl PeerLoopHandler {
     /// list is the `i`th block. The parent of element zero in this list is
     /// `parent_of_first_block`.
     ///
-    /// Returns Err when the connection should be closed; returns Ok(None) if
-    /// some block is invalid or if the last block is not canonical; returns
-    /// Ok(Some(block_height)) otherwise, referring to the largest block height
-    /// in the batch.
+    /// # Return Value
+    ///  - `Err` when the connection should be closed;
+    ///  - `Ok(None)` if some block is invalid
+    ///  - `Ok(None)` if the last block has insufficient cumulative PoW and we
+    ///     are not syncing;
+    ///  - `Ok(None)` if the last block has insufficient height and we are
+    ///     syncing;
+    ///  - `Ok(Some(block_height))` otherwise, referring to the block with the
+    ///     highest height in the batch.
+    ///
+    /// A return value of Ok(Some(_)) means that the message was passed on to
+    /// main loop.
     ///
     /// # Locking
     ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
@@ -340,16 +349,28 @@ impl PeerLoopHandler {
 
         // evaluate the fork choice rule
         debug!("Checking last block's canonicity ...");
+        let last_block = received_blocks.last().unwrap();
         let is_canonical = self
             .global_state_lock
             .lock_guard()
             .await
-            .incoming_block_is_more_canonical(received_blocks.last().unwrap());
-        debug!("is canonical? {is_canonical}");
-        if !is_canonical {
+            .incoming_block_is_more_canonical(last_block);
+        let last_block_height = last_block.header().height;
+        let sync_mode_active_and_have_new_champion = self
+            .global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .sync_anchor
+            .as_ref()
+            .is_some_and(|x| {
+                x.champion
+                    .is_none_or(|(height, _)| height < last_block_height)
+            });
+        if !is_canonical && !sync_mode_active_and_have_new_champion {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
-            canonical than current tip.",
+            canonical than current tip, or current sync-champion.",
                 received_blocks.len()
             );
             return Ok(None);
@@ -357,21 +378,20 @@ impl PeerLoopHandler {
 
         // Send the new blocks to the main task which handles the state update
         // and storage to the database.
-        let new_block_height = received_blocks.last().unwrap().header().height;
         let number_of_received_blocks = received_blocks.len();
         self.to_main_tx
             .send(PeerTaskToMain::NewBlocks(received_blocks))
             .await?;
         info!(
             "Updated block info by block from peer. block height {}",
-            new_block_height
+            last_block_height
         );
 
         // Valuable, new, hard-to-produce information. Reward peer.
         self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))
             .await?;
 
-        Ok(Some(new_block_height))
+        Ok(Some(last_block_height))
     }
 
     /// Take a single block received from a peer and (attempt to) find a path
@@ -895,6 +915,13 @@ impl PeerLoopHandler {
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
                     self.peer_address
                 );
+
+                if known_blocks.len() > MAX_NUM_DIGESTS_IN_BATCH_REQUEST {
+                    self.punish(NegativePeerSanction::BatchBlocksRequestTooManyDigests)
+                        .await?;
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 // The last block in the list of the peers known block is the
                 // earliest block, block with lowest height, the peer has
