@@ -2277,6 +2277,24 @@ mod archival_state_tests {
             );
             assert_eq!(mock_block_2, archival_state.get_tip().await);
             assert_eq!(mock_block_1, archival_state.get_tip_parent().await.unwrap());
+
+            assert_eq!(
+                mock_block_2.hash(),
+                archival_state
+                    .archival_block_mmr
+                    .try_get_leaf(mock_block_2.header().height.into())
+                    .await
+                    .unwrap(),
+                "Block Height must be valid leaf index in archival block-MMR"
+            );
+            assert!(
+                archival_state
+                    .archival_block_mmr
+                    .try_get_leaf(mock_block_2.header().height.next().into())
+                    .await
+                    .is_none(),
+                "Tip height plus 1 must translate into an out-of-bounds leaf index in block-MMR"
+            );
         }
 
         Ok(())
