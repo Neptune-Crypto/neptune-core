@@ -209,8 +209,8 @@ mod chunk_dict_tests {
     use twenty_first::math::tip5::Digest;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-    use super::super::archival_mmr::mmr_test::mock;
     use super::*;
+    use crate::util_types::archival_mmr::mmr_test::mock;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 

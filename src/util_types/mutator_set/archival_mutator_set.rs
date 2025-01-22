@@ -8,7 +8,6 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-use super::archival_mmr::ArchivalMmr;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
@@ -19,6 +18,7 @@ use super::shared::CHUNK_SIZE;
 use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
+use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::MutatorSetError;
 

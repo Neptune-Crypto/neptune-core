@@ -1,7 +1,6 @@
 use twenty_first::math::tip5::Digest;
 
 use super::active_window::ActiveWindow;
-use super::archival_mmr::ArchivalMmr;
 use super::archival_mutator_set::ArchivalMutatorSet;
 use super::chunk::Chunk;
 use crate::database::storage::storage_schema::traits::*;
@@ -12,6 +11,7 @@ use crate::database::storage::storage_schema::RustyValue;
 use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
+use crate::util_types::archival_mmr::ArchivalMmr;
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;

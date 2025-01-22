@@ -1,3 +1,4 @@
+pub mod archival_mmr;
 pub mod mutator_set;
 
 #[cfg(test)]

@@ -1070,7 +1070,7 @@ mod block_tests {
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
-    use crate::util_types::mutator_set::archival_mmr::ArchivalMmr;
+    use crate::util_types::archival_mmr::ArchivalMmr;
 
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
@@ -1193,7 +1193,7 @@ mod block_tests {
             .unwrap();
         let mut storage = SimpleRustyStorage::new(db);
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
-        let mut ammr: ArchivalMmr<_> = ArchivalMmr::new(ammr_storage).await;
+        let mut ammr = ArchivalMmr::new(ammr_storage).await;
         ammr.append(genesis_block.hash()).await;
         let mut mmra = MmrAccumulator::new_from_leafs(vec![genesis_block.hash()]);
 

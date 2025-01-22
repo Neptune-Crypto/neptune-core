@@ -15,7 +15,6 @@ use crate::models::blockchain::shared::Hash;
 
 pub mod active_window;
 pub mod addition_record;
-pub mod archival_mmr;
 pub mod archival_mutator_set;
 pub mod chunk;
 pub mod chunk_dictionary;
