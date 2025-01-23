@@ -11,7 +11,6 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::FromPrimitive;
-use num_traits::Signed;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
 use rand::Rng;
@@ -488,10 +487,10 @@ pub(crate) fn max_cumulative_pow_after(
     let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
     for _ in 0..num_blocks {
         max_cumpow += max_difficulty;
-        max_difficulty = max_difficulty * f;
+        max_difficulty *= f;
     }
 
-    ProofOfWork::try_from(max_cumpow).unwrap_or_else(|e| panic!("calculated max proof-of-work"))
+    ProofOfWork::try_from(max_cumpow).unwrap_or_else(|_e| panic!("calculated max proof-of-work"))
 }
 
 #[cfg(test)]
@@ -502,7 +501,6 @@ mod test {
     use num_bigint::BigInt;
     use num_bigint::BigUint;
     use num_rational::BigRational;
-    use num_traits::FromPrimitive;
     use num_traits::One;
     use num_traits::ToPrimitive;
     use num_traits::Zero;
@@ -880,7 +878,7 @@ mod test {
         let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
         let upper_bound =
             max_cumulative_pow_after_iterative_test_impl(init_cumpow, init_difficulty, num_blocks);
-        prop_assert!(upper_bound >= calculated);
-        prop_assert!(calculated < ProofOfWork::MAXIMUM);
+        assert!(upper_bound >= calculated);
+        assert!(calculated < ProofOfWork::MAXIMUM);
     }
 }
