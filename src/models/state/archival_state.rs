@@ -19,8 +19,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::create_db_if_missing;
 use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_schema::DbtVec;
-use crate::database::storage::storage_schema::SimpleRustyStorage;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -35,14 +33,12 @@ use crate::models::database::BlockRecord;
 use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
 use crate::prelude::twenty_first;
-use crate::util_types::archival_mmr::ArchivalMmr;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-
-type ArchivalBlockMmr = ArchivalMmr<DbtVec<Digest>>;
+use crate::util_types::rusty_archival_block_mmr::RustyArchivalBlockMmr;
 
 pub(crate) const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub(crate) const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -79,7 +75,7 @@ pub(crate) struct ArchivalState {
     pub(crate) archival_mutator_set: RustyArchivalMutatorSet,
 
     /// Archival-MMR of the block digests belonging to the canonical chain.
-    pub(crate) archival_block_mmr: ArchivalBlockMmr,
+    pub(crate) archival_block_mmr: RustyArchivalBlockMmr,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -145,7 +141,7 @@ impl ArchivalState {
 
     pub(crate) async fn initialize_archival_block_mmr(
         data_dir: &DataDirectory,
-    ) -> Result<ArchivalBlockMmr> {
+    ) -> Result<RustyArchivalBlockMmr> {
         let abmmr_dir_path = data_dir.archival_block_mmr_dir_path();
         DataDirectory::create_dir_if_not_exists(&abmmr_dir_path).await?;
 
@@ -168,17 +164,7 @@ impl ArchivalState {
             }
         };
 
-        let mut storage = SimpleRustyStorage::new_with_callback(
-            db,
-            "archival-block-mmr-Schema",
-            crate::LOG_TOKIO_LOCK_EVENT_CB,
-        );
-
-        // We do not need a sync-label since the last leaf of the MMR will
-        // be the sync-label, i.e., the block digest of the latest block added.
-        let abmmr = storage.schema.new_vec::<Digest>("archival_block_mmr").await;
-
-        let archival_bmmr = ArchivalBlockMmr::new(abmmr).await;
+        let archival_bmmr = RustyArchivalBlockMmr::connect(db).await;
 
         Ok(archival_bmmr)
     }
@@ -250,7 +236,7 @@ impl ArchivalState {
         data_dir: DataDirectory,
         block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
         mut archival_mutator_set: RustyArchivalMutatorSet,
-        mut archival_block_mmr: ArchivalBlockMmr,
+        mut archival_block_mmr: RustyArchivalBlockMmr,
         network: Network,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block(network));
@@ -270,8 +256,11 @@ impl ArchivalState {
         }
 
         // Add genesis block digest to archival MMR, if empty.
-        if archival_block_mmr.is_empty().await {
-            archival_block_mmr.append(genesis_block.hash()).await;
+        if archival_block_mmr.ammr().is_empty().await {
+            archival_block_mmr
+                .ammr_mut()
+                .append(genesis_block.hash())
+                .await;
         }
 
         Self {
@@ -472,11 +461,13 @@ impl ArchivalState {
         // then add new digest.
         let num_leafs_prior_to_this_block = new_block.header().height.into();
         self.archival_block_mmr
+            .ammr_mut()
             .prune_to_num_leafs(num_leafs_prior_to_this_block)
             .await;
 
         let latest_leaf = self
             .archival_block_mmr
+            .ammr()
             .get_latest_leaf()
             .await
             .expect("block MMR must always have at least one leaf");
@@ -485,22 +476,28 @@ impl ArchivalState {
                 .find_path(latest_leaf, new_block.header().prev_block_digest)
                 .await;
             for _ in backwards {
-                self.archival_block_mmr.remove_last_leaf_async().await;
+                self.archival_block_mmr
+                    .ammr_mut()
+                    .remove_last_leaf_async()
+                    .await;
             }
             for digest in forwards {
-                self.archival_block_mmr.append(digest).await;
+                self.archival_block_mmr.ammr_mut().append(digest).await;
             }
         }
 
         assert_eq!(
             new_block.header().prev_block_digest,
-            self.archival_block_mmr
+            self.archival_block_mmr.ammr()
                 .get_latest_leaf()
                 .await
                 .expect("block MMR must always have at least one leaf"),
             "Archival block-MMR must be in a consistent state. Try deleting this database to have it rebuilt."
         );
-        self.archival_block_mmr.append(new_block.hash()).await;
+        self.archival_block_mmr
+            .ammr_mut()
+            .append(new_block.hash())
+            .await;
     }
 
     async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
@@ -641,6 +638,7 @@ impl ArchivalState {
             let new_guess_height = BlockHeight::arithmetic_mean(min_block_height, max_block_height);
             block_hash = self
                 .archival_block_mmr
+                .ammr()
                 .get_leaf_async(new_guess_height.into())
                 .await;
             record = self
@@ -832,6 +830,7 @@ impl ArchivalState {
         let block_height: u64 = block_header.height.into();
 
         self.archival_block_mmr
+            .ammr()
             .try_get_leaf(block_height)
             .await
             .is_some_and(|canonical_digest_at_this_height| {
@@ -2282,6 +2281,7 @@ mod archival_state_tests {
                 mock_block_2.hash(),
                 archival_state
                     .archival_block_mmr
+                    .ammr()
                     .try_get_leaf(mock_block_2.header().height.into())
                     .await
                     .unwrap(),
@@ -2290,6 +2290,7 @@ mod archival_state_tests {
             assert!(
                 archival_state
                     .archival_block_mmr
+                    .ammr()
                     .try_get_leaf(mock_block_2.header().height.next().into())
                     .await
                     .is_none(),

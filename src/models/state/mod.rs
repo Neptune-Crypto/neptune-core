@@ -1315,6 +1315,12 @@ impl GlobalState {
             .persist()
             .await;
 
+        self.chain
+            .archival_state_mut()
+            .archival_block_mmr
+            .persist()
+            .await;
+
         // flush peer_standings
         self.net.peer_databases.peer_standings.flush().await;
 
@@ -1560,6 +1566,7 @@ impl GlobalState {
                 .chain
                 .archival_state()
                 .archival_block_mmr
+                .ammr()
                 .try_get_leaf(h.into())
                 .await
             else {
@@ -1581,6 +1588,7 @@ impl GlobalState {
                 self.chain
                     .archival_state()
                     .archival_block_mmr
+                    .ammr()
                     .prove_membership_async(h.into())
                     .await,
             );
@@ -2866,6 +2874,7 @@ mod global_state_tests {
                     .chain
                     .archival_state()
                     .archival_block_mmr
+                    .ammr()
                     .get_latest_leaf()
                     .await
                     .unwrap(),
@@ -2883,6 +2892,7 @@ mod global_state_tests {
                         .chain
                         .archival_state()
                         .archival_block_mmr
+                        .ammr()
                         .to_accumulator_async()
                         .await,
                     "archival block-MMR must match that in tip after adding tip digest"

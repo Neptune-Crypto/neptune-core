@@ -246,6 +246,7 @@ impl PeerLoopHandler {
                 .chain
                 .archival_state()
                 .archival_block_mmr
+                .ammr()
                 .prove_membership_relative_to_smaller_mmr(
                     block.header().height.into(),
                     anchor.num_leafs(),
@@ -839,6 +840,7 @@ impl PeerLoopHandler {
                     .chain
                     .archival_state()
                     .archival_block_mmr
+                    .ammr()
                     .try_get_leaf(block_height.into())
                     .await;
 
@@ -1006,6 +1008,7 @@ impl PeerLoopHandler {
                         .chain
                         .archival_state()
                         .archival_block_mmr
+                        .ammr()
                         .try_get_leaf(block_height)
                         .await
                     {
@@ -2111,6 +2114,7 @@ mod peer_loop_tests {
             .chain
             .archival_state()
             .archival_block_mmr
+            .ammr()
             .to_accumulator_async()
             .await;
         for i in 0..=4 {
@@ -2184,6 +2188,7 @@ mod peer_loop_tests {
             .chain
             .archival_state()
             .archival_block_mmr
+            .ammr()
             .to_accumulator_async()
             .await;
         let response_1 = {
@@ -2302,6 +2307,7 @@ mod peer_loop_tests {
             .chain
             .archival_state()
             .archival_block_mmr
+            .ammr()
             .to_accumulator_async()
             .await;
         assert_eq!(

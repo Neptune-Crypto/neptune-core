@@ -1177,6 +1177,7 @@ impl MainLoopHandler {
                         .chain
                         .archival_state()
                         .archival_block_mmr
+                        .ammr()
                         .get_leaf_async(height.into())
                         .await;
                     ordered_preferred_block_digests.push(digest);

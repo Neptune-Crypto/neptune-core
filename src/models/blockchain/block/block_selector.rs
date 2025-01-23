@@ -114,6 +114,7 @@ impl BlockSelector {
                     .chain
                     .archival_state()
                     .archival_block_mmr
+                    .ammr()
                     .try_get_leaf((*h).into())
                     .await
             }
