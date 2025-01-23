@@ -4,11 +4,15 @@ use std::ops::Add;
 use std::ops::Shr;
 use std::ops::ShrAssign;
 
+use anyhow::bail;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
+use num_traits::FromPrimitive;
+use num_traits::Signed;
+use num_traits::ToPrimitive;
 use num_traits::Zero;
 use rand::Rng;
 use rand_distr::Distribution;
@@ -20,6 +24,7 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Digest;
 
 use super::block_height::BlockHeight;
+use super::MINIMUM_BLOCK_TIME;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -215,6 +220,8 @@ const POW_NUM_LIMBS: usize = 6;
 pub struct ProofOfWork([u32; POW_NUM_LIMBS]);
 
 impl ProofOfWork {
+    pub(crate) const MAXIMUM: Self = ProofOfWork([u32::MAX; POW_NUM_LIMBS]);
+    pub(crate) const MINIMUM: Self = ProofOfWork([0u32; POW_NUM_LIMBS]);
     pub(crate) const NUM_LIMBS: usize = POW_NUM_LIMBS;
     pub(crate) const fn new(amount: [u32; Self::NUM_LIMBS]) -> Self {
         Self(amount)
@@ -274,6 +281,35 @@ impl From<ProofOfWork> for BigUint {
             bi = (bi << 32) + limb;
         }
         bi
+    }
+}
+
+impl TryFrom<f64> for ProofOfWork {
+    type Error = anyhow::Error;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if value.is_nan() {
+            bail!("cannot convert NaN to ProofOfWork value");
+        }
+        if value < 0_f64 {
+            return Ok(ProofOfWork::MINIMUM);
+        }
+        if value.is_infinite() {
+            return Ok(ProofOfWork::MAXIMUM);
+        }
+        let digits = BigUint::from_f64(value).unwrap().to_u32_digits();
+        if digits.len() > POW_NUM_LIMBS && digits.iter().skip(POW_NUM_LIMBS).any(|&d| d != 0) {
+            return Ok(ProofOfWork::MAXIMUM);
+        }
+        Ok(ProofOfWork(
+            digits
+                .into_iter()
+                .pad_using(POW_NUM_LIMBS, |_| 0u32)
+                .take(POW_NUM_LIMBS)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))
     }
 }
 
@@ -343,9 +379,9 @@ impl Distribution<ProofOfWork> for Standard {
 ///      |                           -------       |                 -  ---
 ///      |                              ^          |------------------>| + |
 ///      |                              |          |                    ---
-///      |                            -----        |                     |
-///      |                           | 1/7 |       v                     |
-///      |   (P =)                    -----      -----                   |
+///      |                          --------       |                     |
+///      |                         | * 2^-7 |      v                     |
+///      |   (P =)                  --------     -----                   |
 ///      |   -2^-4                      ^       | 1/x |                  |
 ///      |     |                        |        -----                   |
 ///      |     v                        |          v                     |
@@ -426,12 +462,40 @@ pub(crate) fn difficulty_control(
     }
 }
 
+/// Determine the maximum possible cumulative proof-of-work after n blocks given
+/// the start conditions.
+pub(crate) fn max_cumulative_pow_after(
+    cumulative_pow_start: ProofOfWork,
+    difficulty_start: Difficulty,
+    num_blocks: usize,
+) -> ProofOfWork {
+    // If the observed interval between consecutive blocks is the minimum
+    // allowed by the consensus rules, the clamped relative error is almost -1.
+    // In this case the PID adjustment factor is
+    // f =  1 + (MINIMUM_BLOCK_TIME - TARGET_BLOCK_INTERVAL) / TARGET_BLOCK_INTERVAL * P
+    //   =  1 - (60 - 588) / 588 / 16,
+    let f = 1.0_f64
+        + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
+            / TARGET_BLOCK_INTERVAL.to_millis() as f64
+            / 16.0;
+    let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
+    let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
+    for _ in 0..num_blocks {
+        max_cumpow += max_difficulty;
+        max_difficulty = max_difficulty * f;
+    }
+
+    ProofOfWork::try_from(max_cumpow).unwrap_or_else(|e| panic!("calculated max proof-of-work"))
+}
+
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_bigint::BigUint;
     use num_rational::BigRational;
+    use num_traits::Float;
+    use num_traits::FromPrimitive;
     use num_traits::One;
     use num_traits::ToPrimitive;
     use proptest::prop_assert;
@@ -446,6 +510,9 @@ mod test {
     use test_strategy::proptest;
 
     use super::difficulty_control;
+    use super::max_cumulative_pow_after;
+    use super::ProofOfWork;
+    use super::POW_NUM_LIMBS;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -721,5 +788,115 @@ mod test {
         let mut running_diff = diff;
         running_diff >>= a;
         prop_assert_eq!(diff >> a, running_diff);
+    }
+
+    /// Determine the maximum possible cumulative proof-of-work after n blocks given
+    /// the start conditions.
+    pub(crate) fn max_cumulative_pow_after_iterative(
+        cumulative_pow_start: ProofOfWork,
+        difficulty_start: Difficulty,
+        num_blocks: usize,
+    ) -> ProofOfWork {
+        let mut cumulative_pow = cumulative_pow_start;
+        let mut difficulty = difficulty_start;
+        let f = (1u64 << 32) + (115 << 21);
+        let lo = f as u32;
+        let hi = (f >> 32) as u32;
+        for _ in 0..num_blocks {
+            cumulative_pow = cumulative_pow + difficulty;
+            let (product, overflow) = difficulty.safe_mul_fixed_point_rational(lo, hi);
+            difficulty = if overflow == 0 {
+                product
+            } else {
+                Difficulty::MAXIMUM
+            };
+        }
+        cumulative_pow
+    }
+
+    fn maxcumfloatiter(
+        cumulative_pow_start: ProofOfWork,
+        difficulty_start: Difficulty,
+        num_blocks: i32,
+    ) -> ProofOfWork {
+        let f = 1.0_f64 - (60.0 - 588.0) / 588.0 / 16.0;
+        let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
+        let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
+        for _ in 0..num_blocks {
+            max_cumpow += max_difficulty;
+            max_difficulty = max_difficulty * f;
+        }
+
+        ProofOfWork(
+            BigUint::from_f64(max_cumpow)
+                .unwrap()
+                .to_u32_digits()
+                .into_iter()
+                .pad_using(POW_NUM_LIMBS, |_| 0u32)
+                .take(POW_NUM_LIMBS)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn maxcumpowfloat(
+        cumulative_pow_start: ProofOfWork,
+        difficulty_start: Difficulty,
+        num_blocks: i32,
+    ) -> ProofOfWork {
+        let f = 1.0_f64 - (60.0 - 588.0) / 588.0 / 16.0;
+        let cumulative_pow_start: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
+        let mut difficulty_start: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
+        let ss = f.powi(num_blocks + 1);
+        let mut cum_acc_difficulty = difficulty_start * ss;
+        cum_acc_difficulty /= f - 1.0;
+        let final_max_cumpow = cumulative_pow_start + cum_acc_difficulty;
+        // S = f^(i+1) / (f-1) = 2048 / 115 * f^(i+1)
+        // for i in 0..num_blocks {
+        //     acc = acc + max_difficulty;
+        //     max_difficulty = max_difficulty * f;
+        // }
+
+        ProofOfWork(
+            BigUint::from_f64(final_max_cumpow)
+                .unwrap()
+                .to_u32_digits()
+                .into_iter()
+                .pad_using(POW_NUM_LIMBS, |_| 0u32)
+                .take(POW_NUM_LIMBS)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn test_sanity_max_pow_after() {
+        let cumulative_pow_start = ProofOfWork([0u32, 0u32, 0u32, 0u32, 0u32, 0u32]);
+        let difficulty_start = Difficulty::MINIMUM;
+        let num_blocks = 100;
+        for i in 0..num_blocks {
+            let cumulative_pow_fast =
+                max_cumulative_pow_after(cumulative_pow_start, difficulty_start, i);
+            let cumulative_pow_iterative =
+                max_cumulative_pow_after_iterative(cumulative_pow_start, difficulty_start, i);
+            let cumulative_pow_maxcumpowfloat =
+                maxcumpowfloat(cumulative_pow_start, difficulty_start, i as i32);
+            let cumulative_pow_maxcumpowfloatiter =
+                maxcumfloatiter(cumulative_pow_start, difficulty_start, i as i32);
+
+            println!("{i} fast: {}", BigUint::from(cumulative_pow_fast));
+            println!("{i} iterative: {}", BigUint::from(cumulative_pow_iterative));
+            println!(
+                "{i} maxcumpowfloat: {}",
+                BigUint::from(cumulative_pow_maxcumpowfloat)
+            );
+            println!(
+                "{i} cumulative_pow_maxcumpowfloatiter: {}",
+                BigUint::from(cumulative_pow_maxcumpowfloatiter)
+            );
+            println!("");
+        }
     }
 }

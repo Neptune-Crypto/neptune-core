@@ -781,6 +781,12 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // Does cumulative proof-of-work evolve reasonably?
+                if !challenge_response.check_pow() {
+                    self.punish(NegativePeerSanction::FishyPow).await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 // Did it come in time?
                 const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
                 if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {

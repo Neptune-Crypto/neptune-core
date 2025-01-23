@@ -7,6 +7,8 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
+use itertools::Itertools;
+use num_traits::Zero;
 use peer_block_notifications::PeerBlockNotification;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -30,6 +32,7 @@ use super::channel::BlockProposalNotification;
 use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
@@ -145,6 +148,7 @@ pub enum NegativePeerSanction {
     InvalidSyncChallengeResponse,
     TimedOutSyncChallengeResponse,
     UnexpectedSyncChallengeResponse,
+    FishyPow,
 
     FloodPeerListResponse,
     BlockRequestUnknownHeight,
@@ -230,6 +234,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => {
                 "too many digests in batch block request"
             }
+            NegativePeerSanction::FishyPow => "fishy pow",
         };
         write!(f, "{string}")
     }
@@ -299,6 +304,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
             NegativePeerSanction::InvalidBlockMmrAuthentication => -4,
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
+            NegativePeerSanction::FishyPow => -51,
         }
     }
 }
@@ -743,6 +749,9 @@ impl SyncChallenge {
             heights.push(height);
         }
 
+        // sort from small to big
+        heights.sort();
+
         Self {
             tip_digest: block_notification.hash,
             challenges: heights.try_into().unwrap(),
@@ -820,5 +829,36 @@ impl SyncChallengeResponse {
         }
 
         true
+    }
+
+    /// Determine whether the claimed evolution of the cumulative proof-of-work
+    /// is a) possible, and b) likely, given the difficulties.
+    pub(crate) fn check_pow(&self) -> bool {
+        let triples = [(
+            BlockHeight::genesis(),
+            ProofOfWork::zero(),
+            Difficulty::MINIMUM,
+        )]
+        .into_iter()
+        .chain(self.blocks.iter().map(|(child, _parent)| {
+            (
+                child.header.height,
+                child.header.cumulative_proof_of_work,
+                child.header.difficulty,
+            )
+        }))
+        .chain([(
+            self.tip_parent.header.height,
+            self.tip_parent.header.cumulative_proof_of_work,
+            self.tip_parent.header.difficulty,
+        )]);
+
+        // let cumulative_pow_evolution_okay = triples.tuple_windows().all(
+        //     |(start_height, start_cpow, start_diff), (stop_height, stop_cpow, stop_diff)| {
+        //         // stop_cpow <= ProofOfWork::max_at(start_height, start_cpow, start_diff, stop_height)
+        //         false
+        //     },
+        // );
+        todo!()
     }
 }
