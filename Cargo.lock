@@ -3404,13 +3404,13 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.45.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=04309be3#04309be30874577eb56c7f54070f8710cac77786"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=6975e5c8#6975e5c8c2b7c823b0db36874f262012983a6e4b"
 dependencies = [
  "anyhow",
  "arbitrary",
  "const_format",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "ndarray",
  "num",
  "num-traits",
@@ -3425,7 +3425,7 @@ dependencies = [
 [[package]]
 name = "tasm-object-derive"
 version = "0.45.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=04309be3#04309be30874577eb56c7f54070f8710cac77786"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=6975e5c8#6975e5c8c2b7c823b0db36874f262012983a6e4b"
 dependencies = [
  "proc-macro2",
  "quote",

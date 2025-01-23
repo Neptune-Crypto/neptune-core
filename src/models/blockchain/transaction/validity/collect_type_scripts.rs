@@ -160,15 +160,9 @@ impl ConsensusProgram for CollectTypeScripts {
         let field_utxos = field!(SaltedUtxos::utxos);
         let field_coin = field!(Utxo::coins);
         let field_type_script_hash = field!(Coin::type_script_hash);
-        let contains = library.import(Box::new(Contains {
-            element_type: DataType::Digest,
-        }));
-        let new_list = library.import(Box::new(New {
-            element_type: DataType::Digest,
-        }));
-        let push_digest = library.import(Box::new(Push {
-            element_type: DataType::Digest,
-        }));
+        let contains = library.import(Box::new(Contains::new(DataType::Digest)));
+        let new_list = library.import(Box::new(New));
+        let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let eq_digest = library.import(Box::new(EqDigest));
 
