@@ -8,6 +8,8 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 
 use itertools::Itertools;
+use num_bigint::BigUint;
+use num_traits::ToPrimitive;
 use num_traits::Zero;
 use peer_block_notifications::PeerBlockNotification;
 use rand::rngs::StdRng;
@@ -32,6 +34,7 @@ use super::channel::BlockProposalNotification;
 use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
+use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
@@ -834,7 +837,7 @@ impl SyncChallengeResponse {
     /// Determine whether the claimed evolution of the cumulative proof-of-work
     /// is a) possible, and b) likely, given the difficulties.
     pub(crate) fn check_pow(&self) -> bool {
-        let triples = [(
+        let cumulative_pow_evolution_okay = [(
             BlockHeight::genesis(),
             ProofOfWork::zero(),
             Difficulty::MINIMUM,
@@ -851,14 +854,59 @@ impl SyncChallengeResponse {
             self.tip_parent.header.height,
             self.tip_parent.header.cumulative_proof_of_work,
             self.tip_parent.header.difficulty,
-        )]);
+        )])
+        .tuple_windows()
+        .all(
+            |((start_height, start_cpow, start_diff), (stop_height, stop_cpow, _))| {
+                max_cumulative_pow_after(
+                    start_cpow,
+                    start_diff,
+                    (stop_height - start_height)
+                        .try_into()
+                        .expect("difference of block heights guaranteed to be positive"),
+                ) >= stop_cpow
+            },
+        );
 
-        // let cumulative_pow_evolution_okay = triples.tuple_windows().all(
-        //     |(start_height, start_cpow, start_diff), (stop_height, stop_cpow, stop_diff)| {
-        //         // stop_cpow <= ProofOfWork::max_at(start_height, start_cpow, start_diff, stop_height)
-        //         false
-        //     },
-        // );
-        todo!()
+        let first = self.blocks.first().unwrap().0.header;
+        let last = self.tip.header;
+        let total_pow_increase = BigUint::from(first.cumulative_proof_of_work)
+            - BigUint::from(first.cumulative_proof_of_work);
+        let span = last.height - first.height;
+        let average_difficulty = total_pow_increase.to_f64().unwrap() / (span as f64);
+
+        // In principle, the cumulative proof-of-work could have been boosted by
+        // a small number of outlying large difficulties. We require here that
+        // "enough" observed difficulties are above this average. This strategy
+        // is a heuristic and its use implies false positives: some evolutions
+        // will be flagged as fishy, even though they came about legally.
+        //
+        // To quantify the heuristic somewhat: Suppose we are okay with assuming
+        // that for all honest responders 10% of the difficulties must be larger
+        // than the mean; and otherwise the node should flag the sync challenge
+        // response as fishy. Then the probability of observing k above-mean
+        // difficulties out of a random selection of 22, is
+        //   {22 choose k} * (0.1)^k * (0.9)^(22-k) .
+        // And in particular:
+        //   k: probability
+        //   ----------------------
+        //   0: 0.09847709021836118
+        //   1: 0.24072177608932735
+        //   2: 0.28084207210421525
+        //   3: 0.20803116452164094
+        //   4: 0.10979422571975492
+        //   5: 0.043917690287901975 .
+
+        let too_few_above_mean_difficulties = self
+            .blocks
+            .iter()
+            .flat_map(|(l, r)| [l, r])
+            .chain([&self.tip_parent, &self.tip])
+            .map(|b| b.header.difficulty)
+            .filter(|d| BigUint::from(*d).to_f64().unwrap() > average_difficulty)
+            .count()
+            == 0;
+
+        cumulative_pow_evolution_okay && !too_few_above_mean_difficulties
     }
 }
