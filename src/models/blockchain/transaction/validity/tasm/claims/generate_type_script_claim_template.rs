@@ -172,7 +172,10 @@ mod test {
                 .unwrap();
 
             let mut rng: StdRng = SeedableRng::from_seed(seed);
-            let pw_pointer = rng.next_u32();
+            // Sample an address for primitive witness pointer from first page,
+            // but leave enough margin till the end so we don't accidentally
+            // overwrite memory in the next page.
+            let pw_pointer = rng.next_u32() >> 1;
             let pw_pointer = bfe!(pw_pointer);
 
             let mut memory = HashMap::default();
