@@ -469,6 +469,12 @@ pub(crate) fn max_cumulative_pow_after(
     difficulty_start: Difficulty,
     num_blocks: usize,
 ) -> ProofOfWork {
+    // Avoid spending too much time in below loop and return early on silly
+    // input values.
+    if num_blocks > 1_000_000_000 {
+        return ProofOfWork::MAXIMUM;
+    }
+
     // If the observed interval between consecutive blocks is the minimum
     // allowed by the consensus rules, the clamped relative error is almost -1.
     // In this case the PID adjustment factor is
@@ -490,14 +496,16 @@ pub(crate) fn max_cumulative_pow_after(
 
 #[cfg(test)]
 mod test {
+    use std::usize;
+
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_bigint::BigUint;
     use num_rational::BigRational;
-    use num_traits::Float;
     use num_traits::FromPrimitive;
     use num_traits::One;
     use num_traits::ToPrimitive;
+    use num_traits::Zero;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
@@ -512,7 +520,6 @@ mod test {
     use super::difficulty_control;
     use super::max_cumulative_pow_after;
     use super::ProofOfWork;
-    use super::POW_NUM_LIMBS;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
     use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -532,6 +539,22 @@ mod test {
                     .try_into()
                     .unwrap(),
             )
+        }
+
+        /// Convert a u64 into a difficulty.
+        pub(crate) fn from_u64(value: u64) -> Self {
+            let mut array = [0u32; Self::NUM_LIMBS];
+            array[0] = (value & u32::MAX as u64) as u32;
+            array[1] = (value >> 32) as u32;
+            Self(array)
+        }
+    }
+
+    impl ProofOfWork {
+        /// Convert a u64 into a proof-of-work value.
+        pub(crate) fn from_u64(value: u64) -> Self {
+            let as_difficulty = Difficulty::from_u64(value);
+            ProofOfWork::zero() + as_difficulty
         }
     }
 
@@ -792,7 +815,7 @@ mod test {
 
     /// Determine the maximum possible cumulative proof-of-work after n blocks given
     /// the start conditions.
-    pub(crate) fn max_cumulative_pow_after_iterative(
+    fn max_cumulative_pow_after_iterative_test_impl(
         cumulative_pow_start: ProofOfWork,
         difficulty_start: Difficulty,
         num_blocks: usize,
@@ -814,89 +837,50 @@ mod test {
         cumulative_pow
     }
 
-    fn maxcumfloatiter(
-        cumulative_pow_start: ProofOfWork,
-        difficulty_start: Difficulty,
-        num_blocks: i32,
-    ) -> ProofOfWork {
-        let f = 1.0_f64 - (60.0 - 588.0) / 588.0 / 16.0;
-        let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
-        let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
-        for _ in 0..num_blocks {
-            max_cumpow += max_difficulty;
-            max_difficulty = max_difficulty * f;
-        }
-
-        ProofOfWork(
-            BigUint::from_f64(max_cumpow)
-                .unwrap()
-                .to_u32_digits()
-                .into_iter()
-                .pad_using(POW_NUM_LIMBS, |_| 0u32)
-                .take(POW_NUM_LIMBS)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        )
+    #[test]
+    fn max_pow_after_doesnt_crash() {
+        let init_cumpow = ProofOfWork::from_u64(200);
+        let init_difficulty = Difficulty::from_u64(1000);
+        let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 1_000_000_000);
+        let _calculated_again = max_cumulative_pow_after(init_cumpow, init_difficulty, usize::MAX);
     }
 
-    fn maxcumpowfloat(
-        cumulative_pow_start: ProofOfWork,
-        difficulty_start: Difficulty,
-        num_blocks: i32,
-    ) -> ProofOfWork {
-        let f = 1.0_f64 - (60.0 - 588.0) / 588.0 / 16.0;
-        let cumulative_pow_start: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
-        let mut difficulty_start: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
-        let ss = f.powi(num_blocks + 1);
-        let mut cum_acc_difficulty = difficulty_start * ss;
-        cum_acc_difficulty /= f - 1.0;
-        let final_max_cumpow = cumulative_pow_start + cum_acc_difficulty;
-        // S = f^(i+1) / (f-1) = 2048 / 115 * f^(i+1)
-        // for i in 0..num_blocks {
-        //     acc = acc + max_difficulty;
-        //     max_difficulty = max_difficulty * f;
-        // }
+    #[proptest]
+    fn test_sanity_max_pow_after_prop(
+        #[strategy(arb())] init_difficulty: u64,
+        #[strategy(0usize..1000)] num_blocks: usize,
+        #[strategy(0u64..(u64::MAX << 1))] init_cumpow: u64,
+    ) {
+        // Captures a potential acceptable impresision when converting to f64 in
+        // the `max_cumulative_pow_after` function.
+        let init_cumpow_upper_bound = ProofOfWork::from_u64(init_cumpow + 1_000_000);
 
-        ProofOfWork(
-            BigUint::from_f64(final_max_cumpow)
-                .unwrap()
-                .to_u32_digits()
-                .into_iter()
-                .pad_using(POW_NUM_LIMBS, |_| 0u32)
-                .take(POW_NUM_LIMBS)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        )
+        let init_cumpow = ProofOfWork::from_u64(init_cumpow);
+        let init_difficulty = Difficulty::from_u64(init_difficulty);
+        let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
+
+        let upper_bound = max_cumulative_pow_after_iterative_test_impl(
+            init_cumpow_upper_bound,
+            init_difficulty,
+            num_blocks,
+        );
+        println!("upper_bound: {upper_bound}");
+        println!("calculated: {calculated}");
+        println!("num_blocks: {num_blocks}");
+        prop_assert!(upper_bound >= calculated);
+        prop_assert!(calculated < ProofOfWork::MAXIMUM);
     }
 
     #[test]
     fn test_sanity_max_pow_after() {
-        let cumulative_pow_start = ProofOfWork([0u32, 0u32, 0u32, 0u32, 0u32, 0u32]);
-        let difficulty_start = Difficulty::MINIMUM;
-        let num_blocks = 100;
-        for i in 0..num_blocks {
-            let cumulative_pow_fast =
-                max_cumulative_pow_after(cumulative_pow_start, difficulty_start, i);
-            let cumulative_pow_iterative =
-                max_cumulative_pow_after_iterative(cumulative_pow_start, difficulty_start, i);
-            let cumulative_pow_maxcumpowfloat =
-                maxcumpowfloat(cumulative_pow_start, difficulty_start, i as i32);
-            let cumulative_pow_maxcumpowfloatiter =
-                maxcumfloatiter(cumulative_pow_start, difficulty_start, i as i32);
-
-            println!("{i} fast: {}", BigUint::from(cumulative_pow_fast));
-            println!("{i} iterative: {}", BigUint::from(cumulative_pow_iterative));
-            println!(
-                "{i} maxcumpowfloat: {}",
-                BigUint::from(cumulative_pow_maxcumpowfloat)
-            );
-            println!(
-                "{i} cumulative_pow_maxcumpowfloatiter: {}",
-                BigUint::from(cumulative_pow_maxcumpowfloatiter)
-            );
-            println!("");
-        }
+        let init_cumpow = 100u64;
+        let init_cumpow = ProofOfWork::from_u64(init_cumpow);
+        let init_difficulty = Difficulty::from_u64(1000u64);
+        let num_blocks = 1000;
+        let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
+        let upper_bound =
+            max_cumulative_pow_after_iterative_test_impl(init_cumpow, init_difficulty, num_blocks);
+        prop_assert!(upper_bound >= calculated);
+        prop_assert!(calculated < ProofOfWork::MAXIMUM);
     }
 }
