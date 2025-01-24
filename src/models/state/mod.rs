@@ -1548,17 +1548,18 @@ impl GlobalState {
             bail!("could not fetch tip and tip predecessor");
         };
 
-        if tip.header().height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
+        let tip_height = tip.header().height;
+        if tip_height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
             bail!("tip height is too small for sync mode")
         }
 
         let mut block_pairs: Vec<(TransferBlock, TransferBlock)> = vec![];
         let mut block_mmr_mps = vec![];
-        for h in sync_challenge.challenges {
-            if h < 2u64.into() {
+        for child_height in sync_challenge.challenges {
+            if child_height < 2u64.into() {
                 bail!("challenge asks for genesis block");
             }
-            if h >= tip.header().height {
+            if child_height >= tip.header().height {
                 bail!("challenge asks for height that's not ancestor to tip.");
             }
 
@@ -1567,7 +1568,7 @@ impl GlobalState {
                 .archival_state()
                 .archival_block_mmr
                 .ammr()
-                .try_get_leaf(h.into())
+                .try_get_leaf(child_height.into())
                 .await
             else {
                 bail!("could not get leaf from archival block mmr");
@@ -1576,20 +1577,20 @@ impl GlobalState {
                 bail!("could not fetch indicated block pair");
             };
 
-            // The MMR membership proofs will be invalid here if the peer's tip
-            // does not match ours. That's a known deficiency of this function,
-            // and can be fixed by correctly handling the construction of old
-            // MMR-MPs from the current archival MMR state.
             // Notice that the MMR membership proofs are relative to an MMR
             // where the tip digest *has* been added. So it is not relative to
             // the block MMR accumulator present in the tip block, as it only
-            // refers to its ancestors.
+            // refers to its ancestors. Rather, it's relative to the block MMR
+            // accumulator present in the tip's child.
             block_mmr_mps.push(
                 self.chain
                     .archival_state()
                     .archival_block_mmr
                     .ammr()
-                    .prove_membership_async(h.into())
+                    .prove_membership_relative_to_smaller_mmr(
+                        child_height.into(),
+                        tip_height.next().into(),
+                    )
                     .await,
             );
             block_pairs.push((

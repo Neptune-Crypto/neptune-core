@@ -3,9 +3,11 @@ use std::fmt::Display;
 #[cfg(any(test, feature = "arbitrary-impls"))]
 use arbitrary::Arbitrary;
 use get_size2::GetSize;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::twenty_first::bfe_array;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -13,6 +15,7 @@ use twenty_first::math::digest::Digest;
 use super::block_height::BlockHeight;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
+use crate::config_models::network::Network;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -93,6 +96,22 @@ impl Display for BlockHeader {
         );
 
         write!(f, "{}", string)
+    }
+}
+
+impl BlockHeader {
+    pub(crate) fn genesis(network: Network) -> Self {
+        Self {
+            version: BFieldElement::zero(),
+            height: BFieldElement::zero().into(),
+            prev_block_digest: Default::default(),
+            timestamp: network.launch_date(),
+
+            // TODO: to be set to something difficult to predict ahead of time
+            nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
+            cumulative_proof_of_work: ProofOfWork::zero(),
+            difficulty: Difficulty::MINIMUM,
+        }
     }
 }
 
