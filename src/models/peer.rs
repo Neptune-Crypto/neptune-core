@@ -21,13 +21,16 @@ use serde::Serialize;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tracing::debug;
 use tracing::trace;
+use tracing::warn;
 use transaction_notification::TransactionNotification;
 use transfer_transaction::TransferTransaction;
 use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::difficulty_control::Difficulty;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::channel::BlockProposalNotification;
@@ -35,7 +38,6 @@ use super::proof_abstractions::timestamp::Timestamp;
 use super::state::transaction_kernel_id::TransactionKernelId;
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::difficulty_control::max_cumulative_pow_after;
-use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
@@ -151,7 +153,8 @@ pub enum NegativePeerSanction {
     InvalidSyncChallengeResponse,
     TimedOutSyncChallengeResponse,
     UnexpectedSyncChallengeResponse,
-    FishyPow,
+    FishyPowEvolutionChallengeResponse,
+    FishyDifficultiesChallengeResponse,
 
     FloodPeerListResponse,
     BlockRequestUnknownHeight,
@@ -237,7 +240,8 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => {
                 "too many digests in batch block request"
             }
-            NegativePeerSanction::FishyPow => "fishy pow",
+            NegativePeerSanction::FishyPowEvolutionChallengeResponse => "fishy pow evolution",
+            NegativePeerSanction::FishyDifficultiesChallengeResponse => "fishy difficulties",
         };
         write!(f, "{string}")
     }
@@ -307,7 +311,8 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::TimedOutSyncChallengeResponse => -50,
             NegativePeerSanction::InvalidBlockMmrAuthentication => -4,
             NegativePeerSanction::BatchBlocksRequestTooManyDigests => -50,
-            NegativePeerSanction::FishyPow => -51,
+            NegativePeerSanction::FishyPowEvolutionChallengeResponse => -51,
+            NegativePeerSanction::FishyDifficultiesChallengeResponse => -51,
         }
     }
 }
@@ -689,6 +694,9 @@ impl IssuedSyncChallenge {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct SyncChallenge {
     pub(crate) tip_digest: Digest,
+
+    /// Block heights of the child blocks, for which the peer must respond with
+    /// (parent, child) blocks. Assumed to be ordered from small to big.
     pub(crate) challenges: [BlockHeight; 10],
 }
 
@@ -752,7 +760,7 @@ impl SyncChallenge {
             heights.push(height);
         }
 
-        // sort from small to big
+        // sort from small to big as that makes some validation checks easier.
         heights.sort();
 
         Self {
@@ -764,10 +772,16 @@ impl SyncChallenge {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct SyncChallengeResponse {
-    pub(crate) tip: TransferBlock,
-    pub(crate) tip_parent: TransferBlock,
+    /// (parent, child) blocks. blocks are assumed to be ordered from small to
+    /// big block height.
     pub(crate) blocks: [(TransferBlock, TransferBlock); 10],
+
+    /// Membership proof of the child blocks, relative to the tip-MMR (after
+    /// appending digest of tip). Must match ordering of blocks.
     pub(crate) membership_proofs: [MmrMembershipProof; 10],
+
+    pub(crate) tip_parent: TransferBlock,
+    pub(crate) tip: TransferBlock,
 }
 
 impl SyncChallengeResponse {
@@ -836,11 +850,12 @@ impl SyncChallengeResponse {
 
     /// Determine whether the claimed evolution of the cumulative proof-of-work
     /// is a) possible, and b) likely, given the difficulties.
-    pub(crate) fn check_pow(&self) -> bool {
-        let cumulative_pow_evolution_okay = [(
-            BlockHeight::genesis(),
-            ProofOfWork::zero(),
-            Difficulty::MINIMUM,
+    pub(crate) fn check_pow(&self, network: Network) -> bool {
+        let genesis_header = BlockHeader::genesis(network);
+        let parent_triples = [(
+            genesis_header.height,
+            genesis_header.cumulative_proof_of_work,
+            genesis_header.difficulty,
         )]
         .into_iter()
         .chain(self.blocks.iter().map(|(child, _parent)| {
@@ -855,25 +870,32 @@ impl SyncChallengeResponse {
             self.tip_parent.header.cumulative_proof_of_work,
             self.tip_parent.header.difficulty,
         )])
-        .tuple_windows()
-        .all(
-            |((start_height, start_cpow, start_diff), (stop_height, stop_cpow, _))| {
-                max_cumulative_pow_after(
+        .collect_vec();
+        let cumulative_pow_evolution_okay = parent_triples.iter().copied().tuple_windows().all(
+            |((start_height, start_cpow, start_difficulty), (stop_height, stop_cpow, _))| {
+                let max_pow = max_cumulative_pow_after(
                     start_cpow,
-                    start_diff,
+                    start_difficulty,
                     (stop_height - start_height)
                         .try_into()
-                        .expect("difference of block heights guaranteed to be positive"),
-                ) >= stop_cpow
+                        .expect("difference of block heights guaranteed to be non-negative"),
+                );
+                // cpow must increase for each block, and is upward-bounded. But
+                // since response may contain duplicates, allow equality.
+                max_pow >= stop_cpow && start_cpow <= stop_cpow
             },
         );
 
-        let first = self.blocks.first().unwrap().0.header;
+        let first = self.blocks[0].0.header;
         let last = self.tip.header;
-        let total_pow_increase = BigUint::from(first.cumulative_proof_of_work)
+        let total_pow_increase = BigUint::from(last.cumulative_proof_of_work)
             - BigUint::from(first.cumulative_proof_of_work);
         let span = last.height - first.height;
         let average_difficulty = total_pow_increase.to_f64().unwrap() / (span as f64);
+        debug_assert!(
+            average_difficulty > 0.0,
+            "Average difficulty must be positive. Got: {average_difficulty}"
+        );
 
         // In principle, the cumulative proof-of-work could have been boosted by
         // a small number of outlying large difficulties. We require here that
@@ -896,6 +918,9 @@ impl SyncChallengeResponse {
         //   3: 0.20803116452164094
         //   4: 0.10979422571975492
         //   5: 0.043917690287901975 .
+        //
+        // The tip is included in the below check, so if *it* doesn't have an
+        // above average difficulty, something is almost certainly off.
 
         let too_few_above_mean_difficulties = self
             .blocks
@@ -903,10 +928,46 @@ impl SyncChallengeResponse {
             .flat_map(|(l, r)| [l, r])
             .chain([&self.tip_parent, &self.tip])
             .map(|b| b.header.difficulty)
-            .filter(|d| BigUint::from(*d).to_f64().unwrap() > average_difficulty)
+            .filter(|d| BigUint::from(*d).to_f64().unwrap() >= average_difficulty)
             .count()
             == 0;
 
+        if too_few_above_mean_difficulties {
+            warn!("Too few above mean difficulties.");
+        }
+
+        if !cumulative_pow_evolution_okay {
+            warn!("Impossible evolution of cumulative pow.");
+            for (start, stop) in parent_triples.into_iter().tuple_windows() {
+                let upper_bound = max_cumulative_pow_after(
+                    start.1,
+                    start.2,
+                    (stop.0 - start.0).try_into().unwrap(),
+                );
+                debug!(
+                    "start ({} / {} / {}) -> stop ({} / {} / {}) with max {}",
+                    start.0, start.1, start.2, stop.0, stop.1, stop.2, upper_bound
+                );
+            }
+        }
+
         cumulative_pow_evolution_okay && !too_few_above_mean_difficulties
+    }
+
+    /// Check whether the claimed difficulties are large enough relative to that
+    /// of our own tip.
+    ///
+    /// Sum all verified difficulties and verify that this number is larger than
+    /// our own tip difficulty. This inequality guarantees that the successful
+    /// attacker must have spent at least one block's worth of guessing power to
+    /// produce the malicious chain, and probably much more.
+    pub(crate) fn check_difficulty(&self, own_tip_difficulty: Difficulty) -> bool {
+        let own_tip_difficulty = ProofOfWork::zero() + own_tip_difficulty;
+        let mut fork_relative_cumpow = ProofOfWork::zero();
+        for (_parent, child) in self.blocks.iter() {
+            fork_relative_cumpow = fork_relative_cumpow + child.header.difficulty;
+        }
+
+        fork_relative_cumpow > own_tip_difficulty
     }
 }

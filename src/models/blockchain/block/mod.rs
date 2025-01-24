@@ -485,17 +485,7 @@ impl Block {
             MmrAccumulator::new_from_leafs(vec![]),
         );
 
-        let header: BlockHeader = BlockHeader {
-            version: BFieldElement::zero(),
-            height: BFieldElement::zero().into(),
-            prev_block_digest: Default::default(),
-            timestamp: network.launch_date(),
-
-            // TODO: to be set to something difficult to predict ahead of time
-            nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
-            cumulative_proof_of_work: ProofOfWork::zero(),
-            difficulty: Difficulty::MINIMUM,
-        };
+        let header = BlockHeader::genesis(network);
 
         let appendix = BlockAppendix::default();
 

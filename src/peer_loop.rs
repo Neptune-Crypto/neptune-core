@@ -754,6 +754,21 @@ impl PeerLoopHandler {
                     self.peer_address.ip()
                 );
 
+                // The purpose of the sync challenge and sync challenge response
+                // is to avoid going into sync mode based on a malicious target
+                // fork. Instead of verifying that the claimed proof-of-work
+                // number is correct (which would require sending and verifying,
+                // at least, all blocks between luca (whatever that is) and the
+                // claimed tip), we use a heuristic that requires less
+                // communication and less verification work. The downside of
+                // using a heuristic here is a nonzero false positive and false
+                // negative rate. Note that the false negative event
+                // (maliciously sending someone into sync mode based on a bogus
+                // fork) still requires a significant amount of work from the
+                // attacker, *in addition* to being lucky. Also, down the line
+                // succinctness (and more specifically, recursive block
+                // validation) obviates this entire subprotocol.
+
                 // Did we issue a challenge?
                 let Some(issued_challenge) = peer_state_info.sync_challenge else {
                     warn!("Sync challenge response was not prompted.");
@@ -782,13 +797,29 @@ impl PeerLoopHandler {
                 }
 
                 // Does cumulative proof-of-work evolve reasonably?
-                if !challenge_response.check_pow() {
-                    self.punish(NegativePeerSanction::FishyPow).await?;
+                if !challenge_response.check_pow(self.global_state_lock.cli().network) {
+                    self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Is there some specific (*i.e.*, not aggregate) proof of work?
+                if !challenge_response.check_difficulty(
+                    self.global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .header()
+                        .difficulty,
+                ) {
+                    self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Did it come in time?
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(30);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
                 if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
                     self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
                         .await?;

@@ -461,8 +461,8 @@ pub(crate) fn difficulty_control(
     }
 }
 
-/// Determine the maximum possible cumulative proof-of-work after n blocks given
-/// the start conditions.
+/// Determine an upper bound for the maximum possible cumulative proof-of-work
+/// after n blocks given the start conditions.
 pub(crate) fn max_cumulative_pow_after(
     cumulative_pow_start: ProofOfWork,
     difficulty_start: Difficulty,
@@ -473,10 +473,12 @@ pub(crate) fn max_cumulative_pow_after(
     // In this case the PID adjustment factor is
     // f =  1 + (MINIMUM_BLOCK_TIME - TARGET_BLOCK_INTERVAL) / TARGET_BLOCK_INTERVAL * P
     //   =  1 - (60 - 588) / 588 / 16,
+    const EPSILON: f64 = 0.000001;
     let f = 1.0_f64
         + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
             / TARGET_BLOCK_INTERVAL.to_millis() as f64
-            / 16.0;
+            / 16.0
+        + EPSILON;
     let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
     let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
     let cap = BigUint::from(ProofOfWork::MAXIMUM).to_f64().unwrap();
@@ -848,6 +850,13 @@ mod test {
         let init_difficulty = Difficulty::from_u64(1000);
         let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 1_000_000_000);
         let _calculated_again = max_cumulative_pow_after(init_cumpow, init_difficulty, usize::MAX);
+    }
+
+    #[test]
+    fn max_pow_after_accepts_zero_num_blocks() {
+        let init_cumpow = ProofOfWork::from_u64(200);
+        let init_difficulty = Difficulty::from_u64(1000);
+        let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 0);
     }
 
     #[proptest]
