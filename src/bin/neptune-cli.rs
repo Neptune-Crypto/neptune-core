@@ -651,10 +651,12 @@ async fn main() -> Result<()> {
             println!("Found a total of {num} expected UTXOs in the database");
         }
         Command::NextReceivingAddress => {
-            let rec_addr = client
+            let maybe_receiving_address = client
                 .next_receiving_address(ctx, token, KeyType::Generation)
                 .await??;
-            println!("{}", rec_addr.to_display_bech32m(network).unwrap())
+            if let Some(receiving_address) = maybe_receiving_address {
+                println!("{}", receiving_address.to_display_bech32m(network).unwrap())
+            }
         }
         Command::MempoolTxCount => {
             let count: usize = client.mempool_tx_count(ctx, token).await??;

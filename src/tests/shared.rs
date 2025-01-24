@@ -841,9 +841,8 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }
 
-/// Create a block from a transaction without the hassle of proving but such
-/// that it appears valid.
-pub(crate) async fn fake_valid_block_from_tx_for_tests(
+/// Create a fake block proposal; will pass `is_valid` but fail pow-check.
+pub(crate) async fn fake_valid_block_proposal_from_tx(
     predecessor: &Block,
     tx: Transaction,
     seed: [u8; 32],
@@ -866,9 +865,19 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
         (appendix, BlockProof::SingleProof(Proof(vec![])))
     };
 
-    let mut block = Block::new(header, body, appendix, proof);
+    Block::new(header, body, appendix, proof)
+}
 
+/// Create a block from a transaction without the hassle of proving but such
+/// that it appears valid.
+pub(crate) async fn fake_valid_block_from_tx_for_tests(
+    predecessor: &Block,
+    tx: Transaction,
+    seed: [u8; 32],
+) -> Block {
     let threshold = predecessor.header().difficulty.target();
+    let mut rng = StdRng::from_seed(seed);
+    let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, rng.gen()).await;
     while !block.has_proof_of_work(predecessor.header()) {
         mine_iteration_for_tests(&mut block, threshold, &mut rng);
     }
@@ -956,10 +965,11 @@ pub(crate) async fn fake_create_block_transaction_for_tests(
     Ok((block_transaction, composer_txos))
 }
 
-pub(crate) async fn fake_valid_successor_for_tests(
+async fn fake_block_successor(
     predecessor: &Block,
     timestamp: Timestamp,
     seed: [u8; 32],
+    with_valid_pow: bool,
 ) -> Block {
     let mut rng = StdRng::from_seed(seed);
 
@@ -978,7 +988,27 @@ pub(crate) async fn fake_valid_successor_for_tests(
     .await
     .unwrap();
 
-    fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
+    if with_valid_pow {
+        fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
+    } else {
+        fake_valid_block_proposal_from_tx(predecessor, block_tx, rng.gen()).await
+    }
+}
+
+pub(crate) async fn fake_valid_block_proposal_successor_for_test(
+    predecessor: &Block,
+    timestamp: Timestamp,
+    seed: [u8; 32],
+) -> Block {
+    fake_block_successor(predecessor, timestamp, seed, false).await
+}
+
+pub(crate) async fn fake_valid_successor_for_tests(
+    predecessor: &Block,
+    timestamp: Timestamp,
+    seed: [u8; 32],
+) -> Block {
+    fake_block_successor(predecessor, timestamp, seed, true).await
 }
 
 /// Create a block with coinbase going to self. For testing purposes.

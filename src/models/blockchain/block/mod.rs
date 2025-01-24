@@ -1290,11 +1290,12 @@ mod block_tests {
                 .lock_guard()
                 .await
                 .wallet_state
-                .nth_spending_key(KeyType::Generation, 0);
+                .nth_spending_key(KeyType::Generation, 0)
+                .unwrap();
             let output_to_self = TxOutput::onchain_native_currency(
                 NeptuneCoins::new(1),
                 rng.gen(),
-                alice_key.to_address(),
+                alice_key.to_address().unwrap(),
                 true,
             );
 

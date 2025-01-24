@@ -547,7 +547,9 @@ impl GlobalState {
         change_key: SpendingKey,
         change_utxo_notify_method: UtxoNotificationMedium,
     ) -> Result<TxOutput> {
-        let own_receiving_address = change_key.to_address();
+        let Some(own_receiving_address) = change_key.to_address() else {
+            bail!("Cannot create change output when supplied spending key has no corresponding address.");
+        };
 
         let receiver_digest = own_receiving_address.privacy_digest();
         let change_sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
@@ -1413,12 +1415,7 @@ impl GlobalState {
         for miner_reward_utxo_info in miner_reward_utxo_infos {
             // Notify wallet to expect the coinbase UTXO, as we mined this block
             self.wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    miner_reward_utxo_info.utxo,
-                    miner_reward_utxo_info.sender_randomness,
-                    miner_reward_utxo_info.receiver_preimage,
-                    UtxoNotifier::OwnMinerComposeBlock,
-                ))
+                .add_expected_utxo(miner_reward_utxo_info)
                 .await;
         }
 
@@ -2388,7 +2385,8 @@ mod global_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation)
-            .await;
+            .await
+            .unwrap();
         let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
@@ -2422,7 +2420,7 @@ mod global_state_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 change_output.utxo(),
                 change_output.sender_randomness(),
-                genesis_key.privacy_preimage(),
+                genesis_key.privacy_preimage().unwrap(),
                 UtxoNotifier::Myself,
             ))
             .await;
@@ -3490,7 +3488,9 @@ mod global_state_tests {
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
                     .await
+                    .unwrap()
                     .to_address()
+                    .unwrap()
             };
 
             // in alice wallet: send pre-mined funds to bob
@@ -3510,7 +3510,8 @@ mod global_state_tests {
                 let alice_change_key = alice_state_mut
                     .wallet_state
                     .next_unused_spending_key(change_key_type)
-                    .await;
+                    .await
+                    .unwrap();
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];

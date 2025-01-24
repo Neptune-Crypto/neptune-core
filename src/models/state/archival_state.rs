@@ -1790,7 +1790,8 @@ mod archival_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Symmetric)
-            .await;
+            .await
+            .unwrap();
         let (tx_to_alice_and_bob, change_utxo) = premine_rec
             .lock_guard()
             .await

@@ -276,8 +276,11 @@ impl Widget for AddressScreen {
                 vec![
                     KeyType::from(key).to_string(),
                     key.to_address()
-                        .to_display_bech32m_abbreviated(self.network)
-                        .unwrap(),
+                        .map_or("(guessed nonce)".to_string(), |address| {
+                            address
+                                .to_display_bech32m_abbreviated(self.network)
+                                .unwrap()
+                        }),
                 ]
             })
             .collect_vec();

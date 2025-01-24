@@ -19,6 +19,8 @@ pub(crate) enum BlockProposal {
 }
 
 impl BlockProposal {
+    /// Returns the UTXOs for the composer if this is our composition,
+    /// otherwise returns the empty list.
     pub(crate) fn composer_utxos(&self) -> Vec<ExpectedUtxo> {
         match self {
             BlockProposal::OwnComposition((_, utxo_info)) => utxo_info.clone(),

@@ -122,13 +122,17 @@ impl EncryptedUtxoNotification {
     pub fn decrypt_with_spending_key(
         &self,
         spending_key: &SpendingKey,
-    ) -> anyhow::Result<UtxoNotificationPayload> {
-        let (utxo, sender_randomness) = spending_key.decrypt(&self.ciphertext)?;
-
-        Ok(UtxoNotificationPayload {
-            utxo,
-            sender_randomness,
-        })
+    ) -> Option<anyhow::Result<UtxoNotificationPayload>> {
+        match spending_key.decrypt(&self.ciphertext) {
+            Some(decryption_result) => match decryption_result {
+                Ok((utxo, sender_randomness)) => Some(Ok(UtxoNotificationPayload {
+                    utxo,
+                    sender_randomness,
+                })),
+                Err(e) => Some(Err(e)),
+            },
+            None => None,
+        }
     }
 }
 
