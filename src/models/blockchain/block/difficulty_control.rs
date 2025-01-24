@@ -468,12 +468,6 @@ pub(crate) fn max_cumulative_pow_after(
     difficulty_start: Difficulty,
     num_blocks: usize,
 ) -> ProofOfWork {
-    // Avoid spending too much time in below loop and return early on silly
-    // input values.
-    if num_blocks > 1_000_000_000 {
-        return ProofOfWork::MAXIMUM;
-    }
-
     // If the observed interval between consecutive blocks is the minimum
     // allowed by the consensus rules, the clamped relative error is almost -1.
     // In this case the PID adjustment factor is
@@ -485,18 +479,25 @@ pub(crate) fn max_cumulative_pow_after(
             / 16.0;
     let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
     let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
+    let cap = BigUint::from(ProofOfWork::MAXIMUM).to_f64().unwrap();
     for _ in 0..num_blocks {
         max_cumpow += max_difficulty;
         max_difficulty *= f;
+
+        // Avoid spending more time in loop if we've already reached max.
+        if max_cumpow >= cap {
+            return ProofOfWork::MAXIMUM;
+        }
     }
 
-    ProofOfWork::try_from(max_cumpow).unwrap_or_else(|_e| panic!("calculated max proof-of-work"))
+    // This conversion is safe and cannot panic.
+    ProofOfWork::try_from(max_cumpow).unwrap_or_else(|_e| {
+        panic!("max_cumpow is within bounds where successful conversion should be guaranteed")
+    })
 }
 
 #[cfg(test)]
 mod test {
-    use std::usize;
-
     use itertools::Itertools;
     use num_bigint::BigInt;
     use num_bigint::BigUint;
@@ -515,14 +516,7 @@ mod test {
     use rand_distr::Geometric;
     use test_strategy::proptest;
 
-    use super::difficulty_control;
-    use super::max_cumulative_pow_after;
-    use super::ProofOfWork;
-    use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
-    use crate::models::blockchain::block::block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
-    use crate::models::blockchain::block::block_height::BlockHeight;
-    use crate::models::blockchain::block::difficulty_control::Difficulty;
-    use crate::models::proof_abstractions::timestamp::Timestamp;
+    use super::*;
 
     impl Difficulty {
         pub(crate) fn from_biguint(bi: BigUint) -> Self {
@@ -820,7 +814,20 @@ mod test {
     ) -> ProofOfWork {
         let mut cumulative_pow = cumulative_pow_start;
         let mut difficulty = difficulty_start;
-        let f = (1u64 << 32) + (115 << 21);
+
+        // f =  1 + (MINIMUM_BLOCK_TIME - TARGET_BLOCK_INTERVAL) / TARGET_BLOCK_INTERVAL * P
+        // let f = (1u64 << 32) + (115 << 21);
+        // let second_term = (MINIMUM_BLOCK_TIME.to_millis() - TARGET_BLOCK_INTERVAL.to_millis())
+        //     as f64
+        //     / TARGET_BLOCK_INTERVAL.to_millis() as f64;
+        let f = (1.0_f64
+            + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
+                / TARGET_BLOCK_INTERVAL.to_millis() as f64
+                / 16.0)
+            * (1u64 << 32) as f64;
+        let f = f as u64;
+        // let second_term_shift_amount = 32 - second_term.ilog2() - 1;
+        // let f = (1u64 << 32) + (second_term << second_term_shift_amount);
         let lo = f as u32;
         let hi = (f >> 32) as u32;
         for _ in 0..num_blocks {
@@ -857,28 +864,38 @@ mod test {
         let init_difficulty = Difficulty::from_u64(init_difficulty);
         let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
 
-        let upper_bound = max_cumulative_pow_after_iterative_test_impl(
+        let approximation = max_cumulative_pow_after_iterative_test_impl(
             init_cumpow_upper_bound,
             init_difficulty,
             num_blocks,
         );
-        println!("upper_bound: {upper_bound}");
+        println!("upper_bound: {approximation}");
         println!("calculated: {calculated}");
         println!("num_blocks: {num_blocks}");
-        prop_assert!(upper_bound >= calculated);
+        let approximation_as_f64 = BigUint::from(approximation).to_f64().unwrap();
+        let upper_bound = approximation_as_f64 * 1.01;
+        let lower_bound = approximation_as_f64 * 0.99;
+        let calculated_as_f64 = BigUint::from(calculated).to_f64().unwrap();
+        prop_assert!(upper_bound >= calculated_as_f64);
+        prop_assert!(lower_bound <= calculated_as_f64);
         prop_assert!(calculated < ProofOfWork::MAXIMUM);
     }
 
     #[test]
-    fn test_sanity_max_pow_after() {
+    fn test_sanity_max_pow_after_unit() {
         let init_cumpow = 100u64;
         let init_cumpow = ProofOfWork::from_u64(init_cumpow);
         let init_difficulty = Difficulty::from_u64(1000u64);
         let num_blocks = 1000;
         let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
-        let upper_bound =
+        let approximation =
             max_cumulative_pow_after_iterative_test_impl(init_cumpow, init_difficulty, num_blocks);
-        assert!(upper_bound >= calculated);
+        let approximation_as_f64 = BigUint::from(approximation).to_f64().unwrap();
+        let upper_bound = approximation_as_f64 * 1.01;
+        let lower_bound = approximation_as_f64 * 0.99;
+        let calculated_as_f64 = BigUint::from(calculated).to_f64().unwrap();
+        assert!(upper_bound >= calculated_as_f64);
+        assert!(lower_bound <= calculated_as_f64);
         assert!(calculated < ProofOfWork::MAXIMUM);
     }
 }
