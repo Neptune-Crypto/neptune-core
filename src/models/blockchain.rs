@@ -36,7 +36,7 @@ mod tests {
                 return format!("🅾 {name}");
             }
 
-            format!("{} {name}", sign_offs.len().to_string())
+            format!("{} {name}", sign_offs.len())
         }
 
         let all_consensus_critical_imports = name_and_lib![
