@@ -480,7 +480,8 @@ pub(crate) fn max_cumulative_pow_after(
             / 16.0
         + EPSILON;
     let mut max_difficulty: f64 = BigUint::from(difficulty_start).to_f64().unwrap();
-    let mut max_cumpow: f64 = BigUint::from(cumulative_pow_start).to_f64().unwrap();
+    let mut max_cumpow: f64 =
+        BigUint::from(cumulative_pow_start).to_f64().unwrap() * (1.0 + EPSILON);
     let cap = BigUint::from(ProofOfWork::MAXIMUM).to_f64().unwrap();
     for _ in 0..num_blocks {
         max_cumpow += max_difficulty;
@@ -857,6 +858,18 @@ mod test {
         let init_cumpow = ProofOfWork::from_u64(200);
         let init_difficulty = Difficulty::from_u64(1000);
         let _calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, 0);
+    }
+
+    #[proptest]
+    fn ensure_no_false_negatives_when_num_blocks_is_zero(
+        #[strategy(arb())] init_pow: ProofOfWork,
+        #[strategy(arb())] init_difficulty: Difficulty,
+    ) {
+        let max = max_cumulative_pow_after(init_pow, init_difficulty, 0);
+        prop_assert!(
+            max >= init_pow,
+            "Max-calculator must upward bound pow-value for zero-blocks input"
+        );
     }
 
     #[proptest]
