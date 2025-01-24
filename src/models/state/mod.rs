@@ -804,6 +804,10 @@ impl GlobalState {
             tip_mutator_set_accumulator,
         )?;
 
+        // note: if this task is cancelled, the proving job will continue
+        // because TritonVmJobOptions::cancel_job_rx is None.
+        // see how compose_task handles cancellation in mine_loop.
+
         // 2. Create the transaction
         let transaction = Self::create_raw_transaction(
             transaction_details,
@@ -2479,6 +2483,7 @@ mod global_state_tests {
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
@@ -2790,6 +2795,7 @@ mod global_state_tests {
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
@@ -2894,6 +2900,7 @@ mod global_state_tests {
                 guesser_fraction,
                 timestamp,
                 TxProvingCapability::PrimitiveWitness,
+                (TritonVmJobPriority::Normal, None).into(),
             )
             .await
             .unwrap();
@@ -3699,6 +3706,7 @@ mod global_state_tests {
                     seven_months_post_launch,
                     rng.gen(),
                     &TritonVmJobQueue::dummy(),
+                    (TritonVmJobPriority::Normal, None).into(),
                     vec![alice_to_bob_tx],
                 )
                 .await

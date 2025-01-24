@@ -1218,6 +1218,7 @@ mod tests {
             guesser_fraction,
             in_eight_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
@@ -1299,6 +1300,7 @@ mod tests {
             guesser_fraction,
             block_5_timestamp,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();

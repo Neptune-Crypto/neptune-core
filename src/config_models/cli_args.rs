@@ -315,6 +315,7 @@ impl Args {
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
             },
+            cancel_job_rx: None,
         }
     }
 

@@ -281,6 +281,9 @@ impl UpgradeJob {
             let affected_txids = upgrade_job.affected_txids();
             let mutator_set_for_tx = upgrade_job.mutator_set();
 
+            // note: if this task is cancelled, the job will continue
+            // because TritonVmJobOptions::cancel_job_rx is None.
+            // see how compose_task handles cancellation in mine_loop.
             let job_options = global_state_lock.cli().proof_job_options(priority);
 
             // It's a important to *not* hold any locks when proving happens.
@@ -452,7 +455,8 @@ impl UpgradeJob {
                 .collect_vec();
             let gobbler = PrimitiveWitness::from_transaction_details(gobbler);
             let gobbler_proof =
-                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options).await?;
+                SingleProof::produce(&gobbler, triton_vm_job_queue, proof_job_options.clone())
+                    .await?;
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
             let gobbler = Transaction {
                 kernel: gobbler.kernel,
@@ -478,7 +482,7 @@ impl UpgradeJob {
                         claim,
                         nondeterminism,
                         triton_vm_job_queue,
-                        proof_job_options,
+                        proof_job_options.clone(),
                     )
                     .await?;
                 info!("Proof-upgrader, to single proof: Done");
@@ -531,7 +535,7 @@ impl UpgradeJob {
                     right,
                     shuffle_seed.to_owned(),
                     triton_vm_job_queue,
-                    proof_job_options,
+                    proof_job_options.clone(),
                 )
                 .await?;
                 info!("Proof-upgrader, merge: Done");

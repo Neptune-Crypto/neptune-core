@@ -28,7 +28,6 @@ impl JobHandle {
     ///
     /// a completed job may either be finished or cancelled.
     pub async fn complete(self) -> Result<JobCompletion, JobHandleError> {
-        // Ok(self.result_rx.await?)
         Ok(self.result_rx.await?)
     }
 

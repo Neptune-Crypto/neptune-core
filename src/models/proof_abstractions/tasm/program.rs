@@ -213,14 +213,37 @@ pub(crate) async fn prove_consensus_program(
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
-    let result = triton_vm_job_queue
+    let job_handle = triton_vm_job_queue
         .add_job(Box::new(job), proof_job_options.job_priority)
-        .await?
-        .result()
         .await?;
 
+    // satisfy borrow checker.
+    // instead of calling job_handle.cancel() inside select!()
+    // we get a handle to the cancellation channel sender here.
+    let cancel_tx = job_handle.cancel_tx().to_owned();
+
+    let job_result = match proof_job_options.cancel_job_rx {
+        // fix for issue #348.
+        // if we have a cancellation channel from caller then we select on
+        // both the channel and job.  If we get a cancel request from the
+        // caller, or the channel closes, then we cancel the job
+        // which removes it from the job-queue.
+        Some(mut cancel_job_rx) => {
+            tokio::select! {
+                // case: sender cancelled, or sender dropped.
+                _ = cancel_job_rx.changed() => {
+                    cancel_tx.send(())?;
+                    anyhow::bail!("job cancelled by caller");
+                }
+                // case: job completion.
+                result = job_handle.result() => result,
+            }
+        }
+        None => job_handle.result().await,
+    };
+
     // obtain resulting proof.
-    let result: Result<Proof, ProverJobError> = result
+    let result: Result<Proof, ProverJobError> = job_result?
         .into_any()
         .downcast::<ProverJobResult>()
         .expect("downcast should succeed, else bug")
@@ -229,10 +252,11 @@ pub(crate) async fn prove_consensus_program(
     Ok(result?)
 }
 
-#[derive(Clone, Debug, Default, Copy)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
     pub job_settings: ProverJobSettings,
+    pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 }
 
 impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
@@ -243,6 +267,7 @@ impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs,
             },
+            cancel_job_rx: None,
         }
     }
 }
@@ -253,6 +278,7 @@ impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         Self {
             job_priority,
             job_settings: Default::default(),
+            cancel_job_rx: None,
         }
     }
 }

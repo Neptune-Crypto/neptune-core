@@ -51,6 +51,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::JobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
@@ -692,6 +693,7 @@ pub(crate) async fn make_mock_block_with_nonce_preimage_and_guesser_fraction(
         block_timestamp,
         TxProvingCapability::PrimitiveWitness,
         &JobQueue::dummy(),
+        (TritonVmJobPriority::Normal, None).into(),
     )
     .await
     .unwrap();
@@ -806,9 +808,13 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         .light_state()
         .to_owned();
 
-    let (transaction, expected_composer_utxos) =
-        crate::mine_loop::create_block_transaction(&tip_block, global_state_lock, timestamp)
-            .await?;
+    let (transaction, expected_composer_utxos) = crate::mine_loop::create_block_transaction(
+        &tip_block,
+        global_state_lock,
+        timestamp,
+        (TritonVmJobPriority::Normal, None).into(),
+    )
+    .await?;
 
     let nonce_preimage = Digest::default();
     let block = Block::block_template_invalid_proof(

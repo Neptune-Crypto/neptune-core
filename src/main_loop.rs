@@ -437,7 +437,10 @@ impl MainLoopHandler {
             // Jobs for updating txs in the mempool have highest priority since
             // they block the composer from continuing.
             // TODO: Handle errors better here.
-            let job_result = job.upgrade(job_queue, proof_job_options).await.unwrap();
+            let job_result = job
+                .upgrade(job_queue, proof_job_options.clone())
+                .await
+                .unwrap();
             result.push(job_result);
         }
 
@@ -1316,6 +1319,10 @@ impl MainLoopHandler {
         }
         let (update_sender, update_receiver) =
             mpsc::channel::<Vec<Transaction>>(TX_UPDATER_CHANNEL_CAPACITY);
+
+        // note: if this task is cancelled, the job will continue
+        // because TritonVmJobOptions::cancel_job_rx is None.
+        // see how compose_task handles cancellation in mine_loop.
         let job_options = self
             .global_state_lock
             .cli()

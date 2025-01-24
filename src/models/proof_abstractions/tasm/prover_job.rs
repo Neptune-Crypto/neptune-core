@@ -206,6 +206,7 @@ impl ProverJob {
             ];
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
+                .kill_on_drop()
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null()) // ignore stderr

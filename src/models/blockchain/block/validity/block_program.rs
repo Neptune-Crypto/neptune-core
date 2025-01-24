@@ -446,6 +446,7 @@ pub(crate) mod test {
                 timestamp,
                 rng.gen(),
                 &TritonVmJobQueue::dummy(),
+                (TritonVmJobPriority::Normal, None).into(),
                 vec![tx],
             )
             .await

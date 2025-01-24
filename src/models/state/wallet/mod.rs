@@ -1193,6 +1193,7 @@ mod wallet_tests {
             guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
@@ -1369,6 +1370,7 @@ mod wallet_tests {
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
