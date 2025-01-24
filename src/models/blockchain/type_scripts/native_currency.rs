@@ -1652,7 +1652,7 @@ pub mod test {
         );
     }
 
-    #[proptest]
+    #[proptest(cases = 1)]
     fn assertion_failure_is_caught_gracefully() {
         // This test is supposed to catch wrong compilation flags causing
         // causing asserts not to be caught by catch_unwind.
