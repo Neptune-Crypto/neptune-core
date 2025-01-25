@@ -9,6 +9,7 @@ use tasm_lib::twenty_first;
 use twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::block::Block;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -36,6 +37,8 @@ impl SecretWitness for CoinbaseIsValidWitness {
 pub struct CoinbaseIsValid {
     witness: CoinbaseIsValidWitness,
 }
+
+impl program::private::Seal for CoinbaseIsValid {}
 
 impl ConsensusProgram for CoinbaseIsValid {
     fn source(&self) {

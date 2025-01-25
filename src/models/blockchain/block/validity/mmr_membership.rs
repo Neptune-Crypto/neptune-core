@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::prelude::MmrMembershipProof;
 
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -34,6 +35,8 @@ impl SecretWitness for MmrMembershipWitness {
 pub struct MmrMembership {
     witness: MmrMembershipWitness,
 }
+
+impl program::private::Seal for MmrMembership {}
 
 impl ConsensusProgram for MmrMembership {
     fn source(&self) {

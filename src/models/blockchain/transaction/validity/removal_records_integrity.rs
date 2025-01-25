@@ -42,6 +42,7 @@ use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -365,6 +366,8 @@ impl RemovalRecordsIntegrityWitness {
         (mmra, mps)
     }
 }
+
+impl program::private::Seal for RemovalRecordsIntegrity {}
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
     fn source(&self) {

@@ -7,6 +7,7 @@ use tasm_lib::library::Library;
 use tasm_lib::triton_vm::prelude::*;
 
 use crate::models::blockchain::block::BFieldCodec;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -34,6 +35,8 @@ impl SecretWitness for CorrectMutatorSetUpdateWitness {
 pub struct CorrectMutatorSetUpdate {
     pub witness: CorrectMutatorSetUpdateWitness,
 }
+
+impl program::private::Seal for CorrectMutatorSetUpdate {}
 
 impl ConsensusProgram for CorrectMutatorSetUpdate {
     fn source(&self) {

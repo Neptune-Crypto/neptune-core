@@ -25,6 +25,7 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::prelude::triton_vm;
@@ -72,6 +73,8 @@ impl SecretWitness for CollectLockScriptsWitness {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct CollectLockScripts;
+
+impl program::private::Seal for CollectLockScripts {}
 
 impl ConsensusProgram for CollectLockScripts {
     fn source(&self) {

@@ -15,6 +15,7 @@ use self::correct_mutator_set_update::CorrectMutatorSetUpdate;
 use self::mmr_membership::MmrMembership;
 use self::predecessor_is_valid::PredecessorIsValid;
 use super::Block;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -75,6 +76,8 @@ impl SecretWitness for PrincipalBlockValidationWitness {
         todo!()
     }
 }
+
+impl program::private::Seal for PrincipalBlockValidationLogic {}
 
 impl ConsensusProgram for PrincipalBlockValidationLogic {
     fn source(&self) {

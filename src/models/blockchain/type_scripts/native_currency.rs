@@ -38,6 +38,7 @@ use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
@@ -84,6 +85,8 @@ impl NativeCurrency {
         BFieldElement::new(18168297044820278740),
     ]);
 }
+
+impl program::private::Seal for NativeCurrencyWitness {}
 
 impl ConsensusProgram for NativeCurrency {
     #[allow(clippy::needless_return)]

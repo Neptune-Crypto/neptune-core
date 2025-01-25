@@ -32,6 +32,7 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::verifier::verify;
 
@@ -65,6 +66,8 @@ impl BlockProgram {
         verdict
     }
 }
+
+impl program::private::Seal for BlockProgram {}
 
 impl ConsensusProgram for BlockProgram {
     fn source(&self) {

@@ -29,6 +29,7 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
@@ -251,6 +252,8 @@ impl SingleProof {
         Ok(single_proof)
     }
 }
+
+impl program::private::Seal for SingleProof {}
 
 impl ConsensusProgram for SingleProof {
     fn source(&self) {

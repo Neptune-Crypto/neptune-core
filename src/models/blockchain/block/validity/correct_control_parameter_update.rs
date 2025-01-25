@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::block::Block;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -34,6 +35,8 @@ impl SecretWitness for CorrectControlParameterUpdateWitness {
 pub struct CorrectControlParameterUpdate {
     pub witness: CorrectControlParameterUpdateWitness,
 }
+
+impl program::private::Seal for CorrectControlParameterUpdate {}
 
 impl ConsensusProgram for CorrectControlParameterUpdate {
     fn source(&self) {

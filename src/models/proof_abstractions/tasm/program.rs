@@ -17,6 +17,10 @@ use super::prover_job::ProverJobSettings;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 
+pub(crate) mod private {
+    pub trait Seal {}
+}
+
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
@@ -25,9 +29,11 @@ pub enum ConsensusError {
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
+///
+/// This is a _sealed_ trait. It cannot be implemented outside of this crate.
 pub trait ConsensusProgram
 where
-    Self: RefUnwindSafe + std::fmt::Debug,
+    Self: RefUnwindSafe + std::fmt::Debug + private::Seal,
 {
     /// The canonical reference source code for the consensus program, written in
     /// the subset of rust that the tasm-lang compiler understands. To run this

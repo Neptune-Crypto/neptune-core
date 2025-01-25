@@ -24,6 +24,7 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -111,6 +112,8 @@ impl SecretWitness for KernelToOutputsWitness {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct KernelToOutputs;
+
+impl program::private::Seal for KernelToOutputs {}
 
 impl ConsensusProgram for KernelToOutputs {
     fn source(&self) {

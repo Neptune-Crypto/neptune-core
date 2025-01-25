@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
 
@@ -34,6 +35,8 @@ impl SecretWitness for CorrectMmrUpdateWitness {
 pub struct CorrectMmrUpdate {
     pub witness: CorrectMmrUpdateWitness,
 }
+
+impl program::private::Seal for CorrectMmrUpdate {}
 
 impl ConsensusProgram for CorrectMmrUpdate {
     fn source(&self) {

@@ -27,6 +27,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasm;
+use crate::models::proof_abstractions::tasm::program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
@@ -56,6 +57,8 @@ impl TimeLock {
             .unwrap_or_else(Timestamp::zero)
     }
 }
+
+impl program::private::Seal for TimeLock {}
 
 impl ConsensusProgram for TimeLock {
     #[allow(clippy::needless_return)]
