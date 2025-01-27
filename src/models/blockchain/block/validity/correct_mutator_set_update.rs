@@ -36,6 +36,7 @@ pub struct CorrectMutatorSetUpdate {
 }
 
 impl ConsensusProgram for CorrectMutatorSetUpdate {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

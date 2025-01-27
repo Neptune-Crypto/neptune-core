@@ -36,6 +36,7 @@ pub struct PredecessorIsValid {
 }
 
 impl ConsensusProgram for PredecessorIsValid {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

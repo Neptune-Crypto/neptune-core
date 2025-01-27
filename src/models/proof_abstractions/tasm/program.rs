@@ -1,15 +1,10 @@
-use std::panic::catch_unwind;
 use std::panic::RefUnwindSafe;
 
-use itertools::Itertools;
 use tasm_lib::library::Library;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tracing::debug;
 
-use super::environment;
 use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
@@ -25,7 +20,7 @@ pub enum ConsensusError {
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
-pub trait ConsensusProgram
+pub(crate) trait ConsensusProgram
 where
     Self: RefUnwindSafe + std::fmt::Debug,
 {
@@ -33,6 +28,7 @@ where
     /// the subset of rust that the tasm-lang compiler understands. To run this
     /// program, call [`Self::run_rust`], which spawns a new thread, boots the
     /// environment, and executes the program.
+    #[cfg(test)]
     fn source(&self);
 
     /// Helps identify all imported Triton assembly snippets.
@@ -64,20 +60,26 @@ where
 
     /// Run the source program natively in rust, but with the emulated TritonVM
     /// environment for input, output, nondeterminism, and program digest.
+    #[cfg(test)]
     fn run_rust(
         &self,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        use std::panic::catch_unwind;
+
+        use itertools::Itertools;
+        use tracing::debug;
+
         debug!(
             "Running consensus program with input: {}",
             input.individual_tokens.iter().map(|b| b.value()).join(",")
         );
         let program_digest = catch_unwind(|| self.hash()).unwrap_or_default();
         let emulation_result = catch_unwind(|| {
-            environment::init(program_digest, &input.individual_tokens, nondeterminism);
+            super::environment::init(program_digest, &input.individual_tokens, nondeterminism);
             self.source();
-            environment::PUB_OUTPUT.take()
+            super::environment::PUB_OUTPUT.take()
         });
 
         emulation_result.map_err(|e| ConsensusError::RustShadowPanic(format!("{e:?}")))
@@ -126,6 +128,8 @@ where
         non_determinism: NonDeterminism,
         expected_error_ids: &[i128],
     ) -> proptest::test_runner::TestCaseResult {
+        use itertools::Itertools;
+
         let fail = |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
 
         let tasm_result = self.run_tasm(&public_input, non_determinism.clone());

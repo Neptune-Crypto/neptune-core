@@ -77,6 +77,7 @@ impl SecretWitness for PrincipalBlockValidationWitness {
 }
 
 impl ConsensusProgram for PrincipalBlockValidationLogic {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

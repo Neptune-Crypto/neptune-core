@@ -36,6 +36,7 @@ pub struct MmrMembership {
 }
 
 impl ConsensusProgram for MmrMembership {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

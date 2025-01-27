@@ -36,6 +36,7 @@ pub struct CorrectControlParameterUpdate {
 }
 
 impl ConsensusProgram for CorrectControlParameterUpdate {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }
