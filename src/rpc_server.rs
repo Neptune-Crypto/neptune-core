@@ -771,7 +771,6 @@ impl NeptuneRPCServer {
             utxo: utxo_notification.utxo,
             sender_randomness: utxo_notification.sender_randomness,
             receiver_preimage: spending_key.privacy_preimage().expect("spending key should have associated address and privacy preimage because it was returned by find_known_spending_key_for_receiver_identifier"),
-            hash_lock_key: None,
         };
 
         // Check if we can satisfy typescripts

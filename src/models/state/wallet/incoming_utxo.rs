@@ -1,12 +1,12 @@
+use tasm_lib::prelude::Digest;
+
+use super::announced_utxo::AnnouncedUtxo;
+use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::ExpectedUtxo;
 use crate::models::state::Tip5;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-
-use tasm_lib::prelude::Digest;
-
-use super::announced_utxo::AnnouncedUtxo;
 
 /// A [`Utxo`] along with associated data necessary for a recipient to claim it.
 ///
@@ -19,13 +19,13 @@ use super::announced_utxo::AnnouncedUtxo;
 ///
 /// See [PublicAnnouncement], [ExpectedUtxo], [AnnouncedUtxo]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct OwnUtxo {
+pub struct IncomingUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
 }
 
-impl From<&ExpectedUtxo> for OwnUtxo {
+impl From<&ExpectedUtxo> for IncomingUtxo {
     fn from(eu: &ExpectedUtxo) -> Self {
         Self {
             utxo: eu.utxo.clone(),
@@ -35,7 +35,7 @@ impl From<&ExpectedUtxo> for OwnUtxo {
     }
 }
 
-impl From<AnnouncedUtxo> for OwnUtxo {
+impl From<AnnouncedUtxo> for IncomingUtxo {
     fn from(value: AnnouncedUtxo) -> Self {
         Self {
             utxo: value.utxo,
@@ -45,12 +45,17 @@ impl From<AnnouncedUtxo> for OwnUtxo {
     }
 }
 
-impl OwnUtxo {
+impl IncomingUtxo {
     pub(crate) fn addition_record(&self) -> AdditionRecord {
         commit(
             Tip5::hash(&self.utxo),
             self.sender_randomness,
             self.receiver_preimage.hash(),
         )
+    }
+
+    pub(crate) fn is_guesser_fee(&self) -> bool {
+        self.utxo.lock_script_hash()
+            == LockScript::hash_lock_from_preimage(self.receiver_preimage).hash()
     }
 }

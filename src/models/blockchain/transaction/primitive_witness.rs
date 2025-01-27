@@ -1483,7 +1483,7 @@ mod test {
                             timelocked_amount.div_two();
                             assert!(total_amount >= timelocked_amount);
                             let timelocked_output = Utxo::new_native_currency(
-                                LockScript::hash_lock(output_seeds[0]),
+                                LockScript::hash_lock_from_after_image(output_seeds[0]),
                                 timelocked_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1492,7 +1492,7 @@ mod test {
                                 total_amount.checked_sub(&timelocked_amount).unwrap();
                             liquid_amount = liquid_amount.checked_add(&(-fee)).unwrap();
                             let liquid_output = Utxo::new_native_currency(
-                                LockScript::hash_lock(output_seeds[0]),
+                                LockScript::hash_lock_from_after_image(output_seeds[0]),
                                 liquid_amount,
                             );
 
@@ -1511,7 +1511,7 @@ mod test {
                                 first_amount.div_two();
                             }
                             let first_output = Utxo::new_native_currency(
-                                LockScript::hash_lock(output_seeds[0]),
+                                LockScript::hash_lock_from_after_image(output_seeds[0]),
                                 first_amount,
                             )
                             .with_time_lock(timestamp + MINING_REWARD_TIME_LOCK_PERIOD);
@@ -1522,7 +1522,7 @@ mod test {
                                 .checked_sub(&fee)
                                 .unwrap();
                             let second_output = Utxo::new_native_currency(
-                                LockScript::hash_lock(output_seeds[1]),
+                                LockScript::hash_lock_from_after_image(output_seeds[1]),
                                 second_amount,
                             );
 

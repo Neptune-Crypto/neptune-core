@@ -1,11 +1,11 @@
+use tasm_lib::prelude::Digest;
+
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::ExpectedUtxo;
 use crate::models::state::Tip5;
 use crate::models::state::UtxoNotifier;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
-
-use tasm_lib::prelude::Digest;
 
 /// A [`Utxo`] along with associated data necessary for a recipient to claim it.
 ///
@@ -19,13 +19,12 @@ use tasm_lib::prelude::Digest;
 ///   offchain expected-utxos
 ///
 /// See also [`PublicAnnouncement`], [`ExpectedUtxo`],
-/// [`OwnUtxo`](super::own_utxo::OwnUtxo).
+/// [`IncomingUtxo`](super::incoming_utxo::IncomingUtxo).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnnouncedUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
-    pub hash_lock_key: Option<Digest>,
 }
 
 impl AnnouncedUtxo {

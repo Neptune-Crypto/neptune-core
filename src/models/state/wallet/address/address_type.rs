@@ -204,7 +204,7 @@ impl ReceivingAddress {
     pub fn spending_lock(&self) -> Digest {
         match self {
             Self::Generation(a) => a.spending_lock(),
-            Self::Symmetric(k) => k.spending_lock(),
+            Self::Symmetric(k) => k.lock_after_image(),
         }
     }
 
@@ -409,8 +409,20 @@ impl SpendingKey {
                 generation_spending_key.lock_script_and_witness()
             }
             SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
-            SpendingKey::RawHashLock { preimage } => LockScriptAndWitness::hash_lock(*preimage),
+            SpendingKey::RawHashLock { preimage } => {
+                LockScriptAndWitness::hash_lock_from_preimage(*preimage)
+            }
         }
+    }
+
+    pub(crate) fn lock_script(&self) -> LockScript {
+        LockScript {
+            program: self.lock_script_and_witness().program,
+        }
+    }
+
+    pub(crate) fn lock_script_hash(&self) -> Digest {
+        self.lock_script().hash()
     }
 
     /// Return the privacy preimage if this spending key has a corresponding
@@ -477,7 +489,7 @@ impl SpendingKey {
     ///  - Logs a warning for any announcement targeted at this key that cannot
     ///    be decypted.
     pub fn scan_for_announced_utxos(&self, tx_kernel: &TransactionKernel) -> Vec<AnnouncedUtxo> {
-        // pre-compute some fields.
+        // pre-compute some fields, and early-abort of key cannot receive.
         let Some(receiver_identifier) = self.receiver_identifier() else {
             return vec![];
         };
@@ -512,7 +524,6 @@ impl SpendingKey {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
-                    hash_lock_key: None,
                 }
             }).collect()
     }

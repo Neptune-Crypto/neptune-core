@@ -968,7 +968,7 @@ impl Block {
         }
 
         let lock = self.header().nonce;
-        let lock_script = LockScript::hash_lock(lock);
+        let lock_script = LockScript::hash_lock_from_after_image(lock);
 
         let total_guesser_reward = self.total_guesser_reward();
         let mut value_locked = total_guesser_reward;
@@ -1574,7 +1574,7 @@ mod block_tests {
 
         let guesser_fee_utxos = block.guesser_fee_utxos();
 
-        let lock_script_and_witness = LockScriptAndWitness::hash_lock(preimage);
+        let lock_script_and_witness = LockScriptAndWitness::hash_lock_from_preimage(preimage);
         assert!(guesser_fee_utxos
             .iter()
             .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));

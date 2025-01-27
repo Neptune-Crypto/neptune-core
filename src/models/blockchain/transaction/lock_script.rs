@@ -58,8 +58,16 @@ impl LockScript {
     ///
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
-    pub fn hash_lock(preimage: Digest) -> Self {
-        let push_spending_lock_digest_to_stack = preimage
+    pub(crate) fn hash_lock_from_preimage(preimage: Digest) -> Self {
+        Self::hash_lock_from_after_image(preimage.hash())
+    }
+
+    /// Generate a lock script that verifies knowledge of a hash preimage.
+    ///
+    /// Satisfaction of this lock script establishes the UTXO owner's assent to
+    /// the transaction.
+    pub(crate) fn hash_lock_from_after_image(after_image: Digest) -> Self {
+        let push_spending_lock_digest_to_stack = after_image
             .values()
             .iter()
             .rev()
@@ -145,11 +153,11 @@ impl LockScriptAndWitness {
 
     /// Generate a lock script and a witness for a simple standard
     /// proof-of-preimage-knowledge lock script.
-    pub(crate) fn hash_lock(unlock_key: Digest) -> Self {
-        let lock_script = LockScript::hash_lock(unlock_key.hash());
+    pub(crate) fn hash_lock_from_preimage(preimage: Digest) -> Self {
+        let lock_script = LockScript::hash_lock_from_after_image(preimage.hash());
         LockScriptAndWitness::new_with_nondeterminism(
             lock_script.program,
-            NonDeterminism::new(unlock_key.reversed().values()),
+            NonDeterminism::new(preimage.reversed().values()),
         )
     }
 

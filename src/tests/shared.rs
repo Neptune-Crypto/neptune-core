@@ -841,7 +841,8 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
     Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
 }
 
-/// Create a fake block proposal; will pass `is_valid` but fail pow-check.
+/// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will
+/// be a valid block except for proof and PoW.
 pub(crate) async fn fake_valid_block_proposal_from_tx(
     predecessor: &Block,
     tx: Transaction,

@@ -33,7 +33,7 @@ use super::address::SpendingKey;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
-use super::own_utxo::OwnUtxo;
+use super::incoming_utxo::IncomingUtxo;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::unlocked_utxo::UnlockedUtxo;
 use super::wallet_status::WalletStatus;
@@ -76,13 +76,17 @@ pub struct WalletState {
     /// these two fields are for monitoring wallet-affecting utxos in the mempool.
     /// key is Tx hash.  for removing watched utxos when a tx is removed from mempool.
     mempool_spent_utxos: HashMap<TransactionKernelId, Vec<(Utxo, AbsoluteIndexSet, u64)>>,
-    mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<OwnUtxo>>,
+    mempool_unspent_utxos: HashMap<TransactionKernelId, Vec<IncomingUtxo>>,
 
     // these fields represent all known keys that have been handed out,
     // ie keys with derivation index in 0..self.spending_key_counter(key_type)
     // derivation order is preserved and each key must be unique.
     known_generation_keys: Vec<SpendingKey>,
     known_symmetric_keys: Vec<SpendingKey>,
+
+    // Cached from the database to avoid async cascades.
+    // Contains nonce-preimages from miner PoW-guessing.
+    known_raw_hash_lock_keys: Vec<SpendingKey>,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -249,6 +253,14 @@ impl WalletState {
             .map(|idx| wallet_secret.nth_symmetric_key(idx).into())
             .collect_vec();
 
+        let known_raw_hash_lock_keys = rusty_wallet_database
+            .nonce_preimages()
+            .get_all()
+            .await
+            .into_iter()
+            .map(|d| SpendingKey::RawHashLock { preimage: d })
+            .collect_vec();
+
         let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
             wallet_secret,
@@ -258,6 +270,7 @@ impl WalletState {
             mempool_unspent_utxos: Default::default(),
             known_generation_keys,
             known_symmetric_keys,
+            known_raw_hash_lock_keys,
         };
 
         // Generation key 0 is reserved for composing and guessing rewards. The
@@ -380,16 +393,15 @@ impl WalletState {
                 let spent_utxos = self.scan_for_spent_utxos(&tx.kernel).await;
 
                 // scan tx for utxo we can claim because we are expecting them (offchain)
-                let own_utxos_from_expected_utxos = self
-                    .scan_addition_records_for_own_utxos(&tx.kernel.outputs)
-                    .await;
+                let own_utxos_from_expected_utxos =
+                    self.scan_for_expected_utxos(&tx.kernel.outputs).await;
 
                 // scan tx for utxo with public-announcements we can claim
                 let announced_utxos_from_public_announcements =
                     self.scan_for_announced_utxos(&tx.kernel);
 
                 let own_utxos = announced_utxos_from_public_announcements
-                    .map(OwnUtxo::from)
+                    .map(IncomingUtxo::from)
                     .chain(own_utxos_from_expected_utxos)
                     .collect_vec();
 
@@ -590,10 +602,10 @@ impl WalletState {
     /// Returns an iterator of [OwnUtxo], which in turn contains a UTXO, sender
     /// randomness, receiver_preimage, and the addition record can be inferred
     /// from these three fields.
-    pub async fn scan_addition_records_for_own_utxos<'a>(
+    pub async fn scan_for_expected_utxos<'a>(
         &'a self,
         addition_records: &'a [AdditionRecord],
-    ) -> impl Iterator<Item = OwnUtxo> + 'a {
+    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         let expected_utxos = self.wallet_db.expected_utxos().get_all().await;
         let eu_map: HashMap<_, _> = expected_utxos
             .into_iter()
@@ -717,11 +729,8 @@ impl WalletState {
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
     // wallet keys.
     pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
-        self.get_all_known_spending_keys().find(|k| {
-            k.to_address()
-                .map(|address| address.lock_script().hash() == utxo.lock_script_hash())
-                .unwrap_or(false)
-        })
+        self.get_all_known_spending_keys()
+            .find(|k| k.lock_script_hash() == utxo.lock_script_hash())
     }
 
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
@@ -752,8 +761,12 @@ impl WalletState {
         match key_type {
             KeyType::Generation => Box::new(self.get_known_generation_spending_keys()),
             KeyType::Symmetric => Box::new(self.get_known_symmetric_keys()),
-            KeyType::RawHashLock => Box::new(std::iter::empty()),
+            KeyType::RawHashLock => Box::new(self.get_known_raw_hash_lock_keys()),
         }
+    }
+
+    pub(crate) fn get_known_raw_hash_lock_keys(&self) -> impl Iterator<Item = SpendingKey> + '_ {
+        self.known_raw_hash_lock_keys.iter().copied()
     }
 
     // TODO: These spending keys should probably be derived dynamically from some
@@ -960,16 +973,16 @@ impl WalletState {
         } = new_block.mutator_set_update();
 
         let offchain_received_outputs = self
-            .scan_addition_records_for_own_utxos(&addition_records)
+            .scan_for_expected_utxos(&addition_records)
             .await
             .collect_vec();
 
         let all_spendable_received_outputs = onchain_received_outputs
-            .map(OwnUtxo::from)
+            .map(IncomingUtxo::from)
             .chain(offchain_received_outputs.iter().cloned())
             .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid());
 
-        let incoming: HashMap<AdditionRecord, OwnUtxo> = all_spendable_received_outputs
+        let incoming: HashMap<AdditionRecord, IncomingUtxo> = all_spendable_received_outputs
             .map(|ou| (ou.addition_record(), ou))
             .collect();
 
@@ -978,6 +991,7 @@ impl WalletState {
         // updates from this block
 
         let monitored_utxos = self.wallet_db.monitored_utxos_mut();
+        let mut new_nonce_preimages = vec![];
         let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
@@ -1042,14 +1056,16 @@ impl WalletState {
             // If the output UTXO belongs to us, add it to the list of monitored
             // UTXOs and add its membership proof to the list of managed
             // membership proofs.
-            if let Some(own_utxo) = incoming.get(addition_record) {
-                let OwnUtxo {
+            if let Some(incoming_utxo) = incoming.get(addition_record) {
+                let IncomingUtxo {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
-                } = own_utxo.to_owned();
+                } = incoming_utxo.to_owned();
+                let is_guesser_fee = incoming_utxo.is_guesser_fee();
                 info!(
-                    "Received UTXO in block {}, height {}: value = {}",
+                    "Received UTXO in block {}, height {}\nvalue = {}\n\
+                    is guesser fee: {is_guesser_fee}\n\n",
                     new_block.hash(),
                     new_block.kernel.header.height,
                     utxo.get_native_currency_amount(),
@@ -1086,6 +1102,15 @@ impl WalletState {
                         (new_own_membership_proof, mutxos_len, utxo_digest),
                     );
                     monitored_utxos.push(mutxo).await;
+
+                    // If this is a guesser-fee UTXO, store the nonce-preimage.
+                    if incoming_utxo.is_guesser_fee() {
+                        self.known_raw_hash_lock_keys
+                            .push(SpendingKey::RawHashLock {
+                                preimage: receiver_preimage,
+                            });
+                        new_nonce_preimages.push(receiver_preimage);
+                    }
 
                     // Add the data required to restore the UTXOs membership proof from public
                     // data to the secret's file.
@@ -1191,6 +1216,14 @@ impl WalletState {
         // write UTXO-recovery data to disk.
         for item in incoming_utxo_recovery_data_list.into_iter() {
             self.store_utxo_ms_recovery_data(item).await?;
+        }
+
+        // Write nonce-preimages for guesser fee UTXOs to DB.
+        for nonce_preimage in new_nonce_preimages {
+            self.wallet_db
+                .nonce_preimages_mut()
+                .push(nonce_preimage)
+                .await;
         }
 
         // Mark all expected UTXOs that were received in this block as received
@@ -1337,7 +1370,6 @@ impl WalletState {
                 continue;
             }
 
-            // find spending key for this utxo.
             let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
                 Some(k) => k,
                 None => {
@@ -2600,9 +2632,7 @@ mod tests {
                 make_mock_transaction(vec![], vec![expected_addition_record]);
 
             let ret_with_tx_containing_utxo = wallet
-                .scan_addition_records_for_own_utxos(
-                    &mock_tx_containing_expected_utxo.kernel.outputs,
-                )
+                .scan_for_expected_utxos(&mock_tx_containing_expected_utxo.kernel.outputs)
                 .await
                 .collect_vec();
             assert_eq!(1, ret_with_tx_containing_utxo.len());
@@ -2615,7 +2645,7 @@ mod tests {
             );
             let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
             let ret_with_tx_without_utxo = wallet
-                .scan_addition_records_for_own_utxos(&tx_without_utxo.kernel.outputs)
+                .scan_for_expected_utxos(&tx_without_utxo.kernel.outputs)
                 .await
                 .collect_vec();
             assert!(ret_with_tx_without_utxo.is_empty());

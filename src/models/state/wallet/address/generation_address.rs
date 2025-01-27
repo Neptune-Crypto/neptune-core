@@ -62,7 +62,7 @@ pub struct GenerationSpendingKey {
     privacy_preimage: Digest,
 
     #[serde(skip)]
-    unlock_key: Digest,
+    unlock_key_preimage: Digest,
 }
 
 // manually impl Deserialize so we can derive all other fields from the seed.
@@ -135,7 +135,7 @@ pub struct GenerationReceivingAddress {
     encryption_key: lattice::kem::PublicKey,
 
     privacy_digest: Digest,
-    spending_lock: Digest,
+    lock_after_image: Digest,
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -155,12 +155,12 @@ impl GenerationSpendingKey {
             receiver_identifier: self.receiver_identifier(),
             encryption_key: pk,
             privacy_digest,
-            spending_lock: self.generate_spending_lock(),
+            lock_after_image: self.generate_spending_lock(),
         }
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        LockScriptAndWitness::hash_lock(self.unlock_key)
+        LockScriptAndWitness::hash_lock_from_preimage(self.unlock_key_preimage)
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -176,7 +176,7 @@ impl GenerationSpendingKey {
             receiver_identifier,
             decryption_key: sk,
             privacy_preimage,
-            unlock_key,
+            unlock_key_preimage: unlock_key,
             seed: seed.to_owned(),
         };
 
@@ -226,7 +226,7 @@ impl GenerationSpendingKey {
     }
 
     fn generate_spending_lock(&self) -> Digest {
-        self.unlock_key.hash()
+        self.unlock_key_preimage.hash()
     }
 
     /// returns the privacy preimage.
@@ -254,7 +254,7 @@ impl GenerationReceivingAddress {
             receiver_identifier,
             encryption_key: pk,
             privacy_digest,
-            spending_lock: spending_key.generate_spending_lock(),
+            lock_after_image: spending_key.generate_spending_lock(),
         }
     }
 
@@ -267,7 +267,7 @@ impl GenerationReceivingAddress {
     /// address.
     pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
         match witness.try_into() {
-            Ok(witness_array) => Digest::new(witness_array).hash() == self.spending_lock,
+            Ok(witness_array) => Digest::new(witness_array).hash() == self.lock_after_image,
             Err(_) => false,
         }
     }
@@ -365,7 +365,7 @@ impl GenerationReceivingAddress {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        LockScript::hash_lock(self.spending_lock)
+        LockScript::hash_lock_from_after_image(self.lock_after_image)
     }
 
     pub(crate) fn generate_public_announcement(
@@ -408,7 +408,7 @@ impl GenerationReceivingAddress {
 
     /// returns the `spending_lock`
     pub fn spending_lock(&self) -> Digest {
-        self.spending_lock
+        self.lock_after_image
     }
 }
 

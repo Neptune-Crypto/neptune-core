@@ -2,8 +2,8 @@ pub mod address;
 pub(crate) mod announced_utxo;
 pub mod coin_with_possible_timelock;
 pub(crate) mod expected_utxo;
+pub(crate) mod incoming_utxo;
 pub(crate) mod monitored_utxo;
-pub(crate) mod own_utxo;
 pub(crate) mod rusty_wallet_database;
 pub(crate) mod transaction_output;
 pub(crate) mod unlocked_utxo;
@@ -425,9 +425,9 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-    use address::KeyType;
     use expected_utxo::ExpectedUtxo;
     use futures::channel::oneshot;
+    use generation_address::GenerationSpendingKey;
     use num_traits::CheckedSub;
     use rand::random;
     use strum::IntoEnumIterator;
@@ -452,6 +452,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::channel::NewBlockFound;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -460,7 +461,10 @@ mod wallet_tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
+    use crate::models::state::ComposerParameters;
     use crate::models::state::GlobalStateLock;
+    use crate::tests::shared::fake_create_block_transaction_for_tests;
+    use crate::tests::shared::fake_valid_block_proposal_from_tx;
     use crate::tests::shared::fake_valid_block_proposal_successor_for_test;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
@@ -1464,53 +1468,89 @@ mod wallet_tests {
         )
         .await;
 
-        let a = guesser_rx.await.unwrap();
-        let guesser_utxos = a.guesser_fee_utxo_infos;
-        let block1 = a.block;
+        let new_block_found = guesser_rx.await.unwrap();
+        let guesser_utxos = new_block_found.guesser_fee_utxo_infos;
+        let block1 = new_block_found.block;
+
+        assert!(
+            !bob.global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block1.hash(), block1_timestamp)
+                .await
+                .is_positive(),
+            "Must show zero-balance before adding block to state"
+        );
         bob.set_new_self_mined_tip(block1.as_ref().clone(), guesser_utxos)
             .await
             .unwrap();
 
-        let balance = bob
-            .global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .confirmed_balance(block1.hash(), block1_timestamp)
-            .await;
         assert!(
-            balance.is_positive(),
+            bob.global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block1.hash(), block1_timestamp)
+                .await
+                .is_positive(),
             "Must show positive balance after successful PoW-guess"
         );
 
         // Can make tx with PoW-loot.
+        let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
         let fee = NeptuneCoins::new(1);
-        let own_key = bob
+        let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
+        let (mut tx_spending_guesser_fee, _) = bob
             .global_state_lock
-            .lock_guard()
-            .await
-            .wallet_state
-            .nth_spending_key(KeyType::Generation, 0)
-            .expect("wallet should be capable of generating a generation address spending key");
-        bob.global_state_lock
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
                 vec![].into(),
-                own_key,
+                a_key.into(),
                 UtxoNotificationMedium::OnChain,
                 fee,
-                block1_timestamp,
+                block2_timestamp,
                 TxProvingCapability::PrimitiveWitness,
                 &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
+        assert!(
+            tx_spending_guesser_fee.is_valid().await,
+            "Tx spending guesser-fee UTXO must be valid."
+        );
 
-        // let self_pow_solved_block1 =
-        //     mine_block_to_wallet_invalid_block_proof(&mut bob, block1_timestamp)
-        //         .await
-        //         .unwrap();
+        // Give tx a fake single proof to allow inclusion in block
+        tx_spending_guesser_fee.proof = TransactionProof::invalid();
+
+        let composer_parameters =
+            ComposerParameters::new(a_key.to_address().into(), rng.gen(), 0.5f64);
+        let (block2_tx, _) = fake_create_block_transaction_for_tests(
+            &block1,
+            composer_parameters,
+            block2_timestamp,
+            rng.gen(),
+            vec![tx_spending_guesser_fee],
+        )
+        .await
+        .unwrap();
+        let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx, rng.gen()).await;
+        assert!(block2.is_valid(&block1, block2_timestamp).await);
+
+        bob.set_new_self_mined_tip(block2.clone(), vec![])
+            .await
+            .unwrap();
+        assert!(
+            !bob.global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .confirmed_balance(block2.hash(), block2_timestamp)
+                .await
+                .is_positive(),
+            "Must show zero liquid balance after spending liquid guesser UTXO"
+        );
     }
 
     #[tokio::test]
