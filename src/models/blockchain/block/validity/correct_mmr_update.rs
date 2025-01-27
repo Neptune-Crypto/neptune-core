@@ -36,6 +36,7 @@ pub struct CorrectMmrUpdate {
 }
 
 impl ConsensusProgram for CorrectMmrUpdate {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

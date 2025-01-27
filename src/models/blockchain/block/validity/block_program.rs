@@ -13,7 +13,6 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::isa::triton_instr;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
@@ -30,8 +29,6 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-use crate::models::proof_abstractions::tasm::builtins::verify_stark;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::verifier::verify;
 
@@ -67,7 +64,13 @@ impl BlockProgram {
 }
 
 impl ConsensusProgram for BlockProgram {
+    #[cfg(test)]
     fn source(&self) {
+        use tasm_lib::triton_vm::prelude::BFieldElement;
+
+        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+        use crate::models::proof_abstractions::tasm::builtins::verify_stark;
+
         let block_body_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let block_witness: BlockProofWitness = tasmlib::decode_from_memory(start_address);

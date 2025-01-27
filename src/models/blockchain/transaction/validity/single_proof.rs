@@ -28,7 +28,6 @@ use crate::models::blockchain::transaction::validity::tasm::claims::generate_typ
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriClaim;
 use crate::models::blockchain::transaction::Claim;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
@@ -256,7 +255,10 @@ impl SingleProof {
 }
 
 impl ConsensusProgram for SingleProof {
+    #[cfg(test)]
     fn source(&self) {
+        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+
         let stark: Stark = Stark::default();
         let own_program_digest: Digest = tasmlib::own_program_digest();
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();

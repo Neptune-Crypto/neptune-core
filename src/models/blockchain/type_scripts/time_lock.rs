@@ -14,7 +14,6 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::math::tip5::Tip5;
 
 use super::TypeScript;
 use super::TypeScriptWitness;
@@ -26,11 +25,9 @@ use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::Hash;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock;
@@ -58,8 +55,14 @@ impl TimeLock {
 }
 
 impl ConsensusProgram for TimeLock {
-    #[allow(clippy::needless_return)]
+    #[cfg(test)]
+    #[expect(clippy::needless_return)]
     fn source(&self) {
+        use tasm_lib::twenty_first::math::tip5::Tip5;
+
+        use crate::models::proof_abstractions::tasm::builtins as tasm;
+        use crate::Hash;
+
         // get in the current program's hash digest
         let self_digest: Digest = tasm::own_program_digest();
 
@@ -1099,7 +1102,14 @@ mod test {
         #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().min().unwrap()))]
         _transaction_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_transaction_timestamp)))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_transaction_timestamp,
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         let rust_result = TimeLock.run_rust(
@@ -1156,11 +1166,26 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
+        #[strategy(
+            vec(
+                Timestamp::arbitrary_between(
+                    Timestamp::now() - Timestamp::days(7),
+                    Timestamp::now() - Timestamp::days(1),
+                ),
+                #_num_inputs,
+            )
+        )]
         _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
         _tx_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp)))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_tx_timestamp,
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
@@ -1189,12 +1214,26 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs
-        ))]
+        #[strategy(
+            vec(
+                Timestamp::arbitrary_between(
+                    Timestamp::now() - Timestamp::days(7),
+                    Timestamp::now() - Timestamp::days(1),
+                ),
+                #_num_inputs,
+            )
+        )]
         _release_dates: Vec<Timestamp>,
         #[strategy(Just::<Timestamp>(#_release_dates.iter().copied().max().unwrap()))]
         _tx_timestamp: Timestamp,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements, #_tx_timestamp + Timestamp::days(1))))]
+        #[strategy(
+            TimeLockWitness::arbitrary_with((
+                #_release_dates,
+                #_num_outputs,
+                #_num_public_announcements,
+                #_tx_timestamp + Timestamp::days(1),
+            ))
+        )]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());

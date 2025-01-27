@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -28,9 +27,7 @@ use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
@@ -159,11 +156,17 @@ impl UpdateWitness {
             .extend_from_slice(&self.old_kernel.merge_bit.encode());
     }
 
+    #[cfg(test)]
     pub(crate) fn branch_source(
         &self,
         single_proof_program_digest: Digest,
         new_txk_digest: Digest,
     ) {
+        use strum::EnumCount;
+
+        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+        use crate::models::proof_abstractions::timestamp::Timestamp;
+
         // divine the witness for this proof
         let uw: UpdateWitness = tasmlib::decode_from_memory(UPDATE_WITNESS_ADDRESS);
 

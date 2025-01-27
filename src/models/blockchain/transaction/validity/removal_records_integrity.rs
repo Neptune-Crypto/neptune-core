@@ -10,7 +10,6 @@ use rand::RngCore;
 use rand::SeedableRng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -37,18 +36,12 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::commit;
-use crate::util_types::mutator_set::get_swbf_indices;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::util_types::mutator_set::shared::WINDOW_SIZE;
@@ -367,7 +360,17 @@ impl RemovalRecordsIntegrityWitness {
 }
 
 impl ConsensusProgram for RemovalRecordsIntegrity {
+    #[cfg(test)]
     fn source(&self) {
+        use strum::EnumCount;
+
+        use crate::models::blockchain::transaction::utxo::Utxo;
+        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+        use crate::util_types::mutator_set::addition_record::AdditionRecord;
+        use crate::util_types::mutator_set::commit;
+        use crate::util_types::mutator_set::get_swbf_indices;
+        use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
+
         let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
 
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -972,9 +975,14 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelProxy;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::commit;
+    use crate::util_types::mutator_set::get_swbf_indices;
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 
     impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-        fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             let num_inputs = u.int_in_range(1..=3usize)?;
             let _num_outputs = u.int_in_range(1..=3usize)?;
             let _num_public_announcements = u.int_in_range(0..=2usize)?;

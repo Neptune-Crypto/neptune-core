@@ -38,6 +38,7 @@ pub struct CoinbaseIsValid {
 }
 
 impl ConsensusProgram for CoinbaseIsValid {
+    #[cfg(test)]
     fn source(&self) {
         todo!()
     }

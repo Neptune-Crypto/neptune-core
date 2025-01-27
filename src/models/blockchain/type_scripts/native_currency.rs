@@ -3,8 +3,6 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use itertools::Itertools;
-use num_traits::CheckedAdd;
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::DataType;
@@ -26,7 +24,6 @@ use super::native_currency_amount::NativeCurrencyAmount;
 use super::TypeScript;
 use super::TypeScriptWitness;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -37,7 +34,6 @@ use crate::models::blockchain::transaction::validity::tasm::coinbase_amount::Coi
 use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasm;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
@@ -86,8 +82,14 @@ impl NativeCurrency {
 }
 
 impl ConsensusProgram for NativeCurrency {
-    #[allow(clippy::needless_return)]
+    #[cfg(test)]
     fn source(&self) {
+        use num_traits::CheckedAdd;
+        use num_traits::Zero;
+
+        use crate::models::blockchain::shared::Hash;
+        use crate::models::proof_abstractions::tasm::builtins as tasm;
+
         // get in the current program's hash digest
         let self_digest: Digest = tasm::own_program_digest();
 
@@ -1472,8 +1474,8 @@ pub mod test {
             .unwrap()
             .current();
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
-        let salted_input_utxos_hash = Hash::hash(&primitive_witness.input_utxos);
-        let salted_output_utxos_hash = Hash::hash(&primitive_witness.output_utxos);
+        let salted_input_utxos_hash = Tip5::hash(&primitive_witness.input_utxos);
+        let salted_output_utxos_hash = Tip5::hash(&primitive_witness.output_utxos);
 
         let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         let type_script_and_witness = TypeScriptAndWitness::new_with_nondeterminism(

@@ -4,11 +4,9 @@ use std::cmp::max;
 
 use authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use itertools::Itertools;
-use num_traits::CheckedAdd;
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use strum::EnumCount;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -39,12 +37,10 @@ use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::transaction::TransactionKernelProxy;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::triton_vm::prelude::NonDeterminism;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 // Dictated by the witness type of SingleProof
 const MERGE_WITNESS_ADDRESS: BFieldElement = BFieldElement::new(2);
@@ -185,11 +181,18 @@ impl MergeWitness {
         nondeterminism.digests.extend(digests);
     }
 
+    #[cfg(test)]
     pub(crate) fn branch_source(
         &self,
         single_proof_program_digest: Digest,
         new_txk_digest: Digest,
     ) {
+        use num_traits::CheckedAdd;
+        use strum::EnumCount;
+
+        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
+        use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
         // divine the witness for this proof
         let mw = tasmlib::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
 
