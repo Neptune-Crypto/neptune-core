@@ -2470,7 +2470,7 @@ mod tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn known_keys_are_unique() {
-            for key_type in KeyType::all_types() {
+            for key_type in KeyType::all_types_for_receiving() {
                 worker::known_keys_are_unique(key_type).await
             }
         }
@@ -2480,7 +2480,7 @@ mod tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn derivation_counter_persists_across_restart() -> Result<()> {
-            for key_type in KeyType::all_types() {
+            for key_type in KeyType::all_types_for_receiving() {
                 worker::derivation_counter_persists_across_restart(key_type).await?
             }
             Ok(())

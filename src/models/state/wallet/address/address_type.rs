@@ -99,6 +99,13 @@ impl KeyType {
     pub fn all_types() -> Vec<KeyType> {
         vec![Self::RawHashLock, Self::Generation, Self::Symmetric]
     }
+
+    /// Returns only those key types that can receive UTXOs, i.e. the key types
+    /// that other people can send to and that have an associated address.
+    #[cfg(test)]
+    pub(crate) fn all_types_for_receiving() -> Vec<KeyType> {
+        vec![Self::Generation, Self::Symmetric]
+    }
 }
 
 /// Represents any type of Neptune receiving Address.
