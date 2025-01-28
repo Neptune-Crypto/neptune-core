@@ -42,7 +42,6 @@ use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::storage::storage_schema::traits::StorageWriter;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -56,7 +55,6 @@ use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::wallet::announced_utxo::AnnouncedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -404,7 +402,6 @@ impl WalletState {
                     self.scan_for_announced_utxos(&tx.kernel);
 
                 let own_utxos = announced_utxos_from_public_announcements
-                    .map(IncomingUtxo::from)
                     .chain(own_utxos_from_expected_utxos)
                     .collect_vec();
 
@@ -577,7 +574,7 @@ impl WalletState {
     fn scan_for_announced_utxos<'a>(
         &'a self,
         tx_kernel: &'a TransactionKernel,
-    ) -> impl Iterator<Item = AnnouncedUtxo> + 'a {
+    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
         // scan for announced utxos for every known key of every key type.
         self.get_all_known_spending_keys()
             .flat_map(|key| key.scan_for_announced_utxos(tx_kernel))
@@ -605,7 +602,7 @@ impl WalletState {
     /// Returns an iterator of [OwnUtxo], which in turn contains a UTXO, sender
     /// randomness, receiver_preimage, and the addition record can be inferred
     /// from these three fields.
-    pub async fn scan_for_expected_utxos<'a>(
+    pub(crate) async fn scan_for_expected_utxos<'a>(
         &'a self,
         addition_records: &'a [AdditionRecord],
     ) -> impl Iterator<Item = IncomingUtxo> + 'a {
@@ -981,12 +978,11 @@ impl WalletState {
             .collect_vec();
 
         let all_spendable_received_outputs = onchain_received_outputs
-            .map(IncomingUtxo::from)
             .chain(offchain_received_outputs.iter().cloned())
             .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid());
 
         let incoming: HashMap<AdditionRecord, IncomingUtxo> = all_spendable_received_outputs
-            .map(|ou| (ou.addition_record(), ou))
+            .map(|utxo| (utxo.addition_record(), utxo))
             .collect();
 
         // Derive the membership proofs for received UTXOs, and in

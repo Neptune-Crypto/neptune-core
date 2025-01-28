@@ -40,7 +40,6 @@ use twenty_first::math::digest::Digest;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
-use wallet::expected_utxo::UtxoNotifier;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -1674,6 +1673,7 @@ mod global_state_tests {
     use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
+    use wallet::expected_utxo::UtxoNotifier;
     use wallet::WalletSecret;
 
     use super::*;

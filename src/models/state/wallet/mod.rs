@@ -1,5 +1,4 @@
 pub mod address;
-pub(crate) mod announced_utxo;
 pub mod coin_with_possible_timelock;
 pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;

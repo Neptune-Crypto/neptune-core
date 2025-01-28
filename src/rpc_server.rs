@@ -87,9 +87,9 @@ use crate::models::state::wallet::address::encrypted_utxo_notification::Encrypte
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::address::SpendingKey;
-use crate::models::state::wallet::announced_utxo::AnnouncedUtxo;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -766,22 +766,18 @@ impl NeptuneRPCServer {
             return Ok(None);
         }
 
-        // construct an AnnouncedUtxo
-        let announced_utxo = AnnouncedUtxo {
-            utxo: utxo_notification.utxo,
-            sender_randomness: utxo_notification.sender_randomness,
-            receiver_preimage: spending_key.privacy_preimage().expect("spending key should have associated address and privacy preimage because it was returned by find_known_spending_key_for_receiver_identifier"),
-        };
+        // construct an IncomingUtxo
+        let incoming_utxo = IncomingUtxo::from_utxo_notification_payload(utxo_notification, spending_key.privacy_preimage().expect("spending key should have associated address and privacy preimage because it was returned by find_known_spending_key_for_receiver_identifier"));
 
         // Check if we can satisfy typescripts
-        if !announced_utxo.utxo.all_type_script_states_are_valid() {
+        if !incoming_utxo.utxo.all_type_script_states_are_valid() {
             let err = error::ClaimError::InvalidTypeScript;
             warn!("{}", err.to_string());
             return Err(err);
         }
 
         // check if wallet is already expecting this utxo.
-        let addition_record = announced_utxo.addition_record();
+        let addition_record = incoming_utxo.addition_record();
         let has_expected_utxo = state.wallet_state.has_expected_utxo(addition_record).await;
 
         // Check if UTXO has already been mined in a transaction.
@@ -814,13 +810,13 @@ impl NeptuneRPCServer {
 
                     haystack
                 };
-                let item = Tip5::hash(&announced_utxo.utxo);
+                let item = Tip5::hash(&incoming_utxo.utxo);
                 let ams = state.chain.archival_state().archival_mutator_set.ams();
                 let msmp = ams
                     .restore_membership_proof(
                         item,
-                        announced_utxo.sender_randomness,
-                        announced_utxo.receiver_preimage,
+                        incoming_utxo.sender_randomness,
+                        incoming_utxo.receiver_preimage,
                         aocl_leaf_index,
                     )
                     .await
@@ -829,7 +825,7 @@ impl NeptuneRPCServer {
                 let tip_digest = state.chain.light_state().hash();
 
                 let mut monitored_utxo = MonitoredUtxo::new(
-                    announced_utxo.utxo.clone(),
+                    incoming_utxo.utxo.clone(),
                     self.state.cli().number_of_mps_per_utxo,
                 );
                 monitored_utxo.confirmed_in_block = Some((
@@ -869,7 +865,7 @@ impl NeptuneRPCServer {
             None => None,
         };
 
-        let expected_utxo = announced_utxo.into_expected_utxo(UtxoNotifier::Cli);
+        let expected_utxo = incoming_utxo.into_expected_utxo(UtxoNotifier::Cli);
         Ok(Some(ClaimUtxoData {
             prepared_monitored_utxo: maybe_prepared_mutxo,
             has_expected_utxo,

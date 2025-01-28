@@ -18,7 +18,7 @@ use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::state::wallet::announced_utxo::AnnouncedUtxo;
+use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::BFieldElement;
 
@@ -495,8 +495,11 @@ impl SpendingKey {
     ///
     ///  - Logs a warning for any announcement targeted at this key that cannot
     ///    be decypted.
-    pub fn scan_for_announced_utxos(&self, tx_kernel: &TransactionKernel) -> Vec<AnnouncedUtxo> {
-        // pre-compute some fields, and early-abort of key cannot receive.
+    pub(crate) fn scan_for_announced_utxos(
+        &self,
+        tx_kernel: &TransactionKernel,
+    ) -> Vec<IncomingUtxo> {
+        // pre-compute some fields, and early-abort if key cannot receive.
         let Some(receiver_identifier) = self.receiver_identifier() else {
             return vec![];
         };
@@ -527,7 +530,7 @@ impl SpendingKey {
             .map(move |(utxo, sender_randomness)| {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
-                AnnouncedUtxo {
+                IncomingUtxo {
                     utxo,
                     sender_randomness,
                     receiver_preimage,
