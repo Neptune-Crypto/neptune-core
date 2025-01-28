@@ -91,7 +91,7 @@ async fn compose_block(
 }
 
 /// Attempt to mine a valid block for the network
-async fn guess_nonce(
+pub(crate) async fn guess_nonce(
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
@@ -248,7 +248,6 @@ Difficulty threshold: {threshold}
     );
 
     let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(nonce_preimage);
-
     assert!(
         !guesser_fee_utxo_infos.is_empty(),
         "All mined blocks have guesser fees"

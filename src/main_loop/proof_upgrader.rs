@@ -423,7 +423,9 @@ impl UpgradeJob {
             let gobble_receiver = own_wallet_secret.nth_symmetric_key(0);
             let receiver_preimage = gobble_receiver.privacy_preimage();
             let gobble_receiver = SpendingKey::Symmetric(gobble_receiver);
-            let gobble_receiver = gobble_receiver.to_address();
+            let gobble_receiver = gobble_receiver.to_address().expect(
+                "gobble receiver should have a corresponding address because it is a symmetric key",
+            );
             let gobbler = TransactionDetails::fee_gobbler(
                 gobbling_fee,
                 own_wallet_secret.generate_sender_randomness(

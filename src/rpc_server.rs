@@ -71,7 +71,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
-use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -90,6 +89,7 @@ use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::incoming_utxo::IncomingUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -296,7 +296,7 @@ pub trait RPC {
     async fn next_receiving_address(
         token: rpc_auth::Token,
         key_type: KeyType,
-    ) -> RpcResult<ReceivingAddress>;
+    ) -> RpcResult<Option<ReceivingAddress>>;
 
     /// Return all known keys, for every [KeyType]
     async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<SpendingKey>>;
@@ -540,7 +540,8 @@ impl NeptuneRPCServer {
             let key = s
                 .wallet_state
                 .next_unused_spending_key(KeyType::Symmetric)
-                .await;
+                .await
+                .expect("wallet should be capable of generating symmetric spending keys");
 
             // write state to disk. create_transaction() may be slow.
             s.persist_wallet().await.expect("flushed");
@@ -746,7 +747,11 @@ impl NeptuneRPCServer {
             .ok_or(error::ClaimError::UtxoUnknown)?;
 
         // decrypt utxo_transfer_encrypted into UtxoTransfer
-        let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
+        let utxo_notification = utxo_transfer_encrypted
+            .decrypt_with_spending_key(&spending_key)
+            .expect(
+                "spending key should be capable of decryption because it was returned by find_known_spending_key_for_receiver_identifier",
+            )?;
 
         tracing::debug!("claim-utxo: decrypted {:#?}", utxo_notification);
 
@@ -761,22 +766,18 @@ impl NeptuneRPCServer {
             return Ok(None);
         }
 
-        // construct an AnnouncedUtxo
-        let announced_utxo = AnnouncedUtxo {
-            utxo: utxo_notification.utxo,
-            sender_randomness: utxo_notification.sender_randomness,
-            receiver_preimage: spending_key.privacy_preimage(),
-        };
+        // construct an IncomingUtxo
+        let incoming_utxo = IncomingUtxo::from_utxo_notification_payload(utxo_notification, spending_key.privacy_preimage().expect("spending key should have associated address and privacy preimage because it was returned by find_known_spending_key_for_receiver_identifier"));
 
         // Check if we can satisfy typescripts
-        if !announced_utxo.utxo.all_type_script_states_are_valid() {
+        if !incoming_utxo.utxo.all_type_script_states_are_valid() {
             let err = error::ClaimError::InvalidTypeScript;
             warn!("{}", err.to_string());
             return Err(err);
         }
 
         // check if wallet is already expecting this utxo.
-        let addition_record = announced_utxo.addition_record();
+        let addition_record = incoming_utxo.addition_record();
         let has_expected_utxo = state.wallet_state.has_expected_utxo(addition_record).await;
 
         // Check if UTXO has already been mined in a transaction.
@@ -809,13 +810,13 @@ impl NeptuneRPCServer {
 
                     haystack
                 };
-                let item = Tip5::hash(&announced_utxo.utxo);
+                let item = Tip5::hash(&incoming_utxo.utxo);
                 let ams = state.chain.archival_state().archival_mutator_set.ams();
                 let msmp = ams
                     .restore_membership_proof(
                         item,
-                        announced_utxo.sender_randomness,
-                        announced_utxo.receiver_preimage,
+                        incoming_utxo.sender_randomness,
+                        incoming_utxo.receiver_preimage,
                         aocl_leaf_index,
                     )
                     .await
@@ -824,7 +825,7 @@ impl NeptuneRPCServer {
                 let tip_digest = state.chain.light_state().hash();
 
                 let mut monitored_utxo = MonitoredUtxo::new(
-                    announced_utxo.utxo.clone(),
+                    incoming_utxo.utxo.clone(),
                     self.state.cli().number_of_mps_per_utxo,
                 );
                 monitored_utxo.confirmed_in_block = Some((
@@ -864,7 +865,7 @@ impl NeptuneRPCServer {
             None => None,
         };
 
-        let expected_utxo = announced_utxo.into_expected_utxo(UtxoNotifier::Cli);
+        let expected_utxo = incoming_utxo.into_expected_utxo(UtxoNotifier::Cli);
         Ok(Some(ClaimUtxoData {
             prepared_monitored_utxo: maybe_prepared_mutxo,
             has_expected_utxo,
@@ -1295,17 +1296,13 @@ impl RPC for NeptuneRPCServer {
             .await)
     }
 
-    // future: this should perhaps take a param indicating what type
-    //         of receiving address.  for now we just use/assume
-    //         a Generation address.
-    //
     // documented in trait. do not add doc-comment.
     async fn next_receiving_address(
         mut self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
         key_type: KeyType,
-    ) -> RpcResult<ReceivingAddress> {
+    ) -> RpcResult<Option<ReceivingAddress>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -1315,7 +1312,7 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .next_unused_spending_key(key_type)
             .await
-            .to_address();
+            .and_then(|spending_key| spending_key.to_address());
 
         // persist wallet state to disk
         global_state_mut.persist_wallet().await.expect("flushed");
@@ -2131,7 +2128,8 @@ mod rpc_server_tests {
         let own_receiving_address = rpc_server
             .clone()
             .next_receiving_address(ctx, token, KeyType::Generation)
-            .await?;
+            .await?
+            .unwrap();
         let _ = rpc_server.clone().mempool_tx_count(ctx, token).await;
         let _ = rpc_server.clone().mempool_size(ctx, token).await;
         let _ = rpc_server.clone().dashboard_overview_data(ctx, token).await;
@@ -2856,11 +2854,13 @@ mod rpc_server_tests {
                     let receiving_address_generation = rpc_server
                         .clone()
                         .next_receiving_address(context::current(), token, KeyType::Generation)
-                        .await?;
+                        .await?
+                        .unwrap();
                     let receiving_address_symmetric = rpc_server
                         .clone()
                         .next_receiving_address(context::current(), token, KeyType::Symmetric)
-                        .await?;
+                        .await?
+                        .unwrap();
 
                     let pay_to_bob_outputs = vec![
                         (receiving_address_generation, NeptuneCoins::new(1)),
@@ -3033,11 +3033,13 @@ mod rpc_server_tests {
                 let bob_gen_addr = bob
                     .clone()
                     .next_receiving_address(context::current(), bob_token, KeyType::Generation)
-                    .await?;
+                    .await?
+                    .unwrap();
                 let bob_sym_addr = bob
                     .clone()
                     .next_receiving_address(context::current(), bob_token, KeyType::Symmetric)
-                    .await?;
+                    .await?
+                    .unwrap();
 
                 let pay_to_self_outputs = vec![
                     (bob_gen_addr, NeptuneCoins::new(5)),
@@ -3179,6 +3181,7 @@ mod rpc_server_tests {
                 .clone()
                 .next_receiving_address(ctx, token, KeyType::Generation)
                 .await
+                .unwrap()
                 .unwrap();
             let elem = (own_address.clone(), NeptuneCoins::zero());
             let outputs = std::iter::repeat(elem);
@@ -3203,13 +3206,14 @@ mod rpc_server_tests {
             }
         }
 
-        /// sends a tx with two outputs: one self, one external, for each key type.
+        /// sends a tx with two outputs: one self, one external, for each key type
+        /// that accepts incoming UTXOs.
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn send_to_many_test() -> Result<()> {
-            for key_type in KeyType::all_types() {
-                worker::send_to_many(key_type).await?;
+            for recipient_key_type in KeyType::all_types_for_receiving() {
+                worker::send_to_many(recipient_key_type).await?;
             }
             Ok(())
         }
@@ -3259,18 +3263,16 @@ mod rpc_server_tests {
                     .await
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
-                    .await;
-                let wallet_spending_key = if let SpendingKey::Generation(key) = wallet_spending_key
-                {
-                    key
-                } else {
+                    .await
+                    .unwrap();
+                let SpendingKey::Generation(wallet_spending_key) = wallet_spending_key else {
                     panic!("Expected generation key")
                 };
 
                 // --- Init.  generate a block, with composer fee going to our
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
-                let (block_1, expected_utxos_block1) = make_mock_block(
+                let (block_1, composer_utxos) = make_mock_block(
                     &genesis_block,
                     Some(timestamp),
                     wallet_spending_key,
@@ -3290,7 +3292,7 @@ mod rpc_server_tests {
                 // --- Init.  append the block to blockchain ---
                 rpc_server
                     .state
-                    .set_new_self_mined_tip(block_1.clone(), expected_utxos_block1)
+                    .set_new_self_mined_tip(block_1.clone(), composer_utxos)
                     .await?;
 
                 {
@@ -3303,7 +3305,7 @@ mod rpc_server_tests {
                     expected_balance.div_two();
                     assert_eq!(
                         expected_balance, new_balance,
-                        "New balance must be exactly 1/2 mining reward"
+                        "New balance must be exactly 1/2 mining reward bc timelock"
                     );
                 };
 
@@ -3313,6 +3315,7 @@ mod rpc_server_tests {
                         GenerationReceivingAddress::derive_from_seed(rng.gen()).into()
                     }
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
+                    KeyType::RawHashLock => panic!("hash lock key not supported"),
                 };
                 let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
 
@@ -3324,8 +3327,9 @@ mod rpc_server_tests {
                         .await
                         .wallet_state
                         .next_unused_spending_key(recipient_key_type)
-                        .await;
-                    (spending_key.to_address(), NeptuneCoins::new(25))
+                        .await
+                        .unwrap();
+                    (spending_key.to_address().unwrap(), NeptuneCoins::new(25))
                 };
 
                 // --- Setup. assemble outputs and fee ---

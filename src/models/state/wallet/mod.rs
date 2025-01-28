@@ -1,12 +1,13 @@
 pub mod address;
 pub mod coin_with_possible_timelock;
-pub mod expected_utxo;
-pub mod monitored_utxo;
-pub mod rusty_wallet_database;
-pub mod transaction_output;
-pub mod unlocked_utxo;
+pub(crate) mod expected_utxo;
+pub(crate) mod incoming_utxo;
+pub(crate) mod monitored_utxo;
+pub(crate) mod rusty_wallet_database;
+pub(crate) mod transaction_output;
+pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
-pub mod wallet_state;
+pub(crate) mod wallet_state;
 pub mod wallet_status;
 
 use std::fs;

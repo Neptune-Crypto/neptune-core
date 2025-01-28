@@ -58,14 +58,14 @@ impl MainToMiner {
 }
 
 #[derive(Clone, Debug)]
-pub struct NewBlockFound {
+pub(crate) struct NewBlockFound {
     pub block: Box<Block>,
     pub composer_utxos: Vec<ExpectedUtxo>,
     pub guesser_fee_utxo_infos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug)]
-pub enum MinerToMain {
+pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
 

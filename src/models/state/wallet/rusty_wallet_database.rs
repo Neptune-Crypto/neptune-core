@@ -33,6 +33,9 @@ pub struct RustyWalletDatabase {
     // counts derived symmetric keys
     // The counter value represents derive index of next unused key.
     symmetric_key_counter: DbtSingleton<u64>,
+
+    // list of pre-images to nonces in blocks we found
+    nonce_preimages: DbtVec<Digest>,
 }
 
 impl RustyWalletDatabase {
@@ -65,6 +68,8 @@ impl RustyWalletDatabase {
             .new_singleton::<u64>("symmetric_key_counter")
             .await;
 
+        let nonce_preimages = storage.schema.new_vec::<Digest>("nonce_preimages").await;
+
         Self {
             storage,
             monitored_utxos,
@@ -73,6 +78,7 @@ impl RustyWalletDatabase {
             counter,
             generation_key_counter,
             symmetric_key_counter,
+            nonce_preimages,
         }
     }
 
@@ -94,6 +100,16 @@ impl RustyWalletDatabase {
     /// get mutable expected_utxos.
     pub fn expected_utxos_mut(&mut self) -> &mut DbtVec<ExpectedUtxo> {
         &mut self.expected_utxos
+    }
+
+    // get the nonce preimages
+    pub fn nonce_preimages(&self) -> &DbtVec<Digest> {
+        &self.nonce_preimages
+    }
+
+    // get mutable nonce preimages
+    pub fn nonce_preimages_mut(&mut self) -> &mut DbtVec<Digest> {
+        &mut self.nonce_preimages
     }
 
     /// Get the hash of the block to which this database is synced.

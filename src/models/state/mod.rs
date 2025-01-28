@@ -40,7 +40,6 @@ use twenty_first::math::digest::Digest;
 use tx_proving_capability::TxProvingCapability;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
-use wallet::expected_utxo::UtxoNotifier;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -547,7 +546,9 @@ impl GlobalState {
         change_key: SpendingKey,
         change_utxo_notify_method: UtxoNotificationMedium,
     ) -> Result<TxOutput> {
-        let own_receiving_address = change_key.to_address();
+        let Some(own_receiving_address) = change_key.to_address() else {
+            bail!("Cannot create change output when supplied spending key has no corresponding address.");
+        };
 
         let receiver_digest = own_receiving_address.privacy_digest();
         let change_sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
@@ -923,6 +924,14 @@ impl GlobalState {
         let incoming_utxo_count = incoming_utxos.len();
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
+        let existing_nonce_preimages = self
+            .wallet_state
+            .wallet_db
+            .nonce_preimages()
+            .get_all()
+            .await;
+        let mut new_nonce_preimages = vec![];
+
         let mut recovery_data_for_missing_mutxos = vec![];
         {
             // Two UTXOs are considered the same iff their AOCL index and
@@ -982,6 +991,14 @@ impl GlobalState {
                 warn!("Cannot restore UTXO with AOCL index {} because it is in the future from our tip. Current AOCL leaf count is {current_aocl_leaf_count}. Maybe this UTXO can be recovered once more blocks are downloaded from peers?", incoming_utxo.aocl_index);
                 continue;
             }
+
+            // Check if UTXO is guesser-reward and associated key doesn't already exist.
+            if incoming_utxo.is_guesser_fee()
+                && !existing_nonce_preimages.contains(&incoming_utxo.receiver_preimage)
+            {
+                new_nonce_preimages.push(incoming_utxo.receiver_preimage);
+            }
+
             let ms_item = Hash::hash(&incoming_utxo.utxo);
             let restored_msmp_res = ams_ref
                 .ams()
@@ -996,7 +1013,7 @@ impl GlobalState {
                 Ok(msmp) => {
                     // Verify that the restored MSMP is valid
                     if !ams_ref.ams().verify(ms_item, &msmp).await {
-                        warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", incoming_utxo.aocl_index);
+                        warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain? Or maybe it was spent?", incoming_utxo.aocl_index);
                         continue;
                     }
 
@@ -1034,6 +1051,11 @@ impl GlobalState {
                 .push(restored_mutxo)
                 .await;
             restored_mutxos += 1;
+        }
+
+        // Update state with all nonce-preimage keys from guesser-fee UTXOs
+        for new_nonce_preimage in new_nonce_preimages {
+            self.wallet_state.add_raw_hash_key(new_nonce_preimage).await;
         }
 
         self.wallet_state.wallet_db.persist().await;
@@ -1413,12 +1435,7 @@ impl GlobalState {
         for miner_reward_utxo_info in miner_reward_utxo_infos {
             // Notify wallet to expect the coinbase UTXO, as we mined this block
             self.wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    miner_reward_utxo_info.utxo,
-                    miner_reward_utxo_info.sender_randomness,
-                    miner_reward_utxo_info.receiver_preimage,
-                    UtxoNotifier::OwnMinerComposeBlock,
-                ))
+                .add_expected_utxo(miner_reward_utxo_info)
                 .await;
         }
 
@@ -1677,6 +1694,7 @@ mod global_state_tests {
     use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
+    use wallet::expected_utxo::UtxoNotifier;
     use wallet::WalletSecret;
 
     use super::*;
@@ -1685,6 +1703,7 @@ mod global_state_tests {
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::make_mock_block;
+    use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
@@ -1875,33 +1894,83 @@ mod global_state_tests {
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis_block(network);
-        let (block1, expected_utxos_block1) =
-            make_mock_block(&genesis_block, None, own_key, rng.gen()).await;
-        global_state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .add_expected_utxos(expected_utxos_block1)
-            .await;
-        global_state_lock.set_new_tip(block1.clone()).await.unwrap();
+        let nonce_preimage = rng.gen();
+        let (block1, composer_utxos) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
+            &genesis_block,
+            None,
+            own_key,
+            rng.gen(),
+            0.5,
+            nonce_preimage,
+        )
+        .await;
+        let guesser_utxos = block1.guesser_fee_expected_utxos(nonce_preimage);
+        let all_mining_rewards = [composer_utxos, guesser_utxos].concat();
 
-        // Delete everything from monitored UTXO (premined UTXO and block-1
-        // composer coinbases).
+        global_state_lock
+            .set_new_self_mined_tip(block1.clone(), all_mining_rewards)
+            .await
+            .unwrap();
+
+        // Delete everything from monitored UTXO and from raw-hash keys.
         let mut global_state = global_state_lock.lock_guard_mut().await;
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
             assert_eq!(
-                3,
+                5,
                 monitored_utxos.len().await,
-                "MUTXO must have genesis element and composer rewards"
+                "MUTXO must have genesis element, composer rewards, and guesser rewards"
             );
             monitored_utxos.pop().await;
             monitored_utxos.pop().await;
             monitored_utxos.pop().await;
+            monitored_utxos.pop().await;
+            monitored_utxos.pop().await;
+
+            let nonce_preimage_keys = global_state.wallet_state.wallet_db.nonce_preimages();
+            assert_eq!(
+                1,
+                nonce_preimage_keys.len().await,
+                "Exactly Nonce-preimage must be stored to DB"
+            );
+            global_state.wallet_state.clear_raw_hash_keys().await;
+            global_state
+                .wallet_state
+                .wallet_db
+                .expected_utxos_mut()
+                .clear()
+                .await;
 
             assert!(
-                monitored_utxos.is_empty().await,
-                "MUTXO must be empty after clearing"
+                global_state
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxos()
+                    .is_empty()
+                    .await
+            );
+            assert!(
+                global_state
+                    .wallet_state
+                    .wallet_db
+                    .expected_utxos()
+                    .is_empty()
+                    .await
+            );
+            assert!(
+                global_state
+                    .wallet_state
+                    .wallet_db
+                    .nonce_preimages()
+                    .is_empty()
+                    .await
+            );
+            assert_eq!(
+                0,
+                global_state
+                    .wallet_state
+                    .get_known_raw_hash_lock_keys()
+                    .count()
             );
         }
 
@@ -1914,9 +1983,9 @@ mod global_state_tests {
                 .unwrap();
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert_eq!(
-                3,
+                5,
                 monitored_utxos.len().await,
-                "MUTXO must have genesis element and premine after recovery"
+                "MUTXO must have genesis elements and premine after recovery"
             );
 
             let mutxos = monitored_utxos.get_all().await;
@@ -1927,10 +1996,10 @@ mod global_state_tests {
                     genesis_block.header().height
                 )),
                 mutxos[0].confirmed_in_block,
-                "Historical information must be restored for premine TX"
+                "Historical information must be restored for premine UTXO"
             );
 
-            for (i, mutxo) in mutxos.iter().enumerate().skip(1).take((1..=2).count()) {
+            for (i, mutxo) in mutxos.iter().enumerate().skip(1).take((1..=4).count()) {
                 assert_eq!(
                     Some((
                         block1.hash(),
@@ -1938,11 +2007,12 @@ mod global_state_tests {
                         block1.header().height
                     )),
                     mutxo.confirmed_in_block,
-                    "Historical information must be restored for composer TX, i={i}"
+                    "Historical information must be restored for composer and guesser UTXOs, i={i}"
                 );
             }
 
-            // Verify that the restored MUTXOs have MSMPs
+            // Verify that the restored MUTXOs have MSMPs, and that they're
+            // valid.
             for mutxo in mutxos {
                 let ms_item = Hash::hash(&mutxo.utxo);
                 assert!(global_state
@@ -1959,6 +2029,30 @@ mod global_state_tests {
                     "MUTXO must have the correct latest block digest value"
                 );
             }
+
+            // Verify that guesser-fee UTXO keys have also been restored.
+            let cached_hash_lock_keys = global_state
+                .wallet_state
+                .get_known_raw_hash_lock_keys()
+                .collect_vec();
+            assert_eq!(
+                vec![SpendingKey::RawHashLock {
+                    preimage: nonce_preimage
+                }],
+                cached_hash_lock_keys,
+                "Cached hash lock keys must match expected value after recovery"
+            );
+            let persisted_hash_lock_keys = global_state
+                .wallet_state
+                .wallet_db
+                .nonce_preimages()
+                .get_all()
+                .await;
+            assert_eq!(
+                vec![nonce_preimage],
+                persisted_hash_lock_keys,
+                "Persisted hash lock keys must match expected value after recovery"
+            );
         }
     }
 
@@ -2388,7 +2482,8 @@ mod global_state_tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation)
-            .await;
+            .await
+            .unwrap();
         let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
@@ -2422,7 +2517,7 @@ mod global_state_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 change_output.utxo(),
                 change_output.sender_randomness(),
-                genesis_key.privacy_preimage(),
+                genesis_key.privacy_preimage().unwrap(),
                 UtxoNotifier::Myself,
             ))
             .await;
@@ -3490,7 +3585,9 @@ mod global_state_tests {
                     .wallet_state
                     .next_unused_spending_key(KeyType::Generation)
                     .await
+                    .unwrap()
                     .to_address()
+                    .unwrap()
             };
 
             // in alice wallet: send pre-mined funds to bob
@@ -3510,7 +3607,8 @@ mod global_state_tests {
                 let alice_change_key = alice_state_mut
                     .wallet_state
                     .next_unused_spending_key(change_key_type)
-                    .await;
+                    .await
+                    .unwrap();
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];

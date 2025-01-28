@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "arbitrary-impls"))]
+use arbitrary::Arbitrary;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -77,9 +79,8 @@ impl ExpectedUtxo {
     }
 }
 
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize, strum_macros::Display,
-)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub enum UtxoNotifier {
     OwnMinerComposeBlock,
     OwnMinerGuessNonce,

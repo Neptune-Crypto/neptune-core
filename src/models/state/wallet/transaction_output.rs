@@ -462,8 +462,9 @@ mod tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Generation)
-            .await;
-        let address_gen = spending_key_gen.to_address();
+            .await
+            .expect("wallet should be capable of generating a generation address spending key");
+        let address_gen = spending_key_gen.to_address().unwrap();
 
         // obtain next unused symmetric address from our wallet.
         let spending_key_sym = global_state_lock
@@ -471,8 +472,9 @@ mod tests {
             .await
             .wallet_state
             .next_unused_spending_key(KeyType::Symmetric)
-            .await;
-        let address_sym = spending_key_sym.to_address();
+            .await
+            .expect("wallet should be capable of generating a symmetric address spending key");
+        let address_sym = spending_key_sym.to_address().unwrap();
 
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
