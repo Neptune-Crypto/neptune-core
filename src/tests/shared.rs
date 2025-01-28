@@ -727,18 +727,15 @@ pub(crate) async fn make_mock_block(
     seed: [u8; 32],
 ) -> (Block, Vec<ExpectedUtxo>) {
     let nonce_preimage = Digest::default();
-    let (block, composer_expected_utxos) =
-        make_mock_block_with_nonce_preimage_and_guesser_fraction(
-            previous_block,
-            block_timestamp,
-            composer_key,
-            seed,
-            0f64,
-            nonce_preimage,
-        )
-        .await;
-
-    (block, composer_expected_utxos)
+    make_mock_block_with_nonce_preimage_and_guesser_fraction(
+        previous_block,
+        block_timestamp,
+        composer_key,
+        seed,
+        0f64,
+        nonce_preimage,
+    )
+    .await
 }
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with

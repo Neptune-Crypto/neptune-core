@@ -129,6 +129,12 @@ impl Utxo {
         self.lock_script_hash
     }
 
+    /// Returns true iff this UTXO is a lock script with the preimage provided
+    /// as input argument.
+    pub(crate) fn is_lockscript_with_preimage(&self, preimage: Digest) -> bool {
+        self.lock_script_hash == LockScript::hash_lock_from_preimage(preimage).hash()
+    }
+
     pub fn new_native_currency(lock_script: LockScript, amount: NeptuneCoins) -> Self {
         Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }

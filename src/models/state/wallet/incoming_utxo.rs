@@ -4,7 +4,6 @@ use tasm_lib::prelude::Digest;
 
 use super::expected_utxo::UtxoNotifier;
 use super::utxo_notification::UtxoNotificationPayload;
-use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::state::ExpectedUtxo;
 use crate::models::state::Tip5;
@@ -48,9 +47,10 @@ impl IncomingUtxo {
         )
     }
 
+    /// Returns true iff this UTXO is a guesser reward.
     pub(crate) fn is_guesser_fee(&self) -> bool {
-        self.utxo.lock_script_hash()
-            == LockScript::hash_lock_from_preimage(self.receiver_preimage).hash()
+        self.utxo
+            .is_lockscript_with_preimage(self.receiver_preimage)
     }
 
     pub(crate) fn from_utxo_notification_payload(

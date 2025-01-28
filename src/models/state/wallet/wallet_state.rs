@@ -103,6 +103,12 @@ impl IncomingUtxoRecoveryData {
         let item = Tip5::hash(&self.utxo);
         commit(item, self.sender_randomness, self.receiver_preimage.hash())
     }
+
+    /// Returns true iff this UTXO is a guesser reward.
+    pub(crate) fn is_guesser_fee(&self) -> bool {
+        self.utxo
+            .is_lockscript_with_preimage(self.receiver_preimage)
+    }
 }
 
 impl TryFrom<&MonitoredUtxo> for IncomingUtxoRecoveryData {
@@ -536,6 +542,27 @@ impl WalletState {
             ))
             .await;
         }
+    }
+
+    /// Add a RawHashLock key to the wallet's state. If key is already stored,
+    /// this is a no-op.
+    ///
+    /// Assumes that the cache agrees with the database.
+    pub(crate) async fn add_raw_hash_key(&mut self, nonce_preimage: Digest) {
+        let as_key = SpendingKey::RawHashLock {
+            preimage: nonce_preimage,
+        };
+        if self.known_raw_hash_lock_keys.contains(&as_key) {
+            return;
+        }
+
+        self.wallet_db
+            .nonce_preimages_mut()
+            .push(nonce_preimage)
+            .await;
+        self.known_raw_hash_lock_keys.push(as_key);
+
+        return;
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
@@ -1215,14 +1242,7 @@ impl WalletState {
 
         // Write nonce-preimage for guesser fee UTXOs to DB, and cache.
         if let Some(nonce_preimage) = nonce_preimage {
-            self.wallet_db
-                .nonce_preimages_mut()
-                .push(nonce_preimage)
-                .await;
-            self.known_raw_hash_lock_keys
-                .push(SpendingKey::RawHashLock {
-                    preimage: nonce_preimage,
-                });
+            self.add_raw_hash_key(nonce_preimage).await;
         }
 
         // Mark all expected UTXOs that were received in this block as received
@@ -1443,6 +1463,14 @@ mod tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
+
+    impl WalletState {
+        /// Delete all nonce-preimage keys from database and cache.
+        pub(crate) async fn clear_raw_hash_keys(&mut self) {
+            self.known_raw_hash_lock_keys.clear();
+            self.wallet_db.nonce_preimages_mut().clear().await;
+        }
+    }
 
     #[tokio::test]
     #[traced_test]
