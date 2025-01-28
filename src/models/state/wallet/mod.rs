@@ -29,6 +29,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
+use strum::Display;
 use tasm_lib::twenty_first::prelude::Polynomial;
 use tasm_lib::twenty_first::xfe;
 use tracing::info;
@@ -53,7 +54,7 @@ pub const WALLET_DB_NAME: &str = "wallet";
 pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct SecretKeyMaterial(XFieldElement);
+pub struct SecretKeyMaterial(XFieldElement);
 
 impl Zeroize for SecretKeyMaterial {
     fn zeroize(&mut self) {
@@ -61,7 +62,7 @@ impl Zeroize for SecretKeyMaterial {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Display)]
 pub enum ShamirSecretSharingError {
     /// When t = 0 or t = 1, Shamir secret sharing is disallowed because (t=0)
     /// it is impossible or (t=1) all shares contain all of the information
@@ -116,7 +117,7 @@ impl SecretKeyMaterial {
     ///
     /// This function is responsible for the splitting part.
     /// [`combine_shamir`](Self::combine_shamir) does the recombination.
-    pub(crate) fn share_shamir(
+    pub fn share_shamir(
         &self,
         t: usize,
         n: usize,
@@ -150,7 +151,7 @@ impl SecretKeyMaterial {
     /// Combine a quorum of Shamir secret shares into one.
     ///
     /// See [`share_shamir`](Self::share_shamir).
-    pub(crate) fn combine_shamir(
+    pub fn combine_shamir(
         t: usize,
         shares: Vec<(usize, SecretKeyMaterial)>,
     ) -> Result<SecretKeyMaterial, ShamirSecretSharingError> {
@@ -178,6 +179,25 @@ impl SecretKeyMaterial {
 
         let p0 = polynomial.evaluate(XFieldElement::ZERO);
         Ok(SecretKeyMaterial(p0))
+    }
+
+    /// Convert a seed phrase into [`SecretKeyMaterial`].
+    ///
+    /// The returned secret key material is wrapped in a `Result`, which is
+    /// `Err` if the words are not 18 valid BIP-39 words.
+    pub fn from_phrase(phrase: &[String]) -> Result<Self> {
+        let mnemonic = Mnemonic::from_phrase(&phrase.iter().join(" "), bip39::Language::English)?;
+        let secret_seed: [u8; 24] = mnemonic.entropy().try_into()?;
+        let xfe = XFieldElement::new(
+            secret_seed
+                .chunks(8)
+                .map(|ch| u64::from_le_bytes(ch.try_into().unwrap()))
+                .map(BFieldElement::new)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        );
+        Ok(Self(xfe))
     }
 }
 
@@ -213,7 +233,7 @@ impl WalletSecret {
     }
 
     /// Create new `Wallet` given a `secret` key.
-    fn new(secret_seed: SecretKeyMaterial) -> Self {
+    pub fn new(secret_seed: SecretKeyMaterial) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
@@ -528,20 +548,25 @@ impl WalletSecret {
             .collect_vec()
     }
 
-    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a WalletSecret
+    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
+    /// [`WalletSecret`]
     pub fn from_phrase(phrase: &[String]) -> Result<Self> {
-        let mnemonic = Mnemonic::from_phrase(&phrase.iter().join(" "), bip39::Language::English)?;
-        let secret_seed: [u8; 24] = mnemonic.entropy().try_into().unwrap();
-        let xfe = XFieldElement::new(
-            secret_seed
-                .chunks(8)
-                .map(|ch| u64::from_le_bytes(ch.try_into().unwrap()))
-                .map(BFieldElement::new)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-        Ok(Self::new(SecretKeyMaterial(xfe)))
+        let key = SecretKeyMaterial::from_phrase(phrase)?;
+        Ok(Self::new(key))
+    }
+
+    /// Split the secret across n shares such that combining any t of them
+    /// yields the secret again.
+    ///
+    /// Calls [`SecretKeyMaterial::share_shamir`] on the `secret_seed` field.
+    /// See that method for documentation.
+    pub fn share_shamir(
+        &self,
+        t: usize,
+        n: usize,
+        seed: [u8; 32],
+    ) -> Result<Vec<(usize, SecretKeyMaterial)>, ShamirSecretSharingError> {
+        self.secret_seed.share_shamir(t, n, seed)
     }
 }
 
