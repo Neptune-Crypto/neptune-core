@@ -16,6 +16,7 @@
   - [Utxo Notification](./neptune-core/utxo_notification.md)
 - [User Guides](./user-guides.md)
   - [Installation](./user-guides/installation.md)
+  - [Shamir Secret Sharing](./user-guides/shamir-secret-sharing.md)
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)
   - [Git Message](./contributing/git-message.md)
