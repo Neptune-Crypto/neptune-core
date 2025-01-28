@@ -993,10 +993,10 @@ impl GlobalState {
             }
 
             // Check if UTXO is guesser-reward and associated key doesn't already exist.
-            if incoming_utxo.is_guesser_fee() {
-                if !existing_nonce_preimages.contains(&incoming_utxo.receiver_preimage) {
-                    new_nonce_preimages.push(incoming_utxo.receiver_preimage);
-                }
+            if incoming_utxo.is_guesser_fee()
+                && !existing_nonce_preimages.contains(&incoming_utxo.receiver_preimage)
+            {
+                new_nonce_preimages.push(incoming_utxo.receiver_preimage);
             }
 
             let ms_item = Hash::hash(&incoming_utxo.utxo);

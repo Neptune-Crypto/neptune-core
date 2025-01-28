@@ -3206,13 +3206,14 @@ mod rpc_server_tests {
             }
         }
 
-        /// sends a tx with two outputs: one self, one external, for each key type.
+        /// sends a tx with two outputs: one self, one external, for each key type
+        /// that accepts incoming UTXOs.
         #[traced_test]
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn send_to_many_test() -> Result<()> {
-            for key_type in KeyType::all_types() {
-                worker::send_to_many(key_type).await?;
+            for recipient_key_type in KeyType::all_types_for_receiving() {
+                worker::send_to_many(recipient_key_type).await?;
             }
             Ok(())
         }
@@ -3264,17 +3265,14 @@ mod rpc_server_tests {
                     .next_unused_spending_key(KeyType::Generation)
                     .await
                     .unwrap();
-                let wallet_spending_key = if let SpendingKey::Generation(key) = wallet_spending_key
-                {
-                    key
-                } else {
+                let SpendingKey::Generation(wallet_spending_key) = wallet_spending_key else {
                     panic!("Expected generation key")
                 };
 
                 // --- Init.  generate a block, with composer fee going to our
                 // wallet ---
                 let timestamp = network.launch_date() + Timestamp::days(1);
-                let (block_1, expected_utxos_block1) = make_mock_block(
+                let (block_1, composer_utxos) = make_mock_block(
                     &genesis_block,
                     Some(timestamp),
                     wallet_spending_key,
@@ -3294,7 +3292,7 @@ mod rpc_server_tests {
                 // --- Init.  append the block to blockchain ---
                 rpc_server
                     .state
-                    .set_new_self_mined_tip(block_1.clone(), expected_utxos_block1)
+                    .set_new_self_mined_tip(block_1.clone(), composer_utxos)
                     .await?;
 
                 {
@@ -3307,7 +3305,7 @@ mod rpc_server_tests {
                     expected_balance.div_two();
                     assert_eq!(
                         expected_balance, new_balance,
-                        "New balance must be exactly 1/2 mining reward"
+                        "New balance must be exactly 1/2 mining reward bc timelock"
                     );
                 };
 

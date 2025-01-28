@@ -560,9 +560,7 @@ impl WalletState {
             .nonce_preimages_mut()
             .push(nonce_preimage)
             .await;
-        self.known_raw_hash_lock_keys.push(as_key);
-
-        return;
+        self.known_raw_hash_lock_keys.push(as_key)
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
