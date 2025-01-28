@@ -1555,129 +1555,172 @@ mod block_tests {
         }
     }
 
-    #[test]
-    fn guesser_can_unlock_guesser_fee_utxo() {
-        let genesis_block = Block::genesis_block(Network::Main);
-        let mut transaction = make_mock_transaction(vec![], vec![]);
+    mod guesser_fee_utxos {
+        use super::*;
+        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
 
-        transaction.kernel = TransactionKernelModifier::default()
-            .fee(
-                NeptuneCoins::from_nau(1337.into())
-                    .expect("given number should be valid NeptuneCoins amount"),
+        #[tokio::test]
+        async fn guesser_fee_addition_records_are_consistent() {
+            // Ensure that two ways of deriving guesser-fee addition records
+            // are consistent.
+
+            let mut rng = thread_rng();
+            let genesis_block = Block::genesis_block(Network::Main);
+            let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
+            let nonce_preimage = rng.gen();
+            let (block1, _) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
+                &genesis_block,
+                None,
+                a_key,
+                rng.gen(),
+                0.4,
+                nonce_preimage,
             )
-            .modify(transaction.kernel);
+            .await;
+            let ars = block1.guesser_fee_addition_records();
+            let ars_from_eus = block1
+                .guesser_fee_expected_utxos(nonce_preimage)
+                .iter()
+                .map(|x| x.addition_record)
+                .collect_vec();
+            assert_eq!(ars, ars_from_eus);
 
-        let mut block = invalid_block_with_transaction(&genesis_block, transaction);
+            let MutatorSetUpdate {
+                removals: _,
+                additions,
+            } = block1.mutator_set_update();
+            assert!(
+                ars.iter().all(|ar| additions.contains(ar)),
+                "All addition records must be present in block's mutator set update"
+            );
+        }
 
-        let preimage = thread_rng().gen::<Digest>();
-        block.set_header_nonce(preimage.hash());
+        #[test]
+        fn guesser_can_unlock_guesser_fee_utxo() {
+            let genesis_block = Block::genesis_block(Network::Main);
+            let mut transaction = make_mock_transaction(vec![], vec![]);
 
-        let guesser_fee_utxos = block.guesser_fee_utxos();
+            transaction.kernel = TransactionKernelModifier::default()
+                .fee(
+                    NeptuneCoins::from_nau(1337.into())
+                        .expect("given number should be valid NeptuneCoins amount"),
+                )
+                .modify(transaction.kernel);
 
-        let lock_script_and_witness = LockScriptAndWitness::hash_lock_from_preimage(preimage);
-        assert!(guesser_fee_utxos
-            .iter()
-            .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));
-    }
+            let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
-    #[traced_test]
-    #[tokio::test]
-    async fn guesser_fees_are_added_to_mutator_set() {
-        // Mine two blocks on top of the genesis block. Verify that the guesser
-        // fee for the 1st block was added to the mutator set. The genesis
-        // block awards no guesser fee.
+            let preimage = thread_rng().gen::<Digest>();
+            block.set_header_nonce(preimage.hash());
 
-        // This test must live in block/mod.rs because it relies on access to
-        // private fields on `BlockBody`.
+            let guesser_fee_utxos = block.guesser_fee_utxos();
 
-        let mut rng = thread_rng();
-        let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
-        assert!(
-            genesis_block.guesser_fee_utxos().is_empty(),
-            "Genesis block has no guesser fee UTXOs"
-        );
+            let lock_script_and_witness = LockScriptAndWitness::hash_lock_from_preimage(preimage);
+            assert!(guesser_fee_utxos
+                .iter()
+                .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));
+        }
 
-        let launch_date = genesis_block.header().timestamp;
-        let in_seven_months = launch_date + Timestamp::months(7);
-        let in_eight_months = launch_date + Timestamp::months(8);
-        let alice_wallet = WalletSecret::devnet_wallet();
-        let alice_key = alice_wallet.nth_generation_spending_key(0);
-        let alice_address = alice_key.to_address();
-        let mut alice =
-            mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
+        #[traced_test]
+        #[tokio::test]
+        async fn guesser_fees_are_added_to_mutator_set() {
+            // Mine two blocks on top of the genesis block. Verify that the guesser
+            // fee for the 1st block was added to the mutator set. The genesis
+            // block awards no guesser fee.
 
-        let output = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(4),
-            rng.gen(),
-            alice_address.into(),
-            true,
-        );
-        let fee = NeptuneCoins::new(1);
-        let (tx1, _) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
-                vec![output.clone()].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OnChain,
-                fee,
+            // This test must live in block/mod.rs because it relies on access to
+            // private fields on `BlockBody`.
+
+            let mut rng = thread_rng();
+            let network = Network::Main;
+            let genesis_block = Block::genesis_block(network);
+            assert!(
+                genesis_block.guesser_fee_utxos().is_empty(),
+                "Genesis block has no guesser fee UTXOs"
+            );
+
+            let launch_date = genesis_block.header().timestamp;
+            let in_seven_months = launch_date + Timestamp::months(7);
+            let in_eight_months = launch_date + Timestamp::months(8);
+            let alice_wallet = WalletSecret::devnet_wallet();
+            let alice_key = alice_wallet.nth_generation_spending_key(0);
+            let alice_address = alice_key.to_address();
+            let mut alice =
+                mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default())
+                    .await;
+
+            let output = TxOutput::offchain_native_currency(
+                NeptuneCoins::new(4),
+                rng.gen(),
+                alice_address.into(),
+                true,
+            );
+            let fee = NeptuneCoins::new(1);
+            let (tx1, _) = alice
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![output.clone()].into(),
+                    alice_key.into(),
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    in_seven_months,
+                    TxProvingCapability::PrimitiveWitness,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
+
+            let block1 = Block::block_template_invalid_proof(
+                &genesis_block,
+                tx1,
                 in_seven_months,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
-            )
-            .await
-            .unwrap();
+                Digest::default(),
+                None,
+            );
+            alice.set_new_tip(block1.clone()).await.unwrap();
 
-        let block1 = Block::block_template_invalid_proof(
-            &genesis_block,
-            tx1,
-            in_seven_months,
-            Digest::default(),
-            None,
-        );
-        alice.set_new_tip(block1.clone()).await.unwrap();
+            let (tx2, _) = alice
+                .lock_guard()
+                .await
+                .create_transaction_with_prover_capability(
+                    vec![output].into(),
+                    alice_key.into(),
+                    UtxoNotificationMedium::OnChain,
+                    fee,
+                    in_eight_months,
+                    TxProvingCapability::PrimitiveWitness,
+                    &TritonVmJobQueue::dummy(),
+                )
+                .await
+                .unwrap();
 
-        let (tx2, _) = alice
-            .lock_guard()
-            .await
-            .create_transaction_with_prover_capability(
-                vec![output].into(),
-                alice_key.into(),
-                UtxoNotificationMedium::OnChain,
-                fee,
-                in_eight_months,
-                TxProvingCapability::PrimitiveWitness,
-                &TritonVmJobQueue::dummy(),
-            )
-            .await
-            .unwrap();
+            let block2 =
+                Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
 
-        let block2 =
-            Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
+            let mut ms = block1.body().mutator_set_accumulator.clone();
 
-        let mut ms = block1.body().mutator_set_accumulator.clone();
+            let mutator_set_update_guesser_fees =
+                MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records());
+            let mut mutator_set_update_tx = MutatorSetUpdate::new(
+                block2.body().transaction_kernel.inputs.clone(),
+                block2.body().transaction_kernel.outputs.clone(),
+            );
 
-        let mutator_set_update_guesser_fees =
-            MutatorSetUpdate::new(vec![], block1.guesser_fee_addition_records());
-        let mut mutator_set_update_tx = MutatorSetUpdate::new(
-            block2.body().transaction_kernel.inputs.clone(),
-            block2.body().transaction_kernel.outputs.clone(),
-        );
+            let reason = "applying mutator set update derived from block 2 \
+                          to mutator set from block 1 should work";
+            mutator_set_update_guesser_fees
+                .apply_to_accumulator_and_records(
+                    &mut ms,
+                    &mut mutator_set_update_tx.removals.iter_mut().collect_vec(),
+                )
+                .expect(reason);
+            mutator_set_update_tx
+                .apply_to_accumulator(&mut ms)
+                .expect(reason);
 
-        let reason = "applying mutator set update derived from block 2 \
-                      to mutator set from block 1 should work";
-        mutator_set_update_guesser_fees
-            .apply_to_accumulator_and_records(
-                &mut ms,
-                &mut mutator_set_update_tx.removals.iter_mut().collect_vec(),
-            )
-            .expect(reason);
-        mutator_set_update_tx
-            .apply_to_accumulator(&mut ms)
-            .expect(reason);
-
-        assert_eq!(ms.hash(), block2.body().mutator_set_accumulator.hash());
+            assert_eq!(ms.hash(), block2.body().mutator_set_accumulator.hash());
+        }
     }
 
     #[test]
