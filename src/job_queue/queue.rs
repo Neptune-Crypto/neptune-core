@@ -217,8 +217,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                         .unwrap(),
                 };
                 tracing::info!(
-                    "  *** JobQueue: ended job #{} - {} secs ***",
+                    "  *** JobQueue: ended job #{} - Completion: {} - {} secs ***",
                     job_num,
+                    job_completion,
                     timer.elapsed().as_secs_f32()
                 );
                 job_num += 1;

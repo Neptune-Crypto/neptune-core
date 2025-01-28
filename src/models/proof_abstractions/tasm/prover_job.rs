@@ -16,6 +16,8 @@ use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
+use crate::job_queue::traits::JobCancelReceiver;
+use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
@@ -73,6 +75,27 @@ pub enum VmProcessError {
     NoExitCode,
 }
 
+enum ProverProcessCompletion {
+    Finished(Proof),
+    Cancelled,
+}
+impl From<ProverProcessCompletion> for JobCompletion {
+    fn from(ppc: ProverProcessCompletion) -> Self {
+        match ppc {
+            ProverProcessCompletion::Finished(proof) => ProverJobResult::from(proof).into(),
+            ProverProcessCompletion::Cancelled => Self::Cancelled,
+        }
+    }
+}
+impl From<Result<ProverProcessCompletion, VmProcessError>> for JobCompletion {
+    fn from(result: Result<ProverProcessCompletion, VmProcessError>) -> Self {
+        match result {
+            Ok(ppc) => ppc.into(),
+            Err(e) => ProverJobResult(Err(e.into())).into(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ProverJobResult(pub Result<Proof, ProverJobError>);
 impl JobResult for ProverJobResult {
@@ -88,6 +111,16 @@ impl From<Box<ProverJobResult>> for Result<Proof, ProverJobError> {
         (*v).0
     }
 }
+impl From<Proof> for ProverJobResult {
+    fn from(proof: Proof) -> Self {
+        Self(Ok(proof))
+    }
+}
+impl From<ProverJobError> for ProverJobResult {
+    fn from(e: ProverJobError) -> Self {
+        Self(Err(e))
+    }
+}
 
 #[derive(Debug, Clone, Default, Copy)]
 pub(crate) struct ProverJobSettings {
@@ -96,19 +129,38 @@ pub(crate) struct ProverJobSettings {
 
 #[derive(Debug, Clone)]
 pub struct ProverJob {
-    pub program: Program,
-    pub claim: Claim,
-    pub nondeterminism: NonDeterminism,
-    pub job_settings: ProverJobSettings,
+    program: Program,
+    claim: Claim,
+    nondeterminism: NonDeterminism,
+    job_settings: ProverJobSettings,
 }
 
 impl ProverJob {
-    /// Run the program and generate a proof for it, assuming the Triton VM run
-    /// halts gracefully.
-    ///
-    /// If we are in a test environment, try reading it from disk. If it is not
-    /// there, generate it and store it to disk.
-    async fn prove(&self) -> Result<Proof, ProverJobError> {
+    /// instantiate a ProverJob
+    pub fn new(
+        program: Program,
+        claim: Claim,
+        nondeterminism: NonDeterminism,
+        job_settings: ProverJobSettings,
+    ) -> Self {
+        Self {
+            program,
+            claim,
+            nondeterminism,
+            job_settings,
+        }
+    }
+
+    // runs program in triton_vm to determine complexity
+    //
+    // if complexity exceeds setting `max_log2_padded_height_for_proofs`
+    // then it is unlikely this hardware will be able to generate the
+    // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
+    // error is returned.
+    async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
+        tracing::debug!("executing VM program to determine complexity (padded-height)");
+        tracing::debug!("job settings: {:?}", self.job_settings);
+
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let mut vm_state = VMState::new(
@@ -148,45 +200,85 @@ impl ProverJob {
         assert_eq!(self.claim.program_digest, self.program.hash());
         assert_eq!(self.claim.output, vm_state.public_output);
 
-        tracing::debug!("job settings: {:?}", self.job_settings);
-
         let padded_height = vm_state.cycle_count.next_power_of_two();
+
+        tracing::info!(
+            "VM program execution finished: padded-height: {}",
+            padded_height
+        );
+
         match self.job_settings.max_log2_padded_height_for_proofs {
             Some(limit) if 2u32.pow(limit.into()) < padded_height => {
-                return Err(ProverJobError::ProofComplexityLimitExceeded {
+                let ph_limit = 2u32.pow(limit.into());
+
+                tracing::warn!(
+                    "proof-complexity-limit-exceeded. ({} > {})  The proof will not be generated",
+                    padded_height,
+                    ph_limit
+                );
+
+                Err(ProverJobError::ProofComplexityLimitExceeded {
                     result: padded_height,
-                    limit: 2u32.pow(limit.into()),
+                    limit: ph_limit,
                 })
             }
-            _ => {}
+            _ => Ok(()),
         }
+    }
 
+    /// Run the program and generate a proof for it, assuming the Triton VM run
+    /// halts gracefully.
+    ///
+    /// If a message is received on the [JobCancelReceiver] channel while
+    /// proving, the job will be cancelled.
+    ///
+    /// panics if job cannot be successfully cancelled.
+    ///
+    /// If we are in a test environment, try reading it from disk. If it is not
+    /// there, generate it and store it to disk.
+    async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
+        // todo: make test version async, cancellable.
         #[cfg(test)]
         {
-            Ok(test::load_proof_or_produce_and_save(
+            // avoid some 'unused' compiler warnings.
+            let _dummy = rx;
+            let _cancelled = ProverProcessCompletion::Cancelled;
+
+            let proof = test::load_proof_or_produce_and_save(
                 &self.claim,
                 self.program.clone(),
                 self.nondeterminism.clone(),
-            ))
+            );
+            ProverProcessCompletion::Finished(proof).into()
         }
         #[cfg(not(test))]
         {
-            // todo: perhaps we should retry once if process exits
-            // with non-zero or no exit code.
-            Ok(self.prove_out_of_process().await?)
+            // invoke external prover
+            self.prove_out_of_process(rx).await.into()
         }
     }
 
     /// runs triton-vm prover out of process.
     ///
+    /// This method spawns child process and waits for either:
+    ///   1. the child to finish
+    ///   2. a job-cancellation message.
+    ///
+    /// It returns a Result<ProverProcessCompletion, _> indicating:
+    ///   1. Ok(Completion) - prover finished successfully (with a Proof)
+    ///   2. Ok(Cancelled) - job was cancelled
+    ///   3. Err(e) - an error occurred.
+    ///
+    /// If the job is cancelled while the child process is running then
+    /// an attempt is made to kill the child process.  If this attempt
+    /// fails, the fn will panic.
+    ///
     /// input is sent via stdin, output is received via stdout.
     /// stderr is ignored.
     ///
-    /// The prover executable is triton-vm-prover. Presently
-    /// it must be in $PATH.
-    ///
-    /// todo: figure out how to exec correct executable for
-    /// release, debug, etc.
+    /// The prover executable is triton-vm-prover. It must reside
+    /// in same directory as neptune-core.
+    /// see Self::path_to_triton_vm_prover()
     ///
     /// parameters claim, program, nondeterminism are passed as
     /// json strings.
@@ -196,9 +288,12 @@ impl ProverJob {
     /// The process result is only read if exit code is 0.
     /// A non-zero exit code or no code results in an error.
     #[cfg(not(test))]
-    async fn prove_out_of_process(&self) -> Result<Proof, VmProcessError> {
+    async fn prove_out_of_process(
+        &self,
+        mut rx: JobCancelReceiver,
+    ) -> Result<ProverProcessCompletion, VmProcessError> {
         // start child process
-        let child_handle = {
+        let mut child = {
             let inputs = [
                 serde_json::to_string(&self.claim)?,
                 serde_json::to_string(&self.program)?,
@@ -206,7 +301,7 @@ impl ProverJob {
             ];
 
             let mut child = tokio::process::Command::new(Self::path_to_triton_vm_prover()?)
-                .kill_on_drop()
+                .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null()) // ignore stderr
@@ -218,17 +313,33 @@ impl ProverJob {
             child
         };
 
-        // read result from child process stdout.
-        {
-            let op = child_handle.wait_with_output().await?;
-            match op.status.code() {
-                Some(0) => {
-                    let proof = bincode::deserialize(&op.stdout)?;
-                    Ok(proof)
-                }
-                Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
+        let child_process_id = match child.id() {
+            Some(id) => id.to_string(),
+            None => "??".to_string(),
+        };
 
-                None => Err(VmProcessError::NoExitCode),
+        tracing::debug!("prover job started child process. id: {}", child_process_id);
+
+        // see <https://github.com/tokio-rs/tokio/discussions/7132>
+        tokio::select! {
+            result = process_util::wait_with_output(&mut child) => {
+                let output = result?;
+                match output.status.code() {
+                    Some(0) => {
+                        let proof = bincode::deserialize(&output.stdout)?;
+                        Ok(ProverProcessCompletion::Finished(proof))
+                    }
+                    Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
+
+                    None => Err(VmProcessError::NoExitCode),
+                }
+            },
+
+            _ = rx.changed() => {
+                tracing::debug!("prover job got cancel message. killing child process. id: {}", child_process_id);
+                child.kill().await.expect("external proving process should be killed");
+                tracing::debug!("prover job: kill succeeded for child process. id: {},  cancelling job", child_process_id);
+                Ok(ProverProcessCompletion::Cancelled)
             }
         }
     }
@@ -257,8 +368,110 @@ impl Job for ProverJob {
         true
     }
 
-    // see trait doc-comment
-    async fn run_async(&self) -> Box<dyn JobResult> {
-        Box::new(ProverJobResult(self.prove().await))
+    // we override the default impl of this method in order to kill the external
+    // proving job when a job is cancelled.
+    //
+    // It is not strictly necessary to do so.  We could just rely on the handy
+    // tokio::process::Command::kill_on_drop(true) setting, by which the tokio
+    // executor kills the process in the background after the child handle is
+    // dropped.  However in that case we would not know when or if the process
+    // is actually killed.  It can take seconds to kill a prover process, so if
+    // another proving job is queued, it could execute the prover process before
+    // the current one has finished exiting, which might be problematic in terms
+    // of RAM usage.
+    //
+    // also, just in terms of correctness, the job-queue is meant to serialize
+    // jobs one after another, so if aspects of two jobs are ever running at the
+    // same time then by definition the code is not correct.
+    //
+    // The select!() and kill() occur in Self::prove_out_of_process().
+    async fn run_async_cancellable(&self, mut rx: JobCancelReceiver) -> JobCompletion {
+        // check if allowed, and listen for cancel messages.
+        tokio::select!(
+            result = self.check_if_allowed() => {
+                if let Err(e) = result {
+                    return ProverJobResult::from(e).into()
+                }
+            }
+
+            _ = rx.changed() => {
+                tracing::debug!("prover job got cancel message while checking program complexity");
+                return JobCompletion::Cancelled
+            }
+        );
+
+        // all is well, let's prove!
+        self.prove(rx).await // handles cancellation internally
+    }
+}
+
+// future cleanup: remove this module, when possible.
+#[cfg(not(test))]
+mod process_util {
+
+    use std::process::Output;
+
+    use tokio::io::AsyncRead;
+    use tokio::io::AsyncReadExt;
+    use tokio::process::Child;
+
+    // future cleanup: remove this fn.
+    //
+    // This fn is a slightly modified copy of
+    // tokio::process::Child::wait_with_output().
+    //
+    // As of tokio 1.43.0, Child::wait_with_output() takes `self` argument,
+    // which prevents use within a select along with Child::kill().  The docs
+    // for Child::kill() demonstrate using a select!() to Child::wait() for a
+    // process and optionally kill() it if a message is received.  However,
+    // Child::wait_with_output() used in this manner results in a compile error
+    // due to the `self` parameter, which differs from `&mut self` that
+    // Child::wait() takes.
+    //
+    // The modified fn below takes `&mut Child` and has some minor mods so it
+    // does not rely on internal tokio functions.
+    //
+    // The function can be removed if/when a version of tokio is released that
+    // supports this usage, or if another solution is found.
+    //
+    // Links:
+    //   A playground demonstrating the compile error:
+    //   <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=a1aaeb3204f62f9369b85d73d7e25c2e>
+    //
+    //   A playground demonstrating this solution:
+    //   <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=a956940628dd8b0d8bf5d1a546d4a6eb>
+    //
+    //   A writeup / discussion of the issue:
+    //   <https://github.com/tokio-rs/tokio/discussions/7132>
+    pub async fn wait_with_output(child: &mut Child) -> tokio::io::Result<Output> {
+        async fn read_to_end<A: AsyncRead + Unpin>(
+            io: &mut Option<A>,
+        ) -> tokio::io::Result<Vec<u8>> {
+            let mut vec = Vec::new();
+            if let Some(io) = io.as_mut() {
+                io.read_to_end(&mut vec).await?;
+            }
+            Ok(vec)
+        }
+
+        let mut stdout_pipe = child.stdout.take();
+        let mut stderr_pipe = child.stderr.take();
+
+        let stdout_fut = read_to_end(&mut stdout_pipe);
+        let stderr_fut = read_to_end(&mut stderr_pipe);
+
+        let (status, stdout, stderr) = futures::try_join!(child.wait(), stdout_fut, stderr_fut)?;
+
+        // let (status, stdout, stderr) = try_join3(myself.wait(), stdout_fut, stderr_fut).await?;
+
+        // Drop happens after `try_join` due to <https://github.com/tokio-rs/tokio/issues/4309>
+        drop(stdout_pipe);
+        drop(stderr_pipe);
+
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 }

@@ -204,12 +204,12 @@ pub(crate) async fn prove_consensus_program(
     proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
-    let job = ProverJob {
+    let job = ProverJob::new(
         program,
         claim,
         nondeterminism,
-        job_settings: proof_job_options.job_settings,
-    };
+        proof_job_options.job_settings,
+    );
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
@@ -232,6 +232,7 @@ pub(crate) async fn prove_consensus_program(
             tokio::select! {
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
+                    debug!("forwarding job cancellation request to job");
                     cancel_tx.send(())?;
                     anyhow::bail!("job cancelled by caller");
                 }

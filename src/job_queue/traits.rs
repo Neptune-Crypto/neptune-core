@@ -3,7 +3,7 @@ use std::any::Any;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
-pub(super) type JobCancelReceiver = watch::Receiver<()>;
+pub type JobCancelReceiver = watch::Receiver<()>; // used in pub trait
 pub(super) type JobCancelSender = watch::Sender<()>;
 
 pub(super) type JobResultReceiver = oneshot::Receiver<JobCompletion>;
@@ -20,6 +20,21 @@ pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
 pub enum JobCompletion {
     Finished(Box<dyn JobResult>),
     Cancelled,
+}
+impl std::fmt::Display for JobCompletion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            Self::Finished(_) => "Finished",
+            Self::Cancelled => "Cancelled",
+        };
+
+        write!(f, "{}", str)
+    }
+}
+impl<T: JobResult> From<T> for JobCompletion {
+    fn from(result: T) -> Self {
+        Self::Finished(Box::new(result))
+    }
 }
 
 // represents any kind of job
