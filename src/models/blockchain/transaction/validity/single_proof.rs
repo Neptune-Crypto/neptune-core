@@ -962,7 +962,6 @@ mod test {
 
         use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_additions_and_removals;
-        use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
         use super::*;
@@ -1022,12 +1021,12 @@ mod test {
             let claim = bad_witness.claim();
             let input = PublicInput::new(claim.input.clone());
             let nondeterminism = bad_witness.nondeterminism();
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[UpdateBranch::NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR],
             );
+            test_result.unwrap();
         }
 
         fn bad_new_aocl(good_witness: &UpdateWitness) {
@@ -1049,12 +1048,12 @@ mod test {
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 &witness_again,
             );
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
             );
+            test_result.unwrap();
         }
 
         fn bad_old_aocl(good_witness: &UpdateWitness) {
@@ -1076,12 +1075,12 @@ mod test {
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 &witness_again,
             );
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
             );
+            test_result.unwrap();
         }
 
         fn bad_absolute_index_set_value(good_witness: &UpdateWitness) {
@@ -1101,12 +1100,12 @@ mod test {
             let claim = bad_witness.claim();
             let input = PublicInput::new(claim.input.clone());
             let nondeterminism = bad_witness.nondeterminism();
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
+            test_result.unwrap();
         }
 
         fn bad_absolute_index_set_length_too_short(good_witness: &UpdateWitness) {
@@ -1123,12 +1122,12 @@ mod test {
             let claim = bad_witness.claim();
             let input = PublicInput::new(claim.input.clone());
             let nondeterminism = bad_witness.nondeterminism();
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
+            test_result.unwrap();
         }
 
         fn bad_absolute_index_set_length_too_long(good_witness: &UpdateWitness) {
@@ -1147,12 +1146,12 @@ mod test {
             let claim = bad_witness.claim();
             let input = PublicInput::new(claim.input.clone());
             let nondeterminism = bad_witness.nondeterminism();
-            consensus_program_negative_test(
-                SingleProof,
-                &input,
+            let test_result = SingleProof.test_assertion_failure(
+                input,
                 nondeterminism,
                 &[UpdateBranch::INPUT_SETS_NOT_EQUAL_ERROR],
             );
+            test_result.unwrap();
         }
 
         #[tokio::test]
