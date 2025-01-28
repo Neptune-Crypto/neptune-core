@@ -396,7 +396,8 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                bail!("No wallet file found at {}.", wallet_file.display());
+                eprintln!("No wallet file found at {}.", wallet_file.display());
+                return Ok(());
             } else {
                 println!("{}", wallet_file.display());
             }
@@ -502,10 +503,11 @@ async fn main() -> Result<()> {
 
             // if the wallet file already exists, bail
             if wallet_file.exists() {
-                bail!(
+                println!(
                     "Cannot import wallet from Shamir secret shares; wallet file {} already exists. Move it to another location (or remove it) to perform this operation.",
                     wallet_file.display()
                 );
+                return Ok(());
             }
 
             // prompt user for all shares
@@ -641,10 +643,11 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                bail!(
-                    concat!("Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n",
-                    "Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
+                println!(
+                    concat!("Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n \
+                    Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
+                return Ok(());
             }
             let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
                 Err(e) => {
@@ -655,7 +658,7 @@ async fn main() -> Result<()> {
                 Ok(result) => result,
             };
             println!("Wallet for {}.", network);
-            println!("Read from file `{}`.", wallet_file.display());
+            println!("Read from file `{}`.\n", wallet_file.display());
 
             let mut rng = thread_rng();
             let shamir_shares = match wallet_secret.share_shamir(*t, *n, rng.gen()) {
