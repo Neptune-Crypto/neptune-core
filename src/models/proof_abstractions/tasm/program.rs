@@ -298,45 +298,12 @@ pub mod test {
             );
 
             let rust_result = self.run_rust(&public_input, non_determinism.clone());
-            proptest::prop_assert!(rust_result.is_err());
+            let Err(ConsensusError::RustShadowPanic(_)) = rust_result else {
+                return fail("rust shadowing must fail, but did not".into());
+            };
 
             Ok(())
         }
-    }
-
-    pub(crate) fn consensus_program_negative_test<T: ConsensusProgramSpecification>(
-        consensus_program: T,
-        input: &PublicInput,
-        nondeterminism: NonDeterminism,
-        expected_error_ids: &[i128],
-    ) {
-        let rust_result = consensus_program.run_rust(input, nondeterminism.clone());
-        assert2::assert!(let Err(ConsensusError::RustShadowPanic(_)) = rust_result);
-
-        let program_name = core::any::type_name::<T>();
-        let tasm_result = consensus_program.run_tasm(input, nondeterminism);
-        let consensus_err = tasm_result.expect_err(&format!(
-            "negative test failed to fail for consensus program {program_name}"
-        ));
-        let ConsensusError::TritonVMPanic(_, instruction_error) = consensus_err else {
-            panic!("Triton VM must fail for consensus program {program_name}")
-        };
-        let assertion_err = match instruction_error {
-            InstructionError::AssertionFailed(err)
-            | InstructionError::VectorAssertionFailed(_, err) => err,
-            _ => panic!("Triton VM must fail on assertion, but got: {instruction_error}"),
-        };
-        let err_id = assertion_err
-            .id
-            .expect("failed assertion must have an error ID, but does not");
-
-        let expected_error_ids_str = expected_error_ids.iter().join(", ");
-        assert!(
-            expected_error_ids.contains(&err_id),
-            "error ID {err_id} ∉ {{{expected_error_ids_str}}}\nTriton VM execution failed due to \
-            unfulfilled assertion with error ID {err_id}, but expected one of the following IDs: \
-            {{{expected_error_ids_str}}}",
-        );
     }
 
     /// Derive a file name from the claim, includes the extension

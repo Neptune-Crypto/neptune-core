@@ -1060,7 +1060,6 @@ pub mod test {
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::builtins as tasm;
-    use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -1270,7 +1269,8 @@ pub mod test {
     ) {
         let stdin = native_currency_witness.standard_input();
         let nd = native_currency_witness.nondeterminism();
-        consensus_program_negative_test(NativeCurrency, &stdin, nd, expected_error_ids);
+        let test_result = NativeCurrency.test_assertion_failure(stdin, nd, expected_error_ids);
+        test_result.unwrap();
     }
 
     #[test]
