@@ -1177,7 +1177,7 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        let guesser_fraction = 0f64;
+        let guesser_fraction = 0.8f64;
         let (coinbase_tx, expected_composer_utxos) = make_coinbase_transaction_from_state(
             &alice
                 .global_state_lock
@@ -1354,7 +1354,7 @@ mod wallet_tests {
 
         let mut rng = StdRng::seed_from_u64(87255549301u64);
 
-        let guesser_fraction = 0f64;
+        let guesser_fraction = 0.9f64;
         let (cbtx, _cb_expected) = make_coinbase_transaction_from_state(
             &bob.global_state_lock
                 .lock_guard()
