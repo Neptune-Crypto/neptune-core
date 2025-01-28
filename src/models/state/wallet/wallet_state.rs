@@ -2483,11 +2483,29 @@ mod tests {
                 .monitored_utxos()
                 .get_all()
                 .await;
-            assert_eq!(2, mutxos.len(), "Must have registered two UTXOs");
+            assert_eq!(
+                2,
+                mutxos.len(),
+                "Must have registered two UTXOs as guesser-reward"
+            );
             assert_eq!(
                 2,
                 mutxos.iter().map(|x| x.addition_record()).unique().count(),
                 "Addition records from MUTXOs must be unique"
+            );
+            assert_eq!(
+                1,
+                mutxos
+                    .iter()
+                    .filter(|x| x.utxo.release_date().is_some())
+                    .count()
+            );
+            assert_eq!(
+                1,
+                mutxos
+                    .iter()
+                    .filter(|x| x.utxo.release_date().is_none())
+                    .count()
             );
             for mutxo in mutxos {
                 assert!(
