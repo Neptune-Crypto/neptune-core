@@ -42,6 +42,7 @@ use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::database::storage::storage_schema::traits::StorageWriter;
 use crate::database::storage::storage_schema::DbtVec;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
@@ -331,7 +332,6 @@ impl WalletState {
                 }
             }
 
-            // note: this will write modified state to disk.
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
@@ -339,6 +339,9 @@ impl WalletState {
                 )
                 .await
                 .expect("Updating wallet state with genesis block must succeed");
+
+            // No db-persisting here, as all of state should preferably be
+            // persisted at the same time.
         }
 
         wallet_state
