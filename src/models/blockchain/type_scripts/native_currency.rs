@@ -77,11 +77,11 @@ pub struct NativeCurrency;
 
 impl NativeCurrency {
     const TIME_LOCK_HASH: Digest = Digest([
-        BFieldElement::new(15856625234789400986),
-        BFieldElement::new(14860524825637478569),
-        BFieldElement::new(16088103707528769286),
-        BFieldElement::new(9034095039849919237),
-        BFieldElement::new(18168297044820278740),
+        BFieldElement::new(11493081001297792331),
+        BFieldElement::new(14845021226026139948),
+        BFieldElement::new(4809053857285865793),
+        BFieldElement::new(5280486431890426245),
+        BFieldElement::new(12484740501891840491),
     ]);
 }
 

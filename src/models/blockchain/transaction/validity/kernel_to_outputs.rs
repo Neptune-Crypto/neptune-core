@@ -156,12 +156,8 @@ impl ConsensusProgram for KernelToOutputs {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
-        let new_list = library.import(Box::new(list::new::New {
-            element_type: DataType::Digest,
-        }));
-        let get_digest = library.import(Box::new(list::get::Get {
-            element_type: DataType::Digest,
-        }));
+        let new_list = library.import(Box::new(list::new::New));
+        let get_digest = library.import(Box::new(list::get::Get::new(DataType::Digest)));
         let compute_canonical_commitment =
             library.import(Box::new(tasm_lib::neptune::mutator_set::commit::Commit));
         let hash_varlen = library.import(Box::new(
