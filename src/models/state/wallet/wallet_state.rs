@@ -991,7 +991,7 @@ impl WalletState {
         // updates from this block
 
         let monitored_utxos = self.wallet_db.monitored_utxos_mut();
-        let mut new_nonce_preimages = vec![];
+        let mut nonce_preimage: Option<Digest> = None;
         let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
@@ -1105,7 +1105,7 @@ impl WalletState {
 
                     // If this is a guesser-fee UTXO, store the nonce-preimage.
                     if incoming_utxo.is_guesser_fee() {
-                        new_nonce_preimages.push(receiver_preimage);
+                        nonce_preimage = Some(receiver_preimage);
                     }
 
                     // Add the data required to restore the UTXOs membership proof from public
@@ -1214,11 +1214,8 @@ impl WalletState {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
-        // Write nonce-preimage for guesser fee UTXOs to DB. There should only
-        // ever be 0 or 1 elements in this list, per block.
-        new_nonce_preimages.sort();
-        new_nonce_preimages.dedup();
-        for nonce_preimage in new_nonce_preimages {
+        // Write nonce-preimage for guesser fee UTXOs to DB, and cache.
+        if let Some(nonce_preimage) = nonce_preimage {
             self.wallet_db
                 .nonce_preimages_mut()
                 .push(nonce_preimage)
