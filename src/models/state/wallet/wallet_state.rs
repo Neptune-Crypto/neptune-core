@@ -420,7 +420,7 @@ impl WalletState {
                 self.mempool_unspent_utxos.remove(&tx_id);
             }
             MempoolEvent::UpdateTxMutatorSet(_tx_hash_pre_update, _tx_post_update) => {
-                // Utxos are not affected by MutatorSet update, so this is a no-op.
+                // Wallet doesn't need to do anything here.
             }
         }
     }
