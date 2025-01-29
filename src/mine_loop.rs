@@ -30,6 +30,8 @@ use twenty_first::math::digest::Digest;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::block_kernel::BlockKernel;
+use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -129,7 +131,9 @@ pub(crate) async fn guess_nonce(
 
 /// Return MAST nodes from which the block header MAST hash is calculated,
 /// given a variable nonce.
-fn precalculate_header_ap(block_header_template: &BlockHeader) -> [Digest; 3] {
+fn precalculate_header_ap(
+    block_header_template: &BlockHeader,
+) -> [Digest; BlockHeader::MAST_HEIGHT] {
     let header_mt = block_header_template.merkle_tree();
 
     header_mt
@@ -139,19 +143,33 @@ fn precalculate_header_ap(block_header_template: &BlockHeader) -> [Digest; 3] {
         .unwrap()
 }
 
+/// Return MAST nodes from which the block kernel MAST hash is calculated,
+/// given a variable header.
+fn precalculate_kernel_ap(block_kernel: &BlockKernel) -> [Digest; BlockKernel::MAST_HEIGHT] {
+    let block_mt = block_kernel.merkle_tree();
+
+    block_mt
+        .authentication_structure(&[BlockKernelField::Header as usize])
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
 /// Return MAST nodes from which the block hash is calculated, given a
-/// variable block header.
+/// variable block header with a variable block nonce.
 ///
 /// Returns those MAST nodes that can be precalculated prior to PoW-guessing.
 /// This vastly reduces the amount of hashing needed for each PoW-guess.
-fn precalculate_block_auth_paths(block_template: &Block) -> ([Digest; 2], [Digest; 3]) {
-    let block_body_mast_hash_digest =
-        Tip5::hash_varlen(&block_template.body().mast_hash().encode());
-    let appendix_digest = Tip5::hash_varlen(&block_template.appendix().encode());
-    let mt_node_3 = Tip5::hash_pair(appendix_digest, Digest::default());
+fn precalculate_block_auth_paths(
+    block_template: &Block,
+) -> (
+    [Digest; BlockKernel::MAST_HEIGHT],
+    [Digest; BlockHeader::MAST_HEIGHT],
+) {
     let header_ap = precalculate_header_ap(block_template.header());
+    let kernel_ap = precalculate_kernel_ap(&block_template.kernel);
 
-    ([block_body_mast_hash_digest, mt_node_3], header_ap)
+    (kernel_ap, header_ap)
 }
 
 fn guess_worker(
@@ -281,8 +299,8 @@ impl GuessNonceResult {
 /// Calculates the block hash in as few Tip5 invocations as possible.
 #[inline(always)]
 fn fast_kernel_mast_hash(
-    kernel_auth_path: [Digest; 2],
-    header_auth_path: [Digest; 3],
+    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
+    header_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     nonce: Digest,
 ) -> Digest {
     let header_mast_hash = Tip5::hash_pair(Tip5::hash_varlen(&nonce.encode()), header_auth_path[0]);
@@ -301,11 +319,11 @@ fn fast_kernel_mast_hash(
 /// Run a single iteration of the mining loop.
 #[inline]
 fn guess_nonce_iteration(
-    kernel_auth_path: [Digest; 2],
+    kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
     threshold: Digest,
     sleepy_guessing: bool,
     rng: &mut rand::rngs::ThreadRng,
-    bh_auth_path: [Digest; 3],
+    bh_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
     if sleepy_guessing {
