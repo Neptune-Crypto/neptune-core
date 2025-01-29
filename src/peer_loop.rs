@@ -639,10 +639,6 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotification(block_notification) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockNotification");
 
-                debug!(
-                    "Got BlockNotification of height {}",
-                    block_notification.height
-                );
                 let (tip_header, sync_anchor_is_set) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -650,6 +646,10 @@ impl PeerLoopHandler {
                         state.net.sync_anchor.is_some(),
                     )
                 };
+                debug!(
+                    "Got BlockNotification of height {}. Own height is {}",
+                    block_notification.height, tip_header.height
+                );
 
                 let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
                 if GlobalState::sync_mode_threshold_stateless(
@@ -3569,7 +3569,6 @@ mod peer_loop_tests {
 
     mod sync_challenges {
         use super::*;
-        use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
         use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
@@ -3714,8 +3713,9 @@ mod peer_loop_tests {
             let network = Network::Main;
             let genesis_block: Block = Block::genesis_block(network);
 
+            const ALICE_SYNC_MODE_THRESHOLD: usize = 10;
             let alice_cli = cli_args::Args {
-                sync_mode_threshold: 10,
+                sync_mode_threshold: ALICE_SYNC_MODE_THRESHOLD,
                 ..Default::default()
             };
             let (
@@ -3748,11 +3748,13 @@ mod peer_loop_tests {
             alice.set_new_tip(block_1.clone()).await?;
             bob.set_new_tip(block_1.clone()).await?;
 
+            // produce enough blocks to ensure alice needs to go into sync mode
+            // with this block notification.
             let blocks = fake_valid_sequence_of_blocks_for_tests_dyn(
                 &block_1,
                 TARGET_BLOCK_INTERVAL,
                 rng.gen(),
-                rng.gen_range(SYNC_CHALLENGE_POW_WITNESS_LENGTH..20),
+                rng.gen_range(ALICE_SYNC_MODE_THRESHOLD + 1..20),
             )
             .await;
             for block in &blocks {
