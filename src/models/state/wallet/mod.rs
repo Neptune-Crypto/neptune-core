@@ -4,6 +4,7 @@ pub(crate) mod expected_utxo;
 pub(crate) mod incoming_utxo;
 pub(crate) mod monitored_utxo;
 pub(crate) mod rusty_wallet_database;
+pub mod secret_key_material;
 pub(crate) mod transaction_output;
 pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
@@ -21,11 +22,12 @@ use anyhow::Context;
 use anyhow::Result;
 use bip39::Mnemonic;
 use itertools::Itertools;
-use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
+use secret_key_material::SecretKeyMaterial;
+use secret_key_material::ShamirSecretSharingError;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::info;
@@ -33,7 +35,6 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::math::x_field_element::XFieldElement;
-use zeroize::Zeroize;
 use zeroize::ZeroizeOnDrop;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -48,15 +49,6 @@ const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet";
 pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct SecretKeyMaterial(XFieldElement);
-
-impl Zeroize for SecretKeyMaterial {
-    fn zeroize(&mut self) {
-        self.0 = XFieldElement::zero();
-    }
-}
 
 /// Wallet contains the wallet-related data we want to store in a JSON file,
 /// and that is not updated during regular program execution.
@@ -90,7 +82,7 @@ impl WalletSecret {
     }
 
     /// Create new `Wallet` given a `secret` key.
-    fn new(secret_seed: SecretKeyMaterial) -> Self {
+    pub fn new(secret_seed: SecretKeyMaterial) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
@@ -405,20 +397,25 @@ impl WalletSecret {
             .collect_vec()
     }
 
-    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a WalletSecret
+    /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
+    /// [`WalletSecret`]
     pub fn from_phrase(phrase: &[String]) -> Result<Self> {
-        let mnemonic = Mnemonic::from_phrase(&phrase.iter().join(" "), bip39::Language::English)?;
-        let secret_seed: [u8; 24] = mnemonic.entropy().try_into().unwrap();
-        let xfe = XFieldElement::new(
-            secret_seed
-                .chunks(8)
-                .map(|ch| u64::from_le_bytes(ch.try_into().unwrap()))
-                .map(BFieldElement::new)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-        Ok(Self::new(SecretKeyMaterial(xfe)))
+        let key = SecretKeyMaterial::from_phrase(phrase)?;
+        Ok(Self::new(key))
+    }
+
+    /// Split the secret across n shares such that combining any t of them
+    /// yields the secret again.
+    ///
+    /// Calls [`SecretKeyMaterial::share_shamir`] on the `secret_seed` field.
+    /// See that method for documentation.
+    pub fn share_shamir(
+        &self,
+        t: usize,
+        n: usize,
+        seed: [u8; 32],
+    ) -> Result<Vec<(usize, SecretKeyMaterial)>, ShamirSecretSharingError> {
+        self.secret_seed.share_shamir(t, n, seed)
     }
 }
 
@@ -426,6 +423,7 @@ impl WalletSecret {
 mod wallet_tests {
     use expected_utxo::ExpectedUtxo;
     use num_traits::CheckedSub;
+    use num_traits::Zero;
     use rand::random;
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;

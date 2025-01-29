@@ -23,6 +23,7 @@ use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use neptune_cash::models::state::wallet::secret_key_material::SecretKeyMaterial;
 use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationData;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
@@ -30,6 +31,9 @@ use neptune_cash::models::state::wallet::WalletSecret;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::error::RpcError;
 use neptune_cash::rpc_server::RPCClient;
+use rand::thread_rng;
+use rand::Rng;
+use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use tarpc::client;
@@ -335,6 +339,24 @@ enum Command {
         #[clap(long, default_value_t)]
         network: Network,
     },
+
+    /// Combine shares from a t-out-of-n Shamir secret sharing scheme; reproduce
+    /// the original secret and save it as a wallet secret.
+    ShamirCombine {
+        t: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
+
+    /// Share the wallet secret using a t-out-of-n Shamir secret sharing scheme.
+    ShamirShare {
+        t: usize,
+        n: usize,
+
+        #[clap(long, default_value_t)]
+        network: Network,
+    },
 }
 
 /// represents top-level cli args
@@ -374,7 +396,8 @@ async fn main() -> Result<()> {
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                bail!("No wallet file found at {}.", wallet_file.display());
+                eprintln!("No wallet file found at {}.", wallet_file.display());
+                return Ok(());
             } else {
                 println!("{}", wallet_file.display());
             }
@@ -416,37 +439,15 @@ async fn main() -> Result<()> {
 
             // read seed phrase from user input
             println!("Importing seed phrase. Please enter words:");
-            let mut phrase = vec![];
-            let mut i = 1;
-            loop {
-                print!("{}. ", i);
-                io::stdout().flush()?;
-                let mut buffer = "".to_string();
-                std::io::stdin()
-                    .read_line(&mut buffer)
-                    .expect("Cannot accept user input.");
-                let word = buffer.trim();
-                if bip39::Language::English
-                    .wordlist()
-                    .get_words_by_prefix("")
-                    .iter()
-                    .any(|s| *s == word)
-                {
-                    phrase.push(word.to_string());
-                    i += 1;
-                    if i > 18 {
-                        break;
-                    }
-                } else {
-                    println!("Did not recognize word \"{}\"; please try again.", word);
+            let secret_key = match enter_seed_phrase_dialog() {
+                Ok(k) => k,
+                Err(e) => {
+                    println!("Failed to import seed phrase.");
+                    eprintln!("Error: {e}");
+                    return Ok(());
                 }
-            }
-            let wallet_secret = match WalletSecret::from_phrase(&phrase) {
-                Err(_) => {
-                    bail!("Invalid seed phrase.");
-                }
-                Ok(ws) => ws,
             };
+            let wallet_secret = WalletSecret::new(secret_key);
 
             // wallet file does not exist yet, so create it and save
             println!("Saving wallet to disk at {} ...", wallet_file.display());
@@ -472,7 +473,7 @@ async fn main() -> Result<()> {
             if !wallet_file.exists() {
                 bail!(
                     concat!("Cannot export seed phrase because there is no wallet.dat file to export from.\n",
-                    "Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
+                    "Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
             }
             let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
@@ -486,9 +487,7 @@ async fn main() -> Result<()> {
             };
             println!("Seed phrase for {}.", network);
             println!("Read from file `{}`.", wallet_file.display());
-            for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
-                println!("{}. {word}", i + 1);
-            }
+            print_seed_phrase_dialog(wallet_secret);
             return Ok(());
         }
         Command::NthReceivingAddress { network, index } => {
@@ -496,6 +495,190 @@ async fn main() -> Result<()> {
         }
         Command::PremineReceivingAddress { network } => {
             return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
+        }
+        Command::ShamirCombine { t, network } => {
+            let wallet_dir =
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+
+            // if the wallet file already exists, bail
+            if wallet_file.exists() {
+                println!(
+                    "Cannot import wallet from Shamir secret shares; wallet file {} already exists. Move it to another location (or remove it) to perform this operation.",
+                    wallet_file.display()
+                );
+                return Ok(());
+            }
+
+            // prompt user for all shares
+            let mut shares = vec![];
+            let capture_integers = Regex::new(r"^(\d+)\/(\d+)$").unwrap();
+            while shares.len() != *t {
+                println!("Enter share index (\"i/n\"): ");
+
+                let mut buffer = "".to_string();
+                std::io::stdin()
+                    .read_line(&mut buffer)
+                    .expect("Cannot accept user input.");
+                let buffer = buffer.trim();
+
+                let (before_slash, after_slash) =
+                    if let Some(captures) = capture_integers.captures(buffer) {
+                        let before_slash = captures.get(1).unwrap().as_str();
+                        let after_slash = captures.get(2).unwrap().as_str();
+
+                        (before_slash, after_slash)
+                    } else {
+                        println!("Could not parse index. Please try again.");
+                        continue;
+                    };
+
+                let i = match usize::from_str(before_slash) {
+                    Ok(i) => i,
+                    Err(_e) => {
+                        println!("Failed to parse `{}`. Please try again.", before_slash);
+                        continue;
+                    }
+                };
+
+                let n = match usize::from_str(after_slash) {
+                    Ok(i) => i,
+                    Err(_e) => {
+                        println!("Failed to parse `{}`. Please try again.", after_slash);
+                        continue;
+                    }
+                };
+
+                if i == 0 {
+                    println!("Index i == 0 is invalid. Please try again.");
+                    continue;
+                }
+
+                if i > n {
+                    println!("Index i = {i} > n = {n} is disallowed. Please try again.");
+                    continue;
+                }
+
+                if shares.iter().any(|(j, _)| *j == i) {
+                    println!("Index i = {i} is a duplicate; cannot have duplicates.");
+                    println!(
+                        "Already have shares with indices {{{}}}/{n}",
+                        shares.iter().map(|(j, _)| *j).sorted().join(",")
+                    );
+                    println!("Please try again.");
+                    continue;
+                }
+
+                loop {
+                    println!("Enter seed phrase for key share {i}/{n}:");
+                    let key = match enter_seed_phrase_dialog() {
+                        Ok(key) => key,
+                        Err(e) => {
+                            println!("Failed to process seed phrase.");
+                            eprintln!("Error: {e}");
+                            println!("Please try again.");
+                            continue;
+                        }
+                    };
+                    shares.push((i, key));
+                    break;
+                }
+                println!();
+                println!(
+                    "Have shares {{{}}}/{n}.\n",
+                    shares.iter().map(|(j, _)| *j).sorted().join(",")
+                );
+            }
+
+            let original_secret = match SecretKeyMaterial::combine_shamir(*t, shares) {
+                Ok(key) => {
+                    println!("Shamir recombination successful.");
+                    key
+                }
+                Err(e) => {
+                    println!("Could not recombine Shamir secret shares.");
+                    eprintln!("Error: {e}");
+                    return Ok(());
+                }
+            };
+
+            // create wallet and save to disk
+            let wallet_secret = WalletSecret::new(original_secret);
+
+            // wallet file does not exist yet (we verified that upstairs) so
+            // create it and save
+            println!("Saving wallet to disk at {} ...", wallet_file.display());
+            DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
+            match wallet_secret.save_to_disk(&wallet_file) {
+                Err(e) => {
+                    bail!("Could not save wallet to disk. {e}");
+                }
+                Ok(_) => {
+                    println!("Success.");
+                }
+            }
+
+            return Ok(());
+        }
+        Command::ShamirShare { t, n, network } => {
+            if *n < 1 {
+                println!("Share count n must be larger than 1.");
+                return Ok(());
+            }
+            if *t >= *n {
+                println!("Cannot split secret into fewer shares than would be required to reproduce the original secret. Try setting t < n.");
+                return Ok(());
+            }
+            if *t <= 1 {
+                println!(
+                    "Quorum t must be larger than 1, otherwise Shamir secret sharing is moot."
+                );
+                return Ok(());
+            }
+
+            // The root path is where both the wallet and all databases are stored
+            let wallet_dir =
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
+
+            // Get wallet object, create various wallet secret files
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            if !wallet_file.exists() {
+                println!(
+                    concat!("Cannot Shamir-secret-share wallet secret because there is no wallet.dat file to read from.\n \
+                    Generate one using `neptune-cli generate-wallet`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
+                );
+                return Ok(());
+            }
+            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+                Err(e) => {
+                    println!("Could not read from wallet file.");
+                    eprintln!("Error: {e}");
+                    return Ok(());
+                }
+                Ok(result) => result,
+            };
+            println!("Wallet for {}.", network);
+            println!("Read from file `{}`.\n", wallet_file.display());
+
+            let mut rng = thread_rng();
+            let shamir_shares = match wallet_secret.share_shamir(*t, *n, rng.gen()) {
+                Ok(shares) => shares,
+                Err(e) => {
+                    println!("Could not Shamir secret share wallet secret.");
+                    eprintln!("Error: {e}");
+                    return Ok(());
+                }
+            };
+
+            let n = shamir_shares.len();
+            for (i, secret_key) in shamir_shares {
+                println!("Key share {i}/{}:", n);
+                let wallet_secret = WalletSecret::new(secret_key);
+                print_seed_phrase_dialog(wallet_secret);
+                println!();
+            }
+
+            return Ok(());
         }
         _ => {}
     }
@@ -538,6 +721,8 @@ async fn main() -> Result<()> {
         | Command::WhichWallet { .. }
         | Command::ExportSeedPhrase { .. }
         | Command::ImportSeedPhrase { .. }
+        | Command::ShamirCombine { .. }
+        | Command::ShamirShare { .. }
         | Command::NthReceivingAddress { .. }
         | Command::PremineReceivingAddress { .. } => {
             unreachable!("Case should be handled earlier.")
@@ -1082,4 +1267,42 @@ or use equivalent claim functionality of your chosen wallet software.
     }
 
     Ok(())
+}
+
+fn enter_seed_phrase_dialog() -> Result<SecretKeyMaterial> {
+    let mut phrase = vec![];
+    let mut i = 1;
+    loop {
+        print!("{}. ", i);
+        io::stdout().flush()?;
+        let mut buffer = "".to_string();
+        std::io::stdin()
+            .read_line(&mut buffer)
+            .expect("Cannot accept user input.");
+        let word = buffer.trim();
+        if bip39::Language::English
+            .wordlist()
+            .get_words_by_prefix("")
+            .iter()
+            .any(|s| *s == word)
+        {
+            phrase.push(word.to_string());
+            i += 1;
+            if i > 18 {
+                break;
+            }
+        } else {
+            println!("Did not recognize word \"{}\"; please try again.", word);
+        }
+    }
+    match SecretKeyMaterial::from_phrase(&phrase) {
+        Ok(key) => Ok(key),
+        Err(_) => bail!("invalid seed phrase"),
+    }
+}
+
+fn print_seed_phrase_dialog(wallet_secret: WalletSecret) {
+    for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
+        println!("{}. {word}", i + 1);
+    }
 }
