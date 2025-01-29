@@ -7,7 +7,9 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::bfe_array;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
@@ -15,6 +17,7 @@ use twenty_first::math::digest::Digest;
 use super::block_height::BlockHeight;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
+use super::Block;
 use crate::config_models::network::Network;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -148,12 +151,61 @@ impl MastHash for BlockHeader {
     }
 }
 
+/// The data needed to calculate the block hash, apart from the data present
+/// in the block header.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HeaderToBlockHashWitness {
+    /// The "body" leaf of the Merkle tree from which block hash is calculated.
+    body_leaf: Digest,
+
+    /// The "appendix" leaf of the Merkle tree from which block hash is
+    /// calculated.
+    appendix_leaf: Digest,
+}
+
+impl From<&Block> for HeaderToBlockHashWitness {
+    fn from(value: &Block) -> Self {
+        Self {
+            body_leaf: Tip5::hash_varlen(&value.body().mast_hash().encode()),
+            appendix_leaf: Tip5::hash_varlen(&value.appendix().encode()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct BlockHeaderWithBlockHashWitness {
+    pub(crate) header: BlockHeader,
+    witness: HeaderToBlockHashWitness,
+}
+
+impl BlockHeaderWithBlockHashWitness {
+    pub(crate) fn new(header: BlockHeader, witness: HeaderToBlockHashWitness) -> Self {
+        Self { header, witness }
+    }
+
+    pub(crate) fn hash(&self) -> Digest {
+        let block_header_leaf = Tip5::hash_varlen(&self.header.mast_hash().encode());
+        let leafs = [
+            block_header_leaf,
+            self.witness.body_leaf,
+            self.witness.appendix_leaf,
+            Digest::default(),
+        ];
+        MerkleTree::sequential_new(&leafs).unwrap().root()
+    }
+
+    pub(crate) fn is_successor_of(&self, parent: &Self) -> bool {
+        self.header.prev_block_digest == parent.hash()
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod block_header_tests {
     use rand::thread_rng;
     use rand::Rng;
 
     use super::*;
+    use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
 
     pub fn random_block_header() -> BlockHeader {
         let mut rng = thread_rng();
@@ -185,5 +237,20 @@ pub(crate) mod block_header_tests {
             ADVANCE_DIFFICULTY_CORRECTION_FACTOR,
             1 << ADVANCE_DIFFICULTY_CORRECTION_FACTOR.ilog2()
         );
+    }
+
+    #[test]
+    fn witness_agrees_with_block_hash() {
+        let block_primitive_witness = deterministic_block_primitive_witness();
+        let block = Block::block_template_invalid_proof_from_witness(
+            block_primitive_witness,
+            Timestamp::now(),
+            Digest::default(),
+            None,
+        );
+        let expected = block.hash();
+        let witness: HeaderToBlockHashWitness = (&block).into();
+        let calculated = BlockHeaderWithBlockHashWitness::new(*block.header(), witness).hash();
+        assert_eq!(expected, calculated);
     }
 }

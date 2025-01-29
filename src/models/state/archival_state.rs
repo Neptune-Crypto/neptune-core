@@ -22,6 +22,8 @@ use crate::database::storage::storage_schema::traits::*;
 use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
+use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
@@ -389,6 +391,7 @@ impl ArchivalState {
             min_aocl_index: new_block.mutator_set_accumulator_after().aocl.num_leafs()
                 - num_additions,
             num_additions,
+            block_hash_witness: HeaderToBlockHashWitness::from(new_block),
         }));
 
         block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
@@ -775,6 +778,25 @@ impl ArchivalState {
         }
 
         ret
+    }
+
+    /// Returns the block header with a witness to the block hash if that block
+    /// is known.
+    ///
+    /// Returns `None` if the block is not known *or* if the block is the
+    /// genesis block, as the genesis block does not need a witness for its
+    /// hash.
+    pub(crate) async fn block_header_with_hash_witness(
+        &self,
+        block_digest: Digest,
+    ) -> Option<BlockHeaderWithBlockHashWitness> {
+        self.block_index_db
+            .get(BlockIndexKey::Block(block_digest))
+            .await
+            .map(|x| {
+                let record = x.as_block_record();
+                BlockHeaderWithBlockHashWitness::new(record.block_header, record.block_hash_witness)
+            })
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere.
@@ -3563,5 +3585,59 @@ mod archival_state_tests {
         let _rams = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .unwrap();
+    }
+
+    mod block_hash_witness {
+        use super::*;
+        use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+
+        #[traced_test]
+        #[tokio::test]
+        async fn stored_block_hash_witness_agrees_with_block_hash() {
+            let network = Network::Main;
+            let mut rng = thread_rng();
+            let mut archival_state = make_test_archival_state(network).await;
+            let genesis_block = Block::genesis_block(network);
+            let blocks: [Block; 3] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::now(),
+                rng.gen(),
+            )
+            .await;
+            for block in blocks.iter() {
+                archival_state.write_block_as_tip(block).await.unwrap();
+            }
+
+            for block in blocks.iter() {
+                let block_digest = block.hash();
+                let stored_record = archival_state
+                    .block_index_db
+                    .get(BlockIndexKey::Block(block_digest))
+                    .await
+                    .unwrap()
+                    .as_block_record();
+                assert_eq!(
+                    block.hash(),
+                    BlockHeaderWithBlockHashWitness::new(
+                        stored_record.block_header,
+                        stored_record.block_hash_witness
+                    )
+                    .hash(),
+                    "Block hash from stored witness must agree with block hash for block height {}",
+                    block.header().height
+                );
+
+                let block_header_with_block_hash_witness = archival_state
+                    .block_header_with_hash_witness(block_digest)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    block.hash(),
+                    block_header_with_block_hash_witness.hash(),
+                    "Block hash from stored witness must agree with block hash for block height {}",
+                    block.header().height
+                );
+            }
+        }
     }
 }

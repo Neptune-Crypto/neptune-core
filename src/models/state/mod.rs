@@ -63,11 +63,13 @@ use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::mine_loop::composer_parameters::ComposerParameters;
+use crate::models::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::HandshakeData;
+use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposalRejectError;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -75,7 +77,6 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::peer_loop::MIN_BLOCK_HEIGHT_FOR_SYNCING;
 use crate::prelude::twenty_first;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -1593,7 +1594,7 @@ impl GlobalState {
         };
 
         let tip_height = tip.header().height;
-        if tip_height < MIN_BLOCK_HEIGHT_FOR_SYNCING.into() {
+        if tip_height < (SYNC_CHALLENGE_POW_WITNESS_LENGTH as u64).into() {
             bail!("tip height is too small for sync mode")
         }
 
@@ -1645,6 +1646,21 @@ impl GlobalState {
             ));
         }
 
+        let mut pow_witnesses: Vec<BlockHeaderWithBlockHashWitness> = vec![];
+        let mut block_hash = tip.hash();
+        while pow_witnesses.len() < SYNC_CHALLENGE_POW_WITNESS_LENGTH {
+            let pow_witness = self
+                .chain
+                .archival_state()
+                .block_header_with_hash_witness(block_hash)
+                .await
+                .unwrap_or_else(|| {
+                    panic!("Pow-witness for block with hash {block_hash} must exist")
+                });
+            block_hash = pow_witness.header.prev_block_digest;
+            pow_witnesses.push(pow_witness);
+        }
+
         let response = SyncChallengeResponse {
             tip: tip
                 .try_into()
@@ -1654,6 +1670,7 @@ impl GlobalState {
                 .expect("All blocks from archival state should be transferable."),
             blocks: block_pairs.try_into().unwrap(),
             membership_proofs: block_mmr_mps.try_into().unwrap(),
+            pow_witnesses: pow_witnesses.try_into().unwrap(),
         };
 
         Ok(response)

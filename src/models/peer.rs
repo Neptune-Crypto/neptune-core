@@ -29,6 +29,7 @@ use transfer_transaction::TransferTransaction;
 use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
+use super::blockchain::block::block_header::BlockHeaderWithBlockHashWitness;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::Difficulty;
 use super::blockchain::block::difficulty_control::ProofOfWork;
@@ -42,6 +43,9 @@ use crate::models::peer::transfer_block::TransferBlock;
 use crate::prelude::twenty_first;
 
 pub(crate) type InstanceId = u128;
+
+pub(crate) const SYNC_CHALLENGE_POW_WITNESS_LENGTH: usize = 10;
+pub(crate) const SYNC_CHALLENGE_NUM_BLOCK_PAIRS: usize = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub(crate) struct PeerConnectionInfo {
@@ -697,7 +701,7 @@ pub(crate) struct SyncChallenge {
 
     /// Block heights of the child blocks, for which the peer must respond with
     /// (parent, child) blocks. Assumed to be ordered from small to big.
-    pub(crate) challenges: [BlockHeight; 10],
+    pub(crate) challenges: [BlockHeight; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 }
 
 impl SyncChallenge {
@@ -774,17 +778,35 @@ impl SyncChallenge {
 pub(crate) struct SyncChallengeResponse {
     /// (parent, child) blocks. blocks are assumed to be ordered from small to
     /// big block height.
-    pub(crate) blocks: [(TransferBlock, TransferBlock); 10],
+    pub(crate) blocks: [(TransferBlock, TransferBlock); SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 
     /// Membership proof of the child blocks, relative to the tip-MMR (after
     /// appending digest of tip). Must match ordering of blocks.
-    pub(crate) membership_proofs: [MmrMembershipProof; 10],
+    pub(crate) membership_proofs: [MmrMembershipProof; SYNC_CHALLENGE_NUM_BLOCK_PAIRS],
 
     pub(crate) tip_parent: TransferBlock,
     pub(crate) tip: TransferBlock,
+
+    /// Pow-witnesses from tip and X blocks back, in reverse-chronological
+    /// order. So a witness to the `tip` hash should be the 1st element in this
+    /// array.
+    pub(crate) pow_witnesses: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
 }
 
 impl SyncChallengeResponse {
+    fn pow_witnesses_form_chain_from_tip(
+        tip_digest: Digest,
+        pow_witnesses: &[BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH],
+    ) -> bool {
+        let tip_header_with_witness = &pow_witnesses[0];
+        let mut is_chain_from_tip = tip_header_with_witness.hash() == tip_digest;
+        for (child, parent) in pow_witnesses.iter().tuple_windows() {
+            is_chain_from_tip &= child.is_successor_of(parent);
+        }
+
+        is_chain_from_tip
+    }
+
     /// Determine whether the `SyncChallengeResponse` answers the given
     /// `IssuedSyncChallenge`, and not some other one.
     pub(crate) fn matches(&self, issued_challenge: IssuedSyncChallenge) -> bool {
@@ -795,6 +817,9 @@ impl SyncChallengeResponse {
             return false;
         };
 
+        let pow_witnesses_form_chain_from_tip =
+            Self::pow_witnesses_form_chain_from_tip(tip.hash(), &self.pow_witnesses);
+
         self.blocks
             .iter()
             .zip(issued_challenge.challenge.challenges.iter())
@@ -802,6 +827,7 @@ impl SyncChallengeResponse {
             && issued_challenge.challenge.tip_digest == tip.hash()
             && issued_challenge.accumulated_pow == tip.header().cumulative_proof_of_work
             && tip.has_proof_of_work(tip_parent.header())
+            && pow_witnesses_form_chain_from_tip
     }
 
     /// Determine whether the proofs in `SyncChallengeResponse` are valid. Also
@@ -969,5 +995,67 @@ impl SyncChallengeResponse {
         }
 
         fork_relative_cumpow > own_tip_difficulty
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::random;
+    use rand::thread_rng;
+
+    use super::*;
+    use crate::models::blockchain::block::block_header::HeaderToBlockHashWitness;
+    use crate::models::blockchain::block::Block;
+    use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests;
+
+    #[tokio::test]
+    async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
+        let genesis = Block::genesis_block(Network::Main);
+        let mut rng = thread_rng();
+        let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
+            fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.gen())
+                .await;
+
+        let to_pow_witness = |block: &Block| {
+            BlockHeaderWithBlockHashWitness::new(
+                *block.header(),
+                HeaderToBlockHashWitness::from(block),
+            )
+        };
+
+        let mut i = SYNC_CHALLENGE_POW_WITNESS_LENGTH;
+        let mut block;
+        let mut valid_pow_chain = vec![];
+        while valid_pow_chain.len() < SYNC_CHALLENGE_POW_WITNESS_LENGTH {
+            i -= 1;
+            block = &ten_blocks[i];
+            valid_pow_chain.push(to_pow_witness(block));
+        }
+
+        let tip = &ten_blocks[SYNC_CHALLENGE_POW_WITNESS_LENGTH - 1];
+        let valid_pow_chain: [BlockHeaderWithBlockHashWitness; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
+            valid_pow_chain.try_into().unwrap();
+        assert!(SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
+            tip.hash(),
+            &valid_pow_chain
+        ));
+
+        for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
+            let mut invalid_pow_chain = valid_pow_chain.clone();
+            invalid_pow_chain[j].header.prev_block_digest = random();
+            assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
+                tip.hash(),
+                &invalid_pow_chain
+            ));
+        }
+
+        for j in 0..SYNC_CHALLENGE_POW_WITNESS_LENGTH {
+            let mut invalid_pow_chain = valid_pow_chain.clone();
+            invalid_pow_chain[j].header.nonce = random();
+            assert!(!SyncChallengeResponse::pow_witnesses_form_chain_from_tip(
+                tip.hash(),
+                &invalid_pow_chain
+            ));
+        }
     }
 }
