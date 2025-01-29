@@ -32,7 +32,7 @@ pub trait MastHash {
             digests.push(Digest::default());
         }
 
-        MerkleTree::par_new(&digests).unwrap()
+        MerkleTree::sequential_new(&digests).unwrap()
     }
 
     fn mast_hash(&self) -> Digest {
