@@ -168,6 +168,9 @@ pub struct Args {
     /// least the number of blocks set by this argument multiplied with the max
     /// block size (around 2 MB). Probably 1.5 to 2 times that amount for good
     /// margin.
+    // Notice that the minimum value here may not be less than
+    // [SYNC_CHALLENGE_POW_WITNESS_LENGTH](crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH)
+    // as that would prevent going into sync mode.
     #[clap(long, default_value = "1000", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
     pub(crate) sync_mode_threshold: usize,
 
