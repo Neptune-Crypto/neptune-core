@@ -668,8 +668,9 @@ impl Block {
         //   c) Verify that the mutator set update induced by the block sends
         //      the old mutator set accumulator to the new one.
         //   d) transaction timestamp <= block timestamp
-        //   e) transaction coinbase <= miner reward, and not negative.
-        //   f) 0 <= transaction fee (also checked in block program).
+        //   e) 0 <= transaction fee (also checked in block program).
+        //   f) transaction coinbase <= miner reward, and not negative.
+        //   g) Coinbase, if present, is max 4x the transaction fee.
 
         // DO NOT add explanations to the individual steps below. *All*
         // explanations belong in the recipe above and may not be duplicated or
@@ -844,9 +845,15 @@ impl Block {
         }
 
         // 2.e)
+        let fee = self.kernel.body.transaction_kernel.fee;
+        if fee.is_negative() {
+            warn!("Fee may not be negative when transaction is included in block. Got fee: {fee}.");
+            return false;
+        }
+
+        // 2.f)
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
-        let coinbase = self.kernel.body.transaction_kernel.coinbase;
-        if let Some(coinbase) = coinbase {
+        if let Some(coinbase) = self.kernel.body.transaction_kernel.coinbase {
             if coinbase > block_subsidy {
                 warn!(
                     "Coinbase exceeds block subsidy. coinbase: {coinbase}; \
@@ -859,13 +866,15 @@ impl Block {
                 warn!("Coinbase may not be negative. Got coinbase: {coinbase}.");
                 return false;
             }
-        }
 
-        // 2.f)
-        let fee = self.kernel.body.transaction_kernel.fee;
-        if fee.is_negative() {
-            warn!("Fee may not be negative when transaction is included in block. Got fee: {fee}.");
-            return false;
+            // 2.g)
+            if fee.scalar_mul(4) < coinbase {
+                warn!(
+                    "If coinbase is set, it must not exceed 4x transaction fee.\n\
+                    fee: {fee}; coinbase: {coinbase}"
+                );
+                return false;
+            }
         }
 
         true

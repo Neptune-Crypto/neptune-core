@@ -2428,7 +2428,7 @@ mod global_state_tests {
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
-        let guesser_fraction = 0f64;
+        let guesser_fraction = 0.9f64;
         let (coinbase_transaction, coinbase_expected_utxos) = make_coinbase_transaction_from_state(
             &genesis_block,
             &premine_receiver,

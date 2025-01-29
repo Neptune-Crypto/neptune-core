@@ -1160,7 +1160,9 @@ pub(crate) mod mine_loop_tests {
             .unwrap();
 
         let mut cli = cli_args::Args::default();
-        for guesser_fee_fraction in [0f64, 0.5, 1.0] {
+        for guesser_fee_fraction in [0.25f64, 0.5, 1.0] {
+            println!("guesser_fee_fraction: {guesser_fee_fraction}");
+
             // Verify constructed coinbase transaction and block template when mempool is empty
             assert!(
                 alice.lock_guard().await.mempool.is_empty(),

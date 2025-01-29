@@ -1813,7 +1813,7 @@ mod archival_state_tests {
             .unwrap();
         println!("Generated transaction for Alice and Bob.");
 
-        let guesser_fraction = 0f64;
+        let guesser_fraction = 0.5f64;
         let (cbtx, composer_expected_utxos) = make_coinbase_transaction_from_state(
             &premine_rec
                 .global_state_lock
@@ -1943,14 +1943,16 @@ mod archival_state_tests {
         );
 
         let block_subsidy = Block::block_subsidy(block_1.header().height);
-        let mut liquid_reward = block_subsidy;
-        liquid_reward.div_two();
+        let mut total_composer_reward = block_subsidy;
+        total_composer_reward.div_two();
+        let mut liquid_composer_reward = total_composer_reward;
+        liquid_composer_reward.div_two();
         assert_eq!(
             // premine receiver mined block 1: So new balance is:
             // premine + block_reward / 2 - sent_to_alice - sent_to_bob - tx-fee
             // = 20 + 64 - 10 - 5 - 1
             // = 68
-            liquid_reward + NeptuneCoins::new(20 - 10 - 5 - 1),
+            liquid_composer_reward + NeptuneCoins::new(20 - 10 - 5 - 1),
             premine_rec
                 .lock_guard()
                 .await
@@ -1961,7 +1963,7 @@ mod archival_state_tests {
 
         let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
         assert_eq!(
-            block_subsidy + NeptuneCoins::new(20 - 10 - 5 - 1),
+            total_composer_reward + NeptuneCoins::new(20 - 10 - 5 - 1),
             premine_rec
                 .lock_guard()
                 .await

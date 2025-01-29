@@ -198,8 +198,22 @@ impl NeptuneCoins {
     pub(crate) fn lossy_f64_fraction_mul(&self, fraction: f64) -> Option<NeptuneCoins> {
         assert!((0.0..=1.0).contains(&fraction));
 
+        // A few special-case handlings to avoid rounding errors on common fractions.
         if fraction == 1.0 {
             return Some(*self);
+        }
+
+        if fraction == 0.5 {
+            let mut ret = *self;
+            ret.div_two();
+            return Some(ret);
+        }
+
+        if fraction == 0.25 {
+            let mut ret = *self;
+            ret.div_two();
+            ret.div_two();
+            return Some(ret);
         }
 
         let value_as_f64 = self.0 as f64;
