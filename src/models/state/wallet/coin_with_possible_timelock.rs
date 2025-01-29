@@ -5,14 +5,14 @@ use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinWithPossibleTimeLock {
-    pub amount: NeptuneCoins,
+    pub amount: NativeCurrencyAmount,
     pub confirmed: Timestamp,
     pub release_date: Option<Timestamp>,
 }
@@ -90,14 +90,14 @@ impl CoinWithPossibleTimeLock {
             .iter()
             .filter(|c| c.release_date.is_none())
             .map(|c| c.amount)
-            .sum::<NeptuneCoins>();
+            .sum::<NativeCurrencyAmount>();
         result = format!("{result}total available: {total_available} NPT\n");
 
         let total_timelocked = coins
             .iter()
             .filter(|c| c.release_date.is_some())
             .map(|c| c.amount)
-            .sum::<NeptuneCoins>();
+            .sum::<NativeCurrencyAmount>();
         if !total_timelocked.is_zero() {
             result = format!("{result}total time-locked: {total_timelocked} NPT\n");
         }
@@ -114,7 +114,7 @@ mod test {
     use rand::RngCore;
 
     use super::CoinWithPossibleTimeLock;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
@@ -125,9 +125,10 @@ mod test {
         for _ in 0..num_coins {
             let coin = CoinWithPossibleTimeLock {
                 amount: if rng.gen::<bool>() {
-                    NeptuneCoins::new(rng.next_u32() % 100000)
+                    NativeCurrencyAmount::coins(rng.next_u32() % 100000)
                 } else {
-                    NeptuneCoins::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>())).unwrap()
+                    NativeCurrencyAmount::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>()))
+                        .unwrap()
                 },
                 release_date: if rng.gen::<bool>() {
                     Some(rng.gen::<Timestamp>())

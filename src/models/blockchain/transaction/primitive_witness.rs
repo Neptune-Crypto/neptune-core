@@ -429,7 +429,7 @@ pub mod neptune_arbitrary {
     use super::*;
     use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
@@ -483,7 +483,7 @@ pub mod neptune_arbitrary {
             //  - fee
             //  - timestamp
             (
-                NeptuneCoins::arbitrary_non_negative(),
+                NativeCurrencyAmount::arbitrary_non_negative(),
                 vec(arb::<Digest>(), num_inputs),
                 vec(arb::<u64>(), num_inputs),
                 vec(arb::<Digest>(), num_outputs),
@@ -517,7 +517,7 @@ pub mod neptune_arbitrary {
                                 let mut input_amounts = input_weights
                                     .into_iter()
                                     .map(|w| total_amount.to_nau_f64() * w)
-                                    .map(|f| NeptuneCoins::try_from(f).unwrap())
+                                    .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                                     .collect_vec();
 
                                 let sum_of_all_but_last = input_amounts
@@ -525,12 +525,12 @@ pub mod neptune_arbitrary {
                                     .rev()
                                     .skip(1)
                                     .cloned()
-                                    .sum::<NeptuneCoins>();
+                                    .sum::<NativeCurrencyAmount>();
                                 if let Some(last_input) = input_amounts.last_mut() {
                                     *last_input =
                                         total_amount.checked_sub(&sum_of_all_but_last).unwrap();
                                 } else {
-                                    total_amount = NeptuneCoins::zero();
+                                    total_amount = NativeCurrencyAmount::zero();
                                 }
 
                                 let (input_utxos, input_lock_scripts_and_witnesses) =
@@ -552,15 +552,16 @@ pub mod neptune_arbitrary {
                         let output_amounts = output_weights
                             .into_iter()
                             .map(|w| total_amount.to_nau_f64() * w)
-                            .map(|f| NeptuneCoins::try_from(f).unwrap())
+                            .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                             .collect_vec();
-                        let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+                        let total_outputs =
+                            output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
                         let fee = total_amount.checked_sub(&total_outputs).unwrap();
                         let total_inputs = input_utxos
                             .iter()
                             .cloned()
                             .map(|utxo| utxo.get_native_currency_amount())
-                            .sum::<NeptuneCoins>();
+                            .sum::<NativeCurrencyAmount>();
 
                         assert_eq!(
                             maybe_coinbase.unwrap_or(total_inputs),
@@ -593,8 +594,8 @@ pub mod neptune_arbitrary {
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
             public_announcements: &[PublicAnnouncement],
-            fee: NeptuneCoins,
-            coinbase: Option<NeptuneCoins>,
+            fee: NativeCurrencyAmount,
+            coinbase: Option<NativeCurrencyAmount>,
         ) -> BoxedStrategy<PrimitiveWitness> {
             let input_utxos = input_utxos.to_vec();
             let input_lock_scripts_and_witnesses = input_lock_scripts_and_witnesses.to_vec();
@@ -624,8 +625,8 @@ pub mod neptune_arbitrary {
             input_lock_scripts_and_witnesses: &[LockScriptAndWitness],
             output_utxos: &[Utxo],
             public_announcements: &[PublicAnnouncement],
-            fee: NeptuneCoins,
-            coinbase: Option<NeptuneCoins>,
+            fee: NativeCurrencyAmount,
+            coinbase: Option<NativeCurrencyAmount>,
             timestamp: Timestamp,
             merge_bit: bool,
         ) -> BoxedStrategy<PrimitiveWitness> {
@@ -716,8 +717,8 @@ pub mod neptune_arbitrary {
             public_announcements: Vec<PublicAnnouncement>,
             output_sender_randomnesses: Vec<Digest>,
             output_receiver_digests: Vec<Digest>,
-            fee: NeptuneCoins,
-            coinbase: Option<NeptuneCoins>,
+            fee: NativeCurrencyAmount,
+            coinbase: Option<NativeCurrencyAmount>,
             timestamp: Timestamp,
             inputs_salt: [BFieldElement; 3],
             outputs_salt: [BFieldElement; 3],
@@ -802,7 +803,7 @@ pub mod neptune_arbitrary {
         // this is only used by arbitrary-impls
         pub(crate) fn transaction_inputs_from_address_seeds_and_amounts(
             address_seeds: &[Digest],
-            input_amounts: &[NeptuneCoins],
+            input_amounts: &[NativeCurrencyAmount],
         ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
             let input_spending_keys = address_seeds
                 .iter()
@@ -835,10 +836,10 @@ pub mod neptune_arbitrary {
         /// requirement. This method assumes that the total input amount and coinbase (if
         /// set) can be safely added.
         pub(crate) fn find_balanced_output_amounts_and_fee(
-            total_input_amount: NeptuneCoins,
-            coinbase: Option<NeptuneCoins>,
-            output_amounts_suggestion: &mut [NeptuneCoins],
-            fee_suggestion: &mut NeptuneCoins,
+            total_input_amount: NativeCurrencyAmount,
+            coinbase: Option<NativeCurrencyAmount>,
+            output_amounts_suggestion: &mut [NativeCurrencyAmount],
+            fee_suggestion: &mut NativeCurrencyAmount,
         ) {
             assert!(
                 coinbase.is_none_or(|x| !x.is_negative()),
@@ -861,9 +862,9 @@ pub mod neptune_arbitrary {
             let mut total_output_amount = output_amounts_suggestion
                 .iter()
                 .cloned()
-                .sum::<NeptuneCoins>();
+                .sum::<NativeCurrencyAmount>();
             let total_input_plus_coinbase =
-                total_input_amount + coinbase.unwrap_or_else(|| NeptuneCoins::new(0));
+                total_input_amount + coinbase.unwrap_or_else(|| NativeCurrencyAmount::coins(0));
             let mut inflationary = total_output_amount.checked_add(fee_suggestion).is_none()
                 || (total_output_amount + *fee_suggestion != total_input_plus_coinbase);
             while inflationary {
@@ -873,7 +874,7 @@ pub mod neptune_arbitrary {
                 total_output_amount = output_amounts_suggestion
                     .iter()
                     .cloned()
-                    .sum::<NeptuneCoins>();
+                    .sum::<NativeCurrencyAmount>();
                 match total_input_plus_coinbase.checked_sub(&total_output_amount) {
                     Some(number) => {
                         *fee_suggestion = number;
@@ -890,7 +891,7 @@ pub mod neptune_arbitrary {
         /// addresses. If some release date is supplied, generate twice as many
         /// UTXOs such that half the total amount is time-locked.
         pub(crate) fn valid_tx_outputs_from_amounts_and_address_seeds(
-            output_amounts: &[NeptuneCoins],
+            output_amounts: &[NativeCurrencyAmount],
             address_seeds: &[Digest],
             timelock_until: Option<Timestamp>,
         ) -> Vec<Utxo> {
@@ -952,7 +953,7 @@ mod test {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -963,10 +964,10 @@ mod test {
 
     impl Utxo {
         /// returns a new Utxo with properties:
-        /// Set the number of NeptuneCoins, overriding the pre-existing number attached
+        /// Set the number of NativeCurrencyAmount, overriding the pre-existing number attached
         /// to the type script `NativeCurrency`, or adding a new coin with that amount
         /// and type script hash to the coins list.
-        pub(crate) fn new_with_native_currency_amount(&self, amount: NeptuneCoins) -> Utxo {
+        pub(crate) fn new_with_native_currency_amount(&self, amount: NativeCurrencyAmount) -> Utxo {
             let mut coins = self.coins().to_vec();
             assert!(
                 coins
@@ -994,7 +995,7 @@ mod test {
         pub(crate) fn arbitrary_tuple_with_matching_mutator_sets<const N: usize>(
             param_sets: [(usize, usize, usize); N],
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
-            (arb::<Option<NeptuneCoins>>(), 0..N)
+            (arb::<Option<NativeCurrencyAmount>>(), 0..N)
                 .prop_flat_map(move |(mut maybe_coinbase, coinbase_index)| {
                     // Force coinbase to be non-negative, if set
                     maybe_coinbase = maybe_coinbase.map(|x| x.abs());
@@ -1014,7 +1015,7 @@ mod test {
             const N: usize,
         >(
             param_sets: [(usize, usize, usize); N],
-            coinbase_and_index: Option<(NeptuneCoins, usize)>,
+            coinbase_and_index: Option<(NativeCurrencyAmount, usize)>,
         ) -> BoxedStrategy<[PrimitiveWitness; N]> {
             if let Some((_, index)) = coinbase_and_index {
                 // assert that index lies in the range [0;N)
@@ -1026,7 +1027,7 @@ mod test {
             let nested_vec_strategy_pubann =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<PublicAnnouncement>(), count));
             let nested_vec_strategy_amounts = |counts: [usize; N]| {
-                counts.map(|count| vec(NeptuneCoins::arbitrary_non_negative(), count))
+                counts.map(|count| vec(NativeCurrencyAmount::arbitrary_non_negative(), count))
             };
             let nested_vec_strategy_utxos =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Utxo>(), count));
@@ -1041,7 +1042,7 @@ mod test {
                     nested_vec_strategy_digests(input_counts),
                     nested_vec_strategy_utxos(output_counts),
                     nested_vec_strategy_pubann(announcement_counts),
-                    vec(NeptuneCoins::arbitrary_non_negative(), N),
+                    vec(NativeCurrencyAmount::arbitrary_non_negative(), N),
                     vec(arb::<Digest>(), total_num_inputs),
                     vec(arb::<Digest>(), total_num_inputs),
                 ),
@@ -1076,9 +1077,9 @@ mod test {
                             outputs_salts,
                         ),
                     )| {
-                        let input_amounts_per_tx: [NeptuneCoins; N] = input_amountss
+                        let input_amounts_per_tx: [NativeCurrencyAmount; N] = input_amountss
                             .clone()
-                            .map(|amounts| amounts.iter().copied().sum::<NeptuneCoins>());
+                            .map(|amounts| amounts.iter().copied().sum::<NativeCurrencyAmount>());
                         let mut output_utxo_amounts_per_tx = output_utxos.clone().map(|utxos| {
                             utxos
                                 .iter()
@@ -1112,11 +1113,11 @@ mod test {
                             .for_each(|(i, (utxos, amounts))| {
                                 // half_of_coinbase <= total_timelocked_output + half_of_fee =>
                                 // half_of_coinbase - half_of_fee <= total_timelocked_output
-                                let mut timelocked_cb_acc = NeptuneCoins::zero();
+                                let mut timelocked_cb_acc = NativeCurrencyAmount::zero();
                                 let mut min_timelocked_cb = coinbase(i)
-                                    .unwrap_or(NeptuneCoins::zero())
+                                    .unwrap_or(NativeCurrencyAmount::zero())
                                     .checked_sub(&fees[i])
-                                    .unwrap_or(NeptuneCoins::zero());
+                                    .unwrap_or(NativeCurrencyAmount::zero());
                                 min_timelocked_cb.div_two();
                                 for (utxo, amount) in utxos.iter_mut().zip_eq(amounts) {
                                     *utxo = utxo.new_with_native_currency_amount(amount);
@@ -1235,7 +1236,7 @@ mod test {
             (
                 (0..total_num_outputs),
                 (0..total_num_announcements),
-                NeptuneCoins::arbitrary_non_negative(),
+                NativeCurrencyAmount::arbitrary_non_negative(),
             )
                 .prop_flat_map(move |(num_outputs, num_announcements, coinbase_amount)| {
                     let parameter_sets = [
@@ -1261,7 +1262,7 @@ mod test {
             msa_and_records: MsaAndRecords,
             input_utxos: Vec<Utxo>,
             lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
-            coinbase_amount: NeptuneCoins,
+            coinbase_amount: NativeCurrencyAmount,
             timestamp: Timestamp,
         ) -> BoxedStrategy<(Self, Self)> {
             let input_removal_records = msa_and_records.removal_records;
@@ -1301,7 +1302,7 @@ mod test {
         pub(crate) fn arbitrary_given_mutator_set_accumulator_and_inputs(
             num_outputs: usize,
             num_announcements: usize,
-            coinbase: Option<NeptuneCoins>,
+            coinbase: Option<NativeCurrencyAmount>,
             input_utxos: Vec<Utxo>,
             input_removal_records: Vec<RemovalRecord>,
             input_membership_proofs: Vec<MsMembershipProof>,
@@ -1310,8 +1311,8 @@ mod test {
             timestamp: Timestamp,
         ) -> BoxedStrategy<Self> {
             (
-                vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
-                NeptuneCoins::arbitrary_non_negative(),
+                vec(NativeCurrencyAmount::arbitrary_non_negative(), num_outputs),
+                NativeCurrencyAmount::arbitrary_non_negative(),
                 vec(arb::<Digest>(), num_outputs),
                 vec(arb::<Digest>(), num_outputs),
                 vec(arb::<Digest>(), num_outputs),
@@ -1333,8 +1334,8 @@ mod test {
                         let total_input_amount = input_utxos
                             .iter()
                             .map(|utxo| utxo.get_native_currency_amount())
-                            .sum::<NeptuneCoins>()
-                            + coinbase.unwrap_or(NeptuneCoins::zero());
+                            .sum::<NativeCurrencyAmount>()
+                            + coinbase.unwrap_or(NativeCurrencyAmount::zero());
                         PrimitiveWitness::find_balanced_output_amounts_and_fee(
                             total_input_amount,
                             coinbase,
@@ -1406,46 +1407,47 @@ mod test {
         /// given fee. The fee can be negative or even an invalid amount:
         /// greater than the maximum number of nau. It does *not* work for fees
         /// smaller than the minimum number of nau.
-        pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
+        pub(crate) fn arbitrary_with_fee(fee: NativeCurrencyAmount) -> BoxedStrategy<Self> {
             let fee_as_i128 = std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap();
-            let total_amount_strategy = match (fee.is_negative(), fee.abs() > NeptuneCoins::max()) {
-                (false, false) => {
-                    // positive or zero fee, valid amount
-                    // ensure that total amount > fee
-                    fee_as_i128..NeptuneCoins::MAX_NAU
-                }
-                (false, true) => {
-                    // positive fee, greater than max nau
-                    // ensure that total_amount > fee
-                    fee_as_i128..i128::MAX
-                }
-                (true, false) => {
-                    // negative fee, valid amount
-                    // timelocked_amount = -fee/2
-                    // liquid_amount = total_amount - timelocked_amount - fee
-                    // so:
-                    //  * total_amount > timelocked_amount
-                    //  * total_amount - timelocked_amount - fee <= NeptuneCoins::max
-                    // or rephrased:
-                    //  * -fee/2  <  total_amount  <=  NeptuneCoins::max + fee/2
-                    // ensure that total_amount - fee < MAX_NAU
-                    (-fee_as_i128 >> 1)..(NeptuneCoins::MAX_NAU + fee_as_i128 + 1)
-                }
-                (true, true) => {
-                    // negative fee, smaller than min nau
-                    // timelocked_amount = -fee/2
-                    // liquid_amount = total_amount - timelocked_amount - fee
-                    // so:
-                    //  * total_amount > timelocked_amount  (otherwise bad sub)
-                    //  * total_amount - timelocked_amount - fee <= NeptuneCoins::max  (otherwise bad add)
-                    // or rephrased:
-                    //  * -fee/2  <  total_amount  <=  NeptuneCoins::max + fee/2
-                    // except, this can only work if 0 < NeptuneCoins::max + fee
-                    // which would imply that fee was a valid amount. So in
-                    // other words, this case should never happen.
-                    panic!("fees smaller than minimum amount of nau are not supported");
-                }
-            };
+            let total_amount_strategy =
+                match (fee.is_negative(), fee.abs() > NativeCurrencyAmount::max()) {
+                    (false, false) => {
+                        // positive or zero fee, valid amount
+                        // ensure that total amount > fee
+                        fee_as_i128..NativeCurrencyAmount::MAX_NAU
+                    }
+                    (false, true) => {
+                        // positive fee, greater than max nau
+                        // ensure that total_amount > fee
+                        fee_as_i128..i128::MAX
+                    }
+                    (true, false) => {
+                        // negative fee, valid amount
+                        // timelocked_amount = -fee/2
+                        // liquid_amount = total_amount - timelocked_amount - fee
+                        // so:
+                        //  * total_amount > timelocked_amount
+                        //  * total_amount - timelocked_amount - fee <= NativeCurrencyAmount::max
+                        // or rephrased:
+                        //  * -fee/2  <  total_amount  <=  NativeCurrencyAmount::max + fee/2
+                        // ensure that total_amount - fee < MAX_NAU
+                        (-fee_as_i128 >> 1)..(NativeCurrencyAmount::MAX_NAU + fee_as_i128 + 1)
+                    }
+                    (true, true) => {
+                        // negative fee, smaller than min nau
+                        // timelocked_amount = -fee/2
+                        // liquid_amount = total_amount - timelocked_amount - fee
+                        // so:
+                        //  * total_amount > timelocked_amount  (otherwise bad sub)
+                        //  * total_amount - timelocked_amount - fee <= NativeCurrencyAmount::max  (otherwise bad add)
+                        // or rephrased:
+                        //  * -fee/2  <  total_amount  <=  NativeCurrencyAmount::max + fee/2
+                        // except, this can only work if 0 < NativeCurrencyAmount::max + fee
+                        // which would imply that fee was a valid amount. So in
+                        // other words, this case should never happen.
+                        panic!("fees smaller than minimum amount of nau are not supported");
+                    }
+                };
             let num_outputs = 2;
 
             (
@@ -1453,7 +1455,7 @@ mod test {
                 arb::<Digest>(),
                 vec(arb::<Digest>(), num_outputs),
                 arb::<Timestamp>(),
-                NeptuneCoins::arbitrary_non_negative(),
+                NativeCurrencyAmount::arbitrary_non_negative(),
             )
                 .prop_flat_map(
                     move |(
@@ -1467,7 +1469,7 @@ mod test {
                             timestamp = Timestamp::millis(timestamp.to_millis() >> 1);
                         }
 
-                        let total_amount = NeptuneCoins::from_raw_i128(amount);
+                        let total_amount = NativeCurrencyAmount::from_raw_i128(amount);
 
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
@@ -1565,12 +1567,12 @@ mod test {
 
     #[proptest]
     fn amounts_balancer_works_with_coinbase(
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] total_input_amount: NeptuneCoins,
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] coinbase: NeptuneCoins,
-        #[strategy(vec(NeptuneCoins::arbitrary_non_negative(), 1..4))] mut output_amounts: Vec<
-            NeptuneCoins,
-        >,
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] mut fee: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
+        total_input_amount: NativeCurrencyAmount,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] coinbase: NativeCurrencyAmount,
+        #[strategy(vec(NativeCurrencyAmount::arbitrary_non_negative(), 1..4))]
+        mut output_amounts: Vec<NativeCurrencyAmount>,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] mut fee: NativeCurrencyAmount,
     ) {
         PrimitiveWitness::find_balanced_output_amounts_and_fee(
             total_input_amount,
@@ -1583,7 +1585,7 @@ mod test {
                 == output_amounts
                     .iter()
                     .cloned()
-                    .sum::<NeptuneCoins>()
+                    .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()
         );
@@ -1591,11 +1593,11 @@ mod test {
 
     #[proptest]
     fn amounts_balancer_works_without_coinbase(
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] total_input_amount: NeptuneCoins,
-        #[strategy(vec(NeptuneCoins::arbitrary_non_negative(), 1..4))] mut output_amounts: Vec<
-            NeptuneCoins,
-        >,
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] mut fee: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
+        total_input_amount: NativeCurrencyAmount,
+        #[strategy(vec(NativeCurrencyAmount::arbitrary_non_negative(), 1..4))]
+        mut output_amounts: Vec<NativeCurrencyAmount>,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] mut fee: NativeCurrencyAmount,
     ) {
         PrimitiveWitness::find_balanced_output_amounts_and_fee(
             total_input_amount,
@@ -1608,7 +1610,7 @@ mod test {
                 == output_amounts
                     .iter()
                     .cloned()
-                    .sum::<NeptuneCoins>()
+                    .sum::<NativeCurrencyAmount>()
                     .checked_add(&fee)
                     .unwrap()
         );
@@ -1622,7 +1624,7 @@ mod test {
         let mut total = if let Some(amount) = primitive_witness.kernel.coinbase {
             amount
         } else {
-            NeptuneCoins::new(0)
+            NativeCurrencyAmount::coins(0)
         };
         for input in primitive_witness.input_utxos.utxos {
             let u32s = input.coins()[0]
@@ -1634,8 +1636,8 @@ mod test {
                 | ((u32s[1] as u128) << 32)
                 | ((u32s[2] as u128) << 64)
                 | ((u32s[3] as u128) << 96);
-            total = total + NeptuneCoins::from_nau(BigInt::from(amount)).unwrap();
+            total = total + NativeCurrencyAmount::from_nau(BigInt::from(amount)).unwrap();
         }
-        prop_assert!(total <= NeptuneCoins::new(42000000));
+        prop_assert!(total <= NativeCurrencyAmount::coins(42000000));
     }
 }

@@ -1144,7 +1144,7 @@ mod archival_state_tests {
     use crate::models::blockchain::block::block_header::MINIMUM_BLOCK_TIME;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -1332,7 +1332,10 @@ mod archival_state_tests {
 
         // Add an input to the next block's transaction. This will add a removal record
         // to the block, and this removal record will insert indices in the Bloom filter.
-        let utxo = Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(4));
+        let utxo = Utxo::new_native_currency(
+            LockScript::anyone_can_spend(),
+            NativeCurrencyAmount::coins(4),
+        );
 
         let tx_output_anyone_can_spend =
             TxOutput::no_notification(utxo, rng.gen(), rng.gen(), false);
@@ -1343,7 +1346,7 @@ mod archival_state_tests {
                 vec![tx_output_anyone_can_spend].into(),
                 alice_key.into(),
                 UtxoNotificationMedium::OnChain,
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 in_seven_months,
                 TxProvingCapability::PrimitiveWitness,
                 &TritonVmJobQueue::dummy(),
@@ -1437,14 +1440,14 @@ mod archival_state_tests {
         let outputs = (0..20)
             .map(|_| {
                 TxOutput::onchain_native_currency(
-                    NeptuneCoins::new(1),
+                    NativeCurrencyAmount::coins(1),
                     rng.gen(),
                     alice_address.into(),
                     false,
                 )
             })
             .collect_vec();
-        let fee = NeptuneCoins::zero();
+        let fee = NativeCurrencyAmount::zero();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
         let (big_tx, _) = alice
@@ -1536,14 +1539,14 @@ mod archival_state_tests {
         let outputs = (0..20)
             .map(|_| {
                 TxOutput::onchain_native_currency(
-                    NeptuneCoins::new(1),
+                    NativeCurrencyAmount::coins(1),
                     rng.gen(),
                     alice_address.into(),
                     false,
                 )
             })
             .collect_vec();
-        let fee = NeptuneCoins::zero();
+        let fee = NativeCurrencyAmount::zero();
 
         let num_blocks = 30;
         for _ in 0..num_blocks {
@@ -1751,13 +1754,13 @@ mod archival_state_tests {
         let alice_address = alice_spending_key.to_address();
         let receiver_data_for_alice = vec![
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 sender_randomness,
                 alice_address.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(9),
+                NativeCurrencyAmount::coins(9),
                 sender_randomness,
                 alice_address.into(),
                 false,
@@ -1769,13 +1772,13 @@ mod archival_state_tests {
 
         let receiver_data_for_bob = vec![
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 sender_randomness,
                 bob_address.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(3),
+                NativeCurrencyAmount::coins(3),
                 sender_randomness,
                 bob_address.into(),
                 false,
@@ -1783,7 +1786,7 @@ mod archival_state_tests {
         ];
 
         println!("Before tx creation");
-        let fee = NeptuneCoins::new(1);
+        let fee = NativeCurrencyAmount::coins(1);
         let change_key = premine_rec
             .global_state_lock
             .lock_guard_mut()
@@ -1925,7 +1928,7 @@ mod archival_state_tests {
 
         // Check balances
         assert_eq!(
-            NeptuneCoins::new(10),
+            NativeCurrencyAmount::coins(10),
             alice
                 .lock_guard()
                 .await
@@ -1934,7 +1937,7 @@ mod archival_state_tests {
                 .synced_unspent_liquid_amount(in_seven_months)
         );
         assert_eq!(
-            NeptuneCoins::new(5),
+            NativeCurrencyAmount::coins(5),
             bob.lock_guard()
                 .await
                 .get_wallet_status_for_tip()
@@ -1950,7 +1953,7 @@ mod archival_state_tests {
             // premine + block_reward / 2 - sent_to_alice - sent_to_bob - tx-fee
             // = 20 + 64 - 10 - 5 - 1
             // = 68
-            liquid_reward + NeptuneCoins::new(20 - 10 - 5 - 1),
+            liquid_reward + NativeCurrencyAmount::coins(20 - 10 - 5 - 1),
             premine_rec
                 .lock_guard()
                 .await
@@ -1961,7 +1964,7 @@ mod archival_state_tests {
 
         let after_cb_timelock_expiration = block_1.header().timestamp + Timestamp::months(37);
         assert_eq!(
-            block_subsidy + NeptuneCoins::new(20 - 10 - 5 - 1),
+            block_subsidy + NativeCurrencyAmount::coins(20 - 10 - 5 - 1),
             premine_rec
                 .lock_guard()
                 .await
@@ -1977,13 +1980,13 @@ mod archival_state_tests {
         let premine_rec_addr = premine_rec_spending_key.to_address();
         let outputs_from_alice: TxOutputList = vec![
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 rng.gen(),
                 premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(8),
+                NativeCurrencyAmount::coins(8),
                 rng.gen(),
                 premine_rec_addr.into(),
                 false,
@@ -2004,7 +2007,7 @@ mod archival_state_tests {
                 outputs_from_alice.clone(),
                 alice_change_key,
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),
@@ -2017,19 +2020,19 @@ mod archival_state_tests {
         );
         let outputs_from_bob: TxOutputList = vec![
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 rng.gen(),
                 premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 rng.gen(),
                 premine_rec_addr.into(),
                 false,
             ),
             TxOutput::offchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 rng.gen(),
                 premine_rec_addr.into(),
                 false,
@@ -2050,7 +2053,7 @@ mod archival_state_tests {
                 outputs_from_bob.clone(),
                 bob_change_key,
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),

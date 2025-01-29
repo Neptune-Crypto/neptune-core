@@ -19,7 +19,7 @@ use itertools::Itertools;
 use neptune_cash::config_models::data_directory::DataDirectory;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_selector::BlockSelector;
-use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::wallet::address::KeyType;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
@@ -47,7 +47,7 @@ const ANONYMOUS: &str = "anonymous";
 #[derive(Debug, Clone)]
 struct TransactionOutput {
     address: String,
-    amount: NeptuneCoins,
+    amount: NativeCurrencyAmount,
 }
 
 /// represents data format of input to claim-utxo
@@ -108,7 +108,7 @@ impl FromStr for TransactionOutput {
 
         Ok(Self {
             address: parts[0].to_string(),
-            amount: NeptuneCoins::from_str(parts[1])?,
+            amount: NativeCurrencyAmount::from_str(parts[1])?,
         })
     }
 }
@@ -117,7 +117,7 @@ impl TransactionOutput {
     pub fn to_receiving_address_amount_tuple(
         &self,
         network: Network,
-    ) -> Result<(ReceivingAddress, NeptuneCoins)> {
+    ) -> Result<(ReceivingAddress, NativeCurrencyAmount)> {
         Ok((
             ReceivingAddress::from_bech32m(&self.address, network)?,
             self.amount,
@@ -287,10 +287,10 @@ enum Command {
         address: String,
 
         /// amount to send
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
 
         /// transaction fee
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
 
         /// local tag for identifying a receiver
         receiver_tag: String,
@@ -303,7 +303,7 @@ enum Command {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
     },
 
     /// pause mining

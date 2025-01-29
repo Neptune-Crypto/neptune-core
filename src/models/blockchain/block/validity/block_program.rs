@@ -28,7 +28,7 @@ use crate::models::blockchain::block::block_body::BlockBodyField;
 use crate::models::blockchain::block::BlockAppendix;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::builtins::verify_stark;
@@ -96,7 +96,7 @@ impl ConsensusProgram for BlockProgram {
         );
 
         assert!(!fee.is_negative());
-        assert!(*fee <= NeptuneCoins::max());
+        assert!(*fee <= NativeCurrencyAmount::max());
 
         // Verify that merge bit is set
         let merge_bit_hash = Tip5::hash(&1);
@@ -130,9 +130,9 @@ impl ConsensusProgram for BlockProgram {
         let block_witness_field_proofs = field!(BlockProofWitness::proofs);
 
         let merkle_verify = library.import(Box::new(MerkleVerify));
-        let coin_size = NeptuneCoins::static_length().unwrap();
+        let coin_size = NativeCurrencyAmount::static_length().unwrap();
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
-        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
         let hash_from_stack_digest = library.import(Box::new(HashFromStack::new(DataType::Digest)));
         let verify_fee_legality = triton_asm!(
@@ -476,9 +476,9 @@ pub(crate) mod test {
         .await;
 
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let fee = NeptuneCoins::new(1);
+        let fee = NativeCurrencyAmount::coins(1);
         let tx_output = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(1),
+            NativeCurrencyAmount::coins(1),
             rng.gen(),
             alice_key.to_address().into(),
             false,

@@ -26,7 +26,7 @@ use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_fie
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
@@ -292,7 +292,7 @@ impl UpdateWitness {
         );
 
         // coinbases is both transaction is `None`
-        let coinbase: Option<NeptuneCoins> = None;
+        let coinbase: Option<NativeCurrencyAmount> = None;
         let coinbase_hash: Digest = Tip5::hash(&coinbase);
         tasmlib::tasmlib_hashing_merkle_verify(
             old_txk_digest,
@@ -454,7 +454,7 @@ impl BasicSnippet for UpdateBranch {
             };
 
         let verify_coinbase_is_none = {
-            let coinbase: Option<NeptuneCoins> = None;
+            let coinbase: Option<NativeCurrencyAmount> = None;
             let hash_of_none = Tip5::hash(&coinbase);
             let push_hash_none = hash_of_none
                 .values()

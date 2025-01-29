@@ -49,7 +49,7 @@ use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
-use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::transfer_block::TransferBlock;
 use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
@@ -417,7 +417,7 @@ impl GlobalState {
     pub(crate) fn favor_incoming_block_proposal(
         &self,
         incoming_block_height: BlockHeight,
-        incoming_guesser_fee: NeptuneCoins,
+        incoming_guesser_fee: NativeCurrencyAmount,
     ) -> Result<(), BlockProposalRejectError> {
         if self.cli().compose {
             return Err(BlockProposalRejectError::Composing);
@@ -524,7 +524,9 @@ impl GlobalState {
     }
 
     /// Retrieve wallet balance history
-    pub async fn get_balance_history(&self) -> Vec<(Digest, Timestamp, BlockHeight, NeptuneCoins)> {
+    pub async fn get_balance_history(
+        &self,
+    ) -> Vec<(Digest, Timestamp, BlockHeight, NativeCurrencyAmount)> {
         let current_tip_digest = self.chain.light_state().hash();
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
@@ -567,7 +569,7 @@ impl GlobalState {
     /// with claiming it later on, *i.e.*, as an [ExpectedUtxo].
     pub fn create_change_output(
         &self,
-        change_amount: NeptuneCoins,
+        change_amount: NativeCurrencyAmount,
         change_key: SpendingKey,
         change_utxo_notify_method: UtxoNotificationMedium,
     ) -> Result<TxOutput> {
@@ -617,7 +619,7 @@ impl GlobalState {
     /// see future work comment in [TxOutput::auto()]
     pub fn generate_tx_outputs(
         &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
+        outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
     ) -> TxOutputList {
@@ -705,11 +707,11 @@ impl GlobalState {
     /// // Create the transaction
     /// let (transaction, maybe_change_utxo) = state
     ///     .create_transaction(
-    ///         tx_outputs,                   // all outputs except `change`
-    ///         change_key,                   // send `change` to this key
-    ///         change_notify_medium,         // how to notify about `change` utxo
-    ///         NeptuneCoins::new(2),         // fee
-    ///         Timestamp::now(),             // Timestamp of transaction
+    ///         tx_outputs,                     // all outputs except `change`
+    ///         change_key,                     // send `change` to this key
+    ///         change_notify_medium,           // how to notify about `change` utxo
+    ///         NativeCurrencyAmount::coins(2), // fee
+    ///         Timestamp::now(),               // Timestamp of transaction
     ///     )
     ///     .await?;
     ///
@@ -730,7 +732,7 @@ impl GlobalState {
         tx_outputs: TxOutputList,
         change_key: SpendingKey,
         change_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
@@ -755,7 +757,7 @@ impl GlobalState {
         mut tx_outputs: TxOutputList,
         change_key: SpendingKey,
         change_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
@@ -1671,7 +1673,7 @@ impl GlobalState {
         self.cli().proving_capability()
     }
 
-    pub(crate) fn min_gobbling_fee(&self) -> NeptuneCoins {
+    pub(crate) fn min_gobbling_fee(&self) -> NativeCurrencyAmount {
         self.cli().min_gobbling_fee
     }
 
@@ -1815,7 +1817,7 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
         let nine_money_output = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(9),
+            NativeCurrencyAmount::coins(9),
             rng.gen(),
             alice_address.into(),
             false,
@@ -1833,7 +1835,7 @@ mod global_state_tests {
                 tx_outputs.clone(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 launch + six_months - one_month,
                 TxProvingCapability::ProofCollection,
                 &TritonVmJobQueue::dummy()
@@ -1849,7 +1851,7 @@ mod global_state_tests {
                 tx_outputs,
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
                 &TritonVmJobQueue::dummy(),
@@ -1872,7 +1874,7 @@ mod global_state_tests {
         // Test with a transaction with three outputs and one (premine) input
         let mut output_utxos = vec![];
         for i in 2..5 {
-            let that_much_money: NeptuneCoins = NeptuneCoins::new(i);
+            let that_much_money: NativeCurrencyAmount = NativeCurrencyAmount::coins(i);
             let output_utxo = TxOutput::offchain_native_currency(
                 that_much_money,
                 rng.gen(),
@@ -1889,7 +1891,7 @@ mod global_state_tests {
                 output_utxos.into(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
                 &TritonVmJobQueue::dummy(),
@@ -2472,13 +2474,13 @@ mod global_state_tests {
         let sender_randomness: Digest = rng.gen();
         let tx_outputs_for_alice = vec![
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 sender_randomness,
                 alice_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 sender_randomness,
                 alice_spending_key.to_address().into(),
                 false,
@@ -2488,20 +2490,20 @@ mod global_state_tests {
         // Two outputs for Bob
         let tx_outputs_for_bob = vec![
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(3),
+                NativeCurrencyAmount::coins(3),
                 sender_randomness,
                 bob_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(4),
+                NativeCurrencyAmount::coins(4),
                 sender_randomness,
                 bob_spending_key.to_address().into(),
                 false,
             ),
         ];
 
-        let fee = NeptuneCoins::one();
+        let fee = NativeCurrencyAmount::one();
         let genesis_key = premine_receiver
             .lock_guard_mut()
             .await
@@ -2639,7 +2641,7 @@ mod global_state_tests {
         );
 
         assert_eq!(
-            NeptuneCoins::new(3),
+            NativeCurrencyAmount::coins(3),
             alice
                 .lock_guard()
                 .await
@@ -2648,7 +2650,7 @@ mod global_state_tests {
                 .synced_unspent_liquid_amount(in_seven_months)
         );
         assert_eq!(
-            NeptuneCoins::new(7),
+            NativeCurrencyAmount::coins(7),
             bob.lock_guard()
                 .await
                 .get_wallet_status_for_tip()
@@ -2657,7 +2659,7 @@ mod global_state_tests {
         );
         // TODO: No idea why this isn't working.
         // {
-        //     let expected = NeptuneCoins::new(110);
+        //     let expected = NativeCurrencyAmount::coins(110);
         //     let got = premine_receiver
         //         .lock_guard()
         //         .await
@@ -2673,13 +2675,13 @@ mod global_state_tests {
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
         let tx_outputs_from_alice = vec![
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
                 false,
@@ -2697,7 +2699,7 @@ mod global_state_tests {
                 tx_outputs_from_alice.clone().into(),
                 alice_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),
@@ -2715,19 +2717,19 @@ mod global_state_tests {
         // make bob's transaction
         let tx_outputs_from_bob = vec![
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
                 false,
             ),
             TxOutput::onchain_native_currency(
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 rng.gen(),
                 genesis_spending_key.to_address().into(),
                 false,
@@ -2740,7 +2742,7 @@ mod global_state_tests {
                 tx_outputs_from_bob.clone().into(),
                 bob_spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),
@@ -3583,8 +3585,8 @@ mod global_state_tests {
             let seven_months_post_launch = launch + Timestamp::months(7);
 
             // amounts used in alice-to-bob transaction.
-            let alice_to_bob_amount = NeptuneCoins::new(10);
-            let alice_to_bob_fee = NeptuneCoins::new(1);
+            let alice_to_bob_amount = NativeCurrencyAmount::coins(10);
+            let alice_to_bob_fee = NativeCurrencyAmount::coins(1);
 
             // init global state for alice bob
             let mut alice_state_lock = mock_genesis_global_state(
@@ -3626,7 +3628,7 @@ mod global_state_tests {
                     .get_wallet_status_for_tip()
                     .await
                     .synced_unspent_liquid_amount(seven_months_post_launch);
-                assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
+                assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // create change key for alice. change_key_type is a test param.
                 let alice_change_key = alice_state_mut
@@ -3716,7 +3718,7 @@ mod global_state_tests {
                     .unwrap()
                     .checked_sub(&alice_to_bob_fee)
                     .unwrap();
-                assert_eq!(alice_calculated_balance, NeptuneCoins::new(9));
+                assert_eq!(alice_calculated_balance, NativeCurrencyAmount::coins(9));
 
                 assert_eq!(
                     alice_calculated_balance,
@@ -3782,7 +3784,7 @@ mod global_state_tests {
                     .synced_unspent_liquid_amount(seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
-                assert_eq!(alice_initial_balance, NeptuneCoins::new(20));
+                assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // now alice must replay old blocks.  (there's only one so far)
                 alice_state_mut.set_new_tip(block_1).await.unwrap();
@@ -3795,13 +3797,13 @@ mod global_state_tests {
                     .checked_sub(&alice_to_bob_fee)
                     .unwrap();
 
-                assert_eq!(alice_calculated_balance, NeptuneCoins::new(9));
+                assert_eq!(alice_calculated_balance, NativeCurrencyAmount::coins(9));
 
                 // For onchain change-notification the balance will be 9.
                 // For offchain change-notification, it will be 0.  Funds are lost!!!
                 let alice_expected_balance_by_method = match change_notification_medium {
-                    UtxoNotificationMedium::OnChain => NeptuneCoins::new(9),
-                    UtxoNotificationMedium::OffChain => NeptuneCoins::new(0),
+                    UtxoNotificationMedium::OnChain => NativeCurrencyAmount::coins(9),
+                    UtxoNotificationMedium::OffChain => NativeCurrencyAmount::coins(0),
                 };
 
                 // verify that our on/offchain prediction is correct.

@@ -37,7 +37,7 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::blockchain::transaction::TransactionKernel;
 use crate::models::blockchain::transaction::TransactionKernelProxy;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -450,14 +450,14 @@ impl BasicSnippet for MergeBranch {
             new_txk_mast_hash_alloc,
         )));
 
-        let neptune_coins_size = NeptuneCoins::static_length().unwrap();
+        let neptune_coins_size = NativeCurrencyAmount::static_length().unwrap();
         let kernel_field_fee = field!(TransactionKernel::fee);
         let overflowing_add_u128 = library.import(Box::new(
             crate::tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
         ));
         let compare_u128 = DataType::U128.compare();
         let lt_u128 = library.import(Box::new(crate::tasm_lib::arithmetic::u128::lt::Lt));
-        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
 
         let assert_new_fee_is_sum_of_left_and_right = triton_asm!(
             // _ *left_txk *right_txk *new_txk

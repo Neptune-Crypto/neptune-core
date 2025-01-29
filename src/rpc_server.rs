@@ -73,7 +73,7 @@ use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::difficulty_control::Difficulty;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::ClaimUtxoData;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
@@ -109,9 +109,9 @@ pub struct DashBoardOverviewDataFromClient {
     pub tip_digest: Digest,
     pub tip_header: BlockHeader,
     pub syncing: bool,
-    pub available_balance: NeptuneCoins,
-    pub timelocked_balance: NeptuneCoins,
-    pub available_unconfirmed_balance: NeptuneCoins,
+    pub available_balance: NativeCurrencyAmount,
+    pub timelocked_balance: NativeCurrencyAmount,
+    pub available_unconfirmed_balance: NativeCurrencyAmount,
     pub mempool_size: usize,
     pub mempool_total_tx_count: usize,
     pub mempool_own_tx_count: usize,
@@ -146,9 +146,9 @@ pub struct MempoolTransactionInfo {
     pub proof_type: TransactionProofType,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub positive_balance_effect: NeptuneCoins,
-    pub negative_balance_effect: NeptuneCoins,
-    pub fee: NeptuneCoins,
+    pub positive_balance_effect: NativeCurrencyAmount,
+    pub negative_balance_effect: NativeCurrencyAmount,
+    pub fee: NativeCurrencyAmount,
     pub synced: bool,
 }
 
@@ -163,8 +163,8 @@ impl From<&Transaction> for MempoolTransactionInfo {
             },
             num_inputs: mptx.kernel.inputs.len(),
             num_outputs: mptx.kernel.outputs.len(),
-            positive_balance_effect: NeptuneCoins::zero(),
-            negative_balance_effect: NeptuneCoins::zero(),
+            positive_balance_effect: NativeCurrencyAmount::zero(),
+            negative_balance_effect: NativeCurrencyAmount::zero(),
             fee: mptx.kernel.fee,
             synced: false,
         }
@@ -174,7 +174,7 @@ impl From<&Transaction> for MempoolTransactionInfo {
 impl MempoolTransactionInfo {
     pub(crate) fn with_positive_effect_on_balance(
         mut self,
-        positive_balance_effect: NeptuneCoins,
+        positive_balance_effect: NativeCurrencyAmount,
     ) -> Self {
         self.positive_balance_effect = positive_balance_effect;
         self
@@ -182,7 +182,7 @@ impl MempoolTransactionInfo {
 
     pub(crate) fn with_negative_effect_on_balance(
         mut self,
-        negative_balance_effect: NeptuneCoins,
+        negative_balance_effect: NativeCurrencyAmount,
     ) -> Self {
         self.negative_balance_effect = negative_balance_effect;
         self
@@ -276,15 +276,15 @@ pub trait RPC {
     ) -> RpcResult<Option<BlockHeader>>;
 
     /// Get sum of unspent UTXOs.
-    async fn synced_balance(token: rpc_auth::Token) -> RpcResult<NeptuneCoins>;
+    async fn synced_balance(token: rpc_auth::Token) -> RpcResult<NativeCurrencyAmount>;
 
     /// Get sum of unspent UTXOs including mempool transactions.
-    async fn synced_balance_unconfirmed(token: rpc_auth::Token) -> RpcResult<NeptuneCoins>;
+    async fn synced_balance_unconfirmed(token: rpc_auth::Token) -> RpcResult<NativeCurrencyAmount>;
 
     /// Get the client's wallet transaction history
     async fn history(
         token: rpc_auth::Token,
-    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>>;
+    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>>;
 
     /// Return information about funds in the wallet
     async fn wallet_status(token: rpc_auth::Token) -> RpcResult<WalletStatus>;
@@ -336,12 +336,12 @@ pub trait RPC {
     async fn validate_amount(
         token: rpc_auth::Token,
         amount: String,
-    ) -> RpcResult<Option<NeptuneCoins>>;
+    ) -> RpcResult<Option<NativeCurrencyAmount>>;
 
     /// Determine whether the given amount is less than (or equal to) the balance
     async fn amount_leq_synced_balance(
         token: rpc_auth::Token,
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
     ) -> RpcResult<bool>;
 
     /// Generate a report of all owned and unspent coins, whether time-locked or not.
@@ -383,11 +383,11 @@ pub trait RPC {
     /// See docs for [send_to_many()](Self::send_to_many())
     async fn send(
         token: rpc_auth::Token,
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
 
     /// Send coins to multiple recipients
@@ -426,10 +426,10 @@ pub trait RPC {
     ///   see comment for [TxOutput::auto()](crate::models::state::wallet::transaction_output::TxOutput::auto())
     async fn send_to_many(
         token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
 
     /// claim a utxo
@@ -522,9 +522,9 @@ impl NeptuneRPCServer {
 
     async fn send_to_many_inner_with_mock_proof_option(
         mut self,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
         mocked_invalid_proof: Option<TransactionProof>,
@@ -660,9 +660,9 @@ impl NeptuneRPCServer {
     async fn send_to_many_inner(
         self,
         _ctx: context::Context,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         utxo_notification_media: (UtxoNotificationMedium, UtxoNotificationMedium),
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
     ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), error::SendError> {
@@ -692,10 +692,10 @@ impl NeptuneRPCServer {
     #[cfg(test)]
     async fn send_to_many_inner_invalid_proof(
         self,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         now: Timestamp,
     ) -> Option<(Transaction, Vec<PrivateNotificationData>)> {
         self.send_to_many_inner_with_mock_proof_option(
@@ -1171,12 +1171,12 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         token: rpc_auth::Token,
         amount_string: String,
-    ) -> RpcResult<Option<NeptuneCoins>> {
+    ) -> RpcResult<Option<NativeCurrencyAmount>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         // parse string
-        if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
+        if let Ok(amt) = NativeCurrencyAmount::from_str(&amount_string) {
             Ok(Some(amt))
         } else {
             Ok(None)
@@ -1188,7 +1188,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         token: rpc_auth::Token,
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -1209,7 +1209,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-    ) -> RpcResult<NeptuneCoins> {
+    ) -> RpcResult<NativeCurrencyAmount> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -1228,7 +1228,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-    ) -> RpcResult<NeptuneCoins> {
+    ) -> RpcResult<NativeCurrencyAmount> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
@@ -1386,17 +1386,18 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
-    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>> {
+    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)>> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
         let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
-        let mut display_history: Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> = history
-            .iter()
-            .map(|(h, t, bh, a)| (*h, *bh, *t, *a))
-            .collect::<Vec<_>>();
+        let mut display_history: Vec<(Digest, BlockHeight, Timestamp, NativeCurrencyAmount)> =
+            history
+                .iter()
+                .map(|(h, t, bh, a)| (*h, *bh, *t, *a))
+                .collect::<Vec<_>>();
         display_history.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         // return
@@ -1549,11 +1550,11 @@ impl RPC for NeptuneRPCServer {
         self,
         ctx: context::Context,
         token: rpc_auth::Token,
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
 
@@ -1580,10 +1581,10 @@ impl RPC for NeptuneRPCServer {
         self,
         ctx: context::Context,
         token: rpc_auth::Token,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
@@ -2161,11 +2162,11 @@ mod rpc_server_tests {
             .send(
                 ctx,
                 token,
-                NeptuneCoins::one(),
+                NativeCurrencyAmount::one(),
                 own_receiving_address.clone(),
                 UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::one(),
+                NativeCurrencyAmount::one(),
             )
             .await;
 
@@ -2175,12 +2176,12 @@ mod rpc_server_tests {
             .clone()
             .send_to_many_inner(
                 ctx,
-                vec![(own_receiving_address, NeptuneCoins::one())],
+                vec![(own_receiving_address, NativeCurrencyAmount::one())],
                 (
                     UtxoNotificationMedium::OffChain,
                     UtxoNotificationMedium::OffChain,
                 ),
-                NeptuneCoins::one(),
+                NativeCurrencyAmount::one(),
                 transaction_timestamp,
                 proving_capability,
             )
@@ -2758,7 +2759,7 @@ mod rpc_server_tests {
         let ctx = context::current();
         let mut rng = thread_rng();
         let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
-        let amount = NeptuneCoins::new(rng.gen_range(0..10));
+        let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
 
         // set flag on, verify non-initiation
         let cli_on = cli_args::Args {
@@ -2778,7 +2779,7 @@ mod rpc_server_tests {
                 address.into(),
                 UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::zero()
+                NativeCurrencyAmount::zero()
             )
             .await
             .is_err());
@@ -2790,7 +2791,7 @@ mod rpc_server_tests {
                 vec![(address.into(), amount)],
                 UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::zero()
+                NativeCurrencyAmount::zero()
             )
             .await
             .is_err());
@@ -2863,8 +2864,8 @@ mod rpc_server_tests {
                         .unwrap();
 
                     let pay_to_bob_outputs = vec![
-                        (receiving_address_generation, NeptuneCoins::new(1)),
-                        (receiving_address_symmetric, NeptuneCoins::new(2)),
+                        (receiving_address_generation, NativeCurrencyAmount::coins(1)),
+                        (receiving_address_symmetric, NativeCurrencyAmount::coins(2)),
                     ];
 
                     (pay_to_bob_outputs, rpc_server, token)
@@ -2880,8 +2881,8 @@ mod rpc_server_tests {
                     let mut blocks = vec![];
                     let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
 
-                    let fee = NeptuneCoins::zero();
-                    let bob_amount: NeptuneCoins =
+                    let fee = NativeCurrencyAmount::zero();
+                    let bob_amount: NativeCurrencyAmount =
                         pay_to_bob_outputs.iter().map(|(_, amt)| *amt).sum();
 
                     // Mine block 1 to get some coins
@@ -2961,8 +2962,8 @@ mod rpc_server_tests {
 
                     assert_eq!(
                         vec![
-                            NeptuneCoins::new(1), // claimed via generation addr
-                            NeptuneCoins::new(2), // claimed via symmetric addr
+                            NativeCurrencyAmount::coins(1), // claimed via generation addr
+                            NativeCurrencyAmount::coins(2), // claimed via symmetric addr
                         ],
                         state
                             .lock_guard()
@@ -2979,7 +2980,7 @@ mod rpc_server_tests {
 
                     if !claim_after_confirmed {
                         assert_eq!(
-                            NeptuneCoins::zero(),
+                            NativeCurrencyAmount::zero(),
                             bob_rpc_server
                                 .clone()
                                 .synced_balance(context::current(), bob_token)
@@ -3042,11 +3043,11 @@ mod rpc_server_tests {
                     .unwrap();
 
                 let pay_to_self_outputs = vec![
-                    (bob_gen_addr, NeptuneCoins::new(5)),
-                    (bob_sym_addr, NeptuneCoins::new(6)),
+                    (bob_gen_addr, NativeCurrencyAmount::coins(5)),
+                    (bob_sym_addr, NativeCurrencyAmount::coins(6)),
                 ];
 
-                let fee = NeptuneCoins::new(2);
+                let fee = NativeCurrencyAmount::coins(2);
                 let (tx, offchain_notifications) = bob
                     .clone()
                     .send_to_many_inner_invalid_proof(
@@ -3076,10 +3077,10 @@ mod rpc_server_tests {
                         let (spending_tx, _) = bob
                             .clone()
                             .send_to_many_inner_invalid_proof(
-                                vec![(another_address.into(), NeptuneCoins::new(62))],
+                                vec![(another_address.into(), NativeCurrencyAmount::coins(62))],
                                 UtxoNotificationMedium::OffChain,
                                 UtxoNotificationMedium::OffChain,
-                                NeptuneCoins::zero(),
+                                NativeCurrencyAmount::zero(),
                                 in_eight_months,
                             )
                             .await
@@ -3102,12 +3103,12 @@ mod rpc_server_tests {
 
                 assert_eq!(
                     vec![
-                        NeptuneCoins::new(64), // liquid composer reward, block 1
-                        NeptuneCoins::new(64), // illiquid composer reward, block 1
-                        NeptuneCoins::new(5),  // claimed via generation addr
-                        NeptuneCoins::new(6),  // claimed via symmetric addr
+                        NativeCurrencyAmount::coins(64), // liquid composer reward, block 1
+                        NativeCurrencyAmount::coins(64), // illiquid composer reward, block 1
+                        NativeCurrencyAmount::coins(5),  // claimed via generation addr
+                        NativeCurrencyAmount::coins(6),  // claimed via symmetric addr
                         // 51 = (64 - 5 - 6 - 2 (fee))
-                        NeptuneCoins::new(51) // change (symmetric addr)
+                        NativeCurrencyAmount::coins(51) // change (symmetric addr)
                     ],
                     bob.state
                         .lock_guard()
@@ -3125,7 +3126,7 @@ mod rpc_server_tests {
                 if !claim_after_mined {
                     // bob hasn't applied blocks 2,3. liquide balance should be 64
                     assert_eq!(
-                        NeptuneCoins::new(64),
+                        NativeCurrencyAmount::coins(64),
                         bob.clone()
                             .synced_balance(context::current(), bob_token)
                             .await?,
@@ -3149,7 +3150,7 @@ mod rpc_server_tests {
                     // +6 self-send via Symmetric
                     // +51   change (less fee == 2)
                     assert_eq!(
-                        NeptuneCoins::new(62),
+                        NativeCurrencyAmount::coins(62),
                         bob.synced_balance(context::current(), bob_token).await?,
                     );
                 }
@@ -3183,9 +3184,9 @@ mod rpc_server_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let elem = (own_address.clone(), NeptuneCoins::zero());
+            let elem = (own_address.clone(), NativeCurrencyAmount::zero());
             let outputs = std::iter::repeat(elem);
-            let fee = NeptuneCoins::zero();
+            let fee = NativeCurrencyAmount::zero();
 
             for i in 0..5 {
                 let result = rpc_server
@@ -3317,7 +3318,10 @@ mod rpc_server_tests {
                     KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
                     KeyType::RawHashLock => panic!("hash lock key not supported"),
                 };
-                let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
+                let output1 = (
+                    external_receiving_address.clone(),
+                    NativeCurrencyAmount::coins(5),
+                );
 
                 // --- Setup. generate an output that our wallet can claim. ---
                 let output2 = {
@@ -3329,12 +3333,15 @@ mod rpc_server_tests {
                         .next_unused_spending_key(recipient_key_type)
                         .await
                         .unwrap();
-                    (spending_key.to_address().unwrap(), NeptuneCoins::new(25))
+                    (
+                        spending_key.to_address().unwrap(),
+                        NativeCurrencyAmount::coins(25),
+                    )
                 };
 
                 // --- Setup. assemble outputs and fee ---
                 let outputs = vec![output1, output2];
-                let fee = NeptuneCoins::new(1);
+                let fee = NativeCurrencyAmount::coins(1);
 
                 // --- Store: store num expected utxo before spend ---
                 let num_expected_utxo = rpc_server

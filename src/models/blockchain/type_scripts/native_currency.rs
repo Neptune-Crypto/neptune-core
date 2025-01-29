@@ -22,7 +22,7 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
-use super::neptune_coins::NeptuneCoins;
+use super::native_currency_amount::NativeCurrencyAmount;
 use super::TypeScript;
 use super::TypeScriptWitness;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
@@ -61,7 +61,7 @@ const INVALID_COINBASE_DISCRIMINANT: i128 = 1_000_044;
 /// `NativeCurrency` is the type script that governs Neptune's native currency,
 /// Neptune coins.
 ///
-/// The arithmetic for amounts is defined by the struct `NeptuneCoins`.
+/// The arithmetic for amounts is defined by the struct `NativeCurrencyAmount`.
 /// This type script is responsible for checking that transactions that transfer
 /// Neptune are balanced, *i.e.*,
 ///
@@ -104,8 +104,8 @@ impl ConsensusProgram for NativeCurrency {
         let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
         let native_currency_witness_mem: NativeCurrencyWitnessMemory =
             tasm::decode_from_memory(start_address);
-        let coinbase: Option<NeptuneCoins> = native_currency_witness_mem.coinbase;
-        let fee: NeptuneCoins = native_currency_witness_mem.fee;
+        let coinbase: Option<NativeCurrencyAmount> = native_currency_witness_mem.coinbase;
+        let fee: NativeCurrencyAmount = native_currency_witness_mem.fee;
         let input_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_input_utxos;
         let output_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_output_utxos;
         let timestamp = native_currency_witness_mem.timestamp;
@@ -122,9 +122,9 @@ impl ConsensusProgram for NativeCurrency {
         );
 
         // unpack coinbase
-        let some_coinbase: NeptuneCoins = match coinbase {
+        let some_coinbase: NativeCurrencyAmount = match coinbase {
             Some(coins) => coins,
-            None => NeptuneCoins::new(0),
+            None => NativeCurrencyAmount::coins(0),
         };
         assert!(!some_coinbase.is_negative());
 
@@ -156,7 +156,7 @@ impl ConsensusProgram for NativeCurrency {
         assert_eq!(output_utxos_digest, Hash::hash(&output_salted_utxos));
 
         // get total input amount from inputs
-        let mut total_input = NeptuneCoins::new(0);
+        let mut total_input = NativeCurrencyAmount::coins(0);
         let mut i: u32 = 0;
         let num_inputs: u32 = input_salted_utxos.utxos.len() as u32;
         while i < num_inputs {
@@ -166,8 +166,8 @@ impl ConsensusProgram for NativeCurrency {
             while j < num_coins {
                 if utxo_i.coins()[j as usize].type_script_hash == self_digest {
                     // decode state to get amount
-                    let amount: NeptuneCoins =
-                        *NeptuneCoins::decode(&utxo_i.coins()[j as usize].state).unwrap();
+                    let amount: NativeCurrencyAmount =
+                        *NativeCurrencyAmount::decode(&utxo_i.coins()[j as usize].state).unwrap();
 
                     // make sure amount is positive (or zero)
                     assert!(!amount.is_negative());
@@ -181,22 +181,23 @@ impl ConsensusProgram for NativeCurrency {
         }
 
         // get total output amount from outputs
-        let mut total_output = NeptuneCoins::new(0);
-        let mut total_timelocked_output = NeptuneCoins::new(0);
+        let mut total_output = NativeCurrencyAmount::coins(0);
+        let mut total_timelocked_output = NativeCurrencyAmount::coins(0);
 
         i = 0;
         let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
         while i < num_outputs {
             let utxo_i = output_salted_utxos.utxos[i as usize].clone();
             let num_coins: u32 = utxo_i.coins().len() as u32;
-            let mut total_amount_for_utxo = NeptuneCoins::new(0);
+            let mut total_amount_for_utxo = NativeCurrencyAmount::coins(0);
             let mut time_locked = false;
             let mut j = 0;
             while j < num_coins {
                 let coin_j = utxo_i.coins()[j as usize].clone();
                 if coin_j.type_script_hash == self_digest {
                     // decode state to get amount
-                    let amount: NeptuneCoins = *NeptuneCoins::decode(&coin_j.state).unwrap();
+                    let amount: NativeCurrencyAmount =
+                        *NativeCurrencyAmount::decode(&coin_j.state).unwrap();
 
                     // make sure amount is positive (or zero)
                     assert!(!amount.is_negative());
@@ -221,8 +222,14 @@ impl ConsensusProgram for NativeCurrency {
             i += 1;
         }
 
-        assert!(fee >= NeptuneCoins::min(), "fee exceeds amount lower bound");
-        assert!(fee <= NeptuneCoins::max(), "fee exceeds amount upper bound");
+        assert!(
+            fee >= NativeCurrencyAmount::min(),
+            "fee exceeds amount lower bound"
+        );
+        assert!(
+            fee <= NativeCurrencyAmount::max(),
+            "fee exceeds amount upper bound"
+        );
 
         // if coinbase is set, verify that half of it is time-locked
         let mut half_of_coinbase = some_coinbase;
@@ -236,9 +243,10 @@ impl ConsensusProgram for NativeCurrency {
             total_output,);
 
         // test no-inflation equation
-        let total_input_plus_coinbase: NeptuneCoins =
+        let total_input_plus_coinbase: NativeCurrencyAmount =
             total_input.checked_add(&some_coinbase).unwrap();
-        let total_output_plus_fee: NeptuneCoins = total_output.checked_add_negative(&fee).unwrap();
+        let total_output_plus_fee: NativeCurrencyAmount =
+            total_output.checked_add_negative(&fee).unwrap();
         assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
     }
 
@@ -259,7 +267,7 @@ impl ConsensusProgram for NativeCurrency {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
-        let coin_size = NeptuneCoins::static_length().unwrap();
+        let coin_size = NativeCurrencyAmount::static_length().unwrap();
         let hash_fee = library.import(Box::new(HashStaticSize { size: coin_size }));
         let compare_coin_amount = DataType::compare_elem_of_stack_size(coin_size);
         let timestamp_size = 1;
@@ -357,8 +365,8 @@ impl ConsensusProgram for NativeCurrency {
             // _ coinbase_size
         );
 
-        let push_max_amount = NeptuneCoins::max().push_to_stack();
-        let push_min_amount = NeptuneCoins::min().push_to_stack();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
+        let push_min_amount = NativeCurrencyAmount::min().push_to_stack();
 
         let digest_eq = DataType::Digest.compare();
 
@@ -1080,7 +1088,7 @@ impl ConsensusProgram for NativeCurrency {
 }
 
 impl TypeScript for NativeCurrency {
-    type State = NeptuneCoins;
+    type State = NativeCurrencyAmount;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq, TasmObject)]
@@ -1108,8 +1116,8 @@ impl From<PrimitiveWitness> for NativeCurrencyWitness {
 struct NativeCurrencyWitnessMemory {
     salted_input_utxos: SaltedUtxos,
     salted_output_utxos: SaltedUtxos,
-    coinbase: Option<NeptuneCoins>,
-    fee: NeptuneCoins,
+    coinbase: Option<NativeCurrencyAmount>,
+    fee: NativeCurrencyAmount,
     timestamp: Timestamp,
 }
 
@@ -1216,7 +1224,7 @@ pub mod test {
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::type_scripts::neptune_coins::test::invalid_positive_amount;
+    use crate::models::blockchain::type_scripts::native_currency_amount::test::invalid_positive_amount;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
@@ -1350,7 +1358,7 @@ pub mod test {
         #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
             PublicAnnouncement,
         >,
-        #[strategy(arb())] _fee: NeptuneCoins,
+        #[strategy(arb())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
             &#_input_utxos,
             &#_input_lock_scripts_and_witnesses,
@@ -1376,7 +1384,7 @@ pub mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] _coinbase: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _coinbase: NativeCurrencyAmount,
         #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
         #[strategy(vec(arb::<LockScriptAndWitness>(), #_num_inputs))]
         _input_lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
@@ -1384,7 +1392,7 @@ pub mod test {
         #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
             PublicAnnouncement,
         >,
-        #[strategy(arb())] _fee: NeptuneCoins,
+        #[strategy(arb())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
             &#_input_utxos,
             &#_input_lock_scripts_and_witnesses,
@@ -1414,15 +1422,16 @@ pub mod test {
     #[test]
     fn tx_with_negative_fee_with_coinbase_deterministic() {
         let mut test_runner = TestRunner::deterministic();
-        let mut primitive_witness = PrimitiveWitness::arbitrary_with_fee(-NeptuneCoins::new(1))
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let mut primitive_witness =
+            PrimitiveWitness::arbitrary_with_fee(-NativeCurrencyAmount::coins(1))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
         let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
         assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
 
         let kernel_modifier =
-            TransactionKernelModifier::default().coinbase(Some(NeptuneCoins::new(1)));
+            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
         NativeCurrency
@@ -1436,14 +1445,14 @@ pub mod test {
 
     #[proptest]
     fn tx_with_negative_fee_with_coinbase(
-        #[strategy(PrimitiveWitness::arbitrary_with_fee(-NeptuneCoins::new(1)))]
+        #[strategy(PrimitiveWitness::arbitrary_with_fee(-NativeCurrencyAmount::coins(1)))]
         mut primitive_witness: PrimitiveWitness,
     ) {
         let good_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
         assert_both_rust_and_tasm_halt_gracefully(good_native_currency_witness).unwrap();
 
         let kernel_modifier =
-            TransactionKernelModifier::default().coinbase(Some(NeptuneCoins::new(1)));
+            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
         primitive_witness.kernel = kernel_modifier.modify(primitive_witness.kernel);
         let bad_native_currency_witness = NativeCurrencyWitness::from(primitive_witness.clone());
         NativeCurrency
@@ -1541,7 +1550,7 @@ pub mod test {
                 sample(vec(arb::<LockScriptAndWitness>(), 3), &mut tr);
             let output_utxos = sample(vec(arb::<Utxo>(), 3), &mut tr);
             let public_announcements = sample(vec(arb(), 3), &mut tr);
-            let fee = sample(NeptuneCoins::arbitrary_non_negative(), &mut tr);
+            let fee = sample(NativeCurrencyAmount::arbitrary_non_negative(), &mut tr);
             let primitive_witness = PrimitiveWitness::arbitrary_primitive_witness_with(
                 &input_utxos,
                 &input_lock_scripts_and_witnesses,
@@ -1576,8 +1585,8 @@ pub mod test {
         ))]
         mut primitive_witness: PrimitiveWitness,
         #[strategy(arb())]
-        #[filter(NeptuneCoins::zero() < #delta)]
-        delta: NeptuneCoins,
+        #[filter(NativeCurrencyAmount::zero() < #delta)]
+        delta: NativeCurrencyAmount,
     ) {
         // Modify the kernel so as to increase the coinbase but not the fee. The
         // resulting transaction is imbalanced but since the timelocked coinbase
@@ -1667,7 +1676,7 @@ pub mod test {
     fn fee_can_be_positive_deterministic() {
         let mut test_runner = TestRunner::deterministic();
         for _ in 0..10 {
-            let fee = NeptuneCoins::arbitrary_non_negative()
+            let fee = NativeCurrencyAmount::arbitrary_non_negative()
                 .new_tree(&mut test_runner)
                 .unwrap()
                 .current();
@@ -1681,7 +1690,7 @@ pub mod test {
 
     #[proptest]
     fn fee_can_be_positive(
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1690,7 +1699,7 @@ pub mod test {
 
     #[proptest]
     fn fee_can_be_negative(
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] _fee: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1699,7 +1708,7 @@ pub mod test {
 
     #[proptest]
     fn positive_fee_cannot_exceed_max_nau(
-        #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
+        #[strategy(invalid_positive_amount())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {
@@ -1716,7 +1725,7 @@ pub mod test {
     #[ignore]
     #[proptest]
     fn negative_fee_cannot_exceed_min_nau(
-        #[strategy(invalid_positive_amount())] _fee: NeptuneCoins,
+        #[strategy(invalid_positive_amount())] _fee: NativeCurrencyAmount,
         #[strategy(PrimitiveWitness::arbitrary_with_fee(-#_fee))]
         primitive_witness: PrimitiveWitness,
     ) {

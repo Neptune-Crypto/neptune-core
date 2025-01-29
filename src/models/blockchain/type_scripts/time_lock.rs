@@ -763,7 +763,7 @@ pub mod neptune_arbitrary {
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
 
-    use super::super::neptune_coins::NeptuneCoins;
+    use super::super::native_currency_amount::NativeCurrencyAmount;
     use super::*;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::PublicAnnouncement;
@@ -785,12 +785,12 @@ pub mod neptune_arbitrary {
             let num_inputs = release_dates.len();
             (
                 vec(arb::<Digest>(), num_inputs),
-                vec(NeptuneCoins::arbitrary_non_negative(), num_inputs),
+                vec(NativeCurrencyAmount::arbitrary_non_negative(), num_inputs),
                 vec(arb::<Digest>(), num_outputs),
-                vec(NeptuneCoins::arbitrary_non_negative(), num_outputs),
+                vec(NativeCurrencyAmount::arbitrary_non_negative(), num_outputs),
                 vec(arb::<PublicAnnouncement>(), num_public_announcements),
-                NeptuneCoins::arbitrary_coinbase(),
-                NeptuneCoins::arbitrary_non_negative(),
+                NativeCurrencyAmount::arbitrary_coinbase(),
+                NativeCurrencyAmount::arbitrary_non_negative(),
             )
                 .prop_flat_map(
                     move |(
@@ -808,7 +808,7 @@ pub mod neptune_arbitrary {
                                 &input_address_seeds,
                                 &input_amounts,
                             );
-                        let total_inputs = input_amounts.into_iter().sum::<NeptuneCoins>();
+                        let total_inputs = input_amounts.into_iter().sum::<NativeCurrencyAmount>();
 
                         // add time locks to input UTXOs (changes Utxo hash)
                         for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter())
@@ -843,7 +843,7 @@ pub mod neptune_arbitrary {
                             &input_lock_scripts_and_witnesses,
                             &output_utxos,
                             &public_announcements,
-                            NeptuneCoins::zero(),
+                            NativeCurrencyAmount::zero(),
                             maybe_coinbase,
                         )
                         .prop_map(move |mut transaction_primitive_witness| {
@@ -930,7 +930,7 @@ pub mod neptune_arbitrary {
         release_dates: Vec<Timestamp>,
     ) -> BoxedStrategy<PrimitiveWitness> {
         (
-            NeptuneCoins::arbitrary_non_negative(),
+            NativeCurrencyAmount::arbitrary_non_negative(),
             vec(arb::<Digest>(), num_inputs),
             vec(arb::<u64>(), num_inputs),
             vec(arb::<Digest>(), num_outputs),
@@ -968,14 +968,16 @@ pub mod neptune_arbitrary {
                     let mut input_amounts = input_weights
                         .into_iter()
                         .map(|w| total_amount.to_nau_f64() * w)
-                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                         .collect_vec();
                     let maybe_coinbase = if maybe_coinbase_dist.is_some()
                         || input_amounts.is_empty()
                     {
                         Some(
                             total_amount
-                                .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
+                                .checked_sub(
+                                    &input_amounts.iter().cloned().sum::<NativeCurrencyAmount>(),
+                                )
                                 .unwrap(),
                         )
                     } else {
@@ -984,7 +986,7 @@ pub mod neptune_arbitrary {
                             .rev()
                             .skip(1)
                             .cloned()
-                            .sum::<NeptuneCoins>();
+                            .sum::<NativeCurrencyAmount>();
                         *input_amounts.last_mut().unwrap() =
                             total_amount.checked_sub(&sum_of_all_but_last).unwrap();
                         None
@@ -1000,9 +1002,10 @@ pub mod neptune_arbitrary {
                     let output_amounts = output_weights
                         .into_iter()
                         .map(|w| total_amount.to_nau_f64() * w)
-                        .map(|f| NeptuneCoins::try_from(f).unwrap())
+                        .map(|f| NativeCurrencyAmount::try_from(f).unwrap())
                         .collect_vec();
-                    let total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+                    let total_outputs =
+                        output_amounts.iter().cloned().sum::<NativeCurrencyAmount>();
                     let fee = total_amount.checked_sub(&total_outputs).unwrap();
 
                     let (mut input_utxos, input_lock_scripts_and_witnesses) =
@@ -1010,10 +1013,10 @@ pub mod neptune_arbitrary {
                             &input_address_seeds,
                             &input_amounts,
                         );
-                    let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    let total_inputs = input_amounts.iter().copied().sum::<NativeCurrencyAmount>();
 
                     assert_eq!(
-                        total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
+                        total_inputs + maybe_coinbase.unwrap_or(NativeCurrencyAmount::coins(0)),
                         total_outputs + fee
                     );
                     let mut output_utxos =

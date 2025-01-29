@@ -10,7 +10,7 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::utxo_notification::PrivateNotificationData;
@@ -64,7 +64,7 @@ impl TxOutput {
     pub fn auto(
         wallet_state: &WalletState,
         address: ReceivingAddress,
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
@@ -118,7 +118,7 @@ impl TxOutput {
     /// Instantiate a [TxOutput] for native currency intended fro on-chain UTXO
     /// notification.
     pub(crate) fn onchain_native_currency(
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
@@ -136,7 +136,7 @@ impl TxOutput {
     /// Instantiate a [TxOutput] for native currency intended for off-chain UTXO
     /// notification.
     pub(crate) fn offchain_native_currency(
-        amount: NeptuneCoins,
+        amount: NativeCurrencyAmount,
         sender_randomness: Digest,
         receiving_address: ReceivingAddress,
         owned: bool,
@@ -279,7 +279,7 @@ impl From<Option<TxOutput>> for TxOutputList {
 
 impl TxOutputList {
     /// calculates total amount in native currency
-    pub fn total_native_coins(&self) -> NeptuneCoins {
+    pub fn total_native_coins(&self) -> NativeCurrencyAmount {
         self.0
             .iter()
             .map(|u| u.utxo.get_native_currency_amount())
@@ -369,7 +369,7 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::Coin;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::WalletSecret;
@@ -415,7 +415,7 @@ mod tests {
         let seed: Digest = rng.gen();
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
-        let amount = NeptuneCoins::one();
+        let amount = NativeCurrencyAmount::one();
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
 
         let sender_randomness = state
@@ -479,7 +479,7 @@ mod tests {
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
 
-        let amount = NeptuneCoins::one();
+        let amount = NativeCurrencyAmount::one();
 
         for (owned_utxo_notification_medium, address) in [
             (UtxoNotificationMedium::OffChain, address_gen.clone()),

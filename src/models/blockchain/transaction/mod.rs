@@ -323,7 +323,7 @@ mod tests {
     use tests::primitive_witness::SaltedUtxos;
 
     use super::*;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -430,7 +430,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             public_announcements: vec![],
-            fee: NeptuneCoins::new(0),
+            fee: NativeCurrencyAmount::coins(0),
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: Digest::default(),
@@ -468,7 +468,7 @@ mod transaction_tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_block_from_transaction_and_msa;
@@ -477,8 +477,10 @@ mod transaction_tests {
     #[traced_test]
     #[test]
     fn tx_get_timestamp_test() {
-        let output_1 =
-            Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(42));
+        let output_1 = Utxo::new_native_currency(
+            LockScript::anyone_can_spend(),
+            NativeCurrencyAmount::coins(42),
+        );
         let ar = commit(Tip5::hash(&output_1), random(), random());
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow

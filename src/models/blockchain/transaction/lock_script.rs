@@ -218,13 +218,13 @@ mod test {
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     #[proptest]
     fn lock_script_halts_gracefully_prop(
         #[strategy(arb::<Digest>())] txk_mast_hash: Digest,
         #[strategy(arb::<Digest>())] seed: Digest,
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] amount: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())] amount: NativeCurrencyAmount,
     ) {
         let (_utxos, lock_scripts_and_witnesses) =
             PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(&[seed], &[amount]);
@@ -236,7 +236,7 @@ mod test {
     fn lock_script_halts_gracefully_unit() {
         let txk_mast_hash = Digest::default();
         let seed = Digest::default();
-        let amount = NeptuneCoins::zero();
+        let amount = NativeCurrencyAmount::zero();
 
         let (_utxos, lock_scripts_and_witnesses) =
             PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(&[seed], &[amount]);

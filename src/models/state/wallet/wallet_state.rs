@@ -50,7 +50,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
@@ -445,8 +445,8 @@ impl WalletState {
     pub(crate) fn mempool_balance_updates(
         &self,
     ) -> (
-        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + '_,
-        impl Iterator<Item = (TransactionKernelId, NeptuneCoins)> + '_,
+        impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
+        impl Iterator<Item = (TransactionKernelId, NativeCurrencyAmount)> + '_,
     ) {
         let incoming = self.mempool_spent_utxos.iter().map(|(txkid, sender_data)| {
             (
@@ -454,7 +454,7 @@ impl WalletState {
                 sender_data
                     .iter()
                     .map(|(utxo, _ais, _)| utxo.get_native_currency_amount())
-                    .sum::<NeptuneCoins>(),
+                    .sum::<NativeCurrencyAmount>(),
             )
         });
 
@@ -467,7 +467,7 @@ impl WalletState {
                     announced_utxos
                         .iter()
                         .map(|au| au.utxo.get_native_currency_amount())
-                        .sum::<NeptuneCoins>(),
+                        .sum::<NativeCurrencyAmount>(),
                 )
             });
 
@@ -478,7 +478,7 @@ impl WalletState {
         &self,
         tip_digest: Digest,
         timestamp: Timestamp,
-    ) -> NeptuneCoins {
+    ) -> NativeCurrencyAmount {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
 
         wallet_status.synced_unspent_liquid_amount(timestamp)
@@ -488,7 +488,7 @@ impl WalletState {
         &self,
         tip_digest: Digest,
         timestamp: Timestamp,
-    ) -> NeptuneCoins {
+    ) -> NativeCurrencyAmount {
         self.confirmed_balance(tip_digest, timestamp)
             .await
             .checked_sub(
@@ -1356,7 +1356,7 @@ impl WalletState {
     /// transaction.
     pub(crate) async fn allocate_sufficient_input_funds(
         &self,
-        total_spend: NeptuneCoins,
+        total_spend: NativeCurrencyAmount,
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> Result<Vec<UnlockedUtxo>> {
@@ -1375,7 +1375,7 @@ impl WalletState {
         }
 
         let mut input_funds = vec![];
-        let mut allocated_amount = NeptuneCoins::zero();
+        let mut allocated_amount = NativeCurrencyAmount::zero();
         for (wallet_status_element, membership_proof) in wallet_status.synced_unspent.iter() {
             // Don't allocate more than needed
             if allocated_amount >= total_spend {
@@ -1549,7 +1549,7 @@ mod tests {
 
         // First, check that error is returned, when available balance is not
         // there, as it is timelocked.
-        let one_coin = NeptuneCoins::new(1);
+        let one_coin = NativeCurrencyAmount::coins(1);
         assert!(alice_ws_genesis
             .synced_unspent_liquid_amount(launch_timestamp)
             .is_zero());
@@ -1661,9 +1661,9 @@ mod tests {
             .unwrap();
 
         // Bob sends two identical coins (=identical addition records) to Alice.
-        let fee = NeptuneCoins::new(1);
+        let fee = NativeCurrencyAmount::coins(1);
         let txoutput = TxOutput::onchain_native_currency(
-            NeptuneCoins::new(7),
+            NativeCurrencyAmount::coins(7),
             random(),
             alice_key.to_address().into(),
             false,
@@ -1698,7 +1698,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            NeptuneCoins::new(14),
+            NativeCurrencyAmount::coins(14),
             alice
                 .lock_guard()
                 .await
@@ -1732,7 +1732,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            NeptuneCoins::new(28),
+            NativeCurrencyAmount::coins(28),
             alice
                 .lock_guard()
                 .await
@@ -1761,12 +1761,12 @@ mod tests {
             .unwrap();
 
         let txo = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(3),
+            NativeCurrencyAmount::coins(3),
             random(),
             alice_key.to_address().into(),
             false,
         );
-        let fee = NeptuneCoins::new(10);
+        let fee = NativeCurrencyAmount::coins(10);
         let (mut tx_block2, _) = bob
             .lock_guard_mut()
             .await
@@ -1857,12 +1857,12 @@ mod tests {
             .unwrap();
 
         let txo = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(3),
+            NativeCurrencyAmount::coins(3),
             random(),
             alice_key.to_address().into(),
             false,
         );
-        let fee = NeptuneCoins::new(10);
+        let fee = NativeCurrencyAmount::coins(10);
         let (mut tx_block2, _) = bob
             .lock_guard_mut()
             .await
@@ -2542,7 +2542,7 @@ mod tests {
 
             // Can make tx with PoW-loot.
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
-            let fee = NeptuneCoins::new(1);
+            let fee = NativeCurrencyAmount::coins(1);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
             let (mut tx_spending_guesser_fee, _) = bob
                 .global_state_lock
@@ -2645,7 +2645,7 @@ mod tests {
             let coinbase_amt = Block::block_subsidy(BlockHeight::genesis().next());
             let mut half_coinbase_amt = coinbase_amt;
             half_coinbase_amt.div_two();
-            let send_amt = NeptuneCoins::new(5);
+            let send_amt = NativeCurrencyAmount::coins(5);
 
             let timestamp = Block::genesis_block(network).header().timestamp + Timestamp::hours(1);
 
@@ -2688,7 +2688,7 @@ mod tests {
                         tx_outputs,
                         change_key,
                         UtxoNotificationMedium::OnChain,
-                        NeptuneCoins::zero(),
+                        NativeCurrencyAmount::zero(),
                         timestamp,
                         TxProvingCapability::PrimitiveWitness,
                         &TritonVmJobQueue::dummy(),
@@ -2888,8 +2888,10 @@ mod tests {
             assert!(wallet.wallet_db.expected_utxos().is_empty().await);
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
 
-            let mock_utxo =
-                Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(10));
+            let mock_utxo = Utxo::new_native_currency(
+                LockScript::anyone_can_spend(),
+                NativeCurrencyAmount::coins(10),
+            );
 
             let sender_randomness: Digest = rand::random();
             let receiver_preimage: Digest = rand::random();
@@ -2938,8 +2940,10 @@ mod tests {
             let mut wallet =
                 mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
 
-            let mock_utxo =
-                Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
+            let mock_utxo = Utxo::new_native_currency(
+                LockScript::anyone_can_spend(),
+                NativeCurrencyAmount::coins(14),
+            );
 
             // Add a UTXO notification
             let mut addition_records = vec![];
@@ -3045,7 +3049,7 @@ mod tests {
 
                 let mock_utxo = Utxo::new_native_currency(
                     LockScript::anyone_can_spend(),
-                    NeptuneCoins::new(14),
+                    NativeCurrencyAmount::coins(14),
                 );
 
                 assert!(wallet.wallet_db.expected_utxos().is_empty().await);

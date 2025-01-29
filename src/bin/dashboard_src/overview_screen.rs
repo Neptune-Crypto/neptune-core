@@ -10,7 +10,7 @@ use itertools::Itertools;
 use neptune_cash::config_models::network::Network;
 use neptune_cash::models::blockchain::block::block_header::BlockHeader;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
-use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::mining_status::MiningStatus;
 use neptune_cash::models::state::tx_proving_capability::TxProvingCapability;
 use neptune_cash::prelude::twenty_first;
@@ -36,9 +36,9 @@ use super::screen::Screen;
 
 #[derive(Debug, Clone, Default)]
 pub struct OverviewData {
-    available_balance: Option<NeptuneCoins>,
-    available_unconfirmed_balance: Option<NeptuneCoins>,
-    timelocked_balance: Option<NeptuneCoins>,
+    available_balance: Option<NativeCurrencyAmount>,
+    available_unconfirmed_balance: Option<NativeCurrencyAmount>,
+    timelocked_balance: Option<NativeCurrencyAmount>,
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 

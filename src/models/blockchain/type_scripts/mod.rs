@@ -1,6 +1,6 @@
 pub mod known_type_scripts;
 pub mod native_currency;
-pub mod neptune_coins;
+pub mod native_currency_amount;
 pub mod time_lock;
 
 use std::collections::HashMap;

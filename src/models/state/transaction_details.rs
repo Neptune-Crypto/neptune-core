@@ -9,7 +9,7 @@ use super::wallet::transaction_output::TxOutput;
 use super::wallet::unlocked_utxo::UnlockedUtxo;
 use super::wallet::utxo_notification::UtxoNotifyMethod;
 use crate::models::blockchain::block::MINING_REWARD_TIME_LOCK_PERIOD;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -20,8 +20,8 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 pub(crate) struct TransactionDetails {
     pub tx_inputs: Vec<UnlockedUtxo>,
     pub tx_outputs: TxOutputList,
-    pub fee: NeptuneCoins,
-    pub coinbase: Option<NeptuneCoins>,
+    pub fee: NativeCurrencyAmount,
+    pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_accumulator: MutatorSetAccumulator,
 }
@@ -31,7 +31,7 @@ impl TransactionDetails {
     /// no outputs. Can be used if a merge bit needs to be flipped.
     pub(crate) fn nop(mutator_set_accumulator: MutatorSetAccumulator, now: Timestamp) -> Self {
         Self::fee_gobbler(
-            NeptuneCoins::zero(),
+            NativeCurrencyAmount::zero(),
             Digest::default(),
             mutator_set_accumulator,
             now,
@@ -47,7 +47,7 @@ impl TransactionDetails {
     /// The produced transaction is supported by a [`PrimitiveWitness`], so
     /// the caller still needs a follow-up proving operation.
     pub(crate) fn fee_gobbler(
-        gobbled_fee: NeptuneCoins,
+        gobbled_fee: NativeCurrencyAmount,
         sender_randomness: Digest,
         mutator_set_accumulator: MutatorSetAccumulator,
         now: Timestamp,
@@ -117,8 +117,8 @@ impl TransactionDetails {
     pub(crate) fn new_with_coinbase(
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
-        coinbase: NeptuneCoins,
-        fee: NeptuneCoins,
+        coinbase: NativeCurrencyAmount,
+        fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
@@ -143,7 +143,7 @@ impl TransactionDetails {
     pub(crate) fn new_without_coinbase(
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
-        fee: NeptuneCoins,
+        fee: NativeCurrencyAmount,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
@@ -167,18 +167,18 @@ impl TransactionDetails {
     fn new(
         tx_inputs: Vec<UnlockedUtxo>,
         tx_outputs: TxOutputList,
-        fee: NeptuneCoins,
-        coinbase: Option<NeptuneCoins>,
+        fee: NativeCurrencyAmount,
+        coinbase: Option<NativeCurrencyAmount>,
         timestamp: Timestamp,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> Result<TransactionDetails> {
         // total amount to be spent -- determines how many and which UTXOs to use
         let total_spend = tx_outputs.total_native_coins() + fee;
-        let total_input: NeptuneCoins = tx_inputs
+        let total_input: NativeCurrencyAmount = tx_inputs
             .iter()
             .map(|x| x.utxo.get_native_currency_amount())
             .sum();
-        let coinbase_amount = coinbase.unwrap_or(NeptuneCoins::zero());
+        let coinbase_amount = coinbase.unwrap_or(NativeCurrencyAmount::zero());
         let total_spendable = total_input + coinbase_amount;
 
         // sanity check: do we even have enough funds?
@@ -218,7 +218,8 @@ mod test {
 
     #[proptest]
     fn test_fee_gobbler_properties(
-        #[strategy(NeptuneCoins::arbitrary_non_negative())] gobbled_fee: NeptuneCoins,
+        #[strategy(NativeCurrencyAmount::arbitrary_non_negative())]
+        gobbled_fee: NativeCurrencyAmount,
         #[strategy(arb())] sender_randomness: Digest,
         #[strategy(arb())] mutator_set_accumulator: MutatorSetAccumulator,
         #[strategy(arb())] now: Timestamp,
@@ -240,12 +241,12 @@ mod test {
         );
 
         assert_eq!(
-            NeptuneCoins::zero(),
+            NativeCurrencyAmount::zero(),
             fee_gobbler
                 .tx_outputs
                 .iter()
                 .map(|txo| txo.utxo().get_native_currency_amount())
-                .sum::<NeptuneCoins>()
+                .sum::<NativeCurrencyAmount>()
                 + fee_gobbler.fee,
             "total transaction amount must be zero for fee gobbler"
         );
@@ -268,7 +269,7 @@ mod test {
                 None => false,
             })
             .map(|utxo| utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>();
+            .sum::<NativeCurrencyAmount>();
         assert!(
             -half_of_fee
                 <= time_locked_amount,

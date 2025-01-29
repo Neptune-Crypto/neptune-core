@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
@@ -40,45 +40,45 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
-    pub fn synced_unspent_liquid_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+    pub fn synced_unspent_liquid_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
             .filter(|utxo| utxo.can_spend_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
+            .sum::<NativeCurrencyAmount>()
     }
-    pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
+    pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
             .filter(|utxo| utxo.is_timelocked_but_otherwise_spendable_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
+            .sum::<NativeCurrencyAmount>()
     }
 
     /// Sum of value of monitored unsynced, unspent UTXOs. Does not check for
     /// spendability, as that can only be determined once the monitored UTXO
     /// is synced.
-    pub fn unsynced_unspent_amount(&self) -> NeptuneCoins {
+    pub fn unsynced_unspent_amount(&self) -> NativeCurrencyAmount {
         self.unsynced_unspent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
+            .sum::<NativeCurrencyAmount>()
     }
 
-    pub fn synced_spent_amount(&self) -> NeptuneCoins {
+    pub fn synced_spent_amount(&self) -> NativeCurrencyAmount {
         self.synced_spent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
+            .sum::<NativeCurrencyAmount>()
     }
 
-    pub fn unsynced_spent_amount(&self) -> NeptuneCoins {
+    pub fn unsynced_spent_amount(&self) -> NativeCurrencyAmount {
         self.unsynced_spent
             .iter()
             .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NeptuneCoins>()
+            .sum::<NativeCurrencyAmount>()
     }
 }
 

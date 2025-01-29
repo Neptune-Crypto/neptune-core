@@ -10,7 +10,7 @@ use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
@@ -25,8 +25,8 @@ pub struct BlockInfo {
     pub difficulty: Difficulty,
     pub num_inputs: usize,
     pub num_outputs: usize,
-    pub coinbase_amount: NeptuneCoins,
-    pub fee: NeptuneCoins,
+    pub coinbase_amount: NativeCurrencyAmount,
+    pub fee: NativeCurrencyAmount,
     pub is_genesis: bool,
     pub is_tip: bool,
     pub is_canonical: bool,
@@ -96,7 +96,7 @@ impl BlockInfo {
     /// note that this calculated value may be more than the coinbase_amount
     /// field because a miner may choose to reward themself less than the
     /// calculated reward amount.
-    pub fn expected_coinbase_amount(&self) -> NeptuneCoins {
+    pub fn expected_coinbase_amount(&self) -> NativeCurrencyAmount {
         Block::block_subsidy(self.height)
     }
 }

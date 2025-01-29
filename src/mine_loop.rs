@@ -895,7 +895,7 @@ pub(crate) mod mine_loop_tests {
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::test::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
@@ -1139,7 +1139,7 @@ pub(crate) mod mine_loop_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
         let output_to_alice = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(4),
+            NativeCurrencyAmount::coins(4),
             rng.gen(),
             alice_key.to_address().into(),
             false,
@@ -1151,7 +1151,7 @@ pub(crate) mod mine_loop_tests {
                 vec![output_to_alice].into(),
                 alice_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(1),
+                NativeCurrencyAmount::coins(1),
                 now,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),

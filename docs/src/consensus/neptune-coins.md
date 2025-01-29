@@ -4,7 +4,7 @@ Neptune Coins refers to two things
  - the native currency coin type for Neptune;
  - the unit in which quantities of the former are measured.
 
-In the code, the struct `NeptuneCoins` defines the unit. The native currency type script is encapsulated as a struct `NativeCurrency` implementing trait `ConsensusProgram` in `native_currency.rs`.
+In the code, the struct `NativeCurrencyAmount` defines the unit. The native currency type script is encapsulated as a struct `NativeCurrency` implementing trait `ConsensusProgram` in `native_currency.rs`.
 
 ## The Unit
 
@@ -12,7 +12,7 @@ One Neptune Coin equals $10^{30} \times 2^2$ *nau*, which stands for Neptune Ato
  - The largest possible amount, corresponding to 42'000'000 Neptune Coins, can be represented in **127** bits.
  - It can represent a number of Neptune Coins with up to 30 decimal symbols after the point exactly.
 
-The struct `NeptuneCoins` is a wrapper around a `u128`. It leaves 1 bit for testing positivity.
+The struct `NativeCurrencyAmount` is a wrapper around a `u128`. It leaves 1 bit for testing positivity.
 
 ## The Type Script
 

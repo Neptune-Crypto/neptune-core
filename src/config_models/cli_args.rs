@@ -12,7 +12,7 @@ use sysinfo::System;
 
 use super::network::Network;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -128,7 +128,7 @@ pub struct Args {
     /// transaction proofs. Foreign transactions where a fee below this
     /// threshold cannot be collected by proof upgrading will not be upgraded.
     #[clap(long, default_value = "0.01")]
-    pub(crate) min_gobbling_fee: NeptuneCoins,
+    pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
     /// Prune the mempool when it exceeds this size in RAM.
     ///

@@ -78,7 +78,7 @@ use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
@@ -408,17 +408,17 @@ pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
     }
 }
 
-pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
+pub fn pseudorandom_amount(seed: [u8; 32]) -> NativeCurrencyAmount {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let number: u128 = rng.gen::<u128>() >> 10;
-    NeptuneCoins::from_nau(number.into()).unwrap()
+    NativeCurrencyAmount::from_nau(number.into()).unwrap()
 }
 
 pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     (
         rng.gen(),
-        NeptuneCoins::new(rng.gen_range(0..42000000)).to_native_coins(),
+        NativeCurrencyAmount::coins(rng.gen_range(0..42000000)).to_native_coins(),
     )
         .into()
 }
@@ -443,7 +443,7 @@ pub fn random_public_announcement() -> PublicAnnouncement {
     pseudorandom_public_announcement(rng.gen::<[u8; 32]>())
 }
 
-pub fn random_amount() -> NeptuneCoins {
+pub fn random_amount() -> NativeCurrencyAmount {
     let mut rng = thread_rng();
     pseudorandom_amount(rng.gen::<[u8; 32]>())
 }
@@ -520,7 +520,7 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
             inputs,
             outputs,
             public_announcements: vec![],
-            fee: NeptuneCoins::new(1),
+            fee: NativeCurrencyAmount::coins(1),
             timestamp,
             coinbase: None,
             mutator_set_hash,
@@ -533,7 +533,10 @@ pub(crate) fn make_mock_transaction_with_mutator_set_hash(
 
 pub(crate) fn dummy_expected_utxo() -> ExpectedUtxo {
     ExpectedUtxo {
-        utxo: Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::zero()),
+        utxo: Utxo::new_native_currency(
+            LockScript::anyone_can_spend(),
+            NativeCurrencyAmount::zero(),
+        ),
         addition_record: AdditionRecord::new(Default::default()),
         sender_randomness: Default::default(),
         receiver_preimage: Default::default(),
@@ -555,7 +558,7 @@ pub(crate) fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
-    fee: NeptuneCoins,
+    fee: NativeCurrencyAmount,
     _wallet_state: &WalletState,
     timestamp: Option<Timestamp>,
 ) -> Transaction {

@@ -446,7 +446,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -683,7 +683,7 @@ mod wallet_tests {
         let liquid_mining_reward = liquid_expected_utxo.utxo.get_native_currency_amount();
         let now = genesis_block.header().timestamp + Timestamp::months(10);
 
-        let allocate_input_utxos = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
+        let allocate_input_utxos = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
             let tip_digest = alice_.lock_guard().await.chain.light_state().hash();
             alice_
                 .lock_guard()
@@ -692,12 +692,12 @@ mod wallet_tests {
                 .allocate_sufficient_input_funds(amount, tip_digest, now)
                 .await
         };
-        let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NeptuneCoins| async move {
+        let num_utxos_in_allocation = |alice_: GlobalStateLock, amount: NativeCurrencyAmount| async move {
             allocate_input_utxos(alice_, amount).await.map(|x| x.len())
         };
 
         assert!(
-            num_utxos_in_allocation(alice.clone(), NeptuneCoins::new(1),)
+            num_utxos_in_allocation(alice.clone(), NativeCurrencyAmount::coins(1),)
                 .await
                 .is_err(),
             "Cannot allocate anything when wallet is empty"
@@ -714,7 +714,7 @@ mod wallet_tests {
         }
 
         // Verify that the allocater returns a sane amount
-        let one_coin = NeptuneCoins::new(1);
+        let one_coin = NativeCurrencyAmount::coins(1);
         assert_eq!(
             1,
             num_utxos_in_allocation(alice.clone(), one_coin)
@@ -806,8 +806,10 @@ mod wallet_tests {
 
         // This block throws away four UTXOs.
         let msa_tip_previous = next_block.mutator_set_accumulator_after().clone();
-        let output_utxo =
-            Utxo::new_native_currency(LockScript::anyone_can_spend(), NeptuneCoins::new(200));
+        let output_utxo = Utxo::new_native_currency(
+            LockScript::anyone_can_spend(),
+            NativeCurrencyAmount::coins(200),
+        );
         let tx_outputs: TxOutputList = vec![TxOutput::no_notification(
             output_utxo,
             random(),
@@ -850,21 +852,24 @@ mod wallet_tests {
             alice_balance
                 >= allocate_input_utxos(
                     alice.clone(),
-                    alice_balance.checked_sub(&NeptuneCoins::new(1)).unwrap()
+                    alice_balance
+                        .checked_sub(&NativeCurrencyAmount::coins(1))
+                        .unwrap()
                 )
                 .await
                 .unwrap()
                 .into_iter()
                 .map(|unlocked_utxo: UnlockedUtxo| unlocked_utxo.utxo.get_native_currency_amount())
-                .sum::<NeptuneCoins>()
+                .sum::<NativeCurrencyAmount>()
         );
 
         // Cannot allocate more than we have liquid.
-        assert!(
-            allocate_input_utxos(alice.clone(), alice_balance + NeptuneCoins::new(1))
-                .await
-                .is_err()
-        );
+        assert!(allocate_input_utxos(
+            alice.clone(),
+            alice_balance + NativeCurrencyAmount::coins(1)
+        )
+        .await
+        .is_err());
     }
 
     #[traced_test]
@@ -910,13 +915,13 @@ mod wallet_tests {
             alice_address.privacy_digest(),
         );
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(12),
+            NativeCurrencyAmount::coins(12),
             bob_sender_randomness,
             alice_address.into(),
             false,
         );
         let receiver_data_1_to_alice = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(1),
+            NativeCurrencyAmount::coins(1),
             bob_sender_randomness,
             alice_address.into(),
             false,
@@ -929,7 +934,7 @@ mod wallet_tests {
                 receiver_data_to_alice.clone(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
                 UtxoNotificationMedium::OnChain,
-                NeptuneCoins::new(2),
+                NativeCurrencyAmount::coins(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),
@@ -953,7 +958,7 @@ mod wallet_tests {
 
         assert_eq!(
             bobs_original_balance
-                .checked_sub(&NeptuneCoins::new(15))
+                .checked_sub(&NativeCurrencyAmount::coins(15))
                 .unwrap(),
             bob.get_wallet_status_for_tip()
                 .await
@@ -1156,7 +1161,7 @@ mod wallet_tests {
         // Fork back to the B-chain with `block_3b` which contains three outputs
         // for Alice, two composer UTXOs and one other UTXO.
         let receiver_data_1_to_alice_new = TxOutput::offchain_native_currency(
-            NeptuneCoins::new(1),
+            NativeCurrencyAmount::coins(1),
             rng.gen(),
             alice_address.into(),
             false,
@@ -1167,7 +1172,7 @@ mod wallet_tests {
                 vec![receiver_data_1_to_alice_new.clone()].into(),
                 bob_wallet.nth_generation_spending_key_for_tests(0).into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(4),
+                NativeCurrencyAmount::coins(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
                 TxProvingCapability::SingleProof,
                 &TritonVmJobQueue::dummy(),
@@ -1367,7 +1372,7 @@ mod wallet_tests {
         )
         .await
         .unwrap();
-        let one_money: NeptuneCoins = NeptuneCoins::new(1);
+        let one_money: NativeCurrencyAmount = NativeCurrencyAmount::coins(1);
         let anyone_can_spend_utxo =
             Utxo::new_native_currency(LockScript::anyone_can_spend(), one_money);
         let tx_output =
@@ -1613,7 +1618,7 @@ mod wallet_tests {
                 let premine_recipient =
                     mock_genesis_global_state(network, 0, wallet_secret, cli.clone()).await;
                 assert_eq!(
-                    NeptuneCoins::new(1),
+                    NativeCurrencyAmount::coins(1),
                     premine_recipient
                         .global_state_lock
                         .lock_guard()

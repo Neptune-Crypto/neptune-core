@@ -9,7 +9,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use itertools::Itertools;
 use neptune_cash::models::blockchain::block::block_height::BlockHeight;
-use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::proof_abstractions::timestamp::Timestamp;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
@@ -36,7 +36,12 @@ use unicode_width::UnicodeWidthStr;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-type BalanceUpdate = (BlockHeight, Timestamp, NeptuneCoins, NeptuneCoins);
+type BalanceUpdate = (
+    BlockHeight,
+    Timestamp,
+    NativeCurrencyAmount,
+    NativeCurrencyAmount,
+);
 type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -163,9 +168,9 @@ impl HistoryScreen {
                 _ = &mut balance_history => {
                     let bh = rpc_client.history(context::current(), token).await.unwrap().unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
-                    let initial_balance = NeptuneCoins::zero();
+                    let initial_balance = NativeCurrencyAmount::zero();
                     let updates = bh.iter().map(|(_,_,_, delta)| *delta);
-                    let balances = NeptuneCoins::scan_balance(&updates, initial_balance);
+                    let balances = NativeCurrencyAmount::scan_balance(&updates, initial_balance);
                     for ((_, block_height, timestamp, amount), balance) in bh.iter().zip(balances) {
                         history_builder.push((*block_height, *timestamp, *amount, balance));
                     }

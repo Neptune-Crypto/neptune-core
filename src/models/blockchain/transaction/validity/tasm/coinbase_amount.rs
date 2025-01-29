@@ -3,7 +3,7 @@ use tasm_lib::library::Library;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
 
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 pub(crate) struct CoinbaseAmount;
 
@@ -30,9 +30,9 @@ impl BasicSnippet for CoinbaseAmount {
         // `Coinbase` has type `Option<NeptuneCoin>` where the discriminant
         // from `Option` is one word, and `NeptuneCoin` is four words, as it is
         // represented by a u128.
-        let size_minus_one = NeptuneCoins::static_length().unwrap();
+        let size_minus_one = NativeCurrencyAmount::static_length().unwrap();
 
-        let push_max_amount = NeptuneCoins::max().push_to_stack();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
         let u128_lt = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
 
         let has_coinbase_label = format!("{entrypoint}_has_coinbase");
@@ -180,10 +180,10 @@ mod test {
                 );
             }
 
-            type CoinbaseAmount = Option<NeptuneCoins>;
+            type CoinbaseAmount = Option<NativeCurrencyAmount>;
             let coinbase = *CoinbaseAmount::decode(&coinbase_encoded).unwrap();
 
-            let coinbase_amount = coinbase.unwrap_or_else(NeptuneCoins::zero);
+            let coinbase_amount = coinbase.unwrap_or_else(NativeCurrencyAmount::zero);
 
             for word in coinbase_amount.encode().into_iter().rev() {
                 stack.push(word)
@@ -199,8 +199,8 @@ mod test {
             let new_seed: [u8; 32] = rng.gen();
 
             let mut u = Unstructured::new(&new_seed);
-            let coinbase: Option<NeptuneCoins> = u
-                .arbitrary::<Option<NeptuneCoins>>()
+            let coinbase: Option<NativeCurrencyAmount> = u
+                .arbitrary::<Option<NativeCurrencyAmount>>()
                 .unwrap()
                 .map(|c| c.abs());
             let coinbase_ptr: BFieldElement = rng.gen();

@@ -149,7 +149,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::blockchain::transaction::TransactionProof;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
@@ -161,7 +161,7 @@ pub(crate) mod test {
         msa_and_records: MsaAndRecords,
         input_utxos: Vec<Utxo>,
         lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
-        coinbase_amount: NeptuneCoins,
+        coinbase_amount: NativeCurrencyAmount,
         timestamp: Timestamp,
     ) -> BoxedStrategy<Transaction> {
         (
@@ -232,7 +232,7 @@ pub(crate) mod test {
         pub(crate) fn arbitrary() -> BoxedStrategy<BlockPrimitiveWitness> {
             const NUM_INPUTS: usize = 2;
             (
-                NeptuneCoins::arbitrary_non_negative(),
+                NativeCurrencyAmount::arbitrary_non_negative(),
                 vec(0f64..1f64, NUM_INPUTS - 1),
                 vec(arb::<Digest>(), NUM_INPUTS),
                 vec(arb::<Digest>(), NUM_INPUTS),
@@ -254,7 +254,9 @@ pub(crate) mod test {
                             .collect_vec();
                         input_amounts.push(
                             total_input
-                                .checked_sub(&input_amounts.iter().cloned().sum::<NeptuneCoins>())
+                                .checked_sub(
+                                    &input_amounts.iter().cloned().sum::<NativeCurrencyAmount>(),
+                                )
                                 .unwrap(),
                         );
                         let lock_scripts_and_witnesses = hash_lock_keys

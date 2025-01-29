@@ -1783,7 +1783,7 @@ mod peer_loop_tests {
     use crate::config_models::network::Network;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::peer::peer_block_notifications::PeerBlockNotification;
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
@@ -3168,7 +3168,7 @@ mod peer_loop_tests {
                 Default::default(),
                 spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(0),
+                NativeCurrencyAmount::coins(0),
                 now,
                 TxProvingCapability::ProofCollection,
                 &TritonVmJobQueue::dummy(),
@@ -3251,7 +3251,7 @@ mod peer_loop_tests {
                 Default::default(),
                 spending_key.into(),
                 UtxoNotificationMedium::OffChain,
-                NeptuneCoins::new(0),
+                NativeCurrencyAmount::coins(0),
                 now,
                 TxProvingCapability::ProofCollection,
                 &TritonVmJobQueue::dummy(),
@@ -3457,7 +3457,7 @@ mod peer_loop_tests {
                     vec![].into(),
                     alice_key.into(),
                     UtxoNotificationMedium::OffChain,
-                    NeptuneCoins::new(1),
+                    NativeCurrencyAmount::coins(1),
                     in_seven_months,
                     prover_capability,
                     &TritonVmJobQueue::dummy(),

@@ -1919,7 +1919,7 @@ mod test {
         use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
-        use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+        use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
@@ -1927,7 +1927,7 @@ mod test {
         async fn tx_no_outputs(
             global_state_lock: &GlobalStateLock,
             tx_proof_type: TxProvingCapability,
-            fee: NeptuneCoins,
+            fee: NativeCurrencyAmount,
         ) -> Transaction {
             let change_key = global_state_lock
                 .lock_guard()
@@ -1996,7 +1996,7 @@ mod test {
                 "Scheduled task returns OK when run on empty mempool"
             );
 
-            let fee = NeptuneCoins::new(1);
+            let fee = NativeCurrencyAmount::coins(1);
             let proof_collection_tx = tx_no_outputs(
                 &main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,

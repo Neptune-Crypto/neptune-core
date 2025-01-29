@@ -90,7 +90,7 @@ mod tests {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -131,8 +131,8 @@ mod tests {
                 unreachable!("timestamp should have static length 1");
             }
 
-            // pub coinbase: Option<NeptuneCoins>,
-            if let Some(_static_length) = Option::<NeptuneCoins>::static_length() {
+            // pub coinbase: Option<NativeCurrencyAmount>,
+            if let Some(_static_length) = Option::<NativeCurrencyAmount>::static_length() {
                 unreachable!("coinbase should not have static length");
             } else {
                 offset += 1;
@@ -142,8 +142,8 @@ mod tests {
                 offset += dynamic_length;
             }
 
-            // pub fee: NeptuneCoins,
-            if let Some(static_length) = NeptuneCoins::static_length() {
+            // pub fee: NativeCurrencyAmount,
+            if let Some(static_length) = NativeCurrencyAmount::static_length() {
                 field_offsets_and_sizes.push((offset, static_length));
                 offset += static_length;
             } else {

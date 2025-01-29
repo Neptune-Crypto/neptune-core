@@ -21,7 +21,7 @@ use twenty_first::math::tip5::Digest;
 use super::lock_script::LockScript;
 use crate::models::blockchain::type_scripts::known_type_scripts::is_known_type_script_with_valid_state;
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -37,7 +37,7 @@ pub struct Coin {
 impl Display for Coin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = if self.type_script_hash == NativeCurrency.hash() {
-            let amount = match NeptuneCoins::decode(&self.state) {
+            let amount = match NativeCurrencyAmount::decode(&self.state) {
                 Ok(boxed_amount) => boxed_amount.to_string(),
                 Err(_) => "Error: Unable to decode amount".to_owned(),
             };
@@ -62,7 +62,7 @@ impl Coin {
         }
     }
 
-    pub fn new_native_currency(amount: NeptuneCoins) -> Self {
+    pub fn new_native_currency(amount: NativeCurrencyAmount) -> Self {
         Self {
             type_script_hash: NativeCurrency.hash(),
             state: amount.encode(),
@@ -135,7 +135,7 @@ impl Utxo {
         self.lock_script_hash == LockScript::hash_lock_from_preimage(preimage).hash()
     }
 
-    pub fn new_native_currency(lock_script: LockScript, amount: NeptuneCoins) -> Self {
+    pub fn new_native_currency(lock_script: LockScript, amount: NativeCurrencyAmount) -> Self {
         Self::new(lock_script, vec![Coin::new_native_currency(amount)])
     }
 
@@ -148,14 +148,14 @@ impl Utxo {
     /// Get the amount of Neptune coins that are encapsulated in this UTXO,
     /// regardless of which other coins are present. (Even if that makes the
     /// Neptune coins unspendable.)
-    pub fn get_native_currency_amount(&self) -> NeptuneCoins {
+    pub fn get_native_currency_amount(&self) -> NativeCurrencyAmount {
         crate::macros::log_slow_scope!();
         self.coins
             .iter()
             .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
-            .map(|coin| match NeptuneCoins::decode(&coin.state) {
+            .map(|coin| match NativeCurrencyAmount::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
-                Err(_) => NeptuneCoins::zero(),
+                Err(_) => NativeCurrencyAmount::zero(),
             })
             .sum()
     }
@@ -253,7 +253,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     Utxo::from((
         rng.gen(),
-        NeptuneCoins::new(rng.next_u32() % 42000000).to_native_coins(),
+        NativeCurrencyAmount::coins(rng.next_u32() % 42000000).to_native_coins(),
     ))
 }
 
@@ -268,7 +268,7 @@ pub mod neptune_arbitrary {
         fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
             let lock_script_hash: Digest = Digest::arbitrary(u)?;
             let type_script_hash = NativeCurrency.hash();
-            let amount = NeptuneCoins::arbitrary(u)?.abs();
+            let amount = NativeCurrencyAmount::arbitrary(u)?.abs();
             let coins = vec![Coin {
                 type_script_hash,
                 state: amount.encode(),
@@ -296,7 +296,9 @@ mod test {
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
-            let amount = NeptuneCoins::from_raw_i128(rng.gen_range(0i128..=NeptuneCoins::MAX_NAU));
+            let amount = NativeCurrencyAmount::from_raw_i128(
+                rng.gen_range(0i128..=NativeCurrencyAmount::MAX_NAU),
+            );
             coins.push(Coin::new_native_currency(amount));
         }
 
@@ -345,7 +347,7 @@ mod test {
         delta: Timestamp,
     ) {
         let no_lock = LockScript::new(triton_program!(halt));
-        let mut coins = NeptuneCoins::new(1).to_native_coins();
+        let mut coins = NativeCurrencyAmount::coins(1).to_native_coins();
         coins.push(TimeLock::until(release_date));
         let utxo = Utxo::new(no_lock, coins);
 

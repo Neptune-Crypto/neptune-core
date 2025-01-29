@@ -169,7 +169,8 @@ mod test {
     use super::*;
 
     mod shamir {
-        use proptest::{prelude::Just, prop_assert_eq};
+        use proptest::prelude::Just;
+        use proptest::prop_assert_eq;
         use proptest_arbitrary_interop::arb;
         use test_strategy::proptest;
 

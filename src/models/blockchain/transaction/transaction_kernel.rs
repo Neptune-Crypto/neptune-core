@@ -12,7 +12,7 @@ use twenty_first::math::tip5::Digest;
 
 use super::primitive_witness::PrimitiveWitness;
 use super::PublicAnnouncement;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::mast_hash::HasDiscriminant;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
@@ -30,8 +30,8 @@ pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord>,
     pub outputs: Vec<AdditionRecord>,
     pub public_announcements: Vec<PublicAnnouncement>,
-    pub fee: NeptuneCoins,
-    pub coinbase: Option<NeptuneCoins>,
+    pub fee: NativeCurrencyAmount,
+    pub coinbase: Option<NativeCurrencyAmount>,
     pub timestamp: Timestamp,
     pub mutator_set_hash: Digest,
 
@@ -148,8 +148,8 @@ pub mod neptune_arbitrary {
             let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
                 .map(|_| u.arbitrary().unwrap())
                 .collect_vec();
-            let fee: NeptuneCoins = u.arbitrary()?;
-            let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
+            let fee: NativeCurrencyAmount = u.arbitrary()?;
+            let coinbase: Option<NativeCurrencyAmount> = u.arbitrary()?;
             let timestamp: Timestamp = u.arbitrary()?;
             let mutator_set_hash: Digest = u.arbitrary()?;
             let merge_bit: bool = u.arbitrary()?;
@@ -189,10 +189,10 @@ pub struct TransactionKernelProxy {
     pub public_announcements: Vec<PublicAnnouncement>,
 
     /// tx fee amount
-    pub fee: NeptuneCoins,
+    pub fee: NativeCurrencyAmount,
 
     /// optional coinbase.  applies only to miner payments.
-    pub coinbase: Option<NeptuneCoins>,
+    pub coinbase: Option<NativeCurrencyAmount>,
 
     /// number of milliseconds since unix epoch
     pub timestamp: Timestamp,
@@ -247,8 +247,8 @@ pub struct TransactionKernelModifier {
     pub inputs: Option<Vec<RemovalRecord>>,
     pub outputs: Option<Vec<AdditionRecord>>,
     pub public_announcements: Option<Vec<PublicAnnouncement>>,
-    pub fee: Option<NeptuneCoins>,
-    pub coinbase: Option<Option<NeptuneCoins>>,
+    pub fee: Option<NativeCurrencyAmount>,
+    pub coinbase: Option<Option<NativeCurrencyAmount>>,
     pub timestamp: Option<Timestamp>,
     pub mutator_set_hash: Option<Digest>,
     pub merge_bit: Option<bool>,
@@ -271,12 +271,12 @@ impl TransactionKernelModifier {
         self
     }
     /// set modified fee
-    pub fn fee(mut self, fee: NeptuneCoins) -> Self {
+    pub fn fee(mut self, fee: NativeCurrencyAmount) -> Self {
         self.fee = Some(fee);
         self
     }
     /// set modified coinbase
-    pub fn coinbase(mut self, coinbase: Option<NeptuneCoins>) -> Self {
+    pub fn coinbase(mut self, coinbase: Option<NativeCurrencyAmount>) -> Self {
         self.coinbase = Some(coinbase);
         self
     }
@@ -451,7 +451,7 @@ pub mod transaction_kernel_tests {
                 canonical_commitment: random(),
             }],
             public_announcements: Default::default(),
-            fee: NeptuneCoins::one(),
+            fee: NativeCurrencyAmount::one(),
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: rng.gen::<Digest>(),

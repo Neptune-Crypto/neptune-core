@@ -9,7 +9,7 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::Transaction;
-use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
@@ -92,7 +92,7 @@ pub struct MainToPeerTaskBatchBlockRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct BlockProposalNotification {
     pub(crate) body_mast_hash: Digest,
-    pub(crate) guesser_fee: NeptuneCoins,
+    pub(crate) guesser_fee: NativeCurrencyAmount,
     pub(crate) height: BlockHeight,
 }
 

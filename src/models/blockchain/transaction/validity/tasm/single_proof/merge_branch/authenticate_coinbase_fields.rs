@@ -11,7 +11,7 @@ use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 const UNEQUAL_DISCRIMINANT_ERROR: i128 = 1_000_020;
 const UNEQUAL_VALUE_ERROR: i128 = 1_000_021;
@@ -70,7 +70,8 @@ impl BasicSnippet for AuthenticateCoinbaseFields {
         )));
 
         const DISCRIMINANT_SIZE: usize = 1;
-        let some_coinbase_field_size = NeptuneCoins::static_length().unwrap() + DISCRIMINANT_SIZE;
+        let some_coinbase_field_size =
+            NativeCurrencyAmount::static_length().unwrap() + DISCRIMINANT_SIZE;
         let compare_coinbases = DataType::compare_elem_of_stack_size(some_coinbase_field_size);
 
         let assert_coinbase_equality_label = format!("{entrypoint}_assert_eq");
@@ -310,12 +311,12 @@ mod tests {
         }
     }
 
-    fn dummy_tx_kernel(cb: Option<NeptuneCoins>) -> TransactionKernel {
+    fn dummy_tx_kernel(cb: Option<NativeCurrencyAmount>) -> TransactionKernel {
         TransactionKernelProxy {
             inputs: vec![],
             outputs: vec![],
             public_announcements: vec![],
-            fee: NeptuneCoins::zero(),
+            fee: NativeCurrencyAmount::zero(),
             coinbase: cb,
             timestamp: Timestamp::now(),
             mutator_set_hash: Digest::default(),
@@ -335,9 +336,9 @@ mod tests {
     }
 
     fn prop(
-        left_cb: Option<NeptuneCoins>,
-        right_cb: Option<NeptuneCoins>,
-        new_cb: Option<NeptuneCoins>,
+        left_cb: Option<NativeCurrencyAmount>,
+        right_cb: Option<NativeCurrencyAmount>,
+        new_cb: Option<NativeCurrencyAmount>,
     ) {
         let new_cb_is_legal = match (left_cb, right_cb, new_cb) {
             (None, None, None) => Ok(()),
@@ -365,37 +366,59 @@ mod tests {
 
     #[test]
     fn cannot_change_cb_amount() {
-        prop(Some(NeptuneCoins::new(2)), None, Some(NeptuneCoins::new(3)));
-        prop(Some(NeptuneCoins::new(3)), None, Some(NeptuneCoins::new(2)));
-        prop(None, Some(NeptuneCoins::new(2)), Some(NeptuneCoins::new(3)));
-        prop(None, Some(NeptuneCoins::new(3)), Some(NeptuneCoins::new(2)));
         prop(
-            Some(NeptuneCoins::new(3)),
-            Some(NeptuneCoins::new(3)),
-            Some(NeptuneCoins::new(6)),
+            Some(NativeCurrencyAmount::coins(2)),
+            None,
+            Some(NativeCurrencyAmount::coins(3)),
+        );
+        prop(
+            Some(NativeCurrencyAmount::coins(3)),
+            None,
+            Some(NativeCurrencyAmount::coins(2)),
+        );
+        prop(
+            None,
+            Some(NativeCurrencyAmount::coins(2)),
+            Some(NativeCurrencyAmount::coins(3)),
+        );
+        prop(
+            None,
+            Some(NativeCurrencyAmount::coins(3)),
+            Some(NativeCurrencyAmount::coins(2)),
+        );
+        prop(
+            Some(NativeCurrencyAmount::coins(3)),
+            Some(NativeCurrencyAmount::coins(3)),
+            Some(NativeCurrencyAmount::coins(6)),
         );
 
         // Verify that the entire u128 is checked, not just a top-limb
         prop(
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
             None,
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3 + (1 << 32)).unwrap()).unwrap()),
+            Some(
+                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 32)).unwrap()).unwrap(),
+            ),
         );
         prop(
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
             None,
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3 + (1 << 64)).unwrap()).unwrap()),
+            Some(
+                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 64)).unwrap()).unwrap(),
+            ),
         );
         prop(
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
             None,
-            Some(NeptuneCoins::from_nau(BigInt::from_u128(3 + (1 << 96)).unwrap()).unwrap()),
+            Some(
+                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 96)).unwrap()).unwrap(),
+            ),
         );
     }
 
     #[test]
     fn test_all_cb_combinations() {
-        let options = [None, Some(NeptuneCoins::new(1))];
+        let options = [None, Some(NativeCurrencyAmount::coins(1))];
         for left_cb in options {
             for right_cb in options {
                 for new_cb in options {

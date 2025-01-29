@@ -6,15 +6,15 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GuessingWorkInfo {
     work_start: SystemTime,
     num_inputs: usize,
     num_outputs: usize,
-    total_coinbase: NeptuneCoins,
-    total_guesser_fee: NeptuneCoins,
+    total_coinbase: NativeCurrencyAmount,
+    total_guesser_fee: NativeCurrencyAmount,
 }
 
 impl GuessingWorkInfo {

@@ -9,7 +9,7 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_cash::config_models::network::Network;
-use neptune_cash::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_cash::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_cash::models::state::wallet::address::ReceivingAddress;
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::rpc_auth;
@@ -105,9 +105,9 @@ impl SendScreen {
         refresh_tx.send(()).await.unwrap();
 
         // TODO: Let user specify this number
-        let fee = NeptuneCoins::zero();
+        let fee = NativeCurrencyAmount::zero();
 
-        let valid_amount = match NeptuneCoins::from_str(&amount) {
+        let valid_amount = match NativeCurrencyAmount::from_str(&amount) {
             Ok(a) => a,
             Err(e) => {
                 *notice_arc.lock().await = format!("amount: {}", e);

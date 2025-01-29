@@ -570,7 +570,7 @@ mod test {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::tests::shared::make_mock_transaction;
 
     /// tests scanning for announced utxos with a symmetric key
@@ -643,7 +643,7 @@ mod test {
             // 1. generate a utxo with amount = 10
             let utxo = Utxo::new_native_currency(
                 key.to_address().unwrap().lock_script(),
-                NeptuneCoins::new(10),
+                NativeCurrencyAmount::coins(10),
             );
 
             // 2. generate sender randomness
@@ -703,7 +703,7 @@ mod test {
             let mut rng = thread_rng();
 
             // 1. create utxo with random amount
-            let amount = NeptuneCoins::new(rng.gen_range(0..42000000));
+            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..42000000));
             let utxo = Utxo::new_native_currency(key.to_address().unwrap().lock_script(), amount);
 
             // 2. generate sender randomness
