@@ -644,10 +644,20 @@ impl PeerLoopHandler {
                     "Got BlockNotification of height {}",
                     block_notification.height
                 );
-                let state = self.global_state_lock.lock_guard().await;
-                if state.sync_mode_criterion(
+                let (tip_header, sync_anchor_is_set) = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    (
+                        *state.chain.light_state().header(),
+                        state.net.sync_anchor.is_some(),
+                    )
+                };
+
+                let sync_mode_threshold = self.global_state_lock.cli().sync_mode_threshold;
+                if GlobalState::sync_mode_threshold_stateless(
+                    &tip_header,
                     block_notification.height,
                     block_notification.cumulative_proof_of_work,
+                    sync_mode_threshold,
                 ) {
                     debug!("sync mode criterion satisfied.");
 
@@ -661,7 +671,7 @@ impl PeerLoopHandler {
                     );
                     let challenge = SyncChallenge::generate(
                         &block_notification,
-                        state.chain.light_state().header().height,
+                        tip_header.height,
                         self.rng.gen(),
                     );
                     peer_state_info.sync_challenge = Some(IssuedSyncChallenge::new(
@@ -677,28 +687,14 @@ impl PeerLoopHandler {
                 }
 
                 peer_state_info.highest_shared_block_height = block_notification.height;
-                let block_is_new = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .kernel
-                    .header
-                    .cumulative_proof_of_work
+                let block_is_new = tip_header.cumulative_proof_of_work
                     < block_notification.cumulative_proof_of_work;
 
                 debug!("block_is_new: {}", block_is_new);
 
                 if block_is_new
                     && peer_state_info.fork_reconciliation_blocks.is_empty()
-                    && self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .net
-                        .sync_anchor
-                        .is_none()
+                    && !sync_anchor_is_set
                 {
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",

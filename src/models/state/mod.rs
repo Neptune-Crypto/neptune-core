@@ -43,6 +43,7 @@ use wallet::address::SpendingKey;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
+use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::difficulty_control::ProofOfWork;
 use super::blockchain::block::Block;
@@ -359,14 +360,38 @@ impl GlobalState {
     /// The main loop relies on this criterion to decide whether to enter sync
     /// mode. If the main loop activates sync mode, it affects the entire
     /// application.
+    pub(crate) fn sync_mode_threshold_stateless(
+        own_block_tip_header: &BlockHeader,
+        claimed_height: BlockHeight,
+        claimed_cumulative_pow: ProofOfWork,
+        sync_mode_threshold: usize,
+    ) -> bool {
+        own_block_tip_header.cumulative_proof_of_work < claimed_cumulative_pow
+            && claimed_height - own_block_tip_header.height > sync_mode_threshold as i128
+    }
+
+    /// Determine whether the conditions are met to enter into sync mode.
+    ///
+    /// Specifically, compute a boolean value based on
+    ///  - whether the foreign cumulative proof-of-work exceeds that of our own;
+    ///  - whether the foreign block has a bigger block height and the height
+    ///    difference exceeds the threshold set by the CLI.
+    ///
+    /// The main loop relies on this criterion to decide whether to enter sync
+    /// mode. If the main loop activates sync mode, it affects the entire
+    /// application.
     pub(crate) fn sync_mode_criterion(
         &self,
-        max_height: BlockHeight,
-        cumulative_pow: ProofOfWork,
+        claimed_max_height: BlockHeight,
+        claimed_cumulative_pow: ProofOfWork,
     ) -> bool {
         let own_block_tip_header = self.chain.light_state().header();
-        own_block_tip_header.cumulative_proof_of_work < cumulative_pow
-            && max_height - own_block_tip_header.height > self.cli().sync_mode_threshold as i128
+        Self::sync_mode_threshold_stateless(
+            own_block_tip_header,
+            claimed_max_height,
+            claimed_cumulative_pow,
+            self.cli().sync_mode_threshold,
+        )
     }
 
     pub(crate) fn composer_parameters(
