@@ -6,6 +6,7 @@ use serde::Serialize;
 use twenty_first::math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
+use super::blockchain::block::block_header::HeaderToBlockHashWitness;
 use super::blockchain::block::block_height::BlockHeight;
 use super::peer::PeerStanding;
 use super::proof_abstractions::timestamp::Timestamp;
@@ -31,6 +32,9 @@ pub struct BlockRecord {
 
     /// The number of addition records in this block
     pub num_additions: u64,
+
+    /// The data missing from BlockHeader in order to calculate the block hash.
+    pub(crate) block_hash_witness: HeaderToBlockHashWitness,
 }
 
 impl BlockRecord {

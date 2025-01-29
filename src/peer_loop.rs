@@ -60,7 +60,6 @@ use crate::models::state::GlobalStateLock;
 const STANDARD_BLOCK_BATCH_SIZE: usize = 250;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
-pub(crate) const MIN_BLOCK_HEIGHT_FOR_SYNCING: u64 = 10;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const DISCONNECT_CONNECTION: bool = true;
@@ -3570,6 +3569,7 @@ mod peer_loop_tests {
 
     mod sync_challenges {
         use super::*;
+        use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
         use crate::tests::shared::fake_valid_sequence_of_blocks_for_tests_dyn;
 
         #[traced_test]
@@ -3752,7 +3752,7 @@ mod peer_loop_tests {
                 &block_1,
                 TARGET_BLOCK_INTERVAL,
                 rng.gen(),
-                rng.gen_range(11..20),
+                rng.gen_range(SYNC_CHALLENGE_POW_WITNESS_LENGTH..20),
             )
             .await;
             for block in &blocks {
