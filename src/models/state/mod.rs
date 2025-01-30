@@ -567,7 +567,9 @@ impl GlobalState {
 
     /// Generate a change UTXO to ensure that the difference in input amount
     /// and output amount goes back to us. Return the UTXO in a format compatible
-    /// with claiming it later on, *i.e.*, as an [ExpectedUtxo].
+    /// with claiming it later on.
+    //
+    // "Later on" meaning: as an [ExpectedUtxo].
     pub fn create_change_output(
         &self,
         change_amount: NativeCurrencyAmount,
@@ -603,21 +605,15 @@ impl GlobalState {
         Ok(change_output)
     }
 
-    /// generates [TxOutputList] from a list of address:amount pairs (outputs).
+    /// generates TxOutputList from a list of address:amount pairs (outputs).
     ///
     /// This is a helper method for generating the `TxOutputList` that
     /// is required by [Self::create_transaction()].
     ///
-    /// Each output may use either `OnChain` or `OffChain` notifications.  See documentation of
-    /// of [TxOutput::auto()] for a description of the logic and the
-    /// `owned_utxo_notify_method` parameter.
+    /// Each output may use either `OnChain` or `OffChain` notifications.
     ///
     /// If a different behavior is desired, the TxOutputList can be
     /// constructed manually.
-    ///
-    /// future work:
-    ///
-    /// see future work comment in [TxOutput::auto()]
     pub fn generate_tx_outputs(
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddress, NativeCurrencyAmount)>,
@@ -669,7 +665,7 @@ impl GlobalState {
     /// UTXO.
     ///
     /// After this call returns, it is the caller's responsibility to inform the
-    /// wallet of any returned [ExpectedUtxo], ie `OffChain` secret
+    /// wallet of any returned ExpectedUtxo, ie `OffChain` secret
     /// notifications, for utxos that match wallet keys.  Failure to do so can
     /// result in loss of funds!
     ///

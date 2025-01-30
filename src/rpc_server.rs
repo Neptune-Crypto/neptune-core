@@ -421,9 +421,6 @@ pub trait RPC {
     ///
     /// A list of the encoded transaction notifications is also returned. The relevant notifications
     /// should be sent to the transaction receiver in case `Offchain` notifications are used.
-    ///
-    /// future work: add `unowned_utxo_notify_medium` param.
-    ///   see comment for [TxOutput::auto()](crate::models::state::wallet::transaction_output::TxOutput::auto())
     async fn send_to_many(
         token: rpc_auth::Token,
         outputs: Vec<(ReceivingAddress, NativeCurrencyAmount)>,

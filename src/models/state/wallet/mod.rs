@@ -199,11 +199,11 @@ impl WalletSecret {
     }
 
     /// derives a generation spending key at `index`
-    ///
-    /// note: this is a read-only method and does not modify wallet state.  When
-    /// requesting a new key for purposes of a new wallet receiving address,
-    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
-    /// which takes &mut self.
+    //
+    // note: this is a read-only method and does not modify wallet state.  When
+    // requesting a new key for purposes of a new wallet receiving address,
+    // callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    // which takes &mut self.
     pub fn nth_generation_spending_key(
         &self,
         index: u64,
@@ -224,11 +224,11 @@ impl WalletSecret {
     }
 
     /// derives a symmetric key at `index`
-    ///
-    /// note: this is a read-only method and does not modify wallet state.  When
-    /// requesting a new key for purposes of a new wallet receiving address,
-    /// callers should use [wallet_state::WalletState::next_unused_spending_key()]
-    /// which takes &mut self.
+    //
+    // note: this is a read-only method and does not modify wallet state.  When
+    // requesting a new key for purposes of a new wallet receiving address,
+    // callers should use [wallet_state::WalletState::next_unused_spending_key()]
+    // which takes &mut self.
     pub fn nth_symmetric_key(&self, index: u64) -> symmetric_key::SymmetricKey {
         let key_seed = Hash::hash_varlen(
             &[
