@@ -45,7 +45,7 @@ pub struct Difficulty([u32; DIFFICULTY_NUM_LIMBS]);
 
 impl Difficulty {
     pub const NUM_LIMBS: usize = DIFFICULTY_NUM_LIMBS;
-    const LIMBS_FOR_MINIMUM: [u32; Self::NUM_LIMBS] = [1000, 0, 0, 0, 0];
+    const LIMBS_FOR_MINIMUM: [u32; Self::NUM_LIMBS] = [6000, 0, 0, 0, 0];
     pub const MINIMUM: Self = Self::new(Self::LIMBS_FOR_MINIMUM);
     pub const MAXIMUM: Self = Self::new([u32::MAX; Self::NUM_LIMBS]);
 
@@ -472,7 +472,7 @@ pub(crate) fn max_cumulative_pow_after(
     // allowed by the consensus rules, the clamped relative error is almost -1.
     // In this case the PID adjustment factor is
     // f =  1 + (MINIMUM_BLOCK_TIME - TARGET_BLOCK_INTERVAL) / TARGET_BLOCK_INTERVAL * P
-    //   =  1 - (60 - 588) / 588 / 16,
+    //   =  1 - (60 - 294) / 294 / 16,
     const EPSILON: f64 = 0.000001;
     let f = 1.0_f64
         + (TARGET_BLOCK_INTERVAL.to_millis() - MINIMUM_BLOCK_TIME.to_millis()) as f64
@@ -907,7 +907,7 @@ mod test {
     fn test_sanity_max_pow_after_unit() {
         let init_cumpow = 100u64;
         let init_cumpow = ProofOfWork::from_u64(init_cumpow);
-        let init_difficulty = Difficulty::from_u64(1000u64);
+        let init_difficulty = Difficulty::MINIMUM;
         let num_blocks = 1000;
         let calculated = max_cumulative_pow_after(init_cumpow, init_difficulty, num_blocks);
         let approximation =

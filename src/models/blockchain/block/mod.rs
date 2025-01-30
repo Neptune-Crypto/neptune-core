@@ -84,6 +84,8 @@ pub(crate) const MAX_BLOCK_SIZE: usize = 250_000;
 /// is time locked for this period.
 pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
 
+pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(64);
+
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
 pub enum BlockProof {
@@ -409,15 +411,17 @@ impl Block {
     /// The number of coins that can be printed into existence with the mining
     /// a block with this height.
     pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
-        let mut reward: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
+        let mut reward: NativeCurrencyAmount = INITIAL_BLOCK_SUBSIDY;
         let generation = block_height.get_generation();
 
-        if generation > 128 {
-            return NativeCurrencyAmount::zero();
-        }
-
         for _ in 0..generation {
-            reward.div_two()
+            reward.div_two();
+
+            // Early return here is important bc of test-case generators with
+            // arbitrary block heights.
+            if reward.is_zero() {
+                return NativeCurrencyAmount::zero();
+            }
         }
 
         reward
@@ -1034,7 +1038,7 @@ impl Block {
 }
 
 #[cfg(test)]
-mod block_tests {
+pub(crate) mod block_tests {
     use rand::random;
     use rand::rngs::StdRng;
     use rand::thread_rng;
@@ -1061,6 +1065,8 @@ mod block_tests {
     use crate::tests::shared::make_mock_transaction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::util_types::archival_mmr::ArchivalMmr;
+
+    pub(crate) const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831424);
 
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
@@ -1232,11 +1238,11 @@ mod block_tests {
 
     #[test]
     fn test_premine_size() {
-        // 831488 = 42000000 * 0.019797333333333333
+        // 831424 = 42000000 * 0.01979581
         // where 42000000 is the asymptotical limit of the token supply
-        // and 1.9797333...% is the relative size of the premine
+        // and 0.01979581...% is the relative size of the premine
         let asymptotic_total_cap = NativeCurrencyAmount::coins(42_000_000);
-        let premine_max_size = NativeCurrencyAmount::coins(831488);
+        let premine_max_size = PREMINE_MAX_SIZE;
         let total_premine = Block::premine_distribution()
             .iter()
             .map(|(_receiving_address, amount)| *amount)
