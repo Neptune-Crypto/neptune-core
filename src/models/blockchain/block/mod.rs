@@ -711,7 +711,7 @@ impl Block {
         }
 
         // 0.f)
-        const FUTUREDATING_LIMIT: Timestamp = Timestamp::hours(2);
+        const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
             warn!(
