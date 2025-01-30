@@ -1593,7 +1593,7 @@ pub(crate) mod block_tests {
             let mut block = invalid_block_with_transaction(&genesis_block, transaction);
 
             let preimage = thread_rng().gen::<Digest>();
-            block.set_header_nonce(preimage.hash());
+            block.set_header_guesser_digest(preimage.hash());
 
             let guesser_fee_utxos = block.guesser_fee_utxos();
 
