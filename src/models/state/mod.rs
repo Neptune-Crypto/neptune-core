@@ -956,14 +956,6 @@ impl GlobalState {
         let incoming_utxo_count = incoming_utxos.len();
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
-        let existing_nonce_preimages = self
-            .wallet_state
-            .wallet_db
-            .nonce_preimages()
-            .get_all()
-            .await;
-        let mut new_nonce_preimages = vec![];
-
         let mut recovery_data_for_missing_mutxos = vec![];
         {
             // Two UTXOs are considered the same iff their AOCL index and
@@ -1008,6 +1000,14 @@ impl GlobalState {
             return Ok(());
         }
 
+        let existing_guesser_preimages = self
+            .wallet_state
+            .wallet_db
+            .guesser_preimages()
+            .get_all()
+            .await;
+        let mut new_guesser_preimages = vec![];
+
         // For all recovery data where we did not find a matching monitored UTXO,
         // recover the MS membership proof, and insert a new monitored UTXO into the
         // wallet database.
@@ -1026,9 +1026,9 @@ impl GlobalState {
 
             // Check if UTXO is guesser-reward and associated key doesn't already exist.
             if incoming_utxo.is_guesser_fee()
-                && !existing_nonce_preimages.contains(&incoming_utxo.receiver_preimage)
+                && !existing_guesser_preimages.contains(&incoming_utxo.receiver_preimage)
             {
-                new_nonce_preimages.push(incoming_utxo.receiver_preimage);
+                new_guesser_preimages.push(incoming_utxo.receiver_preimage);
             }
 
             let ms_item = Hash::hash(&incoming_utxo.utxo);
@@ -1085,9 +1085,11 @@ impl GlobalState {
             restored_mutxos += 1;
         }
 
-        // Update state with all nonce-preimage keys from guesser-fee UTXOs
-        for new_nonce_preimage in new_nonce_preimages {
-            self.wallet_state.add_raw_hash_key(new_nonce_preimage).await;
+        // Update state with all guesser-preimage keys from guesser-fee UTXOs
+        for new_guesser_preimage in new_guesser_preimages {
+            self.wallet_state
+                .add_raw_hash_key(new_guesser_preimage)
+                .await;
         }
 
         self.wallet_state.wallet_db.persist().await;
@@ -1751,7 +1753,7 @@ mod global_state_tests {
     use crate::models::blockchain::block::Block;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
+    use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
@@ -1942,17 +1944,17 @@ mod global_state_tests {
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
         let genesis_block = Block::genesis(network);
-        let nonce_preimage = rng.gen();
-        let (block1, composer_utxos) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
+        let guesser_preimage = rng.gen();
+        let (block1, composer_utxos) = make_mock_block_guesser_preimage_and_guesser_fraction(
             &genesis_block,
             None,
             own_key,
             rng.gen(),
             0.5,
-            nonce_preimage,
+            guesser_preimage,
         )
         .await;
-        let guesser_utxos = block1.guesser_fee_expected_utxos(nonce_preimage);
+        let guesser_utxos = block1.guesser_fee_expected_utxos(guesser_preimage);
         let all_mining_rewards = [composer_utxos, guesser_utxos].concat();
 
         global_state_lock
@@ -1975,10 +1977,10 @@ mod global_state_tests {
             monitored_utxos.pop().await;
             monitored_utxos.pop().await;
 
-            let nonce_preimage_keys = global_state.wallet_state.wallet_db.nonce_preimages();
+            let guesser_preimage_keys = global_state.wallet_state.wallet_db.guesser_preimages();
             assert_eq!(
                 1,
-                nonce_preimage_keys.len().await,
+                guesser_preimage_keys.len().await,
                 "Exactly Nonce-preimage must be stored to DB"
             );
             global_state.wallet_state.clear_raw_hash_keys().await;
@@ -2009,7 +2011,7 @@ mod global_state_tests {
                 global_state
                     .wallet_state
                     .wallet_db
-                    .nonce_preimages()
+                    .guesser_preimages()
                     .is_empty()
                     .await
             );
@@ -2085,7 +2087,7 @@ mod global_state_tests {
                 .collect_vec();
             assert_eq!(
                 vec![SpendingKey::RawHashLock {
-                    preimage: nonce_preimage
+                    preimage: guesser_preimage
                 }],
                 cached_hash_lock_keys,
                 "Cached hash lock keys must match expected value after recovery"
@@ -2093,11 +2095,11 @@ mod global_state_tests {
             let persisted_hash_lock_keys = global_state
                 .wallet_state
                 .wallet_db
-                .nonce_preimages()
+                .guesser_preimages()
                 .get_all()
                 .await;
             assert_eq!(
-                vec![nonce_preimage],
+                vec![guesser_preimage],
                 persisted_hash_lock_keys,
                 "Persisted hash lock keys must match expected value after recovery"
             );
@@ -2588,7 +2590,6 @@ mod global_state_tests {
             &genesis_block,
             block_transaction,
             in_seven_months,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
@@ -2829,7 +2830,6 @@ mod global_state_tests {
             &block_1,
             block_transaction2,
             in_eight_months,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
@@ -2905,13 +2905,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-            Block::block_template_invalid_proof(
-                &genesis_block,
-                cb,
-                timestamp,
-                Digest::default(),
-                None,
-            )
+            Block::block_template_invalid_proof(&genesis_block, cb, timestamp, None)
         }
 
         let network = Network::Main;
@@ -3715,7 +3709,6 @@ mod global_state_tests {
                     &genesis_block,
                     block_1_tx,
                     seven_months_post_launch,
-                    Digest::default(),
                     None,
                     &TritonVmJobQueue::dummy(),
                     TritonVmJobPriority::default().into(),

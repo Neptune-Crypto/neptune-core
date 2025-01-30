@@ -84,7 +84,7 @@ pub struct WalletState {
     known_symmetric_keys: Vec<SpendingKey>,
 
     // Cached from the database to avoid async cascades.
-    // Contains nonce-preimages from miner PoW-guessing.
+    // Contains guesser-preimages from miner PoW-guessing.
     known_raw_hash_lock_keys: Vec<SpendingKey>,
 }
 
@@ -259,7 +259,7 @@ impl WalletState {
             .collect_vec();
 
         let known_raw_hash_lock_keys = rusty_wallet_database
-            .nonce_preimages()
+            .guesser_preimages()
             .get_all()
             .await
             .into_iter()
@@ -548,18 +548,13 @@ impl WalletState {
     /// this is a no-op.
     ///
     /// Assumes that the cache agrees with the database.
-    pub(crate) async fn add_raw_hash_key(&mut self, nonce_preimage: Digest) {
-        let as_key = SpendingKey::RawHashLock {
-            preimage: nonce_preimage,
-        };
+    pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
+        let as_key = SpendingKey::RawHashLock { preimage };
         if self.known_raw_hash_lock_keys.contains(&as_key) {
             return;
         }
 
-        self.wallet_db
-            .nonce_preimages_mut()
-            .push(nonce_preimage)
-            .await;
+        self.wallet_db.guesser_preimages_mut().push(preimage).await;
         self.known_raw_hash_lock_keys.push(as_key)
     }
 
@@ -1015,7 +1010,7 @@ impl WalletState {
         // updates from this block
 
         let monitored_utxos = self.wallet_db.monitored_utxos_mut();
-        let mut nonce_preimage: Option<Digest> = None;
+        let mut guesser_preimage: Option<Digest> = None;
         let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
@@ -1127,9 +1122,9 @@ impl WalletState {
                     );
                     monitored_utxos.push(mutxo).await;
 
-                    // If this is a guesser-fee UTXO, store the nonce-preimage.
+                    // If this is a guesser-fee UTXO, store the guesser-preimage.
                     if incoming_utxo.is_guesser_fee() {
-                        nonce_preimage = Some(receiver_preimage);
+                        guesser_preimage = Some(receiver_preimage);
                     }
 
                     // Add the data required to restore the UTXOs membership proof from public
@@ -1238,9 +1233,9 @@ impl WalletState {
             self.store_utxo_ms_recovery_data(item).await?;
         }
 
-        // Write nonce-preimage for guesser fee UTXOs to DB, and cache.
-        if let Some(nonce_preimage) = nonce_preimage {
-            self.add_raw_hash_key(nonce_preimage).await;
+        // Write guesser-preimage for guesser fee UTXOs to DB, and cache.
+        if let Some(guesser_preimage) = guesser_preimage {
+            self.add_raw_hash_key(guesser_preimage).await;
         }
 
         // Mark all expected UTXOs that were received in this block as received
@@ -1457,16 +1452,16 @@ mod tests {
     use crate::models::state::GlobalStateLock;
     use crate::tests::shared::invalid_block_with_transaction;
     use crate::tests::shared::make_mock_block;
-    use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
+    use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
     impl WalletState {
-        /// Delete all nonce-preimage keys from database and cache.
+        /// Delete all guesser-preimage keys from database and cache.
         pub(crate) async fn clear_raw_hash_keys(&mut self) {
             self.known_raw_hash_lock_keys.clear();
-            self.wallet_db.nonce_preimages_mut().clear().await;
+            self.wallet_db.guesser_preimages_mut().clear().await;
         }
     }
 
@@ -1945,22 +1940,22 @@ mod tests {
                 .await;
 
         let genesis_block = Block::genesis(network);
-        let nonce_preimage_1a: Digest = rng.gen();
+        let guesser_preimage_1a: Digest = rng.gen();
         let mock_block_seed = rng.gen();
         let guesser_fraction = 0.5f64;
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block_1a, expected_utxos_block_1a) =
-            make_mock_block_with_nonce_preimage_and_guesser_fraction(
+            make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
                 None,
                 bob_key,
                 mock_block_seed,
                 guesser_fraction,
-                nonce_preimage_1a,
+                guesser_preimage_1a,
             )
             .await;
-        let guesser_fee_utxo_infos0 = block_1a.guesser_fee_expected_utxos(nonce_preimage_1a);
+        let guesser_fee_utxo_infos0 = block_1a.guesser_fee_expected_utxos(guesser_preimage_1a);
 
         let mut bob = bob_global_lock.lock_guard_mut().await;
         let mutxos_1a = bob.wallet_state.wallet_db.monitored_utxos().get_all().await;
@@ -1986,15 +1981,15 @@ mod tests {
 
         // Add a new block to state as tip, which *only* differs in its PoW
         // solution. `bob` did *not* find the PoW-solution for this block.
-        let nonce_preimage_1b: Digest = rng.gen();
+        let guesser_preimage_1b: Digest = rng.gen();
         let (block_1b, expected_utxos_block_1b) =
-            make_mock_block_with_nonce_preimage_and_guesser_fraction(
+            make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
                 None,
                 bob_key,
                 mock_block_seed,
                 guesser_fraction,
-                nonce_preimage_1b,
+                guesser_preimage_1b,
             )
             .await;
 
@@ -2425,12 +2420,12 @@ mod tests {
             );
 
             // Verify expected qualities of wallet, that:
-            // 1. nonce-preimage was added to list(s)
+            // 1. guesser-preimage was added to list(s)
             // 2. expected UTXO contains guesser-fee UTXOs
             // 3. monitored UTXOs-list contains guesser-fee UTXOs.
 
             // 1.
-            let cached_nonce_preimages = bob
+            let cached_guesser_preimages = bob
                 .global_state_lock
                 .lock_guard()
                 .await
@@ -2439,36 +2434,36 @@ mod tests {
                 .clone();
             assert_eq!(
                 1,
-                cached_nonce_preimages.len(),
-                "Cache must know exactly 1 nonce-preimage after adding block to wallet state"
+                cached_guesser_preimages.len(),
+                "Cache must know exactly 1 guesser-preimage after adding block to wallet state"
             );
-            let SpendingKey::RawHashLock { preimage } = cached_nonce_preimages[0] else {
+            let SpendingKey::RawHashLock { preimage } = cached_guesser_preimages[0] else {
                 panic!("Stored key must be raw hash lock");
             };
             assert_eq!(
-                block1.header().nonce,
+                block1.header().guesser_digest,
                 preimage.hash(),
-                "Cached nonce preimage must hash to nonce in block"
+                "Cached guesser preimage must hash to guesser digest in block"
             );
 
-            let nonce_preimages_from_db = bob
+            let guesser_preimages_from_db = bob
                 .global_state_lock
                 .lock_guard()
                 .await
                 .wallet_state
                 .wallet_db
-                .nonce_preimages()
+                .guesser_preimages()
                 .get_all()
                 .await;
             assert_eq!(
                 1,
-                nonce_preimages_from_db.len(),
-                "DB must know exactly 1 nonce-preimage after adding block to wallet state"
+                guesser_preimages_from_db.len(),
+                "DB must know exactly 1 guesser-preimage after adding block to wallet state"
             );
             assert_eq!(
-                block1.header().nonce,
-                nonce_preimages_from_db[0].hash(),
-                "Nonce preimage from DB must hash to nonce in block"
+                block1.header().guesser_digest,
+                guesser_preimages_from_db[0].hash(),
+                "Guesser preimage from DB must hash to guesser digest in block"
             );
 
             // 2.
@@ -2579,7 +2574,7 @@ mod tests {
             )
             .await
             .unwrap();
-            let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx, rng.gen()).await;
+            let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx).await;
             assert!(block2.is_valid(&block1, block2_timestamp).await);
 
             bob.set_new_self_mined_tip(block2.clone(), vec![])

@@ -69,12 +69,10 @@ mod tests {
 
     #[test]
     fn kernel_hash_calculation() {
-        // How do I create an arbitrary new block? Preferably without proof.
         let block_primitive_witness = deterministic_block_primitive_witness();
         let invalid_block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),
-            Digest::default(),
             None,
         );
         let calculated = invalid_block.hash();

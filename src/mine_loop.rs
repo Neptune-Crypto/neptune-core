@@ -12,6 +12,7 @@ use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
 use primitive_witness::PrimitiveWitness;
+use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -87,7 +88,6 @@ async fn compose_block(
         &latest_block,
         transaction,
         timestamp,
-        Digest::default(),
         None,
         triton_vm_job_queue,
         job_options,
@@ -223,6 +223,9 @@ fn guess_worker(
     );
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
+    let guesser_preimage: Digest = random();
+    block.set_header_guesser_digest(guesser_preimage.hash());
+
     let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
     let pool = ThreadPoolBuilder::new()
@@ -245,16 +248,15 @@ fn guess_worker(
             .unwrap()
     });
 
-    let nonce_preimage = match guess_result {
+    let nonce = match guess_result {
         GuessNonceResult::Cancelled => {
             info!("Abandoning mining of current block",);
             return;
         }
-        GuessNonceResult::BlockFound { nonce_preimage } => nonce_preimage,
+        GuessNonceResult::NonceFound { nonce } => nonce,
         _ => unreachable!(),
     };
 
-    let nonce = nonce_preimage.hash();
     info!("Found valid block with nonce: ({nonce}).");
 
     block.set_header_nonce(nonce);
@@ -279,7 +281,7 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(nonce_preimage);
+    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(guesser_preimage);
     assert!(
         !guesser_fee_utxo_infos.is_empty(),
         "All mined blocks have guesser fees"
@@ -297,7 +299,7 @@ Difficulty threshold: {threshold}
 }
 
 enum GuessNonceResult {
-    BlockFound { nonce_preimage: Digest },
+    NonceFound { nonce: Digest },
     BlockNotFound,
     Cancelled,
 }
@@ -346,8 +348,7 @@ fn guess_nonce_iteration(
 
     // Modify the nonce in the block header. In order to collect the guesser
     // fee, this nonce must be the post-image of a known pre-image under Tip5.
-    let nonce_preimage: Digest = rng.gen();
-    let nonce = nonce_preimage.hash();
+    let nonce: Digest = rng.gen();
 
     // Check every N guesses if task has been cancelled.
     if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
@@ -360,7 +361,7 @@ fn guess_nonce_iteration(
 
     match success {
         false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::BlockFound { nonce_preimage },
+        true => GuessNonceResult::NonceFound { nonce },
     }
 }
 
@@ -678,7 +679,7 @@ pub(crate) async fn mine(
                 composer_utxos,
                 cli_args.sleepy_guessing,
                 cli_args.guesser_threads,
-                None, // using default TARGET_BLOCK_INTERVAL
+                None, // use default TARGET_BLOCK_INTERVAL
             );
 
             // Only run for N seconds to allow for updating of block's timestamp
@@ -1015,19 +1016,9 @@ pub(crate) mod mine_loop_tests {
     /// Does *not* update the timestamp of the block and therefore also does not
     /// update the difficulty field, as this applies to the next block and only
     /// changes as a result of the timestamp of this block.
-    pub(crate) fn mine_iteration_for_tests(
-        block: &mut Block,
-        threshold: Digest,
-        rng: &mut StdRng,
-    ) -> Option<Digest> {
-        let nonce_preimage: Digest = rng.gen();
-        let nonce = nonce_preimage.hash();
+    pub(crate) fn mine_iteration_for_tests(block: &mut Block, rng: &mut StdRng) {
+        let nonce = rng.gen();
         block.set_header_nonce(nonce);
-        if block.hash() <= threshold {
-            Some(nonce_preimage)
-        } else {
-            None
-        }
     }
 
     /// Estimates the hash rate in number of hashes per milliseconds
@@ -1071,7 +1062,6 @@ pub(crate) mod mine_loop_tests {
             &previous_block,
             transaction,
             start_time,
-            Digest::default(),
             target_block_interval,
         );
         let threshold = previous_block.header().difficulty.target();
@@ -1126,13 +1116,8 @@ pub(crate) mod mine_loop_tests {
         .unwrap();
 
         let in_seven_months = network.launch_date() + Timestamp::months(7);
-        let block = Block::block_template_invalid_proof(
-            &genesis_block,
-            transaction,
-            in_seven_months,
-            Digest::default(),
-            None,
-        );
+        let block =
+            Block::block_template_invalid_proof(&genesis_block, transaction, in_seven_months, None);
         let tock = tick.elapsed().unwrap().as_millis() as f64;
         black_box(block);
         tock
@@ -1241,7 +1226,6 @@ pub(crate) mod mine_loop_tests {
                 &genesis_block,
                 transaction_empty_mempool,
                 now,
-                Digest::default(),
                 None,
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::High.into(),
@@ -1284,7 +1268,6 @@ pub(crate) mod mine_loop_tests {
                 &genesis_block,
                 transaction_non_empty_mempool,
                 now,
-                Digest::default(),
                 None,
                 &TritonVmJobQueue::dummy(),
                 TritonVmJobPriority::default().into(),
@@ -1392,13 +1375,8 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
 
-        let block = Block::block_template_invalid_proof(
-            &tip_block_orig,
-            transaction,
-            launch_date,
-            Digest::default(),
-            None,
-        );
+        let block =
+            Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
 
         let sleepy_guessing = false;
         let num_guesser_threads = None;
@@ -1469,7 +1447,6 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             transaction,
             ten_seconds_ago,
-            Digest::default(),
             None,
         );
 
@@ -1627,7 +1604,6 @@ pub(crate) mod mine_loop_tests {
                 &prev_block,
                 transaction,
                 start_time,
-                Digest::default(),
                 Some(target_block_interval),
             );
 

@@ -34,8 +34,9 @@ pub struct RustyWalletDatabase {
     // The counter value represents derive index of next unused key.
     symmetric_key_counter: DbtSingleton<u64>,
 
-    // list of pre-images to nonces in blocks we found
-    nonce_preimages: DbtVec<Digest>,
+    /// list of pre-images to guesser digests in blocks we found. Allows wallet
+    /// to spend guesser-fee UTXOs.
+    guesser_preimages: DbtVec<Digest>,
 }
 
 impl RustyWalletDatabase {
@@ -68,7 +69,7 @@ impl RustyWalletDatabase {
             .new_singleton::<u64>("symmetric_key_counter")
             .await;
 
-        let nonce_preimages = storage.schema.new_vec::<Digest>("nonce_preimages").await;
+        let guesser_preimages = storage.schema.new_vec::<Digest>("guesser_preimages").await;
 
         Self {
             storage,
@@ -78,7 +79,7 @@ impl RustyWalletDatabase {
             counter,
             generation_key_counter,
             symmetric_key_counter,
-            nonce_preimages,
+            guesser_preimages,
         }
     }
 
@@ -102,14 +103,12 @@ impl RustyWalletDatabase {
         &mut self.expected_utxos
     }
 
-    // get the nonce preimages
-    pub fn nonce_preimages(&self) -> &DbtVec<Digest> {
-        &self.nonce_preimages
+    pub fn guesser_preimages(&self) -> &DbtVec<Digest> {
+        &self.guesser_preimages
     }
 
-    // get mutable nonce preimages
-    pub fn nonce_preimages_mut(&mut self) -> &mut DbtVec<Digest> {
-        &mut self.nonce_preimages
+    pub fn guesser_preimages_mut(&mut self) -> &mut DbtVec<Digest> {
+        &mut self.guesser_preimages
     }
 
     /// Get the hash of the block to which this database is synced.

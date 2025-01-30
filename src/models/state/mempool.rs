@@ -1231,13 +1231,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let block_2 = Block::block_template_invalid_proof(
-            &block_1,
-            block_transaction,
-            in_eight_months,
-            Digest::default(),
-            None,
-        );
+        let block_2 =
+            Block::block_template_invalid_proof(&block_1, block_transaction, in_eight_months, None);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -1317,7 +1312,6 @@ mod tests {
             &previous_block,
             block_tx_5,
             block_5_timestamp,
-            Digest::default(),
             None,
         );
         assert_eq!(Into::<BlockHeight>::into(5), block_5.kernel.header.height);

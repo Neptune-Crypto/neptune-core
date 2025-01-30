@@ -456,7 +456,6 @@ pub(crate) mod test {
                 predecessor,
                 block_tx,
                 timestamp,
-                rng.gen(),
                 None,
                 &TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),

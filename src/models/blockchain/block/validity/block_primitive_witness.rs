@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
 
 use crate::models::blockchain::block::block_body::BlockBody;
@@ -63,16 +62,14 @@ impl BlockPrimitiveWitness {
     pub(crate) fn header(
         &self,
         timestamp: Timestamp,
-        nonce: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> BlockHeader {
         let parent_header = self.predecessor_block.header();
         let parent_digest = self.predecessor_block.hash();
-        Block::template_header(
+        BlockHeader::template_header(
             parent_header,
             parent_digest,
             timestamp,
-            nonce,
             target_block_interval,
         )
     }

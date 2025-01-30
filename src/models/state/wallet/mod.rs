@@ -829,13 +829,7 @@ mod wallet_tests {
             next_block.mutator_set_accumulator_after().hash(),
         );
 
-        let next_block = Block::block_template_invalid_proof(
-            &next_block.clone(),
-            tx,
-            now,
-            Digest::default(),
-            None,
-        );
+        let next_block = Block::block_template_invalid_proof(&next_block.clone(), tx, now, None);
         let final_block_height = Into::<BlockHeight>::into(23u64);
         assert_eq!(final_block_height, next_block.kernel.header.height);
 
@@ -1211,7 +1205,6 @@ mod wallet_tests {
             &block_2_b,
             merged_tx,
             timestamp,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
@@ -1407,7 +1400,6 @@ mod wallet_tests {
             &genesis_block,
             tx_for_block,
             in_seven_months,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),

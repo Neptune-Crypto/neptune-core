@@ -602,6 +602,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
         prev_block_digest: genesis_block.hash().hash(),
         timestamp: tx_kernel.timestamp,
         nonce: Digest::default(),
+        guesser_digest: Digest::default(),
         cumulative_proof_of_work: genesis_block.header().cumulative_proof_of_work,
         difficulty: genesis_block.header().difficulty,
     };
@@ -633,6 +634,7 @@ pub(crate) fn invalid_block_with_transaction(
         prev_block_digest: previous_block.hash(),
         timestamp: transaction.kernel.timestamp,
         nonce: Digest::default(),
+        guesser_digest: Digest::default(),
         cumulative_proof_of_work: previous_block.header().cumulative_proof_of_work,
         difficulty: previous_block.header().difficulty,
     };
@@ -661,16 +663,16 @@ pub(crate) fn invalid_block_with_transaction(
 }
 
 /// Build a fake and invalid block where the caller can specify the
-/// nonce-preimage and guesser fraction.
+/// guesser-preimage and guesser fraction.
 ///
 /// Returns (block, composer's expected UTXOs).
-pub(crate) async fn make_mock_block_with_nonce_preimage_and_guesser_fraction(
+pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
     guesser_fraction: f64,
-    nonce_preimage: Digest,
+    guesser_preimage: Digest,
 ) -> (Block, Vec<ExpectedUtxo>) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
@@ -698,13 +700,8 @@ pub(crate) async fn make_mock_block_with_nonce_preimage_and_guesser_fraction(
     .await
     .unwrap();
 
-    let block = Block::block_template_invalid_proof(
-        previous_block,
-        tx,
-        block_timestamp,
-        nonce_preimage,
-        None,
-    );
+    let mut block = Block::block_template_invalid_proof(previous_block, tx, block_timestamp, None);
+    block.set_header_guesser_digest(guesser_preimage.hash());
 
     let composer_expected_utxos = composer_txos
         .iter()
@@ -731,14 +728,13 @@ pub(crate) async fn make_mock_block(
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
 ) -> (Block, Vec<ExpectedUtxo>) {
-    let nonce_preimage = Digest::default();
-    make_mock_block_with_nonce_preimage_and_guesser_fraction(
+    make_mock_block_guesser_preimage_and_guesser_fraction(
         previous_block,
         block_timestamp,
         composer_key,
         seed,
         0f64,
-        nonce_preimage,
+        Digest::default(),
     )
     .await
 }
@@ -816,16 +812,12 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
     )
     .await?;
 
-    let nonce_preimage = Digest::default();
-    let block = Block::block_template_invalid_proof(
-        &tip_block,
-        transaction,
-        timestamp,
-        nonce_preimage,
-        None,
-    );
+    let guesser_preimage = Digest::default();
+    let mut block = Block::block_template_invalid_proof(&tip_block, transaction, timestamp, None);
+    block.set_header_guesser_digest(guesser_preimage.hash());
+
     let expected_utxos = block
-        .guesser_fee_expected_utxos(nonce_preimage)
+        .guesser_fee_expected_utxos(guesser_preimage)
         .into_iter()
         .chain(expected_composer_utxos)
         .collect_vec();
@@ -844,7 +836,7 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
         predecessor.mutator_set_accumulator_after().hash(),
     );
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
-    Block::block_template_invalid_proof(predecessor, tx, timestamp, Digest::default(), None)
+    Block::block_template_invalid_proof(predecessor, tx, timestamp, None)
 }
 
 /// Create a fake block proposal; will pass `is_valid` but fail pow-check. Will
@@ -852,16 +844,13 @@ pub(crate) fn invalid_empty_block(predecessor: &Block) -> Block {
 pub(crate) async fn fake_valid_block_proposal_from_tx(
     predecessor: &Block,
     tx: Transaction,
-    seed: [u8; 32],
 ) -> Block {
-    let mut rng = StdRng::from_seed(seed);
     let timestamp = tx.kernel.timestamp;
 
     let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), tx);
 
     let body = primitive_witness.body().to_owned();
-    let nonce_preimage = rng.gen::<Digest>();
-    let header = primitive_witness.header(timestamp, nonce_preimage.hash(), None);
+    let header = primitive_witness.header(timestamp, None);
     let (appendix, proof) = {
         let block_proof_witness = BlockProofWitness::produce(primitive_witness)
             .await
@@ -883,10 +872,11 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
     seed: [u8; 32],
 ) -> Block {
     let threshold = predecessor.header().difficulty.target();
+    let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
+
     let mut rng = StdRng::from_seed(seed);
-    let mut block = fake_valid_block_proposal_from_tx(predecessor, tx, rng.gen()).await;
     while !block.has_proof_of_work(predecessor.header()) {
-        mine_iteration_for_tests(&mut block, threshold, &mut rng);
+        mine_iteration_for_tests(&mut block, &mut rng);
     }
 
     block
@@ -998,7 +988,7 @@ async fn fake_block_successor(
     if with_valid_pow {
         fake_valid_block_from_tx_for_tests(predecessor, block_tx, rng.gen()).await
     } else {
-        fake_valid_block_proposal_from_tx(predecessor, block_tx, rng.gen()).await
+        fake_valid_block_proposal_from_tx(predecessor, block_tx).await
     }
 }
 

@@ -1376,13 +1376,8 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        let mock_block_2 = Block::block_template_invalid_proof(
-            &block1,
-            sender_tx,
-            in_seven_months,
-            Digest::default(),
-            None,
-        );
+        let mock_block_2 =
+            Block::block_template_invalid_proof(&block1, sender_tx, in_seven_months, None);
 
         // Remove an element from the mutator set, verify that the active window DB is updated.
         alice.set_new_tip(mock_block_2.clone()).await.unwrap();
@@ -1871,7 +1866,6 @@ mod archival_state_tests {
             &genesis_block,
             block_tx,
             in_seven_months,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),
@@ -2130,7 +2124,6 @@ mod archival_state_tests {
             &block_1,
             block_tx2,
             in_seven_months + MINIMUM_BLOCK_TIME,
-            Digest::default(),
             None,
             &TritonVmJobQueue::dummy(),
             TritonVmJobPriority::default().into(),

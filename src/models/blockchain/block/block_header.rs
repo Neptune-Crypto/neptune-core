@@ -15,6 +15,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 
 use super::block_height::BlockHeight;
+use super::difficulty_control::difficulty_control;
 use super::difficulty_control::Difficulty;
 use super::difficulty_control::ProofOfWork;
 use super::Block;
@@ -83,6 +84,9 @@ pub struct BlockHeader {
 
     /// The difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: Difficulty,
+
+    /// The lock after-image for the guesser fee UTXOs
+    pub(crate) guesser_digest: Digest,
 }
 
 impl Display for BlockHeader {
@@ -114,6 +118,35 @@ impl BlockHeader {
             nonce: Digest::new(bfe_array![0, 0, 0, 0, 0]),
             cumulative_proof_of_work: ProofOfWork::zero(),
             difficulty: Difficulty::MINIMUM,
+            guesser_digest: Digest::default(),
+        }
+    }
+
+    pub(crate) fn template_header(
+        predecessor_header: &BlockHeader,
+        predecessor_digest: Digest,
+        timestamp: Timestamp,
+        target_block_interval: Option<Timestamp>,
+    ) -> BlockHeader {
+        let difficulty = difficulty_control(
+            timestamp,
+            predecessor_header.timestamp,
+            predecessor_header.difficulty,
+            target_block_interval,
+            predecessor_header.height,
+        );
+
+        let new_cumulative_proof_of_work: ProofOfWork =
+            predecessor_header.cumulative_proof_of_work + predecessor_header.difficulty;
+        Self {
+            version: BLOCK_HEADER_VERSION,
+            height: predecessor_header.height.next(),
+            prev_block_digest: predecessor_digest,
+            timestamp,
+            nonce: Digest::default(),
+            cumulative_proof_of_work: new_cumulative_proof_of_work,
+            difficulty,
+            guesser_digest: Digest::default(),
         }
     }
 }
@@ -127,6 +160,7 @@ pub enum BlockHeaderField {
     Nonce,
     CumulativeProofOfWork,
     Difficulty,
+    GusserDigest,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -147,6 +181,7 @@ impl MastHash for BlockHeader {
             self.nonce.encode(),
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
+            self.guesser_digest.encode(),
         ]
     }
 }
@@ -217,6 +252,7 @@ pub(crate) mod block_header_tests {
             nonce: rng.gen(),
             cumulative_proof_of_work: rng.gen(),
             difficulty: rng.gen(),
+            guesser_digest: rng.gen(),
         }
     }
     #[test]
@@ -245,7 +281,6 @@ pub(crate) mod block_header_tests {
         let block = Block::block_template_invalid_proof_from_witness(
             block_primitive_witness,
             Timestamp::now(),
-            Digest::default(),
             None,
         );
         let expected = block.hash();

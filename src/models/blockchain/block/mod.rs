@@ -16,13 +16,11 @@ use block_body::BlockBody;
 use block_header::BlockHeader;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_FACTOR;
 use block_header::ADVANCE_DIFFICULTY_CORRECTION_WAIT;
-use block_header::BLOCK_HEADER_VERSION;
 use block_header::MINIMUM_BLOCK_TIME;
 use block_header::TARGET_BLOCK_INTERVAL;
 use block_height::BlockHeight;
 use block_kernel::BlockKernel;
 use difficulty_control::Difficulty;
-use difficulty_control::ProofOfWork;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
@@ -176,49 +174,16 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
-    fn template_header(
-        predecessor_header: &BlockHeader,
-        predecessor_digest: Digest,
-        timestamp: Timestamp,
-        nonce: Digest,
-        target_block_interval: Option<Timestamp>,
-    ) -> BlockHeader {
-        let difficulty = difficulty_control(
-            timestamp,
-            predecessor_header.timestamp,
-            predecessor_header.difficulty,
-            target_block_interval,
-            predecessor_header.height,
-        );
-
-        let new_cumulative_proof_of_work: ProofOfWork =
-            predecessor_header.cumulative_proof_of_work + predecessor_header.difficulty;
-        BlockHeader {
-            version: BLOCK_HEADER_VERSION,
-            height: predecessor_header.height.next(),
-            prev_block_digest: predecessor_digest,
-            timestamp,
-            nonce,
-            cumulative_proof_of_work: new_cumulative_proof_of_work,
-            difficulty,
-        }
-    }
-
     /// Create a block template with an invalid block proof, from a block
     /// primitive witness.
     #[cfg(test)]
     pub(crate) fn block_template_invalid_proof_from_witness(
         primitive_witness: BlockPrimitiveWitness,
         block_timestamp: Timestamp,
-        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> Block {
         let body = primitive_witness.body().to_owned();
-        let header = primitive_witness.header(
-            block_timestamp,
-            nonce_preimage.hash(),
-            target_block_interval,
-        );
+        let header = primitive_witness.header(block_timestamp, target_block_interval);
         let proof = BlockProof::Invalid;
         let appendix = BlockAppendix::default();
         Block::new(header, body, appendix, proof)
@@ -232,14 +197,12 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
     ) -> Block {
         let primitive_witness = BlockPrimitiveWitness::new(predecessor.to_owned(), transaction);
         Self::block_template_invalid_proof_from_witness(
             primitive_witness,
             block_timestamp,
-            nonce_preimage,
             target_block_interval,
         )
     }
@@ -247,14 +210,12 @@ impl Block {
     pub(crate) async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
-        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
         let body = primitive_witness.body().to_owned();
-        let header =
-            primitive_witness.header(timestamp, nonce_preimage.hash(), target_block_interval);
+        let header = primitive_witness.header(timestamp, target_block_interval);
         let (appendix, proof) = {
             let block_proof_witness = BlockProofWitness::produce(primitive_witness).await?;
             let appendix = block_proof_witness.appendix();
@@ -277,7 +238,6 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
@@ -299,7 +259,6 @@ impl Block {
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
-            nonce_preimage,
             target_block_interval,
             triton_vm_job_queue,
             proof_job_options,
@@ -314,7 +273,6 @@ impl Block {
         predecessor: &Block,
         transaction: Transaction,
         block_timestamp: Timestamp,
-        nonce_preimage: Digest,
         target_block_interval: Option<Timestamp>,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
@@ -323,7 +281,6 @@ impl Block {
             predecessor,
             transaction,
             block_timestamp,
-            nonce_preimage,
             target_block_interval,
             triton_vm_job_queue,
             proof_job_options,
@@ -354,6 +311,15 @@ impl Block {
     #[inline]
     pub fn set_header_nonce(&mut self, nonce: Digest) {
         self.kernel.header.nonce = nonce;
+        self.unset_digest();
+    }
+
+    /// Set the guesser digest in the block's header.
+    ///
+    /// Note: this causes the block digest to change.
+    #[inline]
+    pub(crate) fn set_header_guesser_digest(&mut self, guesser_after_image: Digest) {
+        self.kernel.header.guesser_digest = guesser_after_image;
         self.unset_digest();
     }
 
@@ -967,7 +933,7 @@ impl Block {
             return vec![];
         }
 
-        let lock = self.header().nonce;
+        let lock = self.header().guesser_digest;
         let lock_script = LockScript::hash_lock_from_after_image(lock);
 
         let total_guesser_reward = self.total_guesser_reward();
@@ -995,8 +961,13 @@ impl Block {
             .into_iter()
             .map(|utxo| {
                 let item = Tip5::hash(&utxo);
+
+                // Adding the block hash to the mutator set here means that no
+                // composer can start proving before solving the PoW-race;
+                // production of future proofs is impossible as they depend on
+                // inputs hidden behind the veil of future PoW.
                 let sender_randomness = self.hash();
-                let receiver_digest = self.header().nonce;
+                let receiver_digest = self.header().guesser_digest;
 
                 commit(item, sender_randomness, receiver_digest)
             })
@@ -1004,14 +975,14 @@ impl Block {
     }
 
     /// Create a list of [`ExpectedUtxo`]s for the guesser fee.
-    pub(crate) fn guesser_fee_expected_utxos(&self, nonce_preimage: Digest) -> Vec<ExpectedUtxo> {
+    pub(crate) fn guesser_fee_expected_utxos(&self, guesser_preimage: Digest) -> Vec<ExpectedUtxo> {
         self.guesser_fee_utxos()
             .into_iter()
             .map(|utxo| {
                 ExpectedUtxo::new(
                     utxo,
                     self.hash(),
-                    nonce_preimage,
+                    guesser_preimage,
                     UtxoNotifier::OwnMinerGuessNonce,
                 )
             })
@@ -1077,6 +1048,14 @@ pub(crate) mod block_tests {
             Network::iter().map(mutator_set_hash).all_unique(),
             "All genesis blocks must have unique MSA digests, else replay attacks are possible",
         );
+    }
+
+    #[test]
+    fn block_subsidy_calculation_terminates() {
+        Block::block_subsidy(BFieldElement::MAX.into());
+
+        let random_height: BFieldElement = random();
+        Block::block_subsidy(random_height.into());
     }
 
     #[tokio::test]
@@ -1354,7 +1333,6 @@ pub(crate) mod block_tests {
                     &block1,
                     block2_tx,
                     plus_eight_months,
-                    Digest::default(),
                     None,
                     &TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
@@ -1415,7 +1393,6 @@ pub(crate) mod block_tests {
                     &block2_without_valid_pow,
                     block3_tx,
                     plus_nine_months,
-                    Digest::default(),
                     None,
                     &TritonVmJobQueue::dummy(),
                     TritonVmProofJobOptions::default(),
@@ -1563,29 +1540,29 @@ pub(crate) mod block_tests {
     mod guesser_fee_utxos {
         use super::*;
         use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
-        use crate::tests::shared::make_mock_block_with_nonce_preimage_and_guesser_fraction;
+        use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
 
         #[tokio::test]
         async fn guesser_fee_addition_records_are_consistent() {
-            // Ensure that two ways of deriving guesser-fee addition records
-            // are consistent.
+            // Ensure that multiple ways of deriving guesser-fee addition
+            // records are consistent.
 
             let mut rng = thread_rng();
             let genesis_block = Block::genesis(Network::Main);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
-            let nonce_preimage = rng.gen();
-            let (block1, _) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
+            let guesser_preimage = rng.gen();
+            let (block1, _) = make_mock_block_guesser_preimage_and_guesser_fraction(
                 &genesis_block,
                 None,
                 a_key,
                 rng.gen(),
                 0.4,
-                nonce_preimage,
+                guesser_preimage,
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
             let ars_from_eus = block1
-                .guesser_fee_expected_utxos(nonce_preimage)
+                .guesser_fee_expected_utxos(guesser_preimage)
                 .iter()
                 .map(|x| x.addition_record)
                 .collect_vec();
@@ -1676,13 +1653,8 @@ pub(crate) mod block_tests {
                 .await
                 .unwrap();
 
-            let block1 = Block::block_template_invalid_proof(
-                &genesis_block,
-                tx1,
-                in_seven_months,
-                Digest::default(),
-                None,
-            );
+            let block1 =
+                Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
             let (tx2, _) = alice
@@ -1700,8 +1672,7 @@ pub(crate) mod block_tests {
                 .await
                 .unwrap();
 
-            let block2 =
-                Block::block_template_invalid_proof(&block1, tx2, in_eight_months, rng.gen(), None);
+            let block2 = Block::block_template_invalid_proof(&block1, tx2, in_eight_months, None);
 
             let mut ms = block1.body().mutator_set_accumulator.clone();
 
