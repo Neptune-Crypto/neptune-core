@@ -792,22 +792,23 @@ impl PeerLoopHandler {
                 }
 
                 // Does cumulative proof-of-work evolve reasonably?
-                if !challenge_response.check_pow(self.global_state_lock.cli().network) {
+                let own_tip_header = *self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .header();
+                if !challenge_response
+                    .check_pow(self.global_state_lock.cli().network, own_tip_header.height)
+                {
                     self.punish(NegativePeerSanction::FishyPowEvolutionChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Is there some specific (*i.e.*, not aggregate) proof of work?
-                if !challenge_response.check_difficulty(
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .header()
-                        .difficulty,
-                ) {
+                if !challenge_response.check_difficulty(own_tip_header.difficulty) {
                     self.punish(NegativePeerSanction::FishyDifficultiesChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);

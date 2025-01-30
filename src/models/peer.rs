@@ -876,7 +876,7 @@ impl SyncChallengeResponse {
 
     /// Determine whether the claimed evolution of the cumulative proof-of-work
     /// is a) possible, and b) likely, given the difficulties.
-    pub(crate) fn check_pow(&self, network: Network) -> bool {
+    pub(crate) fn check_pow(&self, network: Network, own_tip_height: BlockHeight) -> bool {
         let genesis_header = BlockHeader::genesis(network);
         let parent_triples = [(
             genesis_header.height,
@@ -948,15 +948,16 @@ impl SyncChallengeResponse {
         // The tip is included in the below check, so if *it* doesn't have an
         // above average difficulty, something is almost certainly off.
 
-        let too_few_above_mean_difficulties = self
-            .blocks
-            .iter()
-            .flat_map(|(l, r)| [l, r])
-            .chain([&self.tip_parent, &self.tip])
-            .map(|b| b.header.difficulty)
-            .filter(|d| BigUint::from(*d).to_f64().unwrap() >= average_difficulty)
-            .count()
-            == 0;
+        let too_few_above_mean_difficulties = !own_tip_height.is_genesis()
+            && self
+                .blocks
+                .iter()
+                .flat_map(|(l, r)| [l, r])
+                .chain([&self.tip_parent, &self.tip])
+                .map(|b| b.header.difficulty)
+                .filter(|d| BigUint::from(*d).to_f64().unwrap() >= average_difficulty)
+                .count()
+                == 0;
 
         if too_few_above_mean_difficulties {
             warn!("Too few above mean difficulties.");
