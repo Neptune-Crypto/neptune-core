@@ -934,6 +934,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
     use crate::tests::shared::dummy_expected_utxo;
+    use crate::tests::shared::invalid_empty_block;
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
@@ -1677,7 +1678,20 @@ pub(crate) mod mine_loop_tests {
     }
 
     #[test]
-    fn fast_kernel_mast_hash_agrees_with_mast_hash_function() {
+    fn fast_kernel_mast_hash_agrees_with_mast_hash_function_invalid_block() {
+        let genesis = Block::genesis(Network::Main);
+        let block1 = invalid_empty_block(&genesis);
+        for block in [genesis, block1] {
+            let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
+            assert_eq!(
+                block.kernel.mast_hash(),
+                fast_kernel_mast_hash(kernel_auth_path, header_auth_path, block.header().nonce)
+            );
+        }
+    }
+
+    #[test]
+    fn fast_kernel_mast_hash_agrees_with_mast_hash_function_valid_block() {
         let block_primitive_witness = deterministic_block_primitive_witness();
         let a_block = block_primitive_witness.predecessor_block();
         let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(a_block);
