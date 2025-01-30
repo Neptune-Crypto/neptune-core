@@ -9,3 +9,7 @@ echo '+cargo clippy --all-targets --all-features -- -D warnings'
 cargo clippy --all-targets --all-features -- -D warnings
 echo '+cargo fmt --all -- --check'
 cargo fmt --all -- --check
+echo '+cargo doc --no-deps --workspace'
+cargo doc --no-deps --workspace
+echo '+cargo test --doc -- -D warnings'
+cargo test --doc -- -D warnings
