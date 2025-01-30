@@ -241,7 +241,7 @@ impl ArchivalState {
         mut archival_block_mmr: RustyArchivalBlockMmr,
         network: Network,
     ) -> Self {
-        let genesis_block = Box::new(Block::genesis_block(network));
+        let genesis_block = Box::new(Block::genesis(network));
 
         // If archival mutator set is empty, populate it with the addition records from genesis block
         // This assumes genesis block doesn't spend anything -- which it can't so that should be OK.
@@ -1209,7 +1209,7 @@ mod archival_state_tests {
 
         let mut archival_state0 = make_test_archival_state(network).await;
 
-        let b = Block::genesis_block(network);
+        let b = Block::genesis(network);
         let some_wallet_secret = WalletSecret::new_random();
         let some_key = some_wallet_secret.nth_generation_spending_key_for_tests(0);
 
@@ -1234,7 +1234,7 @@ mod archival_state_tests {
         let archival_state = make_test_archival_state(network).await;
 
         assert_eq!(
-            Block::genesis_block(network)
+            Block::genesis(network)
                 .kernel
                 .body
                 .transaction_kernel
@@ -1250,12 +1250,12 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            Block::genesis_block(network).hash(),
+            Block::genesis(network).hash(),
             archival_state.archival_mutator_set.get_sync_label().await,
             "AMS must be synced to genesis block after initialization from genesis block"
         );
 
-        for (i, tx_output) in Block::genesis_block(network)
+        for (i, tx_output) in Block::genesis(network)
             .kernel
             .body
             .transaction_kernel
@@ -1334,7 +1334,7 @@ mod archival_state_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let (block1, _) = make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
 
         alice.set_new_tip(block1.clone()).await.unwrap();
@@ -1455,7 +1455,7 @@ mod archival_state_tests {
         let alice_address = alice_key.to_address();
         let mut alice =
             mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         let num_premine_utxos = Block::premine_utxos(network).len();
 
@@ -1549,7 +1549,7 @@ mod archival_state_tests {
         let network = Network::RegTest;
         let mut rng = thread_rng();
         let alice_wallet = WalletSecret::devnet_wallet();
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let mut alice =
@@ -1765,7 +1765,7 @@ mod archival_state_tests {
             mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
                 .await;
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let launch_date = genesis_block.header().timestamp;
         let in_seven_months = launch_date + Timestamp::months(7);
 
@@ -2448,7 +2448,7 @@ mod archival_state_tests {
         let wallet = WalletSecret::new_random();
         let mut rng = thread_rng();
         let mut archival_state = make_test_archival_state(network).await;
-        let mut current_block = Block::genesis_block(network);
+        let mut current_block = Block::genesis(network);
         let genesis_msa = current_block.mutator_set_accumulator_after().clone();
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
         for _block_height in 1..=5 {
@@ -2492,7 +2492,7 @@ mod archival_state_tests {
         let wallet = WalletSecret::new_random();
         let mut rng = thread_rng();
         let mut archival_state = make_test_archival_state(network).await;
-        let mut current_block = Block::genesis_block(network);
+        let mut current_block = Block::genesis(network);
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
         let mut blocks = vec![current_block.clone()];
         let mut min_aocl_index = 0u64;
@@ -2584,9 +2584,9 @@ mod archival_state_tests {
     async fn find_canonical_block_with_output_genesis_block_test() {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
-        let addition_records = Block::genesis_block(network)
+        let addition_records = Block::genesis(network)
             .body()
             .transaction_kernel
             .outputs
@@ -2621,7 +2621,7 @@ mod archival_state_tests {
         let network = Network::Main;
         let wallet = WalletSecret::new_random();
         let mut archival_state = make_test_archival_state(network).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
         let compose_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
@@ -2665,7 +2665,7 @@ mod archival_state_tests {
         let network = Network::Main;
         let wallet = WalletSecret::new_random();
         let mut archival_state = make_test_archival_state(network).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0);
 
@@ -3597,7 +3597,7 @@ mod archival_state_tests {
             let network = Network::Main;
             let mut rng = thread_rng();
             let mut archival_state = make_test_archival_state(network).await;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let blocks: [Block; 3] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::now(),

@@ -1831,7 +1831,7 @@ mod global_state_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
         let nine_money_output = TxOutput::offchain_native_currency(
             NativeCurrencyAmount::coins(9),
@@ -1937,7 +1937,7 @@ mod global_state_tests {
         let own_key = wallet.nth_generation_spending_key_for_tests(0);
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let nonce_preimage = rng.gen();
         let (block1, composer_utxos) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
             &genesis_block,
@@ -2118,7 +2118,7 @@ mod global_state_tests {
         let bob_key = bob_wallet_secret.nth_generation_spending_key(0);
 
         // 1. Create new block 1 and store it
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
         let (mock_block_1a, _) = make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
@@ -2468,7 +2468,7 @@ mod global_state_tests {
             mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
                 .await;
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let in_eight_months = in_seven_months + Timestamp::months(1);
 
@@ -2849,7 +2849,7 @@ mod global_state_tests {
             cli_args::Args::default(),
         )
         .await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
         let block1 = fake_valid_successor_for_tests(&genesis_block, now, Default::default()).await;
@@ -2886,7 +2886,7 @@ mod global_state_tests {
             guesser_fraction: f64,
             global_state_lock: &GlobalStateLock,
         ) -> Block {
-            let genesis_block = Block::genesis_block(global_state_lock.cli().network);
+            let genesis_block = Block::genesis(global_state_lock.cli().network);
             let timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
             let (cb, _) = make_coinbase_transaction_from_state(
                 &genesis_block,
@@ -3108,7 +3108,7 @@ mod global_state_tests {
             // genesis block. Verify that state is integral after each block.
             let network = Network::Main;
             let mut rng = thread_rng();
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
@@ -3179,7 +3179,7 @@ mod global_state_tests {
             // build upon blocks stored through the former method.
             let network = Network::Main;
             let mut rng = thread_rng();
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::new_random();
 
             let mut alice = mock_genesis_global_state(
@@ -3219,7 +3219,7 @@ mod global_state_tests {
         ) -> Vec<(Block, Block)> {
             let mut rng = thread_rng();
             let cb_key = WalletSecret::new_random().nth_generation_spending_key(0);
-            let mut parent = Block::genesis_block(network);
+            let mut parent = Block::genesis(network);
             let mut chain = vec![];
             for _ in 0..length {
                 let (block, _) = make_mock_block(&parent, None, cb_key, rng.gen()).await;
@@ -3300,7 +3300,7 @@ mod global_state_tests {
             // correctly, and that [GlobalState::set_new_tip] can be used to
             // build upon blocks stored through the former method.
             let network = Network::Main;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::new_random();
 
             for depth in 1..=4 {
@@ -3347,7 +3347,7 @@ mod global_state_tests {
             // blockchain to a previous block.
             let network = Network::Main;
             let mut rng = thread_rng();
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let wallet_secret = WalletSecret::devnet_wallet();
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
@@ -3449,7 +3449,7 @@ mod global_state_tests {
             let mut rng = thread_rng();
             let network = Network::Main;
             let wallet_secret = WalletSecret::devnet_wallet();
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
             let (block_1, expected1) =
@@ -3597,7 +3597,7 @@ mod global_state_tests {
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(10001);
 
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let launch = genesis_block.kernel.header.timestamp;
             let seven_months_post_launch = launch + Timestamp::months(7);
 

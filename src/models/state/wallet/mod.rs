@@ -495,7 +495,7 @@ mod wallet_tests {
             );
 
             // Add 12 blocks and verify that membership proofs are still valid
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let mut next_block = genesis_block.clone();
             let charlie_wallet = WalletSecret::new_pseudorandom(rng.gen());
             let charlie_key = charlie_wallet.nth_generation_spending_key_for_tests(0);
@@ -546,7 +546,7 @@ mod wallet_tests {
             "Monitored UTXO list must be empty at init"
         );
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let alice_key = alice_wallet
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
@@ -666,7 +666,7 @@ mod wallet_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         let mut rng = thread_rng();
         let (block_1, expected_utxos) =
@@ -891,7 +891,7 @@ mod wallet_tests {
             .wallet_secret
             .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
@@ -1345,7 +1345,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let bob = mock_genesis_global_state(
             network,
@@ -1610,7 +1610,7 @@ mod wallet_tests {
         async fn verify_premine_receipt_works_with_test_addresses() {
             let network = Network::Main;
             let cli = cli_args::Args::default();
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let seven_months_after_launch = genesis_block.header().timestamp + Timestamp::months(7);
             for seed_phrase in worker::test_seed_phrases() {
                 let wallet_secret = WalletSecret::from_phrase(&seed_phrase)

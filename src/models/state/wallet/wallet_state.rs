@@ -339,7 +339,7 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
-                    &Block::genesis_block(cli_args.network),
+                    &Block::genesis(cli_args.network),
                 )
                 .await
                 .expect("Updating wallet state with genesis block must succeed");
@@ -1501,7 +1501,7 @@ mod tests {
             .expect("Must be able to find premine MUTXO with this method");
         assert_eq!(premine_utxo, premine_mutxo.utxo);
 
-        let genesis_digest = Block::genesis_block(network).hash();
+        let genesis_digest = Block::genesis(network).hash();
         assert_eq!(
             premine_sender_randomness,
             premine_mutxo
@@ -1629,7 +1629,7 @@ mod tests {
 
         // `bob` both composes and guesses the PoW solution of this block.
         let (block1, composer_fee_eutxos) =
-            make_mock_block(&Block::genesis_block(network), None, bob_key, rng.gen()).await;
+            make_mock_block(&Block::genesis(network), None, bob_key, rng.gen()).await;
 
         bob_global_lock
             .lock_guard_mut()
@@ -1944,7 +1944,7 @@ mod tests {
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
                 .await;
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let nonce_preimage_1a: Digest = rng.gen();
         let mock_block_seed = rng.gen();
         let guesser_fraction = 0.5f64;
@@ -2050,7 +2050,7 @@ mod tests {
                 .await;
         let mut bob = bob_global_lock.lock_guard_mut().await;
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let (block1, composer_utxos) =
             make_mock_block(&genesis_block, None, bob_key, rng.gen()).await;
 
@@ -2138,7 +2138,7 @@ mod tests {
             mock_genesis_global_state(network, 0, bob_wallet_secret, cli_args::Args::default())
                 .await;
         let mut bob = bob_global_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
         assert!(
             monitored_utxos_count_init.is_zero(),
@@ -2307,7 +2307,7 @@ mod tests {
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
         let network = Network::RegTest;
         let wallet = WalletSecret::devnet_wallet();
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         let wallet_state = mock_genesis_wallet_state(wallet, network).await;
 
@@ -2359,7 +2359,7 @@ mod tests {
         #[tokio::test]
         async fn registers_guesser_fee_utxos_correctly() {
             let network = Network::Main;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let mut bob = mock_genesis_global_state(
                 network,
                 3,
@@ -2647,7 +2647,7 @@ mod tests {
             half_coinbase_amt.div_two();
             let send_amt = NativeCurrencyAmount::coins(5);
 
-            let timestamp = Block::genesis_block(network).header().timestamp + Timestamp::hours(1);
+            let timestamp = Block::genesis(network).header().timestamp + Timestamp::hours(1);
 
             // mine a block to our wallet.  we should have 100 coins after.
             let tip_digest =

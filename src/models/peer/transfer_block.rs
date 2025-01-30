@@ -84,7 +84,7 @@ mod test {
 
     #[test]
     fn cannot_transfer_blocks_that_are_not_single_proof_supported() {
-        let genesis = Block::genesis_block(Network::Main);
+        let genesis = Block::genesis(Network::Main);
         let tblock_genesis: Result<TransferBlock> = (&genesis).try_into();
         assert!(
             tblock_genesis.is_err(),
@@ -104,7 +104,7 @@ mod test {
         // note: we have to generate a block because
         // TransferBlock::into() will panic if it
         // encounters the genesis block.
-        let genesis = Block::genesis_block(network);
+        let genesis = Block::genesis(network);
         let [block1] = fake_valid_sequence_of_blocks_for_tests(
             &genesis,
             Timestamp::hours(1),

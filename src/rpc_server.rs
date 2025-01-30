@@ -2665,7 +2665,7 @@ mod rpc_server_tests {
         let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
-        let genesis_hash = Block::genesis_block(network).hash();
+        let genesis_hash = Block::genesis(network).hash();
 
         // should find genesis block by Genesis selector
         assert_eq!(
@@ -2877,7 +2877,7 @@ mod rpc_server_tests {
                     let mut rpc_server =
                         test_rpc_server(network, wallet_secret.clone(), 2, Args::default()).await;
 
-                    let genesis_block = Block::genesis_block(network);
+                    let genesis_block = Block::genesis(network);
                     let mut blocks = vec![];
                     let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);
 
@@ -3016,11 +3016,11 @@ mod rpc_server_tests {
                 let bob_token = cookie_token(&bob).await;
 
                 let in_seven_months =
-                    Block::genesis_block(network).header().timestamp + Timestamp::months(7);
+                    Block::genesis(network).header().timestamp + Timestamp::months(7);
                 let in_eight_months = in_seven_months + Timestamp::months(1);
 
                 let bob_key = bob_wallet.nth_generation_spending_key(0);
-                let genesis_block = Block::genesis_block(network);
+                let genesis_block = Block::genesis(network);
                 let (block1, composer_expected) =
                     make_mock_block(&genesis_block, None, bob_key, Default::default()).await;
 
@@ -3257,7 +3257,7 @@ mod rpc_server_tests {
                 let ctx = context::current();
 
                 // --- Init.  get wallet spending key ---
-                let genesis_block = Block::genesis_block(network);
+                let genesis_block = Block::genesis(network);
                 let wallet_spending_key = rpc_server
                     .state
                     .lock_guard_mut()

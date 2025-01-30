@@ -1090,7 +1090,7 @@ pub(crate) mod mine_loop_tests {
     /// nonces.
     async fn estimate_block_preparation_time_invalid_proof() -> f64 {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         let global_state_lock = mock_genesis_global_state(
             network,
@@ -1135,7 +1135,7 @@ pub(crate) mod mine_loop_tests {
             cli_args::Args::default(),
         )
         .await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         assert!(
             !alice
@@ -1289,7 +1289,7 @@ pub(crate) mod mine_loop_tests {
             cli_args::Args::default(),
         )
         .await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mocked_now = genesis_block.header().timestamp + Timestamp::months(7);
 
         assert!(
@@ -1339,7 +1339,7 @@ pub(crate) mod mine_loop_tests {
             cli_args::Args::default(),
         )
         .await;
-        let tip_block_orig = Block::genesis_block(network);
+        let tip_block_orig = Block::genesis(network);
         let launch_date = tip_block_orig.header().timestamp;
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
 
@@ -1709,7 +1709,7 @@ pub(crate) mod mine_loop_tests {
             cli_args::Args::default(),
         )
         .await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let launch_date = genesis_block.header().timestamp;
 
         let (transaction, coinbase_utxo_info) = make_coinbase_transaction_from_state(

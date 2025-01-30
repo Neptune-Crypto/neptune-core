@@ -1010,7 +1010,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_challenge_response_pow_witnesses_must_be_a_chain() {
-        let genesis = Block::genesis_block(Network::Main);
+        let genesis = Block::genesis(Network::Main);
         let mut rng = thread_rng();
         let ten_blocks: [Block; SYNC_CHALLENGE_POW_WITNESS_LENGTH] =
             fake_valid_sequence_of_blocks_for_tests(&genesis, Timestamp::minutes(20), rng.gen())

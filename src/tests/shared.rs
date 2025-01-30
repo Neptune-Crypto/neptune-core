@@ -162,7 +162,7 @@ pub fn get_dummy_version() -> String {
 pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        tip_header: Block::genesis_block(network).header().to_owned(),
+        tip_header: Block::genesis(network).header().to_owned(),
         listen_port: Some(8080),
         network,
         version: get_dummy_version(),
@@ -593,7 +593,7 @@ pub(crate) fn mock_block_from_transaction_and_msa(
     mutator_set_before: MutatorSetAccumulator,
     network: Network,
 ) -> Block {
-    let genesis_block = Block::genesis_block(network);
+    let genesis_block = Block::genesis(network);
     let new_block_height: BlockHeight = BlockHeight::from(100u64);
     let block_header = BlockHeader {
         version: bfe!(0),

@@ -844,7 +844,7 @@ mod tests {
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
         let txs = make_plenty_mock_transaction_with_primitive_witness(2);
@@ -883,7 +883,7 @@ mod tests {
         network: Network,
         origin: TransactionOrigin,
     ) -> Mempool {
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         let txs = make_plenty_mock_transaction_with_primitive_witness(transactions_count);
         for tx in txs {
@@ -967,7 +967,7 @@ mod tests {
     async fn most_dense_proof_collection_test() {
         let network = Network::Main;
         let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let bob_wallet_secret = WalletSecret::devnet_wallet();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let bob = mock_genesis_global_state(
@@ -1049,7 +1049,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let network = Network::Alpha;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         assert!(
             mempool.is_empty(),
@@ -1104,7 +1104,7 @@ mod tests {
 
         // Ensure that both wallets have a non-zero balance by letting Alice
         // mine a block.
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let (block_1, expected_1) =
             make_mock_block(&genesis_block, None, alice_key, rng.gen()).await;
 
@@ -1394,7 +1394,7 @@ mod tests {
         // Verify that a merged transaction replaces the two transactions that
         // are the input into the merge.
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
         let ((left, right), merged) = merge_tx_triplet().await;
@@ -1596,7 +1596,7 @@ mod tests {
              preminer_clone: GlobalStateLock,
              sender_randomness: Digest| async move {
                 let in_seven_months =
-                    Block::genesis_block(network).kernel.header.timestamp + Timestamp::months(7);
+                    Block::genesis(network).kernel.header.timestamp + Timestamp::months(7);
 
                 let receiver_data = TxOutput::offchain_native_currency(
                     NativeCurrencyAmount::coins(1),
@@ -1675,7 +1675,7 @@ mod tests {
     #[tokio::test]
     async fn single_proof_flag_is_respected() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_with_primitive_witness(11);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
         for tx in txs {
@@ -1694,7 +1694,7 @@ mod tests {
     #[tokio::test]
     async fn max_len_none() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_with_primitive_witness(11);
         let mut mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
 
@@ -1713,7 +1713,7 @@ mod tests {
     #[tokio::test]
     async fn max_len_is_respected() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let txs = make_plenty_mock_transaction_with_primitive_witness(20);
 
         let mut expected_txs = txs.clone();
@@ -1792,7 +1792,7 @@ mod tests {
             network: Network,
             fee: NativeCurrencyAmount,
         ) -> Transaction {
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let bob_wallet_secret = WalletSecret::devnet_wallet();
             let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
             let bob = mock_genesis_global_state(

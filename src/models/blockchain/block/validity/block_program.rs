@@ -484,7 +484,7 @@ pub(crate) mod test {
             false,
         );
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(12);
         let (tx, _) = alice
             .lock_guard()

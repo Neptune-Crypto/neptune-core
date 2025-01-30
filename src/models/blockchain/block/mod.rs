@@ -436,7 +436,7 @@ impl Block {
             .unwrap_or_else(NativeCurrencyAmount::zero)
     }
 
-    pub fn genesis_block(network: Network) -> Self {
+    pub fn genesis(network: Network) -> Self {
         let premine_distribution = Self::premine_distribution();
         let total_premine_amount = premine_distribution
             .iter()
@@ -1065,7 +1065,7 @@ mod block_tests {
     #[test]
     fn all_genesis_blocks_have_unique_mutator_set_hashes() {
         let mutator_set_hash = |network| {
-            Block::genesis_block(network)
+            Block::genesis(network)
                 .body()
                 .mutator_set_accumulator
                 .hash()
@@ -1086,7 +1086,7 @@ mod block_tests {
 
         // TODO: Can this outer-loop be parallelized?
         for multiplier in [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000] {
-            let mut block_prev = Block::genesis_block(network);
+            let mut block_prev = Block::genesis(network);
             let mut now = block_prev.kernel.header.timestamp;
             let mut rng = thread_rng();
 
@@ -1143,7 +1143,7 @@ mod block_tests {
     #[tokio::test]
     async fn block_with_wrong_mmra_is_invalid() {
         let network = Network::Main;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
@@ -1175,7 +1175,7 @@ mod block_tests {
     async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
         let network = Network::RegTest;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
         let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
@@ -1271,7 +1271,7 @@ mod block_tests {
             // Cf., the bug fixed in 4d6b7013624e593c40e76ce93cb6b288b6b3f48b.
 
             let network = Network::Main;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
             let block1 =
@@ -1431,7 +1431,7 @@ mod block_tests {
         #[tokio::test]
         async fn block_with_far_future_timestamp_is_invalid() {
             let network = Network::Main;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
             let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
 
@@ -1476,7 +1476,7 @@ mod block_tests {
         //       Arc<Mutex<Option<Digest>>> would link the digest in the clone
         #[test]
         fn clone_and_modify() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
             let g_hash = gblock.hash();
 
             let mut g2 = gblock.clone();
@@ -1491,7 +1491,7 @@ mod block_tests {
         // test: verify digest is correct after Block::new().
         #[test]
         fn new() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
             let g2 = gblock.clone();
 
             let block = Block::new(
@@ -1506,7 +1506,7 @@ mod block_tests {
         // test: verify digest changes after nonce is updated.
         #[test]
         fn set_header_nonce() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
             let mut rng = thread_rng();
 
             let mut new_block = gblock.clone();
@@ -1517,7 +1517,7 @@ mod block_tests {
         // test: verify set_block() copies source digest
         #[test]
         fn set_block() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
             let mut rng = thread_rng();
 
             let mut unique_block = gblock.clone();
@@ -1533,7 +1533,7 @@ mod block_tests {
         // test: verify digest is correct after deserializing
         #[test]
         fn deserialize() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
 
             let bytes = bincode::serialize(&gblock).unwrap();
             let block: Block = bincode::deserialize(&bytes).unwrap();
@@ -1545,7 +1545,7 @@ mod block_tests {
         //       round trip.
         #[test]
         fn bfieldcodec_encode_and_decode() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis(Network::RegTest);
 
             let encoded: Vec<BFieldElement> = gblock.encode();
             let decoded: Block = *Block::decode(&encoded).unwrap();
@@ -1566,7 +1566,7 @@ mod block_tests {
             // are consistent.
 
             let mut rng = thread_rng();
-            let genesis_block = Block::genesis_block(Network::Main);
+            let genesis_block = Block::genesis(Network::Main);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
             let nonce_preimage = rng.gen();
             let (block1, _) = make_mock_block_with_nonce_preimage_and_guesser_fraction(
@@ -1598,7 +1598,7 @@ mod block_tests {
 
         #[test]
         fn guesser_can_unlock_guesser_fee_utxo() {
-            let genesis_block = Block::genesis_block(Network::Main);
+            let genesis_block = Block::genesis(Network::Main);
             let mut transaction = make_mock_transaction(vec![], vec![]);
 
             transaction.kernel = TransactionKernelModifier::default()
@@ -1633,7 +1633,7 @@ mod block_tests {
 
             let mut rng = thread_rng();
             let network = Network::Main;
-            let genesis_block = Block::genesis_block(network);
+            let genesis_block = Block::genesis(network);
             assert!(
                 genesis_block.guesser_fee_utxos().is_empty(),
                 "Genesis block has no guesser fee UTXOs"

@@ -2058,7 +2058,7 @@ mod peer_loop_tests {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, mut alice, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = Block::genesis_block(network);
+        let genesis_block: Block = Block::genesis(network);
 
         let now = genesis_block.header().timestamp + Timestamp::hours(1);
         let block_1 =
@@ -2119,7 +2119,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
-        let genesis_block: Block = Block::genesis_block(network);
+        let genesis_block: Block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
         let [block_1, block_2, block_3, block_4, block_5] =
             fake_valid_sequence_of_blocks_for_tests(
@@ -2192,7 +2192,7 @@ mod peer_loop_tests {
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
-        let genesis_block: Block = Block::genesis_block(network);
+        let genesis_block: Block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
@@ -2308,7 +2308,7 @@ mod peer_loop_tests {
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
@@ -2440,7 +2440,7 @@ mod peer_loop_tests {
         let network = Network::Main;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let peer_address = get_dummy_socket_address(0);
 
         let [block_1, block_2_a, block_3_a] = fake_valid_sequence_of_blocks_for_tests(
@@ -2540,7 +2540,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let blocks: [Block; 7] =
             fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
                 .await;
@@ -2714,7 +2714,7 @@ mod peer_loop_tests {
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         // Restrict max number of blocks held in memory to 2.
         let mut cli = state_lock.cli().clone();
@@ -2795,7 +2795,7 @@ mod peer_loop_tests {
             .await
             .unwrap();
         let peer_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
             Timestamp::hours(1),
@@ -2868,7 +2868,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0, cli_args::Args::default()).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
 
         let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
             &genesis_block,
@@ -3052,7 +3052,7 @@ mod peer_loop_tests {
             mut state_lock,
             _hsd,
         ) = get_test_genesis_setup(network, 1, cli_args::Args::default()).await?;
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let peer_infos: Vec<PeerInfo> = state_lock
             .lock_guard()
             .await
@@ -3158,7 +3158,7 @@ mod peer_loop_tests {
             .wallet_state
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
         let (transaction_1, _change_output) = state_lock
             .lock_guard()
@@ -3241,7 +3241,7 @@ mod peer_loop_tests {
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
 
-        let genesis_block = Block::genesis_block(network);
+        let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp;
         let (transaction_1, _change_output) = state_lock
             .lock_guard()
@@ -3343,7 +3343,7 @@ mod peer_loop_tests {
                 from_main_rx,
                 peer_state,
                 to_main_tx,
-                genesis_block: Block::genesis_block(network),
+                genesis_block: Block::genesis(network),
             }
         }
 
@@ -3588,7 +3588,7 @@ mod peer_loop_tests {
             ) = get_test_genesis_setup(network, 0, cli_args::Args::default())
                 .await
                 .unwrap();
-            let genesis_block: Block = Block::genesis_block(network);
+            let genesis_block: Block = Block::genesis(network);
             let blocks: [Block; 11] = fake_valid_sequence_of_blocks_for_tests(
                 &genesis_block,
                 Timestamp::hours(1),
@@ -3648,7 +3648,7 @@ mod peer_loop_tests {
             // tip.
 
             let network = Network::Main;
-            let genesis_block: Block = Block::genesis_block(network);
+            let genesis_block: Block = Block::genesis(network);
 
             let alice_cli = cli_args::Args::default();
             let (
@@ -3711,7 +3711,7 @@ mod peer_loop_tests {
 
             let mut rng = thread_rng();
             let network = Network::Main;
-            let genesis_block: Block = Block::genesis_block(network);
+            let genesis_block: Block = Block::genesis(network);
 
             const ALICE_SYNC_MODE_THRESHOLD: usize = 10;
             let alice_cli = cli_args::Args {
