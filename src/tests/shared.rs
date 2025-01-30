@@ -871,7 +871,6 @@ pub(crate) async fn fake_valid_block_from_tx_for_tests(
     tx: Transaction,
     seed: [u8; 32],
 ) -> Block {
-    let threshold = predecessor.header().difficulty.target();
     let mut block = fake_valid_block_proposal_from_tx(predecessor, tx).await;
 
     let mut rng = StdRng::from_seed(seed);
