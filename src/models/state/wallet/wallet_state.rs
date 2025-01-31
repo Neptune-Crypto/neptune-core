@@ -2375,6 +2375,14 @@ mod tests {
             )
             .await;
 
+            // Create the correct guesser key
+            let guesser_key = bob
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .guesser_spending_key(genesis_block.hash());
+
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
             // mine_loop.
@@ -2386,6 +2394,7 @@ mod tests {
                 *genesis_block.header(),
                 guesser_tx,
                 claimable_composer_utxos,
+                guesser_key,
                 sleepy_guessing,
                 Some(2),
                 None,

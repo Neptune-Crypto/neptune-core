@@ -12,7 +12,6 @@ use composer_parameters::ComposerParameters;
 use futures::channel::oneshot;
 use num_traits::CheckedSub;
 use primitive_witness::PrimitiveWitness;
-use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -46,6 +45,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
+use crate::models::state::wallet::address::hash_lock::HashLock;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -106,12 +106,13 @@ async fn compose_block(
     }
 }
 
-/// Attempt to mine a valid block for the network
+/// Attempt to mine a valid block for the network.
 pub(crate) async fn guess_nonce(
     block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
+    guesser_key: HashLock,
     sleepy_guessing: bool,
     num_guesser_threads: Option<usize>,
     target_block_interval: Option<Timestamp>,
@@ -134,6 +135,7 @@ pub(crate) async fn guess_nonce(
             previous_block_header,
             sender,
             composer_utxos,
+            guesser_key,
             sleepy_guessing,
             num_guesser_threads,
             target_block_interval,
@@ -186,11 +188,13 @@ fn precalculate_block_auth_paths(
     (kernel_ap, header_ap)
 }
 
+/// Guess the nonce in parallel until success.
 fn guess_worker(
     mut block: Block,
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
+    guesser_key: HashLock,
     sleepy_guessing: bool,
     num_guesser_threads: Option<usize>,
     target_block_interval: Option<Timestamp>,
@@ -223,8 +227,7 @@ fn guess_worker(
     );
     block.set_header_timestamp_and_difficulty(now, new_difficulty);
 
-    let guesser_preimage: Digest = random();
-    block.set_header_guesser_digest(guesser_preimage.hash());
+    block.set_header_guesser_digest(guesser_key.after_image());
 
     let (kernel_auth_path, header_auth_path) = precalculate_block_auth_paths(&block);
 
@@ -250,7 +253,7 @@ fn guess_worker(
 
     let nonce = match guess_result {
         GuessNonceResult::Cancelled => {
-            info!("Abandoning mining of current block",);
+            info!("Cancelling guessing task",);
             return;
         }
         GuessNonceResult::NonceFound { nonce } => nonce,
@@ -281,7 +284,7 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(guesser_preimage);
+    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(Digest::from(guesser_key));
     assert!(
         !guesser_fee_utxo_infos.is_empty(),
         "All mined blocks have guesser fees"
@@ -664,6 +667,12 @@ pub(crate) async fn mine(
 
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
+            let guesser_key = global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .guesser_spending_key(proposal.header().prev_block_digest);
 
             global_state_lock
                 .set_mining_status_to_guessing(proposal)
@@ -677,6 +686,7 @@ pub(crate) async fn mine(
                 latest_block_header,
                 guesser_tx,
                 composer_utxos,
+                guesser_key,
                 cli_args.sleepy_guessing,
                 cli_args.guesser_threads,
                 None, // use default TARGET_BLOCK_INTERVAL
@@ -1376,8 +1386,15 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
 
-        let block =
+        let guesser_key = global_state_lock
+            .lock_guard()
+            .await
+            .wallet_state
+            .wallet_secret
+            .guesser_spending_key(tip_block_orig.hash());
+        let mut block =
             Block::block_template_invalid_proof(&tip_block_orig, transaction, launch_date, None);
+        block.set_header_guesser_digest(guesser_key.after_image());
 
         let sleepy_guessing = false;
         let num_guesser_threads = None;
@@ -1387,6 +1404,7 @@ pub(crate) mod mine_loop_tests {
             tip_block_orig.header().to_owned(),
             worker_task_tx,
             coinbase_utxo_info,
+            guesser_key,
             sleepy_guessing,
             num_guesser_threads,
             None,
@@ -1444,6 +1462,8 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
 
+        let guesser_key = HashLock::from(Digest::default());
+
         let template = Block::block_template_invalid_proof(
             &tip_block_orig,
             transaction,
@@ -1463,6 +1483,7 @@ pub(crate) mod mine_loop_tests {
             tip_block_orig.header().to_owned(),
             worker_task_tx,
             coinbase_utxo_info,
+            guesser_key,
             sleepy_guessing,
             num_guesser_threads,
             None,
@@ -1601,6 +1622,8 @@ pub(crate) mod mine_loop_tests {
                 )
             };
 
+            let guesser_key = HashLock::from(Digest::default());
+
             let block = Block::block_template_invalid_proof(
                 &prev_block,
                 transaction,
@@ -1616,6 +1639,7 @@ pub(crate) mod mine_loop_tests {
                 *prev_block.header(),
                 worker_task_tx,
                 composer_utxos,
+                guesser_key,
                 sleepy_guessing,
                 num_guesser_threads,
                 Some(target_block_interval),

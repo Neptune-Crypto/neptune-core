@@ -4,12 +4,15 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::isa::triton_asm;
 use tasm_lib::triton_vm::isa::triton_instr;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 
 pub(crate) const RAW_HASH_LOCK_FLAG_U8: u8 = 0u8;
+pub(crate) const RAW_HASH_LOCK_FLAG: BFieldElement =
+    BFieldElement::new(RAW_HASH_LOCK_FLAG_U8 as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HashLock {
