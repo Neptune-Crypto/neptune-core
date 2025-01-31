@@ -8,10 +8,10 @@ use serde::Serialize;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
-use tasm_lib::hashing::eq_digest::EqDigest;
 use tasm_lib::library::Library;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
@@ -102,7 +102,7 @@ impl ConsensusProgram for CollectLockScripts {
         let field_utxos = field!(SaltedUtxos::utxos);
         let field_lock_script_hash = field!(Utxo::lock_script_hash);
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let eq_digest = library.import(Box::new(EqDigest));
+        let eq_digest = DataType::Digest.compare();
         let write_all_lock_script_digests =
             "neptune_consensus_transaction_collect_lock_scripts_write_all_lock_script_digests"
                 .to_string();
@@ -135,7 +135,7 @@ impl ConsensusProgram for CollectLockScripts {
             read_io 5
             // _ *clsw witness_size *salted_input_utxos [salted_input_utxos_hash] [siud]
 
-            call {eq_digest} assert
+            {&eq_digest} assert
             // _ *clsw witness_size *salted_input_utxos
 
             {&field_utxos}

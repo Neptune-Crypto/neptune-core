@@ -1087,7 +1087,7 @@ mod tests {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseResult;
     use proptest::test_runner::TestRunner;
-    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+    use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use test_strategy::proptest;
 
     use super::*;
@@ -1178,7 +1178,7 @@ mod tests {
         let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
         );
         assert!(let Ok(_) = assertion_failure);
     }
@@ -1195,7 +1195,7 @@ mod tests {
         let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
             bad_witness.standard_input(),
             bad_witness.nondeterminism(),
-            &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
         );
         assert!(let Ok(_) = assertion_failure);
     }

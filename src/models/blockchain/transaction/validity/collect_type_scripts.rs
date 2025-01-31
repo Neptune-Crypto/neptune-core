@@ -9,7 +9,6 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
-use tasm_lib::hashing::eq_digest::EqDigest;
 use tasm_lib::library::Library;
 use tasm_lib::list::contains::Contains;
 use tasm_lib::list::new::New;
@@ -164,7 +163,7 @@ impl ConsensusProgram for CollectTypeScripts {
         let new_list = library.import(Box::new(New));
         let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let eq_digest = library.import(Box::new(EqDigest));
+        let eq_digest = DataType::Digest.compare();
 
         let collect_type_script_hashes_from_utxos =
             "neptune_consensus_transaction_collect_type_script_hashes_from_utxo".to_string();
@@ -185,7 +184,7 @@ impl ConsensusProgram for CollectTypeScripts {
             read_io 5
             // _ *ctsw *type_script_hashes *salted_utxos [salted_utxos_hash] [sud]
 
-            call {eq_digest} assert
+            {&eq_digest} assert
             // _ *ctsw *type_script_hashes *salted_utxos
 
             {&field_utxos}

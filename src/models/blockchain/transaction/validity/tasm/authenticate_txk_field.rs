@@ -75,7 +75,7 @@ mod tests {
     use rand::random;
     use strum::EnumCount;
     use strum::VariantArray;
-    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+    use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::Digest;
     use tasm_lib::snippet_bencher::BenchmarkCase;
@@ -301,7 +301,7 @@ mod tests {
             test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(AuthenticateTxkField(field)),
                 bad_auth_path.into(),
-                &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
             );
         }
     }

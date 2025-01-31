@@ -276,7 +276,7 @@ mod tests {
     use rand::Rng;
     use rand::SeedableRng;
     use strum::EnumCount;
-    use tasm_lib::hashing::merkle_verify::MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR;
+    use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::prelude::TasmObject;
@@ -443,7 +443,7 @@ mod tests {
             test_assertion_failure(
                 &ShadowedReadOnlyAlgorithm::new(snippet),
                 init_state.clone().into(),
-                &[MERKLE_AUTHENTICATION_ROOT_MISMATCH_ERROR],
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
             );
         }
     }
