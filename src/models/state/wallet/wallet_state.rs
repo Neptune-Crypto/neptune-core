@@ -55,7 +55,7 @@ use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
-use crate::models::state::wallet::address::hash_lock::HashLock;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -264,7 +264,7 @@ impl WalletState {
             .get_all()
             .await
             .into_iter()
-            .map(HashLock::from_preimage)
+            .map(HashLockKey::from_preimage)
             .map(SpendingKey::RawHashLock)
             .collect_vec();
 
@@ -551,7 +551,7 @@ impl WalletState {
     ///
     /// Assumes that the cache agrees with the database.
     pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
-        let as_key = SpendingKey::RawHashLock(HashLock::from_preimage(preimage));
+        let as_key = SpendingKey::RawHashLock(HashLockKey::from_preimage(preimage));
         if self.known_raw_hash_lock_keys.contains(&as_key) {
             return;
         }

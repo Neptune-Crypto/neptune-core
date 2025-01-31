@@ -10,16 +10,16 @@ use tasm_lib::triton_vm::vm::NonDeterminism;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 
-pub(crate) const RAW_HASH_LOCK_FLAG_U8: u8 = 0u8;
-pub(crate) const RAW_HASH_LOCK_FLAG: BFieldElement =
-    BFieldElement::new(RAW_HASH_LOCK_FLAG_U8 as u64);
+pub(crate) const RAW_HASH_LOCK_KEY_FLAG_U8: u8 = 0u8;
+pub(crate) const RAW_HASH_LOCK_KEY_FLAG: BFieldElement =
+    BFieldElement::new(RAW_HASH_LOCK_KEY_FLAG_U8 as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HashLock {
+pub struct HashLockKey {
     preimage: Digest,
 }
 
-impl HashLock {
+impl HashLockKey {
     pub(crate) fn after_image(&self) -> Digest {
         self.preimage.hash()
     }

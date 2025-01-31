@@ -11,7 +11,7 @@ use tracing::warn;
 
 use super::common;
 use super::generation_address;
-use super::hash_lock;
+use super::hash_lock_key;
 use super::symmetric_key;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -37,7 +37,7 @@ use crate::BFieldElement;
 #[repr(u8)]
 pub enum KeyType {
     /// To unlock, prove knowledge of the preimage.
-    RawHashLock = hash_lock::RAW_HASH_LOCK_FLAG_U8,
+    RawHashLock = hash_lock_key::RAW_HASH_LOCK_KEY_FLAG_U8,
 
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
     ///
@@ -371,7 +371,7 @@ impl ReceivingAddress {
 /// particular, the `HashLock` variant has no associated address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendingKey {
-    RawHashLock(hash_lock::HashLock),
+    RawHashLock(hash_lock_key::HashLockKey),
 
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),

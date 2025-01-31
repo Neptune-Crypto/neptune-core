@@ -45,7 +45,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::hash_lock::HashLock;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -119,7 +119,7 @@ pub(crate) async fn guess_nonce(
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
-    guesser_key: HashLock,
+    guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
 ) {
@@ -199,7 +199,7 @@ fn guess_worker(
     previous_block_header: BlockHeader,
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
-    guesser_key: HashLock,
+    guesser_key: HashLockKey,
     guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
 ) {
@@ -1475,7 +1475,7 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
 
-        let guesser_key = HashLock::from_preimage(Digest::default());
+        let guesser_key = HashLockKey::from_preimage(Digest::default());
 
         let template = Block::block_template_invalid_proof(
             &tip_block_orig,
@@ -1637,7 +1637,7 @@ pub(crate) mod mine_loop_tests {
                 )
             };
 
-            let guesser_key = HashLock::from_preimage(Digest::default());
+            let guesser_key = HashLockKey::from_preimage(Digest::default());
 
             let block = Block::block_template_invalid_proof(
                 &prev_block,

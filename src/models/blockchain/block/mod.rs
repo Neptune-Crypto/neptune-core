@@ -57,7 +57,7 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::verifier::verify;
 use crate::models::proof_abstractions::SecretWitness;
-use crate::models::state::wallet::address::hash_lock::HashLock;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -934,7 +934,7 @@ impl Block {
         }
 
         let lock = self.header().guesser_digest;
-        let lock_script = HashLock::lock_script_from_after_image(lock);
+        let lock_script = HashLockKey::lock_script_from_after_image(lock);
 
         let total_guesser_reward = self.total_guesser_reward();
         let mut value_locked = total_guesser_reward;
@@ -1602,7 +1602,7 @@ pub(crate) mod block_tests {
             let guesser_fee_utxos = block.guesser_fee_utxos();
 
             let lock_script_and_witness =
-                HashLock::from_preimage(preimage).lock_script_and_witness();
+                HashLockKey::from_preimage(preimage).lock_script_and_witness();
             assert!(guesser_fee_utxos
                 .iter()
                 .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));

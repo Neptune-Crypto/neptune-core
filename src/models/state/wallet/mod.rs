@@ -16,8 +16,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use address::generation_address;
-use address::hash_lock;
-use address::hash_lock::HashLock;
+use address::hash_lock_key;
+use address::hash_lock_key::HashLockKey;
 use address::symmetric_key;
 use anyhow::bail;
 use anyhow::Context;
@@ -202,11 +202,11 @@ impl WalletSecret {
     }
 
     /// Returns the spending for guessing on top of the given block.
-    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLock {
-        HashLock::from_preimage(Tip5::hash_varlen(
+    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
+        HashLockKey::from_preimage(Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
-                vec![hash_lock::RAW_HASH_LOCK_FLAG],
+                vec![hash_lock_key::RAW_HASH_LOCK_KEY_FLAG],
                 prev_block_digest.encode(),
             ]
             .concat(),
