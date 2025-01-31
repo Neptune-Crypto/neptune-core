@@ -115,6 +115,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::HandshakeData;
 use crate::PEER_CHANNEL_CAPACITY;
+use crate::VERSION;
 
 /// Return an empty peer map
 pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
@@ -156,7 +157,7 @@ pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
 }
 
 pub fn get_dummy_version() -> VersionString {
-    VersionString::try_from_str("0.0.10").unwrap()
+    VersionString::try_from_str(VERSION).unwrap()
 }
 
 /// Return a handshake object with a randomly set instance ID
