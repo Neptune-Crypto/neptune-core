@@ -781,7 +781,7 @@ impl Mempool {
     /// use neptune_cash::config_models::network::Network;
     ///
     /// let network = Network::Main;
-    /// let genesis_block = Block::genesis_block(network);
+    /// let genesis_block = Block::genesis(network);
     /// let mempool = Mempool::new(ByteSize::gb(1), None, genesis_block.hash());
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];

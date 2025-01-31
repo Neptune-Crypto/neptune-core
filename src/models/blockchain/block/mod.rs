@@ -105,8 +105,9 @@ pub enum BlockProof {
 /// use neptune_cash::models::blockchain::block::Block;
 /// use neptune_cash::config_models::network::Network;
 /// use neptune_cash::prelude::twenty_first::math::b_field_element::BFieldElement;
+/// use tasm_lib::prelude::Digest;
 ///
-/// let mut block = Block::genesis_block(Network::RegTest);
+/// let mut block = Block::genesis(Network::RegTest);
 ///
 /// let height = block.kernel.header.height;
 ///
