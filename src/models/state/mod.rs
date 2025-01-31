@@ -51,6 +51,7 @@ use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use super::peer::handshake_data::HandshakeData;
+use super::peer::handshake_data::VersionString;
 use super::peer::transfer_block::TransferBlock;
 use super::peer::SyncChallenge;
 use super::peer::SyncChallengeResponse;
@@ -913,7 +914,10 @@ impl GlobalState {
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
-            version: VERSION.to_string(),
+            version: VersionString::try_from_str(VERSION).unwrap_or_else(|_| {
+                panic!(
+                "Must be able to convert own version number to fixed-size string. Got {VERSION}")
+            }),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
         }
@@ -1753,51 +1757,70 @@ mod global_state_tests {
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
 
-    #[traced_test]
-    #[tokio::test]
-    async fn handshakes_listen_port_is_some_when_max_peers_is_default() {
-        let network = Network::Main;
-        let bob = mock_genesis_global_state(
-            network,
-            2,
-            WalletSecret::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
+    mod handshake {
+        use super::*;
 
-        let handshake_data = bob
-            .global_state_lock
+        #[tokio::test]
+        async fn generating_own_handshake_doesnt_crash() {
+            mock_genesis_global_state(
+                Network::Main,
+                2,
+                WalletSecret::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await
             .lock_guard()
             .await
             .get_own_handshakedata()
             .await;
-        assert!(handshake_data.listen_port.is_some());
-    }
+        }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn handshakes_listen_port_is_none_when_max_peers_is_zero() {
-        let network = Network::Main;
-        let mut bob = mock_genesis_global_state(
-            network,
-            2,
-            WalletSecret::devnet_wallet(),
-            cli_args::Args::default(),
-        )
-        .await;
-        let no_incoming_connections = cli_args::Args {
-            max_num_peers: 0,
-            ..Default::default()
-        };
-        bob.set_cli(no_incoming_connections).await;
-
-        let handshake_data = bob
-            .global_state_lock
-            .lock_guard()
-            .await
-            .get_own_handshakedata()
+        #[traced_test]
+        #[tokio::test]
+        async fn handshakes_listen_port_is_some_when_max_peers_is_default() {
+            let network = Network::Main;
+            let bob = mock_genesis_global_state(
+                network,
+                2,
+                WalletSecret::devnet_wallet(),
+                cli_args::Args::default(),
+            )
             .await;
-        assert!(handshake_data.listen_port.is_none());
+
+            let handshake_data = bob
+                .global_state_lock
+                .lock_guard()
+                .await
+                .get_own_handshakedata()
+                .await;
+            assert!(handshake_data.listen_port.is_some());
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        async fn handshakes_listen_port_is_none_when_max_peers_is_zero() {
+            let network = Network::Main;
+            let mut bob = mock_genesis_global_state(
+                network,
+                2,
+                WalletSecret::devnet_wallet(),
+                cli_args::Args::default(),
+            )
+            .await;
+            let no_incoming_connections = cli_args::Args {
+                max_num_peers: 0,
+                ..Default::default()
+            };
+            bob.set_cli(no_incoming_connections).await;
+
+            let handshake_data = bob
+                .global_state_lock
+                .lock_guard()
+                .await
+                .get_own_handshakedata()
+                .await;
+            assert!(handshake_data.listen_port.is_none());
+        }
     }
 
     #[traced_test]

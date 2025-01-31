@@ -1698,7 +1698,7 @@ impl PeerLoopHandler {
             peer_connection_info,
             self.peer_handshake_data.instance_id,
             SystemTime::now(),
-            self.peer_handshake_data.version.clone(),
+            self.peer_handshake_data.version,
             self.peer_handshake_data.is_archival_node,
             cli_args.peer_tolerance,
         )

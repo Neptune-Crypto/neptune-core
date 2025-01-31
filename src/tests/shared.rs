@@ -86,6 +86,7 @@ use crate::models::channel::PeerTaskToMain;
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
+use crate::models::peer::handshake_data::VersionString;
 use crate::models::peer::peer_info::PeerConnectionInfo;
 use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::PeerMessage;
@@ -155,8 +156,8 @@ pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
     )
 }
 
-pub fn get_dummy_version() -> String {
-    "0.0.10".to_string()
+pub fn get_dummy_version() -> VersionString {
+    VersionString::try_from_str("0.0.10").unwrap()
 }
 
 /// Return a handshake object with a randomly set instance ID

@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::handshake_data::VersionString;
 use super::InstanceId;
 use super::PeerStanding;
 
@@ -34,7 +35,7 @@ pub struct PeerInfo {
     instance_id: InstanceId,
     connection_established: SystemTime,
     pub(crate) standing: PeerStanding,
-    version: String,
+    version: VersionString,
     is_archival_node: bool,
 }
 
@@ -43,7 +44,7 @@ impl PeerInfo {
         peer_connection_info: PeerConnectionInfo,
         instance_id: InstanceId,
         connection_established: SystemTime,
-        version: String,
+        version: VersionString,
         is_archival_node: bool,
         peer_tolerance: u16,
     ) -> Self {

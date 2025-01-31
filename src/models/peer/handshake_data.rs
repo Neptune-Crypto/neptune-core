@@ -1,8 +1,12 @@
+use arraystring::typenum::U30;
+use arraystring::ArrayString;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
+
+pub(crate) type VersionString = ArrayString<U30>;
 
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
@@ -12,6 +16,6 @@ pub(crate) struct HandshakeData {
     pub listen_port: Option<u16>,
     pub network: Network,
     pub instance_id: u128,
-    pub version: String,
+    pub version: VersionString,
     pub is_archival_node: bool,
 }

@@ -554,6 +554,7 @@ mod connect_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::models::peer::handshake_data::VersionString;
     use crate::models::peer::peer_info::PeerInfo;
     use crate::models::peer::InternalConnectionStatus;
     use crate::models::peer::NegativePeerSanction;
@@ -882,8 +883,12 @@ mod connect_tests {
         let mut own_handshake = state.get_own_handshakedata().await;
 
         // Set reported versions to something incompatible
-        "0.0.3".clone_into(&mut own_handshake.version);
-        "0.0.0".clone_into(&mut other_handshake.version);
+        VersionString::try_from_str("0.0.3")
+            .unwrap()
+            .clone_into(&mut own_handshake.version);
+        VersionString::try_from_str("0.0.0")
+            .unwrap()
+            .clone_into(&mut other_handshake.version);
 
         let peer_address = get_dummy_socket_address(55);
         let connection_status = check_if_connection_is_allowed(
