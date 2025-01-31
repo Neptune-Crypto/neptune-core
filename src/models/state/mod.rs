@@ -85,7 +85,7 @@ use crate::Hash;
 use crate::VERSION;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
-/// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
+/// ([`RwLock`](tokio::sync::RwLock)) over [`GlobalState`].
 ///
 /// Conceptually** all reads and writes of application state
 /// require acquiring this lock.
