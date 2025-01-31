@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use itertools::Itertools;
-use neptune_cash::models::peer::PeerInfo;
+use neptune_cash::models::peer::peer_info::PeerInfo;
 use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use ratatui::layout::Constraint;

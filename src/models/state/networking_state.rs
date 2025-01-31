@@ -14,12 +14,12 @@ use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::difficulty_control::ProofOfWork;
 use crate::models::database::PeerDatabases;
-use crate::models::peer;
+use crate::models::peer::peer_info::PeerInfo;
 use crate::models::peer::PeerStanding;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
-type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
+type PeerMap = HashMap<SocketAddr, PeerInfo>;
 
 /// Information about a foreign tip towards which the client is syncing.
 #[derive(Debug, Clone, Eq, PartialEq)]

@@ -554,9 +554,9 @@ mod connect_tests {
     use super::*;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
+    use crate::models::peer::peer_info::PeerInfo;
     use crate::models::peer::InternalConnectionStatus;
     use crate::models::peer::NegativePeerSanction;
-    use crate::models::peer::PeerInfo;
     use crate::models::peer::PeerMessage;
     use crate::models::peer::PeerStanding;
     use crate::prelude::twenty_first;

@@ -45,7 +45,7 @@ use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::peer::handshake_data::HandshakeData;
-use models::peer::PeerInfo;
+use models::peer::peer_info::PeerInfo;
 use prelude::tasm_lib;
 use prelude::triton_vm;
 use prelude::twenty_first;
