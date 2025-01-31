@@ -1,3 +1,4 @@
+pub(crate) mod handshake_data;
 pub mod peer_block_notifications;
 pub mod transaction_notification;
 pub mod transfer_block;
@@ -7,6 +8,7 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
+use handshake_data::HandshakeData;
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
@@ -452,16 +454,6 @@ impl Display for PeerStanding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.standing)
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HandshakeData {
-    pub tip_header: BlockHeader,
-    pub listen_port: Option<u16>,
-    pub network: Network,
-    pub instance_id: u128,
-    pub version: String,
-    pub is_archival_node: bool,
 }
 
 /// A message sent between peers to inform them whether the connection was

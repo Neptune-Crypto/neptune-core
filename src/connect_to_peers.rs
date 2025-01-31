@@ -23,13 +23,13 @@ use tracing::warn;
 use crate::models::channel::MainToPeerTask;
 use crate::models::channel::PeerTaskToMain;
 use crate::models::peer::ConnectionRefusedReason;
-use crate::models::peer::HandshakeData;
 use crate::models::peer::InternalConnectionStatus;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
 use crate::models::peer::TransferConnectionStatus;
 use crate::models::state::GlobalStateLock;
 use crate::peer_loop::PeerLoopHandler;
+use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
 use crate::MAGIC_STRING_RESPONSE;
 

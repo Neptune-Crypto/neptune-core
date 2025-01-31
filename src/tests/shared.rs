@@ -86,7 +86,6 @@ use crate::models::channel::PeerTaskToMain;
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
-use crate::models::peer::HandshakeData;
 use crate::models::peer::PeerConnectionInfo;
 use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
@@ -113,6 +112,7 @@ use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::HandshakeData;
 use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
@@ -160,7 +160,7 @@ pub fn get_dummy_version() -> String {
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
+pub(crate) async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: Block::genesis(network).header().to_owned(),
@@ -179,7 +179,7 @@ pub(crate) fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-pub async fn get_dummy_peer_connection_data_genesis(
+pub(crate) async fn get_dummy_peer_connection_data_genesis(
     network: Network,
     id: u8,
 ) -> (HandshakeData, SocketAddr) {
