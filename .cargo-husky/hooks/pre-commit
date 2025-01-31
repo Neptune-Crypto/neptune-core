@@ -11,5 +11,5 @@ echo '+cargo fmt --all -- --check'
 cargo fmt --all -- --check
 echo '+cargo doc --no-deps --workspace'
 cargo doc --no-deps --workspace
-echo '+cargo test --doc -- -D warnings'
-cargo test --doc -- -D warnings
+echo '+cargo test --doc'
+cargo test --doc
