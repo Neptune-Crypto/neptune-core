@@ -25,6 +25,7 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::timestamp::Timestamp;
+use crate::models::state::wallet::address::hash_lock::HashLock;
 use crate::prelude::twenty_first;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject)]
@@ -132,7 +133,7 @@ impl Utxo {
     /// Returns true iff this UTXO is a lock script with the preimage provided
     /// as input argument.
     pub(crate) fn is_lockscript_with_preimage(&self, preimage: Digest) -> bool {
-        self.lock_script_hash == LockScript::hash_lock_from_preimage(preimage).hash()
+        self.lock_script_hash == HashLock::from(preimage).lock_script_hash()
     }
 
     pub fn new_native_currency(lock_script: LockScript, amount: NativeCurrencyAmount) -> Self {

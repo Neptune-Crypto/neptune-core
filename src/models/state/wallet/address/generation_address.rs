@@ -34,6 +34,7 @@ use super::common;
 use super::common::deterministically_derive_seed_and_nonce;
 use super::common::network_hrp_char;
 use super::encrypted_utxo_notification::EncryptedUtxoNotification;
+use super::hash_lock::HashLock;
 use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -160,7 +161,7 @@ impl GenerationSpendingKey {
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        LockScriptAndWitness::hash_lock_from_preimage(self.unlock_key_preimage)
+        HashLock::from(self.unlock_key_preimage).lock_script_and_witness()
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
@@ -365,7 +366,7 @@ impl GenerationReceivingAddress {
     /// Satisfaction of this lock script establishes the UTXO owner's assent to
     /// the transaction.
     pub fn lock_script(&self) -> LockScript {
-        LockScript::hash_lock_from_after_image(self.lock_after_image)
+        HashLock::lock_script_from_after_image(self.lock_after_image)
     }
 
     pub(crate) fn generate_public_announcement(

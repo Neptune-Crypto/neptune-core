@@ -55,6 +55,7 @@ use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::wallet::address::hash_lock::HashLock;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -263,7 +264,8 @@ impl WalletState {
             .get_all()
             .await
             .into_iter()
-            .map(|d| SpendingKey::RawHashLock { preimage: d })
+            .map(HashLock::from)
+            .map(SpendingKey::RawHashLock)
             .collect_vec();
 
         let mut wallet_state = Self {
@@ -549,7 +551,7 @@ impl WalletState {
     ///
     /// Assumes that the cache agrees with the database.
     pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
-        let as_key = SpendingKey::RawHashLock { preimage };
+        let as_key = SpendingKey::RawHashLock(HashLock::from(preimage));
         if self.known_raw_hash_lock_keys.contains(&as_key) {
             return;
         }
@@ -2437,9 +2439,12 @@ mod tests {
                 cached_guesser_preimages.len(),
                 "Cache must know exactly 1 guesser-preimage after adding block to wallet state"
             );
-            let SpendingKey::RawHashLock { preimage } = cached_guesser_preimages[0] else {
-                panic!("Stored key must be raw hash lock");
-            };
+            let preimage =
+                if let SpendingKey::RawHashLock(raw_hash_lock) = cached_guesser_preimages[0] {
+                    Digest::from(raw_hash_lock)
+                } else {
+                    panic!("Stored key must be raw hash lock");
+                };
             assert_eq!(
                 block1.header().guesser_digest,
                 preimage.hash(),
