@@ -5,7 +5,6 @@ use std::time::UNIX_EPOCH;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::handshake_data::VersionString;
 use super::InstanceId;
 use super::PeerStanding;
 use crate::HandshakeData;
@@ -38,7 +37,7 @@ pub struct PeerInfo {
     pub(crate) own_timestamp_connection_established: SystemTime,
     pub(crate) peer_timestamp_connection_established: SystemTime,
     pub(crate) standing: PeerStanding,
-    version: VersionString,
+    version: String,
     is_archival_node: bool,
 }
 
@@ -57,7 +56,7 @@ impl PeerInfo {
             own_timestamp_connection_established: connection_established,
             peer_timestamp_connection_established: peer_handshake.timestamp,
             standing,
-            version: peer_handshake.version,
+            version: peer_handshake.version.to_string(),
             is_archival_node: peer_handshake.is_archival_node,
         }
     }
