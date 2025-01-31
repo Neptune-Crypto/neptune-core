@@ -1419,26 +1419,31 @@ pub(crate) mod block_tests {
 
             let mut block1 = fake_valid_successor_for_tests(&genesis_block, now, rng.gen()).await;
 
-            // Set block timestamp 1 hour in the future.  (is valid)
-            let future_time1 = now + Timestamp::hours(1);
+            // Set block timestamp 4 minutes in the future.  (is valid)
+            let future_time1 = now + Timestamp::minutes(4);
             block1.kernel.header.timestamp = future_time1;
             assert!(block1.is_valid(&genesis_block, now).await);
 
             now = block1.kernel.header.timestamp;
 
-            // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
-            let future_time2 = now + Timestamp::hours(2) - Timestamp::seconds(1);
+            // Set block timestamp 5 minutes - 1 sec in the future.  (is valid)
+            let future_time2 = now + Timestamp::minutes(5) - Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time2;
             assert!(block1.is_valid(&genesis_block, now).await);
 
-            // Set block timestamp 2 hours + 10 secs in the future. (not valid)
-            let future_time3 = now + Timestamp::hours(2) + Timestamp::seconds(10);
+            // Set block timestamp 5 minutes in the future. (not valid)
+            let future_time3 = now + Timestamp::minutes(5);
             block1.kernel.header.timestamp = future_time3;
             assert!(!block1.is_valid(&genesis_block, now).await);
 
-            // Set block timestamp 2 days in the future. (not valid)
-            let future_time4 = now + Timestamp::seconds(86400 * 2);
+            // Set block timestamp 5 minutes + 1 sec in the future. (not valid)
+            let future_time4 = now + Timestamp::minutes(5) + Timestamp::seconds(1);
             block1.kernel.header.timestamp = future_time4;
+            assert!(!block1.is_valid(&genesis_block, now).await);
+
+            // Set block timestamp 2 days in the future. (not valid)
+            let future_time5 = now + Timestamp::seconds(86400 * 2);
+            block1.kernel.header.timestamp = future_time5;
             assert!(!block1.is_valid(&genesis_block, now).await);
         }
     }

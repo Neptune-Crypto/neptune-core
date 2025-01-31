@@ -3074,7 +3074,7 @@ mod rpc_server_tests {
                         let (spending_tx, _) = bob
                             .clone()
                             .send_to_many_inner_invalid_proof(
-                                vec![(another_address.into(), NativeCurrencyAmount::coins(62))],
+                                vec![(another_address.into(), NativeCurrencyAmount::coins(30))],
                                 UtxoNotificationMedium::OffChain,
                                 UtxoNotificationMedium::OffChain,
                                 NativeCurrencyAmount::zero(),
@@ -3100,12 +3100,12 @@ mod rpc_server_tests {
 
                 assert_eq!(
                     vec![
-                        NativeCurrencyAmount::coins(64), // liquid composer reward, block 1
-                        NativeCurrencyAmount::coins(64), // illiquid composer reward, block 1
+                        NativeCurrencyAmount::coins(32), // liquid composer reward, block 1
+                        NativeCurrencyAmount::coins(32), // illiquid composer reward, block 1
                         NativeCurrencyAmount::coins(5),  // claimed via generation addr
                         NativeCurrencyAmount::coins(6),  // claimed via symmetric addr
-                        // 51 = (64 - 5 - 6 - 2 (fee))
-                        NativeCurrencyAmount::coins(51) // change (symmetric addr)
+                        // 19 = (32 - 5 - 6 - 2 (fee))
+                        NativeCurrencyAmount::coins(19) // change (symmetric addr)
                     ],
                     bob.state
                         .lock_guard()
@@ -3121,9 +3121,9 @@ mod rpc_server_tests {
                 );
 
                 if !claim_after_mined {
-                    // bob hasn't applied blocks 2,3. liquide balance should be 64
+                    // bob hasn't applied blocks 2,3. liquid balance should be 32
                     assert_eq!(
-                        NativeCurrencyAmount::coins(64),
+                        NativeCurrencyAmount::coins(32),
                         bob.clone()
                             .synced_balance(context::current(), bob_token)
                             .await?,
@@ -3139,15 +3139,15 @@ mod rpc_server_tests {
                         .await?
                         .is_zero(),);
                 } else {
-                    // final liquid balance should be 62.
-                    // +64 composer liquid
-                    // +64 composer timelocked (not counted)
-                    // -64 composer liquid spent
+                    // final liquid balance should be 30.
+                    // +32 composer liquid
+                    // +32 composer timelocked (not counted)
+                    // -32 composer liquid spent
                     // +5 self-send via Generation
                     // +6 self-send via Symmetric
-                    // +51   change (less fee == 2)
+                    // +19   change (less fee == 2)
                     assert_eq!(
-                        NativeCurrencyAmount::coins(62),
+                        NativeCurrencyAmount::coins(30),
                         bob.synced_balance(context::current(), bob_token).await?,
                     );
                 }

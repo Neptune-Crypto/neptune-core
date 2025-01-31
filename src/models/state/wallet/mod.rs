@@ -1212,7 +1212,7 @@ mod wallet_tests {
         .await
         .unwrap();
         assert!(
-            block_3_b.is_valid(&block_2_b, in_seven_months).await,
+            block_3_b.is_valid(&block_2_b, timestamp).await,
             "Block must be valid after accumulating txs"
         );
         let expected_utxos_for_alice_cb = expected_composer_utxos

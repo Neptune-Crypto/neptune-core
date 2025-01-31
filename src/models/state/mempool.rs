@@ -1169,7 +1169,7 @@ mod tests {
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
         let utxos_from_alice = vec![TxOutput::onchain_native_currency(
-            NativeCurrencyAmount::coins(62),
+            NativeCurrencyAmount::coins(30),
             rng.gen(),
             alice_address.into(),
             true,
