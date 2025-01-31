@@ -2338,7 +2338,7 @@ mod test {
 
             // simulate incoming connection
             let (peer_handshake_data, peer_socket_address) =
-                get_dummy_peer_connection_data_genesis(network, 1).await;
+                get_dummy_peer_connection_data_genesis(network, 1);
             let own_handshake_data = main_loop_handler
                 .global_state_lock
                 .lock_guard()

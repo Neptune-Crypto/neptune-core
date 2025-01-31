@@ -146,12 +146,11 @@ pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
 /// Get a dummy-peer representing an outgoing connection.
 pub(crate) fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
     let peer_connection_info = PeerConnectionInfo::new(Some(8080), address, false);
+    let peer_handhake = get_dummy_handshake_data_for_genesis(Network::Main);
     PeerInfo::new(
         peer_connection_info,
-        rand::random(),
+        &peer_handhake,
         SystemTime::now(),
-        get_dummy_version(),
-        true,
         cli_args::Args::default().peer_tolerance,
     )
 }
@@ -161,7 +160,7 @@ pub fn get_dummy_version() -> VersionString {
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub(crate) async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
+pub(crate) fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: Block::genesis(network).header().to_owned(),
@@ -169,6 +168,7 @@ pub(crate) async fn get_dummy_handshake_data_for_genesis(network: Network) -> Ha
         network,
         version: get_dummy_version(),
         is_archival_node: true,
+        timestamp: SystemTime::now(),
     }
 }
 
@@ -180,11 +180,11 @@ pub(crate) fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-pub(crate) async fn get_dummy_peer_connection_data_genesis(
+pub(crate) fn get_dummy_peer_connection_data_genesis(
     network: Network,
     id: u8,
 ) -> (HandshakeData, SocketAddr) {
-    let handshake = get_dummy_handshake_data_for_genesis(network).await;
+    let handshake = get_dummy_handshake_data_for_genesis(network);
     let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
@@ -272,7 +272,7 @@ pub(crate) async fn get_test_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data_for_genesis(network).await,
+        get_dummy_handshake_data_for_genesis(network),
     ))
 }
 

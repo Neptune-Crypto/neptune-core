@@ -920,6 +920,7 @@ impl GlobalState {
             }),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
+            timestamp: SystemTime::now(),
         }
     }
 

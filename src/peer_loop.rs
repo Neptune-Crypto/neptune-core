@@ -5,6 +5,8 @@ use std::time::SystemTime;
 
 use anyhow::bail;
 use anyhow::Result;
+use chrono::DateTime;
+use chrono::Utc;
 use futures::sink::Sink;
 use futures::sink::SinkExt;
 use futures::stream::TryStream;
@@ -1696,13 +1698,29 @@ impl PeerLoopHandler {
         );
         let new_peer = PeerInfo::new(
             peer_connection_info,
-            self.peer_handshake_data.instance_id,
+            &self.peer_handshake_data,
             SystemTime::now(),
-            self.peer_handshake_data.version,
-            self.peer_handshake_data.is_archival_node,
             cli_args.peer_tolerance,
         )
         .with_standing(standing);
+
+        // If timestamps are different, we currently just log a warning.
+        const TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS: i128 = 120;
+        let peer_clock_ahead_in_seconds = new_peer.time_difference_in_seconds();
+        let own_clock_ahead_in_seconds = -peer_clock_ahead_in_seconds;
+        if peer_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
+            || own_clock_ahead_in_seconds > TIME_DIFFERENCE_WARN_THRESHOLD_IN_SECONDS
+        {
+            let own_datetime_utc: DateTime<Utc> =
+                new_peer.own_timestamp_connection_established.into();
+            let peer_datetime_utc: DateTime<Utc> =
+                new_peer.peer_timestamp_connection_established.into();
+            warn!(
+                "New peer {} disagrees with us about time. Peer reports time {} but our clock at handshake was {}.",
+                new_peer.connected_address(),
+                peer_datetime_utc.format("%Y-%m-%d %H:%M:%S"),
+                own_datetime_utc.format("%Y-%m-%d %H:%M:%S"));
+        }
 
         // There is potential for a race-condition in the peer_map here, as we've previously
         // counted the number of entries and checked if instance ID was already connected. But
@@ -1849,7 +1867,7 @@ mod peer_loop_tests {
             peer_infos[1].instance_id(),
         );
 
-        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2).await;
+        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Alpha, 2);
         let expected_response = vec![
             (peer_address0, instance_id0),
             (peer_address1, instance_id1),
@@ -2722,7 +2740,7 @@ mod peer_loop_tests {
         cli.sync_mode_threshold = 2;
         state_lock.set_cli(cli).await;
 
-        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1).await;
+        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
         let [block_1, _block_2, block_3, block_4] =
             fake_valid_sequence_of_blocks_for_tests(&genesis_block, Timestamp::hours(1), rng.gen())
                 .await;
@@ -3071,7 +3089,7 @@ mod peer_loop_tests {
         .await;
         state_lock.set_new_tip(block_1.clone()).await?;
 
-        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
+        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let expected_peer_list_resp = vec![
             (
                 peer_infos[0].listen_address().unwrap(),
@@ -3187,7 +3205,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
 
         // Mock a timestamp to allow transaction to be considered valid
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
@@ -3259,7 +3277,7 @@ mod peer_loop_tests {
             .await
             .unwrap();
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1).await;
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
@@ -3325,7 +3343,7 @@ mod peer_loop_tests {
                 get_test_genesis_setup(network, 0, cli_args::Args::default())
                     .await
                     .unwrap();
-            let peer_hsd = get_dummy_handshake_data_for_genesis(network).await;
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
             let peer_loop_handler = PeerLoopHandler::new(
                 to_main_tx.clone(),
                 alice.clone(),
