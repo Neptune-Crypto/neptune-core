@@ -2017,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-cash"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "aead",
  "aes-gcm",
