@@ -2107,7 +2107,9 @@ mod global_state_tests {
                 .get_known_raw_hash_lock_keys()
                 .collect_vec();
             assert_eq!(
-                vec![SpendingKey::RawHashLock(HashLock::from(guesser_preimage))],
+                vec![SpendingKey::RawHashLock(HashLock::from_preimage(
+                    guesser_preimage
+                ))],
                 cached_hash_lock_keys,
                 "Cached hash lock keys must match expected value after recovery"
             );

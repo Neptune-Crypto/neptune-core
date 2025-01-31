@@ -293,7 +293,7 @@ Difficulty threshold: {threshold}
 "#
     );
 
-    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(Digest::from(guesser_key));
+    let guesser_fee_utxo_infos = block.guesser_fee_expected_utxos(guesser_key.preimage());
     assert!(
         !guesser_fee_utxo_infos.is_empty(),
         "All mined blocks have guesser fees"
@@ -1475,7 +1475,7 @@ pub(crate) mod mine_loop_tests {
         .await
         .unwrap();
 
-        let guesser_key = HashLock::from(Digest::default());
+        let guesser_key = HashLock::from_preimage(Digest::default());
 
         let template = Block::block_template_invalid_proof(
             &tip_block_orig,
@@ -1637,7 +1637,7 @@ pub(crate) mod mine_loop_tests {
                 )
             };
 
-            let guesser_key = HashLock::from(Digest::default());
+            let guesser_key = HashLock::from_preimage(Digest::default());
 
             let block = Block::block_template_invalid_proof(
                 &prev_block,

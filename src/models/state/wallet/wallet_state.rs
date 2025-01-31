@@ -264,7 +264,7 @@ impl WalletState {
             .get_all()
             .await
             .into_iter()
-            .map(HashLock::from)
+            .map(HashLock::from_preimage)
             .map(SpendingKey::RawHashLock)
             .collect_vec();
 
@@ -551,7 +551,7 @@ impl WalletState {
     ///
     /// Assumes that the cache agrees with the database.
     pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
-        let as_key = SpendingKey::RawHashLock(HashLock::from(preimage));
+        let as_key = SpendingKey::RawHashLock(HashLock::from_preimage(preimage));
         if self.known_raw_hash_lock_keys.contains(&as_key) {
             return;
         }
@@ -2453,7 +2453,7 @@ mod tests {
             );
             let preimage =
                 if let SpendingKey::RawHashLock(raw_hash_lock) = cached_guesser_preimages[0] {
-                    Digest::from(raw_hash_lock)
+                    raw_hash_lock.preimage()
                 } else {
                     panic!("Stored key must be raw hash lock");
                 };

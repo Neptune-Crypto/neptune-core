@@ -260,7 +260,7 @@ pub(crate) mod test {
                         let lock_scripts_and_witnesses = hash_lock_keys
                             .iter()
                             .copied()
-                            .map(HashLock::from)
+                            .map(HashLock::from_preimage)
                             .map(|hl| hl.lock_script_and_witness())
                             .collect_vec();
                         let lock_script_hashes = lock_scripts_and_witnesses

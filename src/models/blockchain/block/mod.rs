@@ -1601,7 +1601,8 @@ pub(crate) mod block_tests {
 
             let guesser_fee_utxos = block.guesser_fee_utxos();
 
-            let lock_script_and_witness = HashLock::from(preimage).lock_script_and_witness();
+            let lock_script_and_witness =
+                HashLock::from_preimage(preimage).lock_script_and_witness();
             assert!(guesser_fee_utxos
                 .iter()
                 .all(|guesser_fee_utxo| lock_script_and_witness.can_unlock(guesser_fee_utxo)));

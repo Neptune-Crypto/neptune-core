@@ -133,7 +133,7 @@ impl Utxo {
     /// Returns true iff this UTXO is a lock script with the preimage provided
     /// as input argument.
     pub(crate) fn is_lockscript_with_preimage(&self, preimage: Digest) -> bool {
-        self.lock_script_hash == HashLock::from(preimage).lock_script_hash()
+        self.lock_script_hash == HashLock::from_preimage(preimage).lock_script_hash()
     }
 
     pub fn new_native_currency(lock_script: LockScript, amount: NativeCurrencyAmount) -> Self {

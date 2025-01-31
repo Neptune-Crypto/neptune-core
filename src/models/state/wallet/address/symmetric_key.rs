@@ -191,7 +191,7 @@ impl SymmetricKey {
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        HashLock::from(self.unlock_key()).lock_script_and_witness()
+        HashLock::from_preimage(self.unlock_key()).lock_script_and_witness()
     }
 
     pub(crate) fn generate_public_announcement(

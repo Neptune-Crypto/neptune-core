@@ -203,7 +203,7 @@ impl WalletSecret {
 
     /// Returns the spending for guessing on top of the given block.
     pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLock {
-        HashLock::from(Tip5::hash_varlen(
+        HashLock::from_preimage(Tip5::hash_varlen(
             &[
                 self.secret_seed.0.encode(),
                 vec![hash_lock::RAW_HASH_LOCK_FLAG],

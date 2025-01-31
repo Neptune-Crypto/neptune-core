@@ -19,21 +19,17 @@ pub struct HashLock {
     preimage: Digest,
 }
 
-impl From<Digest> for HashLock {
-    fn from(value: Digest) -> Self {
-        Self { preimage: value }
-    }
-}
-
-impl From<HashLock> for Digest {
-    fn from(value: HashLock) -> Self {
-        value.preimage
-    }
-}
-
 impl HashLock {
     pub(crate) fn after_image(&self) -> Digest {
         self.preimage.hash()
+    }
+
+    pub(crate) fn preimage(&self) -> Digest {
+        self.preimage
+    }
+
+    pub(crate) fn from_preimage(preimage: Digest) -> Self {
+        Self { preimage }
     }
 
     /// Generate a lock script for this hash lock.

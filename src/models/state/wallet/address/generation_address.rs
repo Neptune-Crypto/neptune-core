@@ -161,7 +161,7 @@ impl GenerationSpendingKey {
     }
 
     pub(crate) fn lock_script_and_witness(&self) -> LockScriptAndWitness {
-        HashLock::from(self.unlock_key_preimage).lock_script_and_witness()
+        HashLock::from_preimage(self.unlock_key_preimage).lock_script_and_witness()
     }
 
     pub fn derive_from_seed(seed: Digest) -> Self {
