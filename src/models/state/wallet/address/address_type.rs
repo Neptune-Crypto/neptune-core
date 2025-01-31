@@ -11,6 +11,7 @@ use tracing::warn;
 
 use super::common;
 use super::generation_address;
+use super::hash_lock_key;
 use super::symmetric_key;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -36,7 +37,7 @@ use crate::BFieldElement;
 #[repr(u8)]
 pub enum KeyType {
     /// To unlock, prove knowledge of the preimage.
-    RawHashLock = 0,
+    RawHashLock = hash_lock_key::RAW_HASH_LOCK_KEY_FLAG_U8,
 
     /// [generation_address] built on [crate::prelude::twenty_first::math::lattice::kem]
     ///
@@ -370,9 +371,7 @@ impl ReceivingAddress {
 /// particular, the `HashLock` variant has no associated address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpendingKey {
-    RawHashLock {
-        preimage: Digest,
-    },
+    RawHashLock(hash_lock_key::HashLockKey),
 
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
@@ -405,7 +404,7 @@ impl SpendingKey {
         match self {
             Self::Generation(k) => Some(k.to_address().into()),
             Self::Symmetric(k) => Some((*k).into()),
-            Self::RawHashLock { .. } => None,
+            Self::RawHashLock(_) => None,
         }
     }
 
@@ -416,9 +415,7 @@ impl SpendingKey {
                 generation_spending_key.lock_script_and_witness()
             }
             SpendingKey::Symmetric(symmetric_key) => symmetric_key.lock_script_and_witness(),
-            SpendingKey::RawHashLock { preimage } => {
-                LockScriptAndWitness::hash_lock_from_preimage(*preimage)
-            }
+            SpendingKey::RawHashLock(raw_hash_lock) => raw_hash_lock.lock_script_and_witness(),
         }
     }
 

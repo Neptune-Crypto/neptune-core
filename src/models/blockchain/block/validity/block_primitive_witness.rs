@@ -148,6 +148,7 @@ pub(crate) mod test {
     use crate::models::blockchain::transaction::TransactionProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
     use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -259,7 +260,8 @@ pub(crate) mod test {
                         let lock_scripts_and_witnesses = hash_lock_keys
                             .iter()
                             .copied()
-                            .map(LockScriptAndWitness::hash_lock_from_preimage)
+                            .map(HashLockKey::from_preimage)
+                            .map(|hl| hl.lock_script_and_witness())
                             .collect_vec();
                         let lock_script_hashes = lock_scripts_and_witnesses
                             .iter()

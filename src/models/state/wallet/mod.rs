@@ -16,6 +16,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use address::generation_address;
+use address::hash_lock_key;
+use address::hash_lock_key::HashLockKey;
 use address::symmetric_key;
 use anyhow::bail;
 use anyhow::Context;
@@ -30,6 +32,7 @@ use secret_key_material::SecretKeyMaterial;
 use secret_key_material::ShamirSecretSharingError;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Tip5;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -196,6 +199,18 @@ impl WalletSecret {
         };
 
         Ok((wallet, wallet_secret_file_locations))
+    }
+
+    /// Returns the spending for guessing on top of the given block.
+    pub(crate) fn guesser_spending_key(&self, prev_block_digest: Digest) -> HashLockKey {
+        HashLockKey::from_preimage(Tip5::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                vec![hash_lock_key::RAW_HASH_LOCK_KEY_FLAG],
+                prev_block_digest.encode(),
+            ]
+            .concat(),
+        ))
     }
 
     /// derives a generation spending key at `index`

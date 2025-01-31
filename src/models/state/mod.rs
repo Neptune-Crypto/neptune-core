@@ -1752,6 +1752,7 @@ mod global_state_tests {
     use crate::config_models::network::Network;
     use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
+    use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
     use crate::tests::shared::fake_valid_successor_for_tests;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
@@ -2106,9 +2107,9 @@ mod global_state_tests {
                 .get_known_raw_hash_lock_keys()
                 .collect_vec();
             assert_eq!(
-                vec![SpendingKey::RawHashLock {
-                    preimage: guesser_preimage
-                }],
+                vec![SpendingKey::RawHashLock(HashLockKey::from_preimage(
+                    guesser_preimage
+                ))],
                 cached_hash_lock_keys,
                 "Cached hash lock keys must match expected value after recovery"
             );

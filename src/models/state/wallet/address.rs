@@ -3,6 +3,7 @@ mod common;
 
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
+pub(crate) mod hash_lock_key;
 pub mod symmetric_key;
 
 /// KeyType simply enumerates the known key types.

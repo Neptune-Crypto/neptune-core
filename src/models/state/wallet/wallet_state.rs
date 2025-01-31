@@ -55,6 +55,7 @@ use crate::models::channel::ClaimUtxoData;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -263,7 +264,8 @@ impl WalletState {
             .get_all()
             .await
             .into_iter()
-            .map(|d| SpendingKey::RawHashLock { preimage: d })
+            .map(HashLockKey::from_preimage)
+            .map(SpendingKey::RawHashLock)
             .collect_vec();
 
         let mut wallet_state = Self {
@@ -549,7 +551,7 @@ impl WalletState {
     ///
     /// Assumes that the cache agrees with the database.
     pub(crate) async fn add_raw_hash_key(&mut self, preimage: Digest) {
-        let as_key = SpendingKey::RawHashLock { preimage };
+        let as_key = SpendingKey::RawHashLock(HashLockKey::from_preimage(preimage));
         if self.known_raw_hash_lock_keys.contains(&as_key) {
             return;
         }
@@ -2344,6 +2346,7 @@ mod tests {
         use super::*;
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
+        use crate::mine_loop::GuessingConfiguration;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::channel::NewBlockFound;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
@@ -2373,6 +2376,14 @@ mod tests {
             )
             .await;
 
+            // Create the correct guesser key
+            let guesser_key = bob
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_secret
+                .guesser_spending_key(genesis_block.hash());
+
             // Mine it till it has a valid PoW digest
             // Add this block to the wallet through the same pipeline as the
             // mine_loop.
@@ -2384,8 +2395,11 @@ mod tests {
                 *genesis_block.header(),
                 guesser_tx,
                 claimable_composer_utxos,
-                sleepy_guessing,
-                Some(2),
+                guesser_key,
+                GuessingConfiguration {
+                    sleepy_guessing,
+                    num_guesser_threads: Some(2),
+                },
                 None,
             )
             .await;
@@ -2437,9 +2451,12 @@ mod tests {
                 cached_guesser_preimages.len(),
                 "Cache must know exactly 1 guesser-preimage after adding block to wallet state"
             );
-            let SpendingKey::RawHashLock { preimage } = cached_guesser_preimages[0] else {
-                panic!("Stored key must be raw hash lock");
-            };
+            let preimage =
+                if let SpendingKey::RawHashLock(raw_hash_lock) = cached_guesser_preimages[0] {
+                    raw_hash_lock.preimage()
+                } else {
+                    panic!("Stored key must be raw hash lock");
+                };
             assert_eq!(
                 block1.header().guesser_digest,
                 preimage.hash(),
