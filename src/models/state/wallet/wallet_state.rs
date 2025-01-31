@@ -2346,6 +2346,7 @@ mod tests {
         use super::*;
         use crate::mine_loop::composer_parameters;
         use crate::mine_loop::guess_nonce;
+        use crate::mine_loop::GuessingConfiguration;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::channel::NewBlockFound;
         use crate::tests::shared::fake_create_block_transaction_for_tests;
@@ -2395,8 +2396,10 @@ mod tests {
                 guesser_tx,
                 claimable_composer_utxos,
                 guesser_key,
-                sleepy_guessing,
-                Some(2),
+                GuessingConfiguration {
+                    sleepy_guessing,
+                    num_guesser_threads: Some(2),
+                },
                 None,
             )
             .await;

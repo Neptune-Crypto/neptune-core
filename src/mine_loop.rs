@@ -55,6 +55,13 @@ use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
+/// Information related to the resources to be used for guessing.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GuessingConfiguration {
+    pub(crate) sleepy_guessing: bool,
+    pub(crate) num_guesser_threads: Option<usize>,
+}
+
 async fn compose_block(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
@@ -113,8 +120,7 @@ pub(crate) async fn guess_nonce(
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     guesser_key: HashLock,
-    sleepy_guessing: bool,
-    num_guesser_threads: Option<usize>,
+    guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
 ) {
     // We wrap mining loop with spawn_blocking() because it is a
@@ -136,8 +142,7 @@ pub(crate) async fn guess_nonce(
             sender,
             composer_utxos,
             guesser_key,
-            sleepy_guessing,
-            num_guesser_threads,
+            guessing_configuration,
             target_block_interval,
         )
     })
@@ -195,10 +200,14 @@ fn guess_worker(
     sender: oneshot::Sender<NewBlockFound>,
     composer_utxos: Vec<ExpectedUtxo>,
     guesser_key: HashLock,
-    sleepy_guessing: bool,
-    num_guesser_threads: Option<usize>,
+    guessing_configuration: GuessingConfiguration,
     target_block_interval: Option<Timestamp>,
 ) {
+    let GuessingConfiguration {
+        sleepy_guessing,
+        num_guesser_threads,
+    } = guessing_configuration;
+
     // This must match the rules in `[Block::has_proof_of_work]`.
     let prev_difficulty = previous_block_header.difficulty;
     let threshold = prev_difficulty.target();
@@ -687,8 +696,10 @@ pub(crate) async fn mine(
                 guesser_tx,
                 composer_utxos,
                 guesser_key,
-                cli_args.sleepy_guessing,
-                cli_args.guesser_threads,
+                GuessingConfiguration {
+                    sleepy_guessing: cli_args.sleepy_guessing,
+                    num_guesser_threads: cli_args.guesser_threads,
+                },
                 None, // use default TARGET_BLOCK_INTERVAL
             );
 
@@ -1405,8 +1416,10 @@ pub(crate) mod mine_loop_tests {
             worker_task_tx,
             coinbase_utxo_info,
             guesser_key,
-            sleepy_guessing,
-            num_guesser_threads,
+            GuessingConfiguration {
+                sleepy_guessing,
+                num_guesser_threads,
+            },
             None,
         );
 
@@ -1484,8 +1497,10 @@ pub(crate) mod mine_loop_tests {
             worker_task_tx,
             coinbase_utxo_info,
             guesser_key,
-            sleepy_guessing,
-            num_guesser_threads,
+            GuessingConfiguration {
+                sleepy_guessing,
+                num_guesser_threads,
+            },
             None,
         );
 
@@ -1640,8 +1655,10 @@ pub(crate) mod mine_loop_tests {
                 worker_task_tx,
                 composer_utxos,
                 guesser_key,
-                sleepy_guessing,
-                num_guesser_threads,
+                GuessingConfiguration {
+                    sleepy_guessing,
+                    num_guesser_threads,
+                },
                 Some(target_block_interval),
             );
 
