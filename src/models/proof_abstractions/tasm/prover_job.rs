@@ -200,25 +200,25 @@ impl ProverJob {
         assert_eq!(self.claim.program_digest, self.program.hash());
         assert_eq!(self.claim.output, vm_state.public_output);
 
-        let padded_height = vm_state.cycle_count.next_power_of_two();
+        let padded_height_processor_table = vm_state.cycle_count.next_power_of_two();
 
         tracing::info!(
-            "VM program execution finished: padded-height: {}",
-            padded_height
+            "VM program execution finished: padded-height (processor table): {}",
+            padded_height_processor_table
         );
 
         match self.job_settings.max_log2_padded_height_for_proofs {
-            Some(limit) if 2u32.pow(limit.into()) < padded_height => {
+            Some(limit) if 2u32.pow(limit.into()) < padded_height_processor_table => {
                 let ph_limit = 2u32.pow(limit.into());
 
                 tracing::warn!(
                     "proof-complexity-limit-exceeded. ({} > {})  The proof will not be generated",
-                    padded_height,
+                    padded_height_processor_table,
                     ph_limit
                 );
 
                 Err(ProverJobError::ProofComplexityLimitExceeded {
-                    result: padded_height,
+                    result: padded_height_processor_table,
                     limit: ph_limit,
                 })
             }
@@ -326,7 +326,13 @@ impl ProverJob {
                 let output = result?;
                 match output.status.code() {
                     Some(0) => {
-                        let proof = bincode::deserialize(&output.stdout)?;
+                        let proof: Proof = bincode::deserialize(&output.stdout)?;
+                        tracing::info!(
+                            "Generated proof, with padded height: {}",
+                            proof.padded_height()
+                                .map(|x| x.to_string())
+                                .unwrap_or_else(|e| format!("could not get padded height from proof.\nGot: {e}"))
+                        );
                         Ok(ProverProcessCompletion::Finished(proof))
                     }
                     Some(code) => Err(VmProcessError::NonZeroExitCode(code)),
@@ -415,8 +421,6 @@ mod process_util {
     use tokio::io::AsyncReadExt;
     use tokio::process::Child;
 
-    // future cleanup: remove this fn.
-    //
     // This fn is a slightly modified copy of
     // tokio::process::Child::wait_with_output().
     //
@@ -430,9 +434,6 @@ mod process_util {
     //
     // The modified fn below takes `&mut Child` and has some minor mods so it
     // does not rely on internal tokio functions.
-    //
-    // The function can be removed if/when a version of tokio is released that
-    // supports this usage, or if another solution is found.
     //
     // Links:
     //   A playground demonstrating the compile error:
@@ -460,9 +461,7 @@ mod process_util {
         let stdout_fut = read_to_end(&mut stdout_pipe);
         let stderr_fut = read_to_end(&mut stderr_pipe);
 
-        let (status, stdout, stderr) = futures::try_join!(child.wait(), stdout_fut, stderr_fut)?;
-
-        // let (status, stdout, stderr) = try_join3(myself.wait(), stdout_fut, stderr_fut).await?;
+        let (status, stdout, stderr) = tokio::try_join!(child.wait(), stdout_fut, stderr_fut)?;
 
         // Drop happens after `try_join` due to <https://github.com/tokio-rs/tokio/issues/4309>
         drop(stdout_pipe);

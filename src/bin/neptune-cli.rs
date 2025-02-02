@@ -2,6 +2,7 @@ use std::io;
 use std::io::stdout;
 use std::io::Write;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -108,7 +109,7 @@ impl FromStr for TransactionOutput {
 
         Ok(Self {
             address: parts[0].to_string(),
-            amount: NativeCurrencyAmount::from_str(parts[1])?,
+            amount: NativeCurrencyAmount::coins_from_str(parts[1])?,
         })
     }
 }
@@ -178,11 +179,11 @@ enum Command {
         block_selector: BlockSelector,
     },
 
-    /// retrieve confirmed balance
-    SyncedBalance,
+    /// retrieve confirmed balance (excludes time-locked utxos)
+    ConfirmedAvailableBalance,
 
-    /// retrieve unconfirmed balance (includes unconfirmed transactions)
-    SyncedBalanceUnconfirmed,
+    /// retrieve unconfirmed balance (includes unconfirmed transactions, excludes time-locked utxos)
+    UnconfirmedAvailableBalance,
 
     /// retrieve wallet status information
     WalletStatus,
@@ -287,9 +288,11 @@ enum Command {
         address: String,
 
         /// amount to send
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         amount: NativeCurrencyAmount,
 
         /// transaction fee
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
 
         /// local tag for identifying a receiver
@@ -303,6 +306,7 @@ enum Command {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
     },
 
@@ -363,9 +367,9 @@ enum Command {
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
-    /// Sets the server address to connect to.
-    #[clap(long, default_value = "127.0.0.1:9799")]
-    server_addr: SocketAddr,
+    /// Sets the neptune-core rpc server localhost port to connect to.
+    #[clap(short, long, default_value = "9799", value_name = "port")]
+    port: u16,
 
     /// neptune-core data directory containing wallet and blockchain state
     #[clap(long)]
@@ -684,7 +688,8 @@ async fn main() -> Result<()> {
     }
 
     // all other operations need a connection to the server
-    let Ok(transport) = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default).await
+    let server_socket = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), args.port);
+    let Ok(transport) = tarpc::serde_transport::tcp::connect(server_socket, Json::default).await
     else {
         eprintln!("This command requires a connection to `neptune-core`, but that connection could not be established. Is `neptune-core` running?");
         return Ok(());
@@ -819,12 +824,12 @@ async fn main() -> Result<()> {
                 println!("{}", res.unwrap());
             }
         }
-        Command::SyncedBalance => {
-            let val = client.synced_balance(ctx, token).await??;
+        Command::ConfirmedAvailableBalance => {
+            let val = client.confirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
-        Command::SyncedBalanceUnconfirmed => {
-            let val = client.synced_balance_unconfirmed(ctx, token).await??;
+        Command::UnconfirmedAvailableBalance => {
+            let val = client.unconfirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
         Command::WalletStatus => {
@@ -1032,6 +1037,12 @@ async fn main() -> Result<()> {
         } => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
+
+            // abort early on negative fee
+            if fee.is_negative() {
+                eprintln!("Fee must be non-negative.");
+                bail!("Failed to create transaction.");
+            }
 
             let resp = client
                 .send(

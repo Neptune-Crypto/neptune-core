@@ -266,8 +266,6 @@ mod tests {
     use std::collections::HashMap;
     use std::collections::VecDeque;
 
-    use num_bigint::BigInt;
-    use num_traits::FromPrimitive;
     use num_traits::Zero;
     use proptest::prelude::Strategy;
     use proptest::test_runner::TestRunner;
@@ -394,25 +392,19 @@ mod tests {
 
         // Verify that the entire u128 is checked, not just a top-limb
         prop(
-            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau(3.into())),
             None,
-            Some(
-                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 32)).unwrap()).unwrap(),
-            ),
+            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 32))),
         );
         prop(
-            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau((3).into())),
             None,
-            Some(
-                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 64)).unwrap()).unwrap(),
-            ),
+            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 64))),
         );
         prop(
-            Some(NativeCurrencyAmount::from_nau(BigInt::from_u128(3).unwrap()).unwrap()),
+            Some(NativeCurrencyAmount::from_nau((3).into())),
             None,
-            Some(
-                NativeCurrencyAmount::from_nau(BigInt::from_u128(3 + (1 << 96)).unwrap()).unwrap(),
-            ),
+            Some(NativeCurrencyAmount::from_nau(3 + (1_i128 << 96))),
         );
     }
 

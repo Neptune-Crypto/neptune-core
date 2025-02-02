@@ -862,16 +862,18 @@ mod wallet_tests {
         alice.set_new_tip(next_block.clone()).await.unwrap();
 
         // can make allocation of coins for entire liquid balance.
-        let alice_balance = alice
-            .lock_guard()
-            .await
-            .wallet_state
-            .confirmed_balance(
-                next_block.hash(),
-                &next_block.mutator_set_accumulator_after(),
-                next_block.header().timestamp,
-            )
-            .await;
+        let alice_balance = {
+            let ags = alice.lock_guard().await;
+            let wallet_status = ags
+                .wallet_state
+                .get_wallet_status(
+                    next_block.hash(),
+                    &next_block.mutator_set_accumulator_after(),
+                )
+                .await;
+            ags.wallet_state
+                .confirmed_available_balance(&wallet_status, next_block.header().timestamp)
+        };
         assert!(
             alice_balance
                 >= allocate_input_utxos(
@@ -928,7 +930,7 @@ mod wallet_tests {
         let bobs_original_balance = bob
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_liquid_amount(in_seven_months);
+            .synced_unspent_available_amount(in_seven_months);
         assert!(
             !bobs_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -986,7 +988,7 @@ mod wallet_tests {
                 .unwrap(),
             bob.get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(in_seven_months),
+                .synced_unspent_available_amount(in_seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -1086,7 +1088,7 @@ mod wallet_tests {
             .lock_guard()
             .await
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 first_block_after_spree.hash(),
                 &first_block_after_spree.mutator_set_accumulator_after(),
             )
@@ -1640,19 +1642,19 @@ mod wallet_tests {
                     .expect("legacy seed phrase must still be valid");
                 let premine_recipient =
                     mock_genesis_global_state(network, 0, wallet_secret, cli.clone()).await;
+                let gs = premine_recipient.global_state_lock.lock_guard().await;
+                let wallet_status = gs
+                    .wallet_state
+                    .get_wallet_status(
+                        genesis_block.hash(),
+                        &genesis_block.mutator_set_accumulator_after(),
+                    )
+                    .await;
+
                 assert_eq!(
                     NativeCurrencyAmount::coins(1),
-                    premine_recipient
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .wallet_state
-                        .confirmed_balance(
-                            genesis_block.hash(),
-                            &genesis_block.mutator_set_accumulator_after(),
-                            seven_months_after_launch
-                        )
-                        .await
+                    gs.wallet_state
+                        .confirmed_available_balance(&wallet_status, seven_months_after_launch)
                 );
             }
         }

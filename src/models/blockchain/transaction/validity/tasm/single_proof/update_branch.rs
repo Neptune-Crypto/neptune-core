@@ -165,6 +165,7 @@ impl UpdateBranch {
     pub(crate) const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
     pub(crate) const WITNESS_SIZE_CHANGED_ERROR: i128 = 1_000_102;
     pub(crate) const MERGE_BIT_NOT_BIT: i128 = 1_000_103;
+    pub(crate) const INPUT_SET_IS_EMPTY_ERROR: i128 = 1_000_104;
 }
 
 impl BasicSnippet for UpdateBranch {
@@ -494,6 +495,19 @@ impl BasicSnippet for UpdateBranch {
                 pop 1
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs
 
+                /* Verify that tx has a non-zero number of inputs */
+                dup 0
+                read_mem 1
+                pop 1
+                // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs new_inputs_len
+
+                push 0
+                eq
+                push 0
+                eq
+                assert error_id {Self::INPUT_SET_IS_EMPTY_ERROR}
+
+
                 /* verify index set equality */
                 call {hash_removal_record_index_set}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel *old_inputs *new_inputs_digests
@@ -507,6 +521,7 @@ impl BasicSnippet for UpdateBranch {
 
                 assert error_id {Self::INPUT_SETS_NOT_EQUAL_ERROR}
                 // _ witness_size *update_witness [program_digest] [new_txk_mhash] *old_kernel *new_kernel
+
 
                 /* Authenticate outputs and verify no-change */
                 {&authenticate_field_twice_with_no_change(&outputs_field_with_size, TransactionKernelField::Outputs)}
@@ -733,10 +748,11 @@ pub(crate) mod test {
                 TransactionKernelField::COUNT.next_power_of_two().ilog2(),
             );
 
-            // inputs' index sets are identical
+            // inputs' index sets are identical, and not empty.
             let mut old_index_set_digests: Vec<Digest> = Vec::new();
             let mut new_index_set_digests: Vec<Digest> = Vec::new();
             assert_eq!(old_inputs.len(), new_inputs.len());
+            assert!(!old_inputs.is_empty());
             let mut i: usize = 0;
             while i < old_inputs.len() {
                 old_index_set_digests.push(Hash::hash(&old_inputs[i].absolute_indices));
@@ -916,7 +932,7 @@ pub(crate) mod test {
 
     /// Return an update witness where the mutator set is only changed by new
     /// additions.
-    pub(crate) async fn deterministic_update_witness_only_additions(
+    pub(crate) async fn deterministic_update_witness_only_additions_to_mutator_set(
         num_inputs: usize,
         num_outputs: usize,
         num_pub_announcements: usize,
@@ -979,7 +995,8 @@ pub(crate) mod test {
     /// untouched, or at most permuted.
     #[tokio::test]
     async fn txid_is_constant_under_tx_updates_only_additions() {
-        let update_witness = deterministic_update_witness_only_additions(4, 4, 4).await;
+        let update_witness =
+            deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4).await;
         assert_eq!(
             update_witness.old_kernel.txid(),
             update_witness.new_kernel.txid(),

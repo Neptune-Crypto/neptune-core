@@ -293,7 +293,7 @@ impl Transaction {
         let transaction_as_bytes = bincode::serialize(&self).unwrap();
         let transaction_size = BigInt::from(transaction_as_bytes.get_size());
         let transaction_fee = self.kernel.fee.to_nau();
-        BigRational::new_raw(transaction_fee, transaction_size)
+        BigRational::new_raw(transaction_fee.into(), transaction_size)
     }
 
     /// Determine if the transaction can be validly confirmed if the block has
@@ -528,9 +528,9 @@ mod transaction_tests {
 
         for (to_be_updated_params, mined_params) in [
             ((4, 4, 4), (3, 3, 3)),
-            ((0, 1, 0), (1, 1, 0)),
-            ((1, 1, 0), (0, 1, 0)),
-            ((0, 2, 1), (1, 1, 1)),
+            ((1, 0, 1), (1, 1, 0)),
+            ((1, 1, 0), (1, 0, 0)),
+            ((6, 2, 1), (1, 1, 1)),
             ((2, 2, 2), (2, 2, 2)),
         ] {
             println!("to_be_updated_params: {to_be_updated_params:?}");

@@ -63,10 +63,10 @@ neptune-cli --help
 
 To get e.g. the block height of a running daemon, execute
 ```
-neptune-cli --server-addr block-height
+neptune-cli block-height
 ```
 
-If you set up `neptune-core` on a different address or port from the default (127.0.0.1:9799), then the flag `--server-addr [ip_address:port]` is your friend.
+If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799), then the flag `--port <port>` is your friend.
 
 ## Setup for Development (Ubuntu)
 
@@ -98,11 +98,24 @@ If the RPC server is spamming your log too much, set the logging-level environme
 
 [tokio-console](https://github.com/tokio-rs/console) is a tool for monitoring tokio tasks and resources/locks in real-time.  Kind of like unix `top`, but for a single application.
 
+tokio-console support is not built into neptune-core by default.  It requires
+building with `--features tokio-console`.
+
 To use tokio-console with neptune-core:
 
-1. `cargo install --locked tokio-console`   see: [tokio-console installation](https://github.com/tokio-rs/console#running-the-console)
-2. run tokio-console in a terminal
-3. run neptune-core in a separate terminal, passing the --tokio-console flag.
+1. build and install neptune-core with tokio-console support.
+
+    `cargo install --features tokio-console --locked --path .`
+
+2. install tokio-console executable.
+
+    `cargo install --locked tokio-console`   see: [tokio-console installation](https://github.com/tokio-rs/console#running-the-console)
+
+3. run tokio-console in a terminal
+
+4. run neptune-core in a separate terminal, passing the --tokio-console flag.
+
+    `neptune-core --tokio-console [other-arguments]`
 
 
 ## Local Integration Test Strategy

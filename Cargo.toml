@@ -51,6 +51,9 @@ track-lock-time = []
 # implements arbitrary::Arbitrary for various types
 arbitrary-impls = ["dep:arbitrary", "dep:proptest-arbitrary-interop"]
 
+# for sending trace events to tokio-console utility
+tokio-console = ["dep:console-subscriber"]
+
 [dependencies]
 
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
@@ -69,7 +72,7 @@ bytesize = "1.3"
 chrono = "=0.4.34"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
-console-subscriber = "0.2"
+console-subscriber = { version = "0.2", optional = true}
 crossterm = "0.27"
 directories = "5.0"
 field_count = "0.1"

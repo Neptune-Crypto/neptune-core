@@ -1260,6 +1260,7 @@ pub(crate) mod mmr_test {
         }
     }
 
+    #[cfg(debug_assertions)] // this tests get_leaf_async() use of debug_assert!()
     #[tokio::test]
     #[should_panic(expected = "Leaf index out-of-bounds. Got leaf index 17 but num_leafs was 17")]
     async fn get_panics_when_out_of_bounds() {

@@ -74,11 +74,10 @@ pub enum UpgradeJob {
 
 #[derive(Clone, Debug)]
 pub struct UpdateMutatorSetDataJob {
-    pub(crate) old_kernel: TransactionKernel,
+    old_kernel: TransactionKernel,
     old_single_proof: Proof,
     old_mutator_set: MutatorSetAccumulator,
     mutator_set_update: MutatorSetUpdate,
-    pub(crate) new_timestamp: Option<Timestamp>,
 }
 
 impl UpdateMutatorSetDataJob {
@@ -87,14 +86,12 @@ impl UpdateMutatorSetDataJob {
         old_single_proof: Proof,
         old_mutator_set: MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
-        new_timestamp: Option<Timestamp>,
     ) -> Self {
         Self {
             old_kernel,
             old_single_proof,
             old_mutator_set,
             mutator_set_update,
-            new_timestamp,
         }
     }
 
@@ -108,7 +105,6 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             old_mutator_set,
             mutator_set_update,
-            new_timestamp,
         } = self;
         info!("Proof-upgrader: Start update proof");
         let ret = Transaction::new_with_updated_mutator_set_records_given_proof(
@@ -118,7 +114,7 @@ impl UpdateMutatorSetDataJob {
             old_single_proof,
             triton_vm_job_queue,
             proof_job_options,
-            new_timestamp,
+            None,
         )
         .await?;
         info!("Proof-upgrader, update: Done");
@@ -196,7 +192,7 @@ impl UpgradeJob {
                 ..
             } => {
                 let reciprocal = 1.0 / (collection.num_proofs() as f64);
-                gobbling_fee.lossy_f64_fraction_mul(reciprocal).unwrap()
+                gobbling_fee.lossy_f64_fraction_mul(reciprocal)
             }
             UpgradeJob::Merge { gobbling_fee, .. } => {
                 let mut rate = *gobbling_fee;
@@ -270,7 +266,6 @@ impl UpgradeJob {
         let priority = match tx_origin {
             TransactionOrigin::Foreign => TritonVmJobPriority::Lowest,
             TransactionOrigin::Own => TritonVmJobPriority::High,
-            TransactionOrigin::NopForCoinbaseMerge => TritonVmJobPriority::Normal,
         };
 
         // process in a loop.  in case a new block comes in while processing
@@ -402,7 +397,6 @@ impl UpgradeJob {
                     old_single_proof: single_proof,
                     old_mutator_set: mutator_set_for_tx,
                     mutator_set_update: ms_update,
-                    new_timestamp: None,
                 }
             };
 
@@ -616,10 +610,7 @@ pub(super) fn get_upgrade_task_from_mempool(
         .mempool
         .most_dense_proof_collection(num_proofs_threshold)
     {
-        let gobbling_fee = kernel
-            .fee
-            .lossy_f64_fraction_mul(gobbling_fraction)
-            .unwrap();
+        let gobbling_fee = kernel.fee.lossy_f64_fraction_mul(gobbling_fraction);
         let gobbling_fee =
             if gobbling_fee >= min_gobbling_fee && tx_origin == TransactionOrigin::Foreign {
                 gobbling_fee
@@ -654,9 +645,7 @@ pub(super) fn get_upgrade_task_from_mempool(
     )) = global_state.mempool.most_dense_single_proof_pair()
     {
         let gobbling_fee = left_kernel.fee + right_kernel.fee;
-        let gobbling_fee = gobbling_fee
-            .lossy_f64_fraction_mul(gobbling_fraction)
-            .unwrap();
+        let gobbling_fee = gobbling_fee.lossy_f64_fraction_mul(gobbling_fraction);
         let gobbling_fee = if gobbling_fee >= min_gobbling_fee {
             gobbling_fee
         } else {

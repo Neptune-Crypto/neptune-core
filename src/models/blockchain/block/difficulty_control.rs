@@ -730,6 +730,7 @@ mod test {
         );
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn debug_assert_fails() {

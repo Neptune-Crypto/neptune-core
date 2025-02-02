@@ -79,8 +79,11 @@ pub enum NegativePeerSanction {
     BatchBlocksUnknownRequest,
     BatchBlocksRequestEmpty,
     BatchBlocksRequestTooManyDigests,
+
     InvalidTransaction,
     UnconfirmableTransaction,
+    TransactionWithNegativeFee,
+
     InvalidBlockMmrAuthentication,
 
     InvalidTransferBlock,
@@ -126,6 +129,7 @@ impl Display for NegativePeerSanction {
             NegativePeerSanction::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
             NegativePeerSanction::InvalidTransaction => "invalid transaction",
             NegativePeerSanction::UnconfirmableTransaction => "unconfirmable transaction",
+            NegativePeerSanction::TransactionWithNegativeFee => "negative-fee transaction",
             NegativePeerSanction::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
             }
@@ -209,6 +213,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::BlockRequestUnknownHeight => -1,
             NegativePeerSanction::InvalidTransaction => -10,
             NegativePeerSanction::UnconfirmableTransaction => -2,
+            NegativePeerSanction::TransactionWithNegativeFee => -22,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
             NegativePeerSanction::BlockProposalNotFound => -1,

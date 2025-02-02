@@ -340,7 +340,7 @@ impl GlobalState {
         let tip_digest = self.chain.light_state().hash();
         let mutator_set_accumulator = self.chain.light_state().mutator_set_accumulator_after();
         self.wallet_state
-            .get_wallet_status_from_lock(tip_digest, &mutator_set_accumulator)
+            .get_wallet_status(tip_digest, &mutator_set_accumulator)
             .await
     }
 
@@ -1749,7 +1749,6 @@ mod global_state_tests {
     use rand::Rng;
     use rand::SeedableRng;
     use tracing_test::traced_test;
-    use wallet::address::generation_address::GenerationReceivingAddress;
     use wallet::address::generation_address::GenerationSpendingKey;
     use wallet::address::KeyType;
     use wallet::expected_utxo::UtxoNotifier;
@@ -2168,7 +2167,7 @@ mod global_state_tests {
         assert!(!alice
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_liquid_amount(launch + seven_months)
+            .synced_unspent_available_amount(launch + seven_months)
             .is_zero());
         assert!(!alice.get_balance_history().await.is_empty());
 
@@ -2225,7 +2224,7 @@ mod global_state_tests {
             3,
             alice
                 .wallet_state
-                .get_wallet_status_from_lock(
+                .get_wallet_status(
                     mock_block_1a.hash(),
                     &mock_block_1a.mutator_set_accumulator_after()
                 )
@@ -2255,7 +2254,7 @@ mod global_state_tests {
         // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
         let alice_wallet_status_after_reorg = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 parent_block.hash(),
                 &parent_block.mutator_set_accumulator_after(),
             )
@@ -2353,10 +2352,7 @@ mod global_state_tests {
                 3,
                 alice
                     .wallet_state
-                    .get_wallet_status_from_lock(
-                        block_1.hash(),
-                        &block_1.mutator_set_accumulator_after()
-                    )
+                    .get_wallet_status(block_1.hash(), &block_1.mutator_set_accumulator_after())
                     .await
                     .synced_unspent
                     .len()
@@ -2375,7 +2371,7 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 fork_a_block.hash(),
                 &fork_a_block.mutator_set_accumulator_after(),
             )
@@ -2392,7 +2388,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_b_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 fork_b_block.hash(),
                 &fork_b_block.mutator_set_accumulator_after(),
             )
@@ -2415,7 +2411,7 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_b_fork_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 fork_b_block.hash(),
                 &fork_b_block.mutator_set_accumulator_after(),
             )
@@ -2433,7 +2429,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_c_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 fork_c_block.hash(),
                 &fork_c_block.mutator_set_accumulator_after(),
             )
@@ -2457,7 +2453,7 @@ mod global_state_tests {
             .unwrap();
         let alice_ws_c_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(
+            .get_wallet_status(
                 fork_c_block.hash(),
                 &fork_c_block.mutator_set_accumulator_after(),
             )
@@ -2717,7 +2713,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(in_seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(7),
@@ -2725,7 +2721,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(in_seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         // TODO: No idea why this isn't working.
         // {
@@ -3544,8 +3540,8 @@ mod global_state_tests {
     /// and comparing onchain vs offchain notification methods.
     mod restore_wallet {
         use super::*;
-        use crate::mine_loop::composer_parameters::ComposerParameters;
-        use crate::mine_loop::create_block_transaction_stateless;
+        use crate::mine_loop::create_block_transaction_from;
+        use crate::mine_loop::TxMergeOrigin;
 
         /// test scenario: onchain/symmetric.
         /// pass outcome: no funds loss
@@ -3683,20 +3679,23 @@ mod global_state_tests {
             };
 
             // in alice wallet: send pre-mined funds to bob
-            let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
             let block_1 = {
                 let vm_job_queue = alice_state_lock.vm_job_queue().clone();
-                let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
+                // let mut alice_state_mut = alice_state_lock.lock_guard_mut().await;
 
                 // store and verify alice's initial balance from pre-mine.
-                let alice_initial_balance = alice_state_mut
+                let alice_initial_balance = alice_state_lock
+                    .lock_guard()
+                    .await
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_liquid_amount(seven_months_post_launch);
+                    .synced_unspent_available_amount(seven_months_post_launch);
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // create change key for alice. change_key_type is a test param.
-                let alice_change_key = alice_state_mut
+                let alice_change_key = alice_state_lock
+                    .lock_guard_mut()
+                    .await
                     .wallet_state
                     .next_unused_spending_key(change_key_type)
                     .await
@@ -3704,14 +3703,16 @@ mod global_state_tests {
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let tx_outputs = alice_state_mut.generate_tx_outputs(
+                let tx_outputs = alice_state_lock.lock_guard().await.generate_tx_outputs(
                     outputs,
                     change_notification_medium,
                     UtxoNotificationMedium::OnChain,
                 );
 
                 // create tx.  utxo_notify_method is a test param.
-                let (alice_to_bob_tx, maybe_change_utxo) = alice_state_mut
+                let (alice_to_bob_tx, maybe_change_utxo) = alice_state_lock
+                    .lock_guard()
+                    .await
                     .create_transaction_with_prover_capability(
                         tx_outputs.clone(),
                         alice_change_key,
@@ -3729,26 +3730,30 @@ mod global_state_tests {
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when all utxo notifications are sent on-chain.
-                let expected_utxo = alice_state_mut.wallet_state.extract_expected_utxos(
-                    tx_outputs.concat_with(vec![change_utxo]),
-                    UtxoNotifier::Myself,
-                );
-                alice_state_mut
+                let expected_utxo = alice_state_lock
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .extract_expected_utxos(
+                        tx_outputs.concat_with(vec![change_utxo]),
+                        UtxoNotifier::Myself,
+                    );
+                alice_state_lock
+                    .lock_guard_mut()
+                    .await
                     .wallet_state
                     .add_expected_utxos(expected_utxo)
                     .await;
 
                 // the block gets mined.
-                let composer_parameters =
-                    ComposerParameters::new(an_address.into(), rng.gen(), 0.5);
-                let (block_1_tx, _) = create_block_transaction_stateless(
+                // Alice's wallet does not register the composer reward because
+                // it is not expecting it.
+                let (block_1_tx, _) = create_block_transaction_from(
                     &genesis_block,
-                    composer_parameters,
+                    &alice_state_lock,
                     seven_months_post_launch,
-                    rng.gen(),
-                    &TritonVmJobQueue::dummy(),
                     (TritonVmJobPriority::Normal, None).into(),
-                    vec![alice_to_bob_tx],
+                    TxMergeOrigin::ExplicitList(vec![alice_to_bob_tx]),
                 )
                 .await
                 .unwrap();
@@ -3764,12 +3769,19 @@ mod global_state_tests {
                 .unwrap();
 
                 // alice's node learns of the new block.
-                alice_state_mut.set_new_tip(block_1.clone()).await.unwrap();
+                alice_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .set_new_tip(block_1.clone())
+                    .await
+                    .unwrap();
 
                 // alice should have 2 monitored utxos.
                 assert_eq!(
                     2,
-                    alice_state_mut
+                    alice_state_lock
+                    .lock_guard()
+                    .await
                         .wallet_state
                         .wallet_db
                         .monitored_utxos()
@@ -3787,10 +3799,12 @@ mod global_state_tests {
 
                 assert_eq!(
                     alice_calculated_balance,
-                    alice_state_mut
+                    alice_state_lock
+                        .lock_guard()
+                        .await
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
 
                 block_1
@@ -3809,7 +3823,7 @@ mod global_state_tests {
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
             }
 
@@ -3846,7 +3860,7 @@ mod global_state_tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_liquid_amount(seven_months_post_launch);
+                    .synced_unspent_available_amount(seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
@@ -3877,7 +3891,7 @@ mod global_state_tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
             }
         }

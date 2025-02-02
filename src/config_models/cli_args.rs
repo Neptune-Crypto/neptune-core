@@ -127,7 +127,7 @@ pub struct Args {
     /// Determines the minimum fee to take as a reward for upgrading foreign
     /// transaction proofs. Foreign transactions where a fee below this
     /// threshold cannot be collected by proof upgrading will not be upgraded.
-    #[clap(long, default_value = "0.01")]
+    #[clap(long, default_value = "0.01", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_gobbling_fee: NativeCurrencyAmount,
 
     /// Prune the mempool when it exceeds this size in RAM.
@@ -249,16 +249,6 @@ pub struct Args {
     /// Exposing the data directory leaks some privacy. Disable to prevent.
     #[clap(long)]
     pub disable_cookie_hint: bool,
-
-    /// Set to true to maintain a "nop" transaction with no inputs and outputs
-    /// in the mempool. This should make composition faster in the case that
-    /// there are no other transactions to be mined. This nop transaction will
-    /// not count towards the total number of transactions allowed in the
-    /// mempool. If there are fee-paying transactions to be mined, this will,
-    /// however, slow down composition, as the nop transaction is always
-    /// maintained.
-    #[clap(long)]
-    pub maintain_nop_transaction: bool,
 }
 
 impl Default for Args {
