@@ -33,8 +33,9 @@ use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
 use crate::MAGIC_STRING_RESPONSE;
 
-// Max peer message size is 2000MB
-pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 2000 * 1024 * 1024;
+// Max peer message size is 500MB. Should be enough to send 250 blocks in a
+// block batch-response.
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
 
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
