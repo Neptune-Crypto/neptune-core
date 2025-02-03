@@ -41,10 +41,10 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 ///
 /// Returns:
 ///  - 0: A hash set of indices, showing which indices are into the chunk dictionaries
-///       which have modified chunks.
+///    which have modified chunks.
 ///  - 1: A list of (old membership proof, new digest) where the membership proof
-///       is how it looks before applying the removal record, and the digest is how
-///       it looks after applying the removal record.
+///    is how it looks before applying the removal record, and the digest is how
+///    it looks after applying the removal record.
 ///
 /// This function updates the chunks that are present in the `chunk_dictionaries`
 /// input argument, but not the associated membership proofs. That must be handled
@@ -142,10 +142,10 @@ pub fn get_batch_mutation_argument_for_removal_record(
 ///
 /// Returns:
 ///  - 0: A hash set of indices, showing which indices are into the chunk dictionaries
-///       which have modified chunks.
+///    which have modified chunks.
 ///  - 1: A list of (old membership proof, new digest) where the membership proof
-///       is how it looks before applying the removal record, and the digest is how
-///       it looks after applying the removal record.
+///    is how it looks before applying the removal record, and the digest is how
+///    it looks after applying the removal record.
 ///
 /// This function updates the chunks that are present in the `chunk_dictionaries`
 /// input argument.

@@ -511,10 +511,7 @@ impl NeptuneRPCServer {
     /// Return temperature of CPU, if available.
     fn cpu_temp_inner() -> Option<f32> {
         let current_system = System::new();
-        match current_system.cpu_temp() {
-            Ok(temp) => Some(temp),
-            Err(_) => None,
-        }
+        current_system.cpu_temp().ok()
     }
 
     async fn send_to_many_inner_with_mock_proof_option(
@@ -1150,11 +1147,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
-            Some(address)
-        } else {
-            None
-        };
+        let ret = ReceivingAddress::from_bech32m(&address_string, network).ok();
         tracing::debug!(
             "Responding to address validation request of {address_string}: {}",
             ret.is_some()

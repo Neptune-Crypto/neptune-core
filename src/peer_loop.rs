@@ -270,11 +270,11 @@ impl PeerLoopHandler {
     ///  - `Err` when the connection should be closed;
     ///  - `Ok(None)` if some block is invalid
     ///  - `Ok(None)` if the last block has insufficient cumulative PoW and we
-    ///     are not syncing;
+    ///    are not syncing;
     ///  - `Ok(None)` if the last block has insufficient height and we are
-    ///     syncing;
+    ///    syncing;
     ///  - `Ok(Some(block_height))` otherwise, referring to the block with the
-    ///     highest height in the batch.
+    ///    highest height in the batch.
     ///
     /// A return value of Ok(Some(_)) means that the message was passed on to
     /// main loop.
