@@ -255,73 +255,6 @@ impl SingleProof {
 }
 
 impl ConsensusProgram for SingleProof {
-    #[cfg(test)]
-    fn source(&self) {
-        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-
-        let stark: Stark = Stark::default();
-        let own_program_digest: Digest = tasmlib::own_program_digest();
-        let txk_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-
-        match tasmlib::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS) {
-            SingleProofWitness::Collection(pc) => {
-                assert_eq!(txk_digest, pc.kernel_mast_hash);
-
-                let claimed_merge_bit = false;
-                tasmlib::tasmlib_hashing_merkle_verify(
-                    txk_digest,
-                    TransactionKernelField::MergeBit as u32,
-                    Tip5::hash(&claimed_merge_bit),
-                    TransactionKernel::MAST_HEIGHT as u32,
-                );
-
-                let removal_records_integrity_claim: Claim = pc.removal_records_integrity_claim();
-                tasmlib::verify_stark(
-                    stark,
-                    &removal_records_integrity_claim,
-                    &pc.removal_records_integrity,
-                );
-
-                let kernel_to_outputs_claim: Claim = pc.kernel_to_outputs_claim();
-                tasmlib::verify_stark(stark, &kernel_to_outputs_claim, &pc.kernel_to_outputs);
-
-                let collect_lock_scripts_claim: Claim = pc.collect_lock_scripts_claim();
-                tasmlib::verify_stark(stark, &collect_lock_scripts_claim, &pc.collect_lock_scripts);
-
-                let collect_type_scripts_claim: Claim = pc.collect_type_scripts_claim();
-                tasmlib::verify_stark(stark, &collect_type_scripts_claim, &pc.collect_type_scripts);
-
-                let mut i = 0;
-                let lock_script_claims: Vec<Claim> = pc.lock_script_claims();
-                assert_eq!(lock_script_claims.len(), pc.lock_script_hashes.len());
-                while i < pc.lock_script_hashes.len() {
-                    let claim: &Claim = &lock_script_claims[i];
-                    let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
-                    tasmlib::verify_stark(stark, claim, lock_script_halts_proof);
-
-                    i += 1;
-                }
-
-                i = 0;
-                let type_script_claims = pc.type_script_claims();
-                assert_eq!(type_script_claims.len(), pc.type_script_hashes.len());
-                while i < pc.type_script_hashes.len() {
-                    let claim: &Claim = &type_script_claims[i];
-                    let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
-                    tasmlib::verify_stark(stark, claim, type_script_halts_proof);
-                    i += 1;
-                }
-            }
-            SingleProofWitness::Update(witness) => {
-                debug_assert_eq!(txk_digest, witness.new_kernel_mast_hash);
-                witness.branch_source(own_program_digest, txk_digest);
-            }
-            SingleProofWitness::Merger(witness) => {
-                witness.branch_source(own_program_digest, txk_digest)
-            }
-        }
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
@@ -750,9 +683,85 @@ mod test {
     use crate::models::blockchain::transaction::validity::tasm::single_proof::merge_branch::test::deterministic_merge_witness;
     use crate::models::blockchain::transaction::validity::tasm::single_proof::update_branch::test::deterministic_update_witness_only_additions;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_expired_timelocks;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+
+    impl ConsensusProgramSpecification for SingleProof {
+        fn source(&self) {
+            let stark: Stark = Stark::default();
+            let own_program_digest: Digest = tasm::own_program_digest();
+            let txk_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+
+            match tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS) {
+                SingleProofWitness::Collection(pc) => {
+                    assert_eq!(txk_digest, pc.kernel_mast_hash);
+
+                    let claimed_merge_bit = false;
+                    tasm::tasmlib_hashing_merkle_verify(
+                        txk_digest,
+                        TransactionKernelField::MergeBit as u32,
+                        Tip5::hash(&claimed_merge_bit),
+                        TransactionKernel::MAST_HEIGHT as u32,
+                    );
+
+                    let removal_records_integrity_claim: Claim =
+                        pc.removal_records_integrity_claim();
+                    tasm::verify_stark(
+                        stark,
+                        &removal_records_integrity_claim,
+                        &pc.removal_records_integrity,
+                    );
+
+                    let kernel_to_outputs_claim: Claim = pc.kernel_to_outputs_claim();
+                    tasm::verify_stark(stark, &kernel_to_outputs_claim, &pc.kernel_to_outputs);
+
+                    let collect_lock_scripts_claim: Claim = pc.collect_lock_scripts_claim();
+                    tasm::verify_stark(
+                        stark,
+                        &collect_lock_scripts_claim,
+                        &pc.collect_lock_scripts,
+                    );
+
+                    let collect_type_scripts_claim: Claim = pc.collect_type_scripts_claim();
+                    tasm::verify_stark(
+                        stark,
+                        &collect_type_scripts_claim,
+                        &pc.collect_type_scripts,
+                    );
+
+                    let mut i = 0;
+                    let lock_script_claims: Vec<Claim> = pc.lock_script_claims();
+                    assert_eq!(lock_script_claims.len(), pc.lock_script_hashes.len());
+                    while i < pc.lock_script_hashes.len() {
+                        let claim: &Claim = &lock_script_claims[i];
+                        let lock_script_halts_proof: &Proof = &pc.lock_scripts_halt[i];
+                        tasm::verify_stark(stark, claim, lock_script_halts_proof);
+
+                        i += 1;
+                    }
+
+                    i = 0;
+                    let type_script_claims = pc.type_script_claims();
+                    assert_eq!(type_script_claims.len(), pc.type_script_hashes.len());
+                    while i < pc.type_script_hashes.len() {
+                        let claim: &Claim = &type_script_claims[i];
+                        let type_script_halts_proof: &Proof = &pc.type_scripts_halt[i];
+                        tasm::verify_stark(stark, claim, type_script_halts_proof);
+                        i += 1;
+                    }
+                }
+                SingleProofWitness::Update(witness) => {
+                    debug_assert_eq!(txk_digest, witness.new_kernel_mast_hash);
+                    witness.branch_source(own_program_digest, txk_digest);
+                }
+                SingleProofWitness::Merger(witness) => {
+                    witness.branch_source(own_program_digest, txk_digest)
+                }
+            }
+        }
+    }
 
     impl SingleProofWitness {
         pub(crate) fn into_update(self) -> UpdateWitness {

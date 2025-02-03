@@ -77,11 +77,6 @@ impl SecretWitness for PrincipalBlockValidationWitness {
 }
 
 impl ConsensusProgram for PrincipalBlockValidationLogic {
-    #[cfg(test)]
-    fn source(&self) {
-        todo!()
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -90,5 +85,17 @@ impl ConsensusProgram for PrincipalBlockValidationLogic {
         static HASH: OnceLock<Digest> = OnceLock::new();
 
         *HASH.get_or_init(|| self.program().hash())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for PrincipalBlockValidationLogic {
+        fn source(&self) {
+            todo!()
+        }
     }
 }

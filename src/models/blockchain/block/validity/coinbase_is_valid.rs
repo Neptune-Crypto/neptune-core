@@ -38,11 +38,6 @@ pub struct CoinbaseIsValid {
 }
 
 impl ConsensusProgram for CoinbaseIsValid {
-    #[cfg(test)]
-    fn source(&self) {
-        todo!()
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         todo!()
     }
@@ -51,5 +46,17 @@ impl ConsensusProgram for CoinbaseIsValid {
         static HASH: OnceLock<Digest> = OnceLock::new();
 
         *HASH.get_or_init(|| self.program().hash())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for CoinbaseIsValid {
+        fn source(&self) {
+            todo!()
+        }
     }
 }

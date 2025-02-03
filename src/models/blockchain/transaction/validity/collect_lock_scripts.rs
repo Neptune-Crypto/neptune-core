@@ -73,30 +73,6 @@ impl SecretWitness for CollectLockScriptsWitness {
 pub struct CollectLockScripts;
 
 impl ConsensusProgram for CollectLockScripts {
-    #[cfg(test)]
-    fn source(&self) {
-        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-
-        let siu_digest: Digest = tasmlib::tasmlib_io_read_stdin___digest();
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let clsw: CollectLockScriptsWitness = tasmlib::decode_from_memory(start_address);
-
-        // divine in the salted input UTXOs with hash
-        let salted_input_utxos: &SaltedUtxos = &clsw.salted_input_utxos;
-        let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
-
-        // verify that the divined data matches with the explicit input digest
-        let salted_input_utxos_hash: Digest = Hash::hash(salted_input_utxos);
-        assert_eq!(siu_digest, salted_input_utxos_hash);
-
-        // iterate over all input UTXOs and output the lock script hashes
-        let mut i = 0;
-        while i < input_utxos.len() {
-            tasmlib::tasmlib_io_write_to_stdout___digest(input_utxos[i].lock_script_hash());
-            i += 1;
-        }
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_salted_input_utxos =
@@ -216,13 +192,36 @@ mod test {
     use proptest::strategy::Strategy;
     use proptest::test_runner::TestCaseError;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use test_strategy::proptest;
 
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
-    use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
-    use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::SecretWitness;
+    use super::*;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
+
+    impl ConsensusProgramSpecification for CollectLockScripts {
+        fn source(&self) {
+            let siu_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let clsw: CollectLockScriptsWitness = tasm::decode_from_memory(start_address);
+
+            // divine in the salted input UTXOs with hash
+            let salted_input_utxos: &SaltedUtxos = &clsw.salted_input_utxos;
+            let input_utxos: &Vec<Utxo> = &salted_input_utxos.utxos;
+
+            // verify that the divined data matches with the explicit input digest
+            let salted_input_utxos_hash: Digest = Hash::hash(salted_input_utxos);
+            assert_eq!(siu_digest, salted_input_utxos_hash);
+
+            // iterate over all input UTXOs and output the lock script hashes
+            let mut i = 0;
+            while i < input_utxos.len() {
+                tasm::tasmlib_io_write_to_stdout___digest(input_utxos[i].lock_script_hash());
+                i += 1;
+            }
+        }
+    }
 
     fn prop(primitive_witness: PrimitiveWitness) -> Result<(), TestCaseError> {
         let collect_lock_scripts_witness = CollectLockScriptsWitness::from(&primitive_witness);

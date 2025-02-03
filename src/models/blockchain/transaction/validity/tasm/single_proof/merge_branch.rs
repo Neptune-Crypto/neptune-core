@@ -180,181 +180,6 @@ impl MergeWitness {
         .concat();
         nondeterminism.digests.extend(digests);
     }
-
-    #[cfg(test)]
-    pub(crate) fn branch_source(
-        &self,
-        single_proof_program_digest: Digest,
-        new_txk_digest: Digest,
-    ) {
-        use num_traits::CheckedAdd;
-        use strum::EnumCount;
-
-        use crate::models::proof_abstractions::tasm::builtins as tasmlib;
-        use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-        // divine the witness for this proof
-        let mw = tasmlib::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
-
-        // divine the left and right kernels of the operand transactions
-        let left_txk_digest = tasmlib::tasmlib_io_read_secin___digest();
-        let right_txk_digest = tasmlib::tasmlib_io_read_secin___digest();
-
-        // verify the proofs of the operand transactions
-        let left_claim = Claim::new(single_proof_program_digest)
-            .with_input(left_txk_digest.reversed().values().to_vec());
-        let right_claim = Claim::new(single_proof_program_digest)
-            .with_input(right_txk_digest.reversed().values().to_vec());
-
-        tasmlib::verify_stark(Stark::default(), &left_claim, &mw.left_proof);
-        tasmlib::verify_stark(Stark::default(), &right_claim, &mw.right_proof);
-
-        let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2();
-
-        // new inputs are a permutation of the operands' inputs' concatenation
-        let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
-        let right_inputs: &Vec<RemovalRecord> = &mw.right_kernel.inputs;
-        let new_inputs: &Vec<RemovalRecord> = &mw.new_kernel.inputs;
-
-        let assert_input_integrity = |merkle_root, inputs| {
-            let leaf_index = TransactionKernelField::Inputs as u32;
-            let leaf = Tip5::hash(inputs);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_input_integrity(left_txk_digest, left_inputs);
-        assert_input_integrity(right_txk_digest, right_inputs);
-        assert_input_integrity(new_txk_digest, new_inputs);
-
-        let to_merge_inputs = left_inputs
-            .iter()
-            .chain(right_inputs)
-            .map(Tip5::hash)
-            .sorted()
-            .collect_vec();
-        let merged_inputs = new_inputs.iter().map(Tip5::hash).sorted().collect_vec();
-        assert_eq!(to_merge_inputs, merged_inputs);
-
-        // new outputs are a permutation of the operands' outputs' concatenation
-        let left_outputs = &mw.left_kernel.outputs;
-        let right_outputs = &mw.right_kernel.outputs;
-        let new_outputs = &mw.new_kernel.outputs;
-
-        let assert_output_integrity = |merkle_root, outputs| {
-            let leaf_index = TransactionKernelField::Outputs as u32;
-            let leaf = Tip5::hash(outputs);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height)
-        };
-        assert_output_integrity(left_txk_digest, left_outputs);
-        assert_output_integrity(right_txk_digest, right_outputs);
-        assert_output_integrity(new_txk_digest, new_outputs);
-
-        let to_merge_outputs = left_outputs
-            .iter()
-            .chain(right_outputs)
-            .map(Tip5::hash)
-            .sorted()
-            .collect_vec();
-        let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
-        assert_eq!(to_merge_outputs, merged_outputs);
-
-        // new public announcements is a permutation of operands' public
-        // announcements' concatenation
-        let left_public_announcements = &mw.left_kernel.public_announcements;
-        let right_public_announcements = &mw.right_kernel.public_announcements;
-        let new_public_announcements = &mw.new_kernel.public_announcements;
-
-        let assert_public_announcement_integrity = |merkle_root, announcements| {
-            let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
-            let leaf = Tip5::hash(announcements);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
-        assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
-        assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
-
-        let to_merge_public_announcements = left_public_announcements
-            .iter()
-            .chain(right_public_announcements)
-            .map(Tip5::hash)
-            .sorted()
-            .collect_vec();
-        let merged_public_announcements = new_public_announcements
-            .iter()
-            .map(Tip5::hash)
-            .sorted()
-            .collect_vec();
-        assert_eq!(to_merge_public_announcements, merged_public_announcements);
-
-        // new fee is sum of operand fees
-        let left_fee = mw.left_kernel.fee;
-        let right_fee = mw.right_kernel.fee;
-        assert!(!right_fee.is_negative());
-        let new_fee = if left_fee.is_negative() {
-            left_fee.checked_add_negative(&right_fee).unwrap()
-        } else {
-            left_fee.checked_add(&right_fee).unwrap()
-        };
-
-        let assert_fee_integrity = |merkle_root, fee| {
-            let leaf_index = TransactionKernelField::Fee as u32;
-            let leaf = Tip5::hash(fee);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_fee_integrity(left_txk_digest, &left_fee);
-        assert_fee_integrity(right_txk_digest, &right_fee);
-        assert_fee_integrity(new_txk_digest, &new_fee);
-
-        // at most one coinbase is set
-        let left_coinbase = mw.left_kernel.coinbase;
-        let right_coinbase = mw.right_kernel.coinbase;
-        let new_coinbase = left_coinbase.or(right_coinbase);
-        assert!(left_coinbase.is_none() || right_coinbase.is_none());
-
-        let assert_coinbase_integrity = |merkle_root, coinbase| {
-            let leaf_index = TransactionKernelField::Coinbase as u32;
-            let leaf = Tip5::hash(coinbase);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_coinbase_integrity(left_txk_digest, &left_coinbase);
-        assert_coinbase_integrity(right_txk_digest, &right_coinbase);
-        assert_coinbase_integrity(new_txk_digest, &new_coinbase);
-
-        // new timestamp is whichever is larger
-        let left_timestamp: Timestamp = mw.left_kernel.timestamp;
-        let right_timestamp: Timestamp = mw.right_kernel.timestamp;
-        let new_timestamp: Timestamp = if left_timestamp < right_timestamp {
-            right_timestamp
-        } else {
-            left_timestamp
-        };
-
-        let assert_timestamp_integrity = |merkle_root, timestamp| {
-            let leaf_index = TransactionKernelField::Timestamp as u32;
-            let leaf = Tip5::hash(timestamp);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_timestamp_integrity(left_txk_digest, &left_timestamp);
-        assert_timestamp_integrity(right_txk_digest, &right_timestamp);
-        assert_timestamp_integrity(new_txk_digest, &new_timestamp);
-
-        // mutator set hash is identical
-        let assert_mutator_set_hash_integrity = |merkle_root| {
-            let leaf_index = TransactionKernelField::MutatorSetHash as u32;
-            let leaf = Tip5::hash(&mw.left_kernel.mutator_set_hash);
-            tasmlib::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
-        };
-        assert_mutator_set_hash_integrity(left_txk_digest);
-        assert_mutator_set_hash_integrity(right_txk_digest);
-        assert_mutator_set_hash_integrity(new_txk_digest);
-
-        // new merge bit is set
-        tasmlib::tasmlib_hashing_merkle_verify(
-            new_txk_digest,
-            TransactionKernelField::MergeBit as u32,
-            Tip5::hash(&1),
-            TransactionKernel::MAST_HEIGHT as u32,
-        );
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1069,16 +894,186 @@ impl BasicSnippet for MergeBranch {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use itertools::Itertools;
+    use num_traits::CheckedAdd;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use strum::EnumCount;
 
-    use super::MergeWitness;
+    use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
-    use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
+    use crate::util_types::mutator_set::removal_record::RemovalRecord;
+
+    impl MergeWitness {
+        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
+            // divine the witness for this proof
+            let mw = tasm::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
+
+            // divine the left and right kernels of the operand transactions
+            let left_txk_digest = tasm::tasmlib_io_read_secin___digest();
+            let right_txk_digest = tasm::tasmlib_io_read_secin___digest();
+
+            // verify the proofs of the operand transactions
+            let left_claim = Claim::new(single_proof_program_digest)
+                .with_input(left_txk_digest.reversed().values().to_vec());
+            let right_claim = Claim::new(single_proof_program_digest)
+                .with_input(right_txk_digest.reversed().values().to_vec());
+
+            tasm::verify_stark(Stark::default(), &left_claim, &mw.left_proof);
+            tasm::verify_stark(Stark::default(), &right_claim, &mw.right_proof);
+
+            let tree_height = TransactionKernelField::COUNT.next_power_of_two().ilog2();
+
+            // new inputs are a permutation of the operands' inputs' concatenation
+            let left_inputs: &Vec<RemovalRecord> = &mw.left_kernel.inputs;
+            let right_inputs: &Vec<RemovalRecord> = &mw.right_kernel.inputs;
+            let new_inputs: &Vec<RemovalRecord> = &mw.new_kernel.inputs;
+
+            let assert_input_integrity = |merkle_root, inputs| {
+                let leaf_index = TransactionKernelField::Inputs as u32;
+                let leaf = Tip5::hash(inputs);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_input_integrity(left_txk_digest, left_inputs);
+            assert_input_integrity(right_txk_digest, right_inputs);
+            assert_input_integrity(new_txk_digest, new_inputs);
+
+            let to_merge_inputs = left_inputs
+                .iter()
+                .chain(right_inputs)
+                .map(Tip5::hash)
+                .sorted()
+                .collect_vec();
+            let merged_inputs = new_inputs.iter().map(Tip5::hash).sorted().collect_vec();
+            assert_eq!(to_merge_inputs, merged_inputs);
+
+            // new outputs are a permutation of the operands' outputs' concatenation
+            let left_outputs = &mw.left_kernel.outputs;
+            let right_outputs = &mw.right_kernel.outputs;
+            let new_outputs = &mw.new_kernel.outputs;
+
+            let assert_output_integrity = |merkle_root, outputs| {
+                let leaf_index = TransactionKernelField::Outputs as u32;
+                let leaf = Tip5::hash(outputs);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height)
+            };
+            assert_output_integrity(left_txk_digest, left_outputs);
+            assert_output_integrity(right_txk_digest, right_outputs);
+            assert_output_integrity(new_txk_digest, new_outputs);
+
+            let to_merge_outputs = left_outputs
+                .iter()
+                .chain(right_outputs)
+                .map(Tip5::hash)
+                .sorted()
+                .collect_vec();
+            let merged_outputs = new_outputs.iter().map(Tip5::hash).sorted().collect_vec();
+            assert_eq!(to_merge_outputs, merged_outputs);
+
+            // new public announcements is a permutation of operands' public
+            // announcements' concatenation
+            let left_public_announcements = &mw.left_kernel.public_announcements;
+            let right_public_announcements = &mw.right_kernel.public_announcements;
+            let new_public_announcements = &mw.new_kernel.public_announcements;
+
+            let assert_public_announcement_integrity = |merkle_root, announcements| {
+                let leaf_index = TransactionKernelField::PublicAnnouncements as u32;
+                let leaf = Tip5::hash(announcements);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_public_announcement_integrity(left_txk_digest, left_public_announcements);
+            assert_public_announcement_integrity(right_txk_digest, right_public_announcements);
+            assert_public_announcement_integrity(new_txk_digest, new_public_announcements);
+
+            let to_merge_public_announcements = left_public_announcements
+                .iter()
+                .chain(right_public_announcements)
+                .map(Tip5::hash)
+                .sorted()
+                .collect_vec();
+            let merged_public_announcements = new_public_announcements
+                .iter()
+                .map(Tip5::hash)
+                .sorted()
+                .collect_vec();
+            assert_eq!(to_merge_public_announcements, merged_public_announcements);
+
+            // new fee is sum of operand fees
+            let left_fee = mw.left_kernel.fee;
+            let right_fee = mw.right_kernel.fee;
+            assert!(!right_fee.is_negative());
+            let new_fee = if left_fee.is_negative() {
+                left_fee.checked_add_negative(&right_fee).unwrap()
+            } else {
+                left_fee.checked_add(&right_fee).unwrap()
+            };
+
+            let assert_fee_integrity = |merkle_root, fee| {
+                let leaf_index = TransactionKernelField::Fee as u32;
+                let leaf = Tip5::hash(fee);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_fee_integrity(left_txk_digest, &left_fee);
+            assert_fee_integrity(right_txk_digest, &right_fee);
+            assert_fee_integrity(new_txk_digest, &new_fee);
+
+            // at most one coinbase is set
+            let left_coinbase = mw.left_kernel.coinbase;
+            let right_coinbase = mw.right_kernel.coinbase;
+            let new_coinbase = left_coinbase.or(right_coinbase);
+            assert!(left_coinbase.is_none() || right_coinbase.is_none());
+
+            let assert_coinbase_integrity = |merkle_root, coinbase| {
+                let leaf_index = TransactionKernelField::Coinbase as u32;
+                let leaf = Tip5::hash(coinbase);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_coinbase_integrity(left_txk_digest, &left_coinbase);
+            assert_coinbase_integrity(right_txk_digest, &right_coinbase);
+            assert_coinbase_integrity(new_txk_digest, &new_coinbase);
+
+            // new timestamp is whichever is larger
+            let left_timestamp: Timestamp = mw.left_kernel.timestamp;
+            let right_timestamp: Timestamp = mw.right_kernel.timestamp;
+            let new_timestamp: Timestamp = if left_timestamp < right_timestamp {
+                right_timestamp
+            } else {
+                left_timestamp
+            };
+
+            let assert_timestamp_integrity = |merkle_root, timestamp| {
+                let leaf_index = TransactionKernelField::Timestamp as u32;
+                let leaf = Tip5::hash(timestamp);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_timestamp_integrity(left_txk_digest, &left_timestamp);
+            assert_timestamp_integrity(right_txk_digest, &right_timestamp);
+            assert_timestamp_integrity(new_txk_digest, &new_timestamp);
+
+            // mutator set hash is identical
+            let assert_mutator_set_hash_integrity = |merkle_root| {
+                let leaf_index = TransactionKernelField::MutatorSetHash as u32;
+                let leaf = Tip5::hash(&mw.left_kernel.mutator_set_hash);
+                tasm::tasmlib_hashing_merkle_verify(merkle_root, leaf_index, leaf, tree_height);
+            };
+            assert_mutator_set_hash_integrity(left_txk_digest);
+            assert_mutator_set_hash_integrity(right_txk_digest);
+            assert_mutator_set_hash_integrity(new_txk_digest);
+
+            // new merge bit is set
+            tasm::tasmlib_hashing_merkle_verify(
+                new_txk_digest,
+                TransactionKernelField::MergeBit as u32,
+                Tip5::hash(&1),
+                TransactionKernel::MAST_HEIGHT as u32,
+            );
+        }
+    }
 
     pub(crate) async fn deterministic_merge_witness(
         params_left: (usize, usize, usize),

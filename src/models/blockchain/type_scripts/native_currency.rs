@@ -82,176 +82,6 @@ impl NativeCurrency {
 }
 
 impl ConsensusProgram for NativeCurrency {
-    #[cfg(test)]
-    fn source(&self) {
-        use num_traits::CheckedAdd;
-        use num_traits::Zero;
-
-        use crate::models::blockchain::shared::Hash;
-        use crate::models::proof_abstractions::tasm::builtins as tasm;
-
-        // get in the current program's hash digest
-        let self_digest: Digest = tasm::own_program_digest();
-
-        // read standard input:
-        //  - transaction kernel mast hash
-        //  - input salted utxos digest
-        //  - output salted utxos digest
-        // (All type scripts take this triple as input.)
-        let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-        let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-        let output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
-
-        // divine witness from memory
-        let start_address: BFieldElement = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-        let native_currency_witness_mem: NativeCurrencyWitnessMemory =
-            tasm::decode_from_memory(start_address);
-        let coinbase: Option<NativeCurrencyAmount> = native_currency_witness_mem.coinbase;
-        let fee: NativeCurrencyAmount = native_currency_witness_mem.fee;
-        let input_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_input_utxos;
-        let output_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_output_utxos;
-        let timestamp = native_currency_witness_mem.timestamp;
-
-        // authenticate coinbase against kernel mast hash
-        let coinbase_leaf_index: u32 = 4;
-        let coinbase_leaf: Digest = Hash::hash(&coinbase);
-        let kernel_tree_height: u32 = 3;
-        tasm::tasmlib_hashing_merkle_verify(
-            tx_kernel_digest,
-            coinbase_leaf_index,
-            coinbase_leaf,
-            kernel_tree_height,
-        );
-
-        // unpack coinbase
-        let some_coinbase: NativeCurrencyAmount = match coinbase {
-            Some(coins) => coins,
-            None => NativeCurrencyAmount::coins(0),
-        };
-        assert!(!some_coinbase.is_negative());
-
-        // authenticate fee against kernel mast hash
-        let fee_leaf_index: u32 = 3;
-        let fee_leaf: Digest = Hash::hash(&fee);
-        tasm::tasmlib_hashing_merkle_verify(
-            tx_kernel_digest,
-            fee_leaf_index,
-            fee_leaf,
-            kernel_tree_height,
-        );
-
-        assert!(coinbase.is_none() || !fee.is_negative());
-
-        let timestamp_leaf_index = TransactionKernelField::Timestamp as u32;
-        let timestamp_leaf = Tip5::hash(&timestamp);
-        tasm::tasmlib_hashing_merkle_verify(
-            tx_kernel_digest,
-            timestamp_leaf_index,
-            timestamp_leaf,
-            kernel_tree_height,
-        );
-
-        // authenticate inputs against salted commitment
-        assert_eq!(input_utxos_digest, Hash::hash(&input_salted_utxos));
-
-        // authenticate outputs against salted commitment
-        assert_eq!(output_utxos_digest, Hash::hash(&output_salted_utxos));
-
-        // get total input amount from inputs
-        let mut total_input = NativeCurrencyAmount::coins(0);
-        let mut i: u32 = 0;
-        let num_inputs: u32 = input_salted_utxos.utxos.len() as u32;
-        while i < num_inputs {
-            let utxo_i = &input_salted_utxos.utxos[i as usize];
-            let num_coins: u32 = utxo_i.coins().len() as u32;
-            let mut j = 0;
-            while j < num_coins {
-                if utxo_i.coins()[j as usize].type_script_hash == self_digest {
-                    // decode state to get amount
-                    let amount: NativeCurrencyAmount =
-                        *NativeCurrencyAmount::decode(&utxo_i.coins()[j as usize].state).unwrap();
-
-                    // make sure amount is positive (or zero)
-                    assert!(!amount.is_negative());
-
-                    // safely add to total
-                    total_input = total_input.checked_add(&amount).unwrap();
-                }
-                j += 1;
-            }
-            i += 1;
-        }
-
-        // get total output amount from outputs
-        let mut total_output = NativeCurrencyAmount::coins(0);
-        let mut total_timelocked_output = NativeCurrencyAmount::coins(0);
-
-        i = 0;
-        let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
-        while i < num_outputs {
-            let utxo_i = output_salted_utxos.utxos[i as usize].clone();
-            let num_coins: u32 = utxo_i.coins().len() as u32;
-            let mut total_amount_for_utxo = NativeCurrencyAmount::coins(0);
-            let mut time_locked = false;
-            let mut j = 0;
-            while j < num_coins {
-                let coin_j = utxo_i.coins()[j as usize].clone();
-                if coin_j.type_script_hash == self_digest {
-                    // decode state to get amount
-                    let amount: NativeCurrencyAmount =
-                        *NativeCurrencyAmount::decode(&coin_j.state).unwrap();
-
-                    // make sure amount is positive (or zero)
-                    assert!(!amount.is_negative());
-
-                    // safely add to total
-                    total_amount_for_utxo = total_amount_for_utxo.checked_add(&amount).unwrap();
-                } else if coin_j.type_script_hash == Self::TIME_LOCK_HASH {
-                    // decode state to get release date
-                    let release_date = *Timestamp::decode(&coin_j.state).unwrap();
-                    if release_date >= timestamp + MINING_REWARD_TIME_LOCK_PERIOD {
-                        time_locked = true;
-                    }
-                }
-                j += 1;
-            }
-            total_output = total_output.checked_add(&total_amount_for_utxo).unwrap();
-            if time_locked {
-                total_timelocked_output = total_timelocked_output
-                    .checked_add(&total_amount_for_utxo)
-                    .unwrap();
-            }
-            i += 1;
-        }
-
-        assert!(
-            fee >= NativeCurrencyAmount::min(),
-            "fee exceeds amount lower bound"
-        );
-        assert!(
-            fee <= NativeCurrencyAmount::max(),
-            "fee exceeds amount upper bound"
-        );
-
-        // if coinbase is set, verify that half of it is time-locked
-        let mut half_of_coinbase = some_coinbase;
-        half_of_coinbase.div_two();
-        let mut half_of_fee = fee;
-        half_of_fee.div_two();
-        assert!(some_coinbase.is_zero() || half_of_coinbase <= total_timelocked_output + half_of_fee,
-            "not enough funds timelocked -- half of coinbase == {} > total_timelocked_output + half_of_fee == {} whereas total output == {}",
-            half_of_coinbase,
-            total_timelocked_output + half_of_fee,
-            total_output,);
-
-        // test no-inflation equation
-        let total_input_plus_coinbase: NativeCurrencyAmount =
-            total_input.checked_add(&some_coinbase).unwrap();
-        let total_output_plus_fee: NativeCurrencyAmount =
-            total_output.checked_add_negative(&fee).unwrap();
-        assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
-    }
-
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let field_with_size_coinbase = field_with_size!(NativeCurrencyWitnessMemory::coinbase);
@@ -1209,6 +1039,7 @@ impl SecretWitness for NativeCurrencyWitness {
 pub mod test {
     use std::panic;
 
+    use num_traits::CheckedAdd;
     use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -1221,18 +1052,186 @@ pub mod test {
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
-    use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
-    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::native_currency_amount::test::invalid_positive_amount;
     use crate::models::blockchain::type_scripts::time_lock::neptune_arbitrary::arbitrary_primitive_witness_with_active_timelocks;
     use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+    use crate::models::proof_abstractions::tasm::builtins as tasm;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
+    use crate::models::proof_abstractions::tasm::program::test::ConsensusProgramSpecification;
     use crate::models::proof_abstractions::tasm::program::ConsensusError;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::verifier::verify;
+
+    impl ConsensusProgramSpecification for NativeCurrency {
+        fn source(&self) {
+            // get in the current program's hash digest
+            let self_digest: Digest = tasm::own_program_digest();
+
+            // read standard input:
+            //  - transaction kernel mast hash
+            //  - input salted utxos digest
+            //  - output salted utxos digest
+            // (All type scripts take this triple as input.)
+            let tx_kernel_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let input_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let output_utxos_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
+
+            // divine witness from memory
+            let start_address: BFieldElement =
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+            let native_currency_witness_mem: NativeCurrencyWitnessMemory =
+                tasm::decode_from_memory(start_address);
+            let coinbase: Option<NativeCurrencyAmount> = native_currency_witness_mem.coinbase;
+            let fee: NativeCurrencyAmount = native_currency_witness_mem.fee;
+            let input_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_input_utxos;
+            let output_salted_utxos: SaltedUtxos = native_currency_witness_mem.salted_output_utxos;
+            let timestamp = native_currency_witness_mem.timestamp;
+
+            // authenticate coinbase against kernel mast hash
+            let coinbase_leaf_index: u32 = 4;
+            let coinbase_leaf: Digest = Hash::hash(&coinbase);
+            let kernel_tree_height: u32 = 3;
+            tasm::tasmlib_hashing_merkle_verify(
+                tx_kernel_digest,
+                coinbase_leaf_index,
+                coinbase_leaf,
+                kernel_tree_height,
+            );
+
+            // unpack coinbase
+            let some_coinbase: NativeCurrencyAmount = match coinbase {
+                Some(coins) => coins,
+                None => NativeCurrencyAmount::coins(0),
+            };
+            assert!(!some_coinbase.is_negative());
+
+            // authenticate fee against kernel mast hash
+            let fee_leaf_index: u32 = 3;
+            let fee_leaf: Digest = Hash::hash(&fee);
+            tasm::tasmlib_hashing_merkle_verify(
+                tx_kernel_digest,
+                fee_leaf_index,
+                fee_leaf,
+                kernel_tree_height,
+            );
+
+            assert!(coinbase.is_none() || !fee.is_negative());
+
+            let timestamp_leaf_index = TransactionKernelField::Timestamp as u32;
+            let timestamp_leaf = Tip5::hash(&timestamp);
+            tasm::tasmlib_hashing_merkle_verify(
+                tx_kernel_digest,
+                timestamp_leaf_index,
+                timestamp_leaf,
+                kernel_tree_height,
+            );
+
+            // authenticate inputs against salted commitment
+            assert_eq!(input_utxos_digest, Hash::hash(&input_salted_utxos));
+
+            // authenticate outputs against salted commitment
+            assert_eq!(output_utxos_digest, Hash::hash(&output_salted_utxos));
+
+            // get total input amount from inputs
+            let mut total_input = NativeCurrencyAmount::coins(0);
+            let mut i: u32 = 0;
+            let num_inputs: u32 = input_salted_utxos.utxos.len() as u32;
+            while i < num_inputs {
+                let utxo_i = &input_salted_utxos.utxos[i as usize];
+                let num_coins: u32 = utxo_i.coins().len() as u32;
+                let mut j = 0;
+                while j < num_coins {
+                    if utxo_i.coins()[j as usize].type_script_hash == self_digest {
+                        // decode state to get amount
+                        let amount: NativeCurrencyAmount =
+                            *NativeCurrencyAmount::decode(&utxo_i.coins()[j as usize].state)
+                                .unwrap();
+
+                        // make sure amount is positive (or zero)
+                        assert!(!amount.is_negative());
+
+                        // safely add to total
+                        total_input = total_input.checked_add(&amount).unwrap();
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+
+            // get total output amount from outputs
+            let mut total_output = NativeCurrencyAmount::coins(0);
+            let mut total_timelocked_output = NativeCurrencyAmount::coins(0);
+
+            i = 0;
+            let num_outputs: u32 = output_salted_utxos.utxos.len() as u32;
+            while i < num_outputs {
+                let utxo_i = output_salted_utxos.utxos[i as usize].clone();
+                let num_coins: u32 = utxo_i.coins().len() as u32;
+                let mut total_amount_for_utxo = NativeCurrencyAmount::coins(0);
+                let mut time_locked = false;
+                let mut j = 0;
+                while j < num_coins {
+                    let coin_j = utxo_i.coins()[j as usize].clone();
+                    if coin_j.type_script_hash == self_digest {
+                        // decode state to get amount
+                        let amount: NativeCurrencyAmount =
+                            *NativeCurrencyAmount::decode(&coin_j.state).unwrap();
+
+                        // make sure amount is positive (or zero)
+                        assert!(!amount.is_negative());
+
+                        // safely add to total
+                        total_amount_for_utxo = total_amount_for_utxo.checked_add(&amount).unwrap();
+                    } else if coin_j.type_script_hash == Self::TIME_LOCK_HASH {
+                        // decode state to get release date
+                        let release_date = *Timestamp::decode(&coin_j.state).unwrap();
+                        if release_date >= timestamp + MINING_REWARD_TIME_LOCK_PERIOD {
+                            time_locked = true;
+                        }
+                    }
+                    j += 1;
+                }
+                total_output = total_output.checked_add(&total_amount_for_utxo).unwrap();
+                if time_locked {
+                    total_timelocked_output = total_timelocked_output
+                        .checked_add(&total_amount_for_utxo)
+                        .unwrap();
+                }
+                i += 1;
+            }
+
+            assert!(
+                fee >= NativeCurrencyAmount::min(),
+                "fee exceeds amount lower bound"
+            );
+            assert!(
+                fee <= NativeCurrencyAmount::max(),
+                "fee exceeds amount upper bound"
+            );
+
+            // if coinbase is set, verify that half of it is time-locked
+            let mut half_of_coinbase = some_coinbase;
+            half_of_coinbase.div_two();
+            let mut half_of_fee = fee;
+            half_of_fee.div_two();
+            assert!(some_coinbase.is_zero() || half_of_coinbase <= total_timelocked_output + half_of_fee,
+                    "not enough funds timelocked -- half of coinbase == {} > total_timelocked_output + half_of_fee == {} whereas total output == {}",
+                    half_of_coinbase,
+                    total_timelocked_output + half_of_fee,
+                    total_output,);
+
+            // test no-inflation equation
+            let total_input_plus_coinbase: NativeCurrencyAmount =
+                total_input.checked_add(&some_coinbase).unwrap();
+            let total_output_plus_fee: NativeCurrencyAmount =
+                total_output.checked_add_negative(&fee).unwrap();
+            assert_eq!(total_input_plus_coinbase, total_output_plus_fee);
+        }
+    }
 
     fn assert_both_rust_and_tasm_halt_gracefully(
         native_currency_witness: NativeCurrencyWitness,

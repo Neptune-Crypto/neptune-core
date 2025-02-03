@@ -4,6 +4,7 @@ use tasm_lib::library::Library;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::error::InstructionError;
 use tasm_lib::triton_vm::prelude::*;
+use tracing::debug;
 
 use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
@@ -24,32 +25,16 @@ pub(crate) trait ConsensusProgram
 where
     Self: RefUnwindSafe + std::fmt::Debug,
 {
-    /// The canonical reference source code for the consensus program, written in
-    /// the subset of rust that the tasm-lang compiler understands. To run this
-    /// program, call [`Self::run_rust`], which spawns a new thread, boots the
-    /// environment, and executes the program.
-    #[cfg(test)]
-    fn source(&self);
-
     /// Helps identify all imported Triton assembly snippets.
-    /// You probably want to use [`Self::code`].
+    /// You probably want to use [`Self::program`].
     // Implemented this way to ensure synchronicity between the library in use
     // and the actual code.
-    #[doc(hidden)]
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>);
-
-    /// A derivative of source, in Triton-assembler (tasm) rather than rust. Either
-    /// produced automatically or hand-optimized.
-    ///
-    /// See also [`Self::program`].
-    fn code(&self) -> Vec<LabelledInstruction> {
-        let (_, code) = self.library_and_code();
-        code
-    }
 
     /// The Triton VM [`Program`].
     fn program(&self) -> Program {
-        Program::new(&self.code())
+        let (_, code) = self.library_and_code();
+        Program::new(&code)
     }
 
     /// The [program](Self::program)'s hash [digest](Digest).
@@ -57,108 +42,6 @@ where
     // note: we do not provide a default impl because implementors should cache
     // their Digest with OnceLock.
     fn hash(&self) -> Digest;
-
-    /// Run the source program natively in rust, but with the emulated TritonVM
-    /// environment for input, output, nondeterminism, and program digest.
-    #[cfg(test)]
-    fn run_rust(
-        &self,
-        input: &PublicInput,
-        nondeterminism: NonDeterminism,
-    ) -> Result<Vec<BFieldElement>, ConsensusError> {
-        use std::panic::catch_unwind;
-
-        use itertools::Itertools;
-        use tracing::debug;
-
-        debug!(
-            "Running consensus program with input: {}",
-            input.individual_tokens.iter().map(|b| b.value()).join(",")
-        );
-        let program_digest = catch_unwind(|| self.hash()).unwrap_or_default();
-        let emulation_result = catch_unwind(|| {
-            super::environment::init(program_digest, &input.individual_tokens, nondeterminism);
-            self.source();
-            super::environment::PUB_OUTPUT.take()
-        });
-
-        emulation_result.map_err(|e| ConsensusError::RustShadowPanic(format!("{e:?}")))
-    }
-
-    /// Use Triton VM to run the tasm code.
-    ///
-    /// Should only be called in tests. In production code, use [`Self::run_rust`]
-    /// instead – it's faster.
-    #[cfg(test)]
-    fn run_tasm(
-        &self,
-        input: &PublicInput,
-        nondeterminism: NonDeterminism,
-    ) -> Result<Vec<BFieldElement>, ConsensusError> {
-        let mut vm_state = VMState::new(self.program(), input.clone(), nondeterminism.clone());
-        tasm_lib::maybe_write_debuggable_vm_state_to_disk(&vm_state);
-
-        let init_stack = vm_state.op_stack.clone();
-        if let Err(err) = vm_state.run() {
-            let err_str = format!("Triton VM failed.\nError: {err}\nVMState:\n{vm_state}");
-            eprintln!("{err_str}");
-            return Err(ConsensusError::TritonVMPanic(err_str, err));
-        }
-
-        // Do some sanity checks that are likely to catch programming
-        // errors in the consensus program. This doesn't catch
-        // soundness errors, though, since a valid proof could still be
-        // generated even though one of these checks fail.
-        assert!(
-            vm_state.secret_digests.is_empty(),
-            "Secret digest list must be empty after executing consensus program"
-        );
-        assert_eq!(&init_stack, &vm_state.op_stack);
-
-        Ok(vm_state.public_output)
-    }
-
-    /// `Ok(())` iff the given input & non-determinism triggers the failure of
-    /// either the instruction `assert` or `assert_vector`, and if that
-    /// instruction's error ID is one of the expected error IDs.
-    #[cfg(test)]
-    fn test_assertion_failure(
-        &self,
-        public_input: PublicInput,
-        non_determinism: NonDeterminism,
-        expected_error_ids: &[i128],
-    ) -> proptest::test_runner::TestCaseResult {
-        use itertools::Itertools;
-
-        let fail = |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
-
-        let tasm_result = self.run_tasm(&public_input, non_determinism.clone());
-        let Err(ConsensusError::TritonVMPanic(_, err)) = tasm_result else {
-            return fail("expected a failure in Triton VM, but it halted gracefully".into());
-        };
-
-        let err = match err {
-            InstructionError::AssertionFailed(err)
-            | InstructionError::VectorAssertionFailed(_, err) => err,
-            _ => return fail(format!("expected an assertion failure, but got: {err}")),
-        };
-
-        let ids_str = expected_error_ids.iter().join(", ");
-        let expected_ids_str = format!("expected an error ID in {{{ids_str}}}");
-        let Some(err_id) = err.id else {
-            return fail(format!("{expected_ids_str}, but found none"));
-        };
-
-        proptest::prop_assert!(
-            expected_error_ids.contains(&err_id),
-            "{expected_ids_str}, but found {err_id}",
-        );
-
-        let rust_result = self.run_rust(&public_input, non_determinism.clone());
-        proptest::prop_assert!(rust_result.is_err());
-
-        Ok(())
-    }
 
     /// Run the program and generate a proof for it, assuming running halts
     /// gracefully.
@@ -168,9 +51,6 @@ where
     ///
     /// This method is a thin wrapper around [`prove_consensus_program`], which
     /// does the same but for arbitrary programs.
-    #[allow(async_fn_in_trait)] // Trait must be public bc of benchmarks.
-    #[allow(private_interfaces)] // Trait must be public bc of benchmarks.
-    #[doc(hidden)]
     async fn prove(
         &self,
         claim: Claim,
@@ -295,6 +175,7 @@ pub mod test {
     use std::io::stdout;
     use std::io::Read;
     use std::io::Write;
+    use std::panic::catch_unwind;
     use std::path::Path;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -312,12 +193,118 @@ pub mod test {
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
+    use crate::models::proof_abstractions::tasm::environment;
     use crate::triton_vm::stark::Stark;
 
     const TEST_DATA_DIR: &str = "test_data";
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
-    pub(crate) fn consensus_program_negative_test<T: ConsensusProgram>(
+    pub(crate) trait ConsensusProgramSpecification: ConsensusProgram {
+        /// The canonical reference source code for the consensus program, written in
+        /// the subset of rust that the tasm-lang compiler understands. To run this
+        /// program, call [`Self::run_rust`], which spawns a new thread, boots the
+        /// environment, and executes the program.
+        #[cfg(test)]
+        fn source(&self);
+
+        /// Run the source program natively in rust, but with the emulated TritonVM
+        /// environment for input, output, nondeterminism, and program digest.
+        #[cfg(test)]
+        fn run_rust(
+            &self,
+            input: &PublicInput,
+            nondeterminism: NonDeterminism,
+        ) -> Result<Vec<BFieldElement>, ConsensusError> {
+            debug!(
+                "Running consensus program with input: {}",
+                input.individual_tokens.iter().map(|b| b.value()).join(",")
+            );
+            let program_digest = catch_unwind(|| self.hash()).unwrap_or_default();
+            let emulation_result = catch_unwind(|| {
+                environment::init(program_digest, &input.individual_tokens, nondeterminism);
+                self.source();
+                environment::PUB_OUTPUT.take()
+            });
+
+            emulation_result.map_err(|e| ConsensusError::RustShadowPanic(format!("{e:?}")))
+        }
+
+        /// Use Triton VM to run the tasm code.
+        ///
+        /// Should only be called in tests. In production code, use [`Self::run_rust`]
+        /// instead – it's faster.
+        #[cfg(test)]
+        fn run_tasm(
+            &self,
+            input: &PublicInput,
+            nondeterminism: NonDeterminism,
+        ) -> Result<Vec<BFieldElement>, ConsensusError> {
+            let mut vm_state = VMState::new(self.program(), input.clone(), nondeterminism.clone());
+            tasm_lib::maybe_write_debuggable_vm_state_to_disk(&vm_state);
+
+            let init_stack = vm_state.op_stack.clone();
+            if let Err(err) = vm_state.run() {
+                let err_str = format!("Triton VM failed.\nError: {err}\nVMState:\n{vm_state}");
+                eprintln!("{err_str}");
+                return Err(ConsensusError::TritonVMPanic(err_str, err));
+            }
+
+            // Do some sanity checks that are likely to catch programming
+            // errors in the consensus program. This doesn't catch
+            // soundness errors, though, since a valid proof could still be
+            // generated even though one of these checks fail.
+            assert!(
+                vm_state.secret_digests.is_empty(),
+                "Secret digest list must be empty after executing consensus program"
+            );
+            assert_eq!(&init_stack, &vm_state.op_stack);
+
+            Ok(vm_state.public_output)
+        }
+
+        /// `Ok(())` iff the given input & non-determinism triggers the failure of
+        /// either the instruction `assert` or `assert_vector`, and if that
+        /// instruction's error ID is one of the expected error IDs.
+        #[cfg(test)]
+        fn test_assertion_failure(
+            &self,
+            public_input: PublicInput,
+            non_determinism: NonDeterminism,
+            expected_error_ids: &[i128],
+        ) -> proptest::test_runner::TestCaseResult {
+            let fail =
+                |reason: String| Err(proptest::test_runner::TestCaseError::Fail(reason.into()));
+
+            let tasm_result = self.run_tasm(&public_input, non_determinism.clone());
+            let Err(ConsensusError::TritonVMPanic(_, err)) = tasm_result else {
+                return fail("expected a failure in Triton VM, but it halted gracefully".into());
+            };
+
+            let err = match err {
+                InstructionError::AssertionFailed(err)
+                | InstructionError::VectorAssertionFailed(_, err) => err,
+                _ => return fail(format!("expected an assertion failure, but got: {err}")),
+            };
+
+            let ids_str = expected_error_ids.iter().join(", ");
+            let expected_ids_str = format!("expected an error ID in {{{ids_str}}}");
+            let Some(err_id) = err.id else {
+                return fail(format!("{expected_ids_str}, but found none"));
+            };
+
+            proptest::prop_assert!(
+                expected_error_ids.contains(&err_id),
+                "{expected_ids_str}, but found {err_id}",
+            );
+
+            let rust_result = self.run_rust(&public_input, non_determinism.clone());
+            proptest::prop_assert!(rust_result.is_err());
+
+            Ok(())
+        }
+    }
+
+    pub(crate) fn consensus_program_negative_test<T: ConsensusProgramSpecification>(
         consensus_program: T,
         input: &PublicInput,
         nondeterminism: NonDeterminism,
