@@ -355,7 +355,9 @@ pub trait RPC {
 
     /// Return the block intervals of a range of blocks. Return value is the
     /// number of milliseconds it took to mine the (canonical) block with the
-    /// specified height.
+    /// specified height. Does not include the interval between genesis block
+    /// and block 1 since genesis block was not actually mined and its timestamp
+    /// doesn't carry the same meaning as those of later blocks.
     async fn block_intervals(
         token: rpc_auth::Token,
         last_block: BlockSelector,
@@ -1784,7 +1786,13 @@ impl RPC for NeptuneRPCServer {
             .archival_state()
             .get_block_header(current.prev_block_digest)
             .await;
-        while parent.is_some() && max_num_blocks.is_none_or(|max_num| max_num > intervals.len()) {
+
+        // Exclude genesis since it was not mined. So block interval 0-->1
+        // is not included.
+        while parent.is_some()
+            && !parent.unwrap().height.is_genesis()
+            && max_num_blocks.is_none_or(|max_num| max_num > intervals.len())
+        {
             let parent_ = parent.unwrap();
             let interval = current.timestamp.to_millis() - parent_.timestamp.to_millis();
             let block_height: u64 = current.height.into();
