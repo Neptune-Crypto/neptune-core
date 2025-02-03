@@ -178,6 +178,46 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         cli_args,
         mempool,
     );
+
+    // See #239.  <https://github.com/Neptune-Crypto/neptune-core/issues/239>
+    //
+    // We set a panic hook in order to catch all panics, including those that
+    // would ordinarily be swallowed by the tokio runtime.
+    //
+    // If a panic occurs, we must flush the databases to prevent any possible
+    // corruption before exiting.
+    let global_state_lock_hook = global_state_lock.clone();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let mut msg = "Caught panic.\n".to_string();
+
+        // Print the stack trace
+        if let Some(location) = panic_info.location() {
+            msg += &format!("  location: {}\n", location);
+        }
+
+        if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
+            msg += &format!("  message: {}\n", payload);
+        }
+
+        msg += &format!("  backtrace:\n{}", std::backtrace::Backtrace::capture());
+
+        tracing::error!("{}", msg);
+
+        // we need to flush databases, which is async call. So we spawn a new task.
+        let mut global_state_lock_panic = global_state_lock_hook.clone();
+        let handle = tokio::spawn(async move {
+            tracing::info!("Flushing Database...");
+            let _ = global_state_lock_panic.flush_databases().await;
+            tracing::info!("*** DB flush complete. now exiting.  Bye! ****");
+
+            std::process::exit(1);
+        });
+        // wait for spawned task to complete.
+        while !handle.is_finished() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }));
+
     let own_handshake_data: HandshakeData = global_state_lock
         .lock_guard()
         .await

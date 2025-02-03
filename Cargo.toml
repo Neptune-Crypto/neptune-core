@@ -184,14 +184,12 @@ opt-level = 3                # Set to make execution of tests in this crate fast
 
 [profile.release]
 build-override.opt-level = 3
-panic = 'abort'
 
 [profile.bench]
 build-override.opt-level = 3
 
 [profile.dev]
 build-override.opt-level = 3
-panic = 'abort'
 
 # The profile that 'dist' will build with
 [profile.dist]
